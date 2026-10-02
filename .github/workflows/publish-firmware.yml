@@ -2,6 +2,11 @@ name: Publish Mira Panel firmware
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Version du firmware a publier"
+        required: true
+        default: "0.4.3"
 
 permissions:
   contents: write
@@ -28,7 +33,7 @@ jobs:
             --jq '.[0].databaseId')
 
           if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
-            echo "Aucun build Mira Panel réussi trouvé."
+            echo "Aucun build Mira Panel reussi trouve."
             exit 1
           fi
 
@@ -38,22 +43,49 @@ jobs:
           gh run download "$RUN_ID" --name Mira_Panel_firmware --dir artifact
           test -f artifact/MIRA_PANEL.ino.bin
 
-      - name: Prepare OTA binary
+      - name: Verify firmware version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if ! strings artifact/MIRA_PANEL.ino.bin | grep -Fxq "$VERSION"; then
+            echo "La version $VERSION n'a pas ete trouvee dans le binaire. Publication annulee."
+            exit 1
+          fi
+          echo "Version $VERSION confirmee dans le binaire."
+
+      - name: Prepare OTA release
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
           cp artifact/MIRA_PANEL.ino.bin firmware/Mira_Panel.bin
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path("firmware/version.json")
+          data = json.loads(path.read_text())
+          data["project"] = "Mira Panel"
+          data["version"] = os.environ["VERSION"]
+          data["bin"] = "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/Mira_Panel.bin"
+          path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+          PY
           ls -lh firmware/Mira_Panel.bin
           sha256sum firmware/Mira_Panel.bin
+          cat firmware/version.json
 
       - name: Publish firmware on main
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add firmware/Mira_Panel.bin
+          git add firmware/Mira_Panel.bin firmware/version.json
 
           if git diff --cached --quiet; then
-            echo "Le binaire publié est déjà à jour."
+            echo "Le firmware $VERSION est deja publie."
             exit 0
           fi
 
-          git commit -m "Publish Mira Panel firmware 0.4.2"
+          git commit -m "Publish Mira Panel firmware $VERSION"
           git push origin HEAD:main
