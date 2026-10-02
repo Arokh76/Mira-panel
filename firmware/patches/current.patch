@@ -1,0 +1,146 @@
+--- MIRA_PANEL.ino	2026-10-02 17:12:21.000000000 +0000
++++ MIRA_PANEL.ino	2026-10-02 17:37:14.000000000 +0000
+@@ -35,7 +35,7 @@
+   Serveur.SetupModule(
+     "Mira Panel",
+     "WT32-SC01-PLUS",
+-    "0.4.3",
++    "0.4.4",
+     "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/",
+     "LVGL"
+   );
+@@ -52,7 +52,7 @@
+   }
+ 
+   Serial.println();
+-  Serial.println("[MIRA] Firmware 0.4.3 initialise");
++  Serial.println("[MIRA] Firmware 0.4.4 initialise");
+   Serial.printf("[MIRA][HW] Flash : %.1f MB\n", ESP.getFlashChipSize() / 1048576.0f);
+   Serial.printf("[MIRA][HW] PSRAM : %.1f MB\n", ESP.getPsramSize() / 1048576.0f);
+   Serial.println("[MIRA] Interface HTTP, LVGL et MQTT pretes");
+--- MiraPanelServer.cpp	2026-10-02 17:16:53.000000000 +0000
++++ MiraPanelServer.cpp	2026-10-02 17:37:14.000000000 +0000
+@@ -1431,46 +1431,82 @@
+         if (SetupModuleDone) {
+           String version = SPIFFS_Uncrypt(SPIFFS_Config_Module["module"][0]["version"].as<String>());
+ 
+-          WiFiClientSecure secure;
+-          secure.setInsecure();
+-          HTTPClient http;
+-          http.setTimeout(10000);
+-          if (!http.begin(secure, MIRA_GITHUB_VERSION_URL)) {
++          String githubPayload;
++          int response = -1;
++          String connectionError;
++
++          for (uint8_t attempt = 1; attempt <= 3; ++attempt) {
++            WiFiClientSecure secure;
++            secure.setInsecure();
++            secure.setTimeout(15000);
++
++            HTTPClient http;
++            http.setTimeout(15000);
++            http.setReuse(false);
++            http.useHTTP10(true);
++            http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
++
++            if (_Debug) {
++              Serial.printf("[MIRA][OTA] Verification GitHub %u/3 - WiFi:%d RSSI:%d Heap:%u\n",
++                            attempt, WiFi.status(), WiFi.RSSI(), (unsigned)ESP.getFreeHeap());
++            }
++
++            if (!http.begin(secure, MIRA_GITHUB_VERSION_URL)) {
++              connectionError = "initialisation HTTPS impossible";
++              response = -1;
++            } else {
++              response = http.GET();
++              if (response == HTTP_CODE_OK) {
++                githubPayload = http.getString();
++                http.end();
++                break;
++              }
++
++              connectionError = (response < 0)
++                                  ? HTTPClient::errorToString(response)
++                                  : ("HTTP " + String(response));
++              if (_Debug) {
++                Serial.printf("[MIRA][OTA] Echec tentative %u : %d (%s)\n",
++                              attempt, response, connectionError.c_str());
++              }
++              http.end();
++            }
++
++            if (attempt < 3) delay(500 * attempt);
++          }
++
++          if (response != HTTP_CODE_OK || !githubPayload.length()) {
+             TITRE = "Mise à jour";
+-            Retour = "Impossible d'initialiser la connexion vers GitHub.";
++            Retour = "Impossible de vérifier les mises à jour sur GitHub après 3 tentatives.";
++            if (connectionError.length()) {
++              Retour += "<br><br><small>Détail : " + connectionError + " (code " + String(response) + ")</small>";
++            }
+           } else {
+-            int response = http.GET();
+-            if (response != HTTP_CODE_OK) {
++            DynamicJsonDocument doc(1024);
++            DeserializationError err = deserializeJson(doc, githubPayload);
++            if (err) {
+               TITRE = "Mise à jour";
+-              Retour = "Impossible de vérifier les mises à jour sur GitHub (HTTP " + String(response) + ").";
++              Retour = "Le fichier version.json de GitHub est invalide.";
+             } else {
+-              DynamicJsonDocument doc(1024);
+-              DeserializationError err = deserializeJson(doc, http.getStream());
+-              if (err) {
++              String project = doc["project"] | "";
++              String remoteVersion = doc["version"] | "";
++              String binUrl = doc["bin"] | MIRA_GITHUB_BIN_URL;
++              if (project != "Mira Panel" || !remoteVersion.length()) {
+                 TITRE = "Mise à jour";
+-                Retour = "Le fichier version.json de GitHub est invalide.";
++                Retour = "Les informations de mise à jour GitHub ne correspondent pas à Mira Panel.";
++              } else if (miraCompareVersion(remoteVersion, version) <= 0) {
++                TITRE = "Tout est OK !";
++                Retour = "Mira Panel est à jour.<br><br>Version actuelle : <b>" + version + "</b>";
+               } else {
+-                String project = doc["project"] | "";
+-                String remoteVersion = doc["version"] | "";
+-                String binUrl = doc["bin"] | MIRA_GITHUB_BIN_URL;
+-                if (project != "Mira Panel" || !remoteVersion.length()) {
+-                  TITRE = "Mise à jour";
+-                  Retour = "Les informations de mise à jour GitHub ne correspondent pas à Mira Panel.";
+-                } else if (miraCompareVersion(remoteVersion, version) <= 0) {
+-                  TITRE = "Tout est OK !";
+-                  Retour = "Mira Panel est à jour.<br><br>Version actuelle : <b>" + version + "</b>";
+-                } else {
+-                  UpdateURL = binUrl;
+-                  TITRE = "Nouvelle version disponible";
+-                  Retour = "<b>Version actuelle :</b> " + version + "<br><br>";
+-                  Retour += "<b>Nouvelle version :</b> " + remoteVersion + "<br><br>";
+-                  Retour += "<form method=\"GET\" action=\"/updatemodule\">";
+-                  Retour += "<input class=\"Bouton\" type=\"submit\" name=\"upload\" value=\"Installer la mise à jour\">";
+-                  Retour += "</form>";
+-                }
++                UpdateURL = binUrl;
++                TITRE = "Nouvelle version disponible";
++                Retour = "<b>Version actuelle :</b> " + version + "<br><br>";
++                Retour += "<b>Nouvelle version :</b> " + remoteVersion + "<br><br>";
++                Retour += "<form method=\"GET\" action=\"/updatemodule\">";
++                Retour += "<input class=\"Bouton\" type=\"submit\" name=\"upload\" value=\"Installer la mise à jour\">";
++                Retour += "</form>";
+               }
+             }
+-            http.end();
+           }
+ 
+           Retour += "<br><br><b><div>Mise à jour manuelle :</div></b>";
+@@ -3741,7 +3777,7 @@
+   if (var == "VERSION") {
+     String v = SPIFFS_Config_Module["module"][0]["version"].as<String>();
+     if (v.length()) v = SPIFFS_Uncrypt(v);
+-    return v.length() ? v : "0.4.3";
++    return v.length() ? v : "0.4.4";
+   }
+   if (var == "LOCALIP") {
+     if (WiFi.status() == WL_CONNECTED) return WiFi.localIP().toString();
