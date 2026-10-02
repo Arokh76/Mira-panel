@@ -18,6 +18,7 @@ on:
       - 'firmware/scripts/v0.4.10.py'
       - 'firmware/scripts/v0.4.11.py'
       - 'firmware/scripts/v0.5.0.py'
+      - 'firmware/scripts/v0.5.0_ota_sync.py'
       - 'firmware/overrides/**'
       - 'firmware/final-overrides/**'
 
@@ -101,6 +102,9 @@ jobs:
           echo "Applying Mira Panel 0.5.0 theme engine"
           python3 firmware/scripts/v0.5.0.py firmware/source/work/MIRA_PANEL
 
+          echo "Hardening Mira Panel browser OTA freshness"
+          python3 firmware/scripts/v0.5.0_ota_sync.py firmware/source/work/MIRA_PANEL
+
           grep -q '"0.5.0"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
           grep -q 'MiraPanelServer::SetupModule' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
           grep -q 'MiraPanelServer::IndexSetEvent' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
@@ -113,6 +117,8 @@ jobs:
           grep -q 'uploadBlob' firmware/source/work/MIRA_PANEL/HTML/HTML_Sys.h
           grep -q 'Mise à jour en cours' firmware/source/work/MIRA_PANEL/HTML/HTML_Sys.h
           ! grep -q 'L’ESP n’a plus besoin' firmware/source/work/MIRA_PANEL/HTML/HTML_Sys.h
+          grep -q 'firmwareContainsVersion' firmware/source/work/MIRA_PANEL/HTML/HTML_Sys.h
+          grep -q 'manifests.push' firmware/source/work/MIRA_PANEL/HTML/HTML_Sys.h
           grep -q 'mira-info' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
           grep -q 'font-size:clamp(22px,2.6vw,30px)' firmware/source/work/MIRA_PANEL/HTML/HTML_Index.h
           grep -q 'width:31px;height:25px' firmware/source/work/MIRA_PANEL/HTML/HTML_Index.h
