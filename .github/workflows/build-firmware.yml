@@ -50,7 +50,7 @@ jobs:
         run: |
           mkdir -p build
           arduino-cli compile \
-            --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,CPUFreq=240,FlashMode=qio,FlashSize=8M,PartitionScheme=default_8MB,PSRAM=qspi,UploadMode=default,USBMode=hwcdc" \
+            --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,CPUFreq=240,FlashMode=qio,FlashSize=8M,PartitionScheme=default_8MB,PSRAM=enabled,UploadMode=default,USBMode=hwcdc" \
             --output-dir build \
             firmware/source/work/MIRA_PANEL
 
