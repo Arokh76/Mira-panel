@@ -2,6 +2,10 @@ name: Build Mira Panel firmware
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - "firmware/source/Mira_Panel_Source.zip"
+      - ".github/workflows/build-firmware.yml"
 
 permissions:
   contents: read
@@ -16,10 +20,10 @@ jobs:
 
       - name: Prepare Mira Panel sources
         run: |
-          test -f firmware/source/Mira_Panel_Source_V0.4.3.zip
+          test -f firmware/source/Mira_Panel_Source.zip
           rm -rf firmware/source/work
           mkdir -p firmware/source/work
-          unzip -q firmware/source/Mira_Panel_Source_V0.4.3.zip -d firmware/source/work
+          unzip -q firmware/source/Mira_Panel_Source.zip -d firmware/source/work
           test -f firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
           test -f firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
           grep -q "MiraPanelServer::SetupModule" firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
