@@ -12,7 +12,9 @@ on:
       - 'firmware/patches/ota-safety.patch'
       - 'firmware/patches/v0.4.5.patch'
       - 'firmware/patches/v0.4.6.patch'
+      - 'firmware/patches/v0.4.7.patch'
       - 'firmware/overrides/**'
+      - 'firmware/final-overrides/**'
 
 permissions:
   contents: read
@@ -67,13 +69,27 @@ jobs:
             cd ../../../..
           fi
 
-          grep -q '"0.4.6"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
+          if [ -s firmware/patches/v0.4.7.patch ]; then
+            echo "Applying Mira Panel 0.4.7 patch"
+            cd firmware/source/work/MIRA_PANEL
+            patch --batch --forward -p0 < ../../../patches/v0.4.7.patch
+            cd ../../../..
+          fi
+
+          if [ -d firmware/final-overrides/MIRA_PANEL ]; then
+            echo "Applying final Mira source overrides"
+            cp -a firmware/final-overrides/MIRA_PANEL/. firmware/source/work/MIRA_PANEL/
+          fi
+
+          grep -q '"0.4.7"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
           grep -q 'MiraPanelServer::SetupModule' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
           grep -q 'MiraPanelServer::IndexSetEvent' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
           grep -q 'MiraPanelServer::IsUpdateInProgress' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
           grep -q 'miraManualUpdateSucceeded' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
           grep -q 'Configuration · étape 1/2' firmware/source/work/MIRA_PANEL/HTML/HTML_Key.h
           grep -q 'Configuration · étape 2/2' firmware/source/work/MIRA_PANEL/HTML/HTML_ManageurWiFiSansR.h
+          grep -q 'Vérification effectuée par ton navigateur' firmware/source/work/MIRA_PANEL/HTML/HTML_Sys.h
+          grep -q 'uploadBlob' firmware/source/work/MIRA_PANEL/HTML/HTML_Sys.h
 
       - name: Setup Arduino CLI
         uses: arduino/setup-arduino-cli@v2
