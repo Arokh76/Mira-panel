@@ -16,42 +16,14 @@ jobs:
 
       - name: Prepare Mira Panel sources
         run: |
-          test -f firmware/source/Mira_Panel_Source_V0.4.2.zip
+          test -f firmware/source/Mira_Panel_Source_V0.4.3.zip
           rm -rf firmware/source/work
           mkdir -p firmware/source/work
-          unzip -q firmware/source/Mira_Panel_Source_V0.4.2.zip -d firmware/source/work
+          unzip -q firmware/source/Mira_Panel_Source_V0.4.3.zip -d firmware/source/work
           test -f firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
-
-      - name: Restore missing MiraPanelServer methods
-        run: |
-          python3 - <<'PY'
-          import base64
-          import gzip
-          from pathlib import Path
-
-          payload = "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"
-          block = gzip.decompress(base64.b64decode(payload)).decode()
-          path = Path("firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp")
-          source = path.read_text()
-          marker = "void MiraPanelServer::ResetButton(int PinButton, int PinLed)"
-          if "void MiraPanelServer::IndexSetEvent(int ID)" not in source:
-              if marker not in source:
-                  raise SystemExit("MiraPanelServer insertion marker not found")
-              source = source.replace(marker, block + "\n\n" + marker, 1)
-              path.write_text(source)
-          required = [
-              "MiraPanelServer::SetupModule",
-              "MiraPanelServer::IndexSetEvent",
-              "MiraPanelServer::IndexAddToggle",
-              "MiraPanelServer::IndexGetInfo",
-              "MiraPanelServer::IndexSetInfo",
-              "MiraPanelServer::GetJsonLvgl",
-          ]
-          missing = [name for name in required if name not in source]
-          if missing:
-              raise SystemExit("Missing restored methods: " + ", ".join(missing))
-          print("MiraPanelServer methods restored")
-          PY
+          test -f firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
+          grep -q "MiraPanelServer::SetupModule" firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
+          grep -q "MiraPanelServer::IndexSetEvent" firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
 
       - name: Setup Arduino CLI
         uses: arduino/setup-arduino-cli@v2
