@@ -1,0 +1,57 @@
+name: Build Mira Panel firmware
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Install ESP32 core 2.0.17
+        run: |
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@2.0.17
+
+      - name: Install Arduino libraries
+        run: |
+          arduino-cli lib update-index
+          arduino-cli lib install "lvgl@8.3.11"
+          arduino-cli lib install "LovyanGFX@1.1.9"
+          arduino-cli lib install "ArduinoJson@6.21.5"
+          arduino-cli lib install "AsyncTCP@1.1.4"
+          arduino-cli lib install "AsyncHTTPRequest_Generic@1.13.0"
+
+      - name: Install Mira LVGL configuration
+        run: |
+          cp firmware/source/MIRA_PANEL/lv_conf.h "$HOME/Arduino/libraries/lv_conf.h"
+
+      - name: Compile Mira Panel
+        run: |
+          mkdir -p build
+          arduino-cli compile \
+            --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,CPUFreq=240,FlashMode=qio,FlashSize=8M,PartitionScheme=default_8MB,PSRAM=qspi,UploadMode=default,USBMode=hwcdc" \
+            --output-dir build \
+            firmware/source/MIRA_PANEL
+
+      - name: Show generated files
+        run: ls -lah build
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mira_Panel_firmware
+          path: build/*.bin
+          if-no-files-found: error
+          retention-days: 14
