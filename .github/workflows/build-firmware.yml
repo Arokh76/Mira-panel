@@ -156,7 +156,7 @@ jobs:
       - name: Install Mira LVGL configuration
         run: |
           mkdir -p "$HOME/Arduino/libraries"
-          cp firmware/source/work/MIRA_PANEL/lv_conf.h "$HOME/Arduino/libraries/lv_conf.h
+          cp firmware/source/work/MIRA_PANEL/lv_conf.h "$HOME/Arduino/libraries/lv_conf.h"
 
       - name: Compile Mira Panel
         run: |
