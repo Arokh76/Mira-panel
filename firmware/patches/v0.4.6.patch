@@ -1,0 +1,31 @@
+--- MIRA_PANEL.ino
++++ MIRA_PANEL.ino
+@@ -35,7 +35,7 @@
+   Serveur.SetupModule(
+     "Mira Panel",
+     "WT32-SC01-PLUS",
+-    "0.4.5",
++    "0.4.6",
+     "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/",
+     "LVGL"
+   );
+@@ -52,7 +52,7 @@
+   }
+ 
+   Serial.println();
+-  Serial.println("[MIRA] Firmware 0.4.5 initialise");
++  Serial.println("[MIRA] Firmware 0.4.6 initialise");
+   Serial.printf("[MIRA][HW] Flash : %.1f MB\n", ESP.getFlashChipSize() / 1048576.0f);
+   Serial.printf("[MIRA][HW] PSRAM : %.1f MB\n", ESP.getPsramSize() / 1048576.0f);
+   Serial.println("[MIRA] Interface HTTP, LVGL et MQTT pretes");
+--- MiraPanelServer.cpp
++++ MiraPanelServer.cpp
+@@ -3776,7 +3776,7 @@
+   if (var == "VERSION") {
+     String v = SPIFFS_Config_Module["module"][0]["version"].as<String>();
+     if (v.length()) v = SPIFFS_Uncrypt(v);
+-    return v.length() ? v : "0.4.4";
++    return v.length() ? v : "0.4.6";
+   }
+   if (var == "LOCALIP") {
+     if (WiFi.status() == WL_CONNECTED) return WiFi.localIP().toString();
