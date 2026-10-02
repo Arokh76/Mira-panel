@@ -17,13 +17,14 @@ jobs:
       - name: Prepare Mira Panel sources
         run: |
           test -f firmware/source/Mira_Panel_Source_V0.4.3.zip
+          test -f firmware/patches/current.patch
           rm -rf firmware/source/work
           mkdir -p firmware/source/work
           unzip -q firmware/source/Mira_Panel_Source_V0.4.3.zip -d firmware/source/work
           test -f firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
           test -f firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
-          grep -q "MiraPanelServer::SetupModule" firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
-          grep -q "MiraPanelServer::IndexSetEvent" firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
+          cd firmware/source/work/MIRA_PANEL
+          patch --batch --forward -p0 < ../../../patches/current.patch
 
       - name: Setup Arduino CLI
         uses: arduino/setup-arduino-cli@v2
