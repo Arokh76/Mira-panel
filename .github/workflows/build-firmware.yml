@@ -13,6 +13,7 @@ on:
       - 'firmware/patches/v0.4.5.patch'
       - 'firmware/patches/v0.4.6.patch'
       - 'firmware/patches/v0.4.7.patch'
+      - 'firmware/scripts/v0.4.8.py'
       - 'firmware/overrides/**'
       - 'firmware/final-overrides/**'
 
@@ -81,15 +82,19 @@ jobs:
             cp -a firmware/final-overrides/MIRA_PANEL/. firmware/source/work/MIRA_PANEL/
           fi
 
-          grep -q '"0.4.7"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
+          echo "Applying Mira Panel 0.4.8 post-processing"
+          python3 firmware/scripts/v0.4.8.py firmware/source/work/MIRA_PANEL
+
+          grep -q '"0.4.8"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
           grep -q 'MiraPanelServer::SetupModule' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
           grep -q 'MiraPanelServer::IndexSetEvent' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
           grep -q 'MiraPanelServer::IsUpdateInProgress' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
           grep -q 'miraManualUpdateSucceeded' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
           grep -q 'Configuration · étape 1/2' firmware/source/work/MIRA_PANEL/HTML/HTML_Key.h
           grep -q 'Configuration · étape 2/2' firmware/source/work/MIRA_PANEL/HTML/HTML_ManageurWiFiSansR.h
-          grep -q 'Vérification effectuée par ton navigateur' firmware/source/work/MIRA_PANEL/HTML/HTML_Sys.h
           grep -q 'uploadBlob' firmware/source/work/MIRA_PANEL/HTML/HTML_Sys.h
+          grep -q 'Mise à jour en cours' firmware/source/work/MIRA_PANEL/HTML/HTML_Sys.h
+          ! grep -q 'L’ESP n’a plus besoin' firmware/source/work/MIRA_PANEL/HTML/HTML_Sys.h
 
       - name: Setup Arduino CLI
         uses: arduino/setup-arduino-cli@v2
