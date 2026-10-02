@@ -17,6 +17,7 @@ on:
       - 'firmware/scripts/v0.4.9.py'
       - 'firmware/scripts/v0.4.10.py'
       - 'firmware/scripts/v0.4.11.py'
+      - 'firmware/scripts/v0.5.0.py'
       - 'firmware/overrides/**'
       - 'firmware/final-overrides/**'
 
@@ -97,7 +98,10 @@ jobs:
           echo "Applying Mira Panel 0.4.11 post-processing"
           python3 firmware/scripts/v0.4.11.py firmware/source/work/MIRA_PANEL
 
-          grep -q '"0.4.11"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
+          echo "Applying Mira Panel 0.5.0 theme engine"
+          python3 firmware/scripts/v0.5.0.py firmware/source/work/MIRA_PANEL
+
+          grep -q '"0.5.0"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
           grep -q 'MiraPanelServer::SetupModule' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
           grep -q 'MiraPanelServer::IndexSetEvent' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
           grep -q 'MiraPanelServer::IsUpdateInProgress' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
@@ -113,6 +117,9 @@ jobs:
           grep -q 'font-size:clamp(22px,2.6vw,30px)' firmware/source/work/MIRA_PANEL/HTML/HTML_Index.h
           grep -q 'width:31px;height:25px' firmware/source/work/MIRA_PANEL/HTML/HTML_Index.h
           ! grep -q 'border-radius:6px' firmware/source/work/MIRA_PANEL/HTML/HTML_Index.h
+          grep -q 'THEME_GLASS' firmware/source/work/MIRA_PANEL/MiraPanelUI.h
+          grep -q 'Mira\\nSombre\\nGlass' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -q 'void MiraPanelUI::onTheme' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
 
       - name: Setup Arduino CLI
         uses: arduino/setup-arduino-cli@v2
