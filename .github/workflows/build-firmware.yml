@@ -9,6 +9,7 @@ on:
       - '.github/workflows/build-firmware.yml'
       - 'firmware/source/Mira_Panel_Source_V0.4.3.zip'
       - 'firmware/patches/current.patch'
+      - 'firmware/patches/ota-safety.patch'
       - 'firmware/overrides/**'
 
 permissions:
@@ -43,9 +44,17 @@ jobs:
             cd ../../../..
           fi
 
+          if [ -s firmware/patches/ota-safety.patch ]; then
+            echo "Applying OTA safety patch"
+            cd firmware/source/work/MIRA_PANEL
+            patch --batch --forward -p0 < ../../../patches/ota-safety.patch
+            cd ../../../..
+          fi
+
           grep -q '"0.4.4"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
           grep -q 'MiraPanelServer::SetupModule' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
           grep -q 'MiraPanelServer::IndexSetEvent' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
+          grep -q 'MiraPanelServer::IsUpdateInProgress' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
 
       - name: Setup Arduino CLI
         uses: arduino/setup-arduino-cli@v2
