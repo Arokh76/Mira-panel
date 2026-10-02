@@ -1,0 +1,131 @@
+--- MIRA_PANEL.ino
++++ MIRA_PANEL.ino
+@@ -35,7 +35,7 @@
+   Serveur.SetupModule(
+     "Mira Panel",
+     "WT32-SC01-PLUS",
+-    "0.4.4",
++    "0.4.5",
+     "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/",
+     "LVGL"
+   );
+@@ -52,7 +52,7 @@
+   }
+ 
+   Serial.println();
+-  Serial.println("[MIRA] Firmware 0.4.4 initialise");
++  Serial.println("[MIRA] Firmware 0.4.5 initialise");
+   Serial.printf("[MIRA][HW] Flash : %.1f MB\n", ESP.getFlashChipSize() / 1048576.0f);
+   Serial.printf("[MIRA][HW] PSRAM : %.1f MB\n", ESP.getPsramSize() / 1048576.0f);
+   Serial.println("[MIRA] Interface HTTP, LVGL et MQTT pretes");
+--- MiraPanelServer.cpp
++++ MiraPanelServer.cpp
+@@ -415,49 +415,59 @@
+ 
+ size_t content_len;
+ static int miraManualUpdateLastPercent = -1;
++static bool miraManualUpdateSucceeded = false;
++static bool miraManualUpdateFailed = false;
+ 
+ void handleDoUpdate(AsyncWebServerRequest* request, const String& filename, size_t index, uint8_t* data, size_t len, bool final) {
+   if (!index) {
+     if (_Debug) Serial.println("[MIRA][OTA] Televersement manuel demarre");
+     miraManualUpdateLastPercent = -1;
++    miraManualUpdateSucceeded = false;
++    miraManualUpdateFailed = false;
+     content_len = request->contentLength();
+-    // if filename includes spiffs, update the spiffs partition
++
+     int cmd = (filename.indexOf("spiffs") > -1) ? U_PART : U_FLASH;
+-
+     if (!Update.begin(UPDATE_SIZE_UNKNOWN, cmd)) {
+       Update.printError(Serial);
++      miraManualUpdateFailed = true;
+       if (_Debug) Serial.println("[MIRA][OTA] Echec initialisation Update");
+     }
+   }
+ 
+-  if (Update.write(data, len) != len) {
+-    Update.printError(Serial);
+-    if (_Debug) Serial.println("[MIRA][OTA] Erreur ecriture firmware");
+-    if (_Debug) Serial.printf("[MIRA][OTA] Octets ecrits : %u\n", (unsigned)Update.progress());
+-  } else {
+-    const size_t updateSize = Update.size();
+-    const int percent = updateSize ? (int)((Update.progress() * 100) / updateSize) : 0;
+-    if (percent != miraManualUpdateLastPercent) {
+-      miraManualUpdateLastPercent = percent;
+-      if (_Debug) Serial.printf("[MIRA][OTA] Progression : %d%%\n", percent);
++  if (!miraManualUpdateFailed && len > 0) {
++    if (Update.write(data, len) != len) {
++      Update.printError(Serial);
++      miraManualUpdateFailed = true;
++      if (_Debug) Serial.println("[MIRA][OTA] Erreur ecriture firmware");
++      if (_Debug) Serial.printf("[MIRA][OTA] Octets ecrits : %u\n", (unsigned)Update.progress());
++    } else {
++      int percent = 0;
++      if (content_len > 0) {
++        percent = (int)(((index + len) * 100ULL) / content_len);
++        if (percent > 99 && !final) percent = 99;
++      }
++      if (final) percent = 100;
++
++      if (percent != miraManualUpdateLastPercent) {
++        miraManualUpdateLastPercent = percent;
++        if (_Debug) Serial.printf("[MIRA][OTA] Progression : %d%%\n", percent);
++      }
+     }
+   }
+ 
+   if (final) {
+-    AsyncWebServerResponse* response = request->beginResponse(302, "text/plain", "Please wait while the device reboots");
+-    response->addHeader("Refresh", "20");
+-    response->addHeader("Location", "/");
+-    request->send(response);
+-    if (!Update.end(true)) {
++    if (!miraManualUpdateFailed && !Update.hasError() && Update.end(true)) {
++      miraManualUpdateSucceeded = true;
++      if (_Debug) Serial.println("[MIRA][OTA] Televersement termine");
++    } else {
++      miraManualUpdateFailed = true;
++      miraManualUpdateSucceeded = false;
+       Update.printError(Serial);
+-    } else {
+-      if (_Debug) Serial.println("[MIRA][OTA] Televersement termine, redemarrage");
+-      Serial.flush();
+-      ESP.restart();
+-    }
+-  }
+-}
+-
++      if (Update.isRunning()) Update.abort();
++      if (_Debug) Serial.println("[MIRA][OTA] Televersement manuel abandonne");
++    }
++  }
++}
+ 
+ 
+ void MiraPanelServer::ServeurStation() {
+@@ -1396,12 +1406,19 @@
+ 
+   server.on(
+     "/doUpdateFile", HTTP_POST,
+-    [](AsyncWebServerRequest* request) {},
++    [](AsyncWebServerRequest* request) {
++      if (miraManualUpdateSucceeded && !miraManualUpdateFailed) {
++        request->send(200, "text/plain", "OK");
++        if (_Debug) Serial.println("[MIRA][OTA] Reponse Web envoyee, redemarrage");
++        delay(1000);
++        Serial.flush();
++        ESP.restart();
++      } else {
++        request->send(500, "text/plain", "UPDATE_FAILED");
++      }
++    },
+     [](AsyncWebServerRequest* request, const String& filename, size_t index, uint8_t* data, size_t len, bool final) {
+       handleDoUpdate(request, filename, index, data, len, final);
+-      TITRE = "Mise à jour en cours...";
+-      MESSAGE = "Le module redémarrera une fois la mise à jour terminée.";
+-      request->send_P(200, "text/html", Page_Message, RetourVariable);
+     });
+ 
+ 
