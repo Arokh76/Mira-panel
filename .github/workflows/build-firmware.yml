@@ -14,6 +14,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Prepare Mira Panel sources
+        run: |
+          test -f firmware/source/Mira_Panel_Source_V0.4.2.zip
+          rm -rf firmware/source/work
+          mkdir -p firmware/source/work
+          unzip -q firmware/source/Mira_Panel_Source_V0.4.2.zip -d firmware/source/work
+          test -f firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
+
       - name: Setup Arduino CLI
         uses: arduino/setup-arduino-cli@v2
 
@@ -35,7 +43,8 @@ jobs:
 
       - name: Install Mira LVGL configuration
         run: |
-          cp firmware/source/MIRA_PANEL/lv_conf.h "$HOME/Arduino/libraries/lv_conf.h"
+          mkdir -p "$HOME/Arduino/libraries"
+          cp firmware/source/work/MIRA_PANEL/lv_conf.h "$HOME/Arduino/libraries/lv_conf.h"
 
       - name: Compile Mira Panel
         run: |
@@ -43,7 +52,7 @@ jobs:
           arduino-cli compile \
             --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,CPUFreq=240,FlashMode=qio,FlashSize=8M,PartitionScheme=default_8MB,PSRAM=qspi,UploadMode=default,USBMode=hwcdc" \
             --output-dir build \
-            firmware/source/MIRA_PANEL
+            firmware/source/work/MIRA_PANEL
 
       - name: Show generated files
         run: ls -lah build
