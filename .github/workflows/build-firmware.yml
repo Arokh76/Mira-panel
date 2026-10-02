@@ -2,6 +2,14 @@ name: Build Mira Panel firmware
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/build-firmware.yml'
+      - 'firmware/source/Mira_Panel_Source_V0.4.3.zip'
+      - 'firmware/patches/current.patch'
+      - 'firmware/overrides/**'
 
 permissions:
   contents: read
@@ -17,14 +25,27 @@ jobs:
       - name: Prepare Mira Panel sources
         run: |
           test -f firmware/source/Mira_Panel_Source_V0.4.3.zip
-          test -f firmware/patches/current.patch
           rm -rf firmware/source/work
           mkdir -p firmware/source/work
           unzip -q firmware/source/Mira_Panel_Source_V0.4.3.zip -d firmware/source/work
           test -f firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
           test -f firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
-          cd firmware/source/work/MIRA_PANEL
-          patch --batch --forward -p0 < ../../../patches/current.patch
+
+          if [ -d firmware/overrides/MIRA_PANEL ]; then
+            echo "Applying Mira source overrides"
+            cp -a firmware/overrides/MIRA_PANEL/. firmware/source/work/MIRA_PANEL/
+          fi
+
+          if [ -s firmware/patches/current.patch ]; then
+            echo "Applying current Mira patch"
+            cd firmware/source/work/MIRA_PANEL
+            patch --batch --forward -p0 < ../../../patches/current.patch
+            cd ../../../..
+          fi
+
+          grep -q '"0.4.4"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
+          grep -q 'MiraPanelServer::SetupModule' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
+          grep -q 'MiraPanelServer::IndexSetEvent' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
 
       - name: Setup Arduino CLI
         uses: arduino/setup-arduino-cli@v2
