@@ -22,6 +22,7 @@ on:
       - 'firmware/scripts/v0.5.1.py'
       - 'firmware/scripts/v0.5.2.py'
       - 'firmware/scripts/v0.5.3.py'
+      - 'firmware/scripts/v0.5.4.py'
       - 'firmware/overrides/**'
       - 'firmware/final-overrides/**'
 
@@ -117,7 +118,10 @@ jobs:
           echo "Applying Mira Panel 0.5.3 slider polish"
           python3 firmware/scripts/v0.5.3.py firmware/source/work/MIRA_PANEL
 
-          grep -q '"0.5.3"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
+          echo "Applying Mira Panel 0.5.4 segmented list style"
+          python3 firmware/scripts/v0.5.4.py firmware/source/work/MIRA_PANEL
+
+          grep -q '"0.5.4"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
           grep -q 'MiraPanelServer::SetupModule' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
           grep -q 'MiraPanelServer::IndexSetEvent' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
           grep -q 'MiraPanelServer::IsUpdateInProgress' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
@@ -144,6 +148,7 @@ jobs:
           grep -q 'LV_SCROLLBAR_MODE_OFF' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'lv_obj_set_flex_flow(b.card, LV_FLEX_FLOW_COLUMN)' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'compact ? 220 : 250' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -q 'b.style == "segmented"' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
 
       - name: Setup Arduino CLI
         uses: arduino/setup-arduino-cli@v2
