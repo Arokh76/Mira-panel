@@ -1,5 +1,5 @@
---- MIRA_PANEL.ino	2026-10-02 17:12:21.000000000 +0000
-+++ MIRA_PANEL.ino	2026-10-02 17:37:14.000000000 +0000
+--- MIRA_PANEL.ino
++++ MIRA_PANEL.ino
 @@ -35,7 +35,7 @@
    Serveur.SetupModule(
      "Mira Panel",
@@ -18,9 +18,28 @@
    Serial.printf("[MIRA][HW] Flash : %.1f MB\n", ESP.getFlashChipSize() / 1048576.0f);
    Serial.printf("[MIRA][HW] PSRAM : %.1f MB\n", ESP.getPsramSize() / 1048576.0f);
    Serial.println("[MIRA] Interface HTTP, LVGL et MQTT pretes");
---- MiraPanelServer.cpp	2026-10-02 17:16:53.000000000 +0000
-+++ MiraPanelServer.cpp	2026-10-02 17:37:14.000000000 +0000
-@@ -1431,46 +1431,82 @@
+
+--- MiraPanelServer.cpp
++++ MiraPanelServer.cpp
+@@ -144,14 +144,13 @@
+   static String RetourVariable(String var) {
+     String RETOUR = "Null";
+     if (var == "SCANRESEAUX") {
+-      RETOUR = "<b><label for=\"ReseauxScannes\">Réseaux scannés</label></b><br><select id=\"RS\" name=\"RS\" class=\"box\" onchange=\"Click(this.value)\" >";
++      RETOUR = "<label for=\"RS\">Réseaux détectés</label><select id=\"RS\" name=\"RS\" class=\"box\" onchange=\"Click(this.value)\">";
+       for (int j = 0; j < 10; j++) {
+         if (ScanReseaux[j] != "") {
+-          RETOUR += " <option id=\"" + ScanReseaux[j] + "\" value=\"" + ScanReseaux[j] + "\">" + ScanReseaux[j] + "</option>";
+-          //RETOUR += "<button onclick=\"Click('" + ScanReseaux[j] + "')\"class=\"reseau\">" + ScanReseaux[j] + "</button><br>";
++          RETOUR += "<option value=\"" + ScanReseaux[j] + "\">" + ScanReseaux[j] + "</option>";
+         }
+       }
+-      RETOUR += "</select><br><br>";
++      RETOUR += "</select>";
+     }
+ 
+ 
+@@ -1431,46 +1430,82 @@
          if (SetupModuleDone) {
            String version = SPIFFS_Uncrypt(SPIFFS_Config_Module["module"][0]["version"].as<String>());
  
@@ -135,7 +154,7 @@
            }
  
            Retour += "<br><br><b><div>Mise à jour manuelle :</div></b>";
-@@ -3741,7 +3777,7 @@
+@@ -3741,7 +3776,7 @@
    if (var == "VERSION") {
      String v = SPIFFS_Config_Module["module"][0]["version"].as<String>();
      if (v.length()) v = SPIFFS_Uncrypt(v);
@@ -144,3 +163,99 @@
    }
    if (var == "LOCALIP") {
      if (WiFi.status() == WL_CONNECTED) return WiFi.localIP().toString();
+@@ -3790,8 +3825,15 @@
+   if (var == "RESEAUXENREG") {
+     RETOUR = "";
+     JsonArray Reseaux = SPIFFS_Config_Reseau["reseau"];
+-    for (int i = 0; i < Reseaux.size(); i++) {
+-      RETOUR += "<span class=\"FondBlanc\">" + SPIFFS_Config_Reseau["reseau"][i]["id"].as<String>() + "</span><button onclick=\"window.location.href = '/load?nav=update&network=" + SPIFFS_Config_Reseau["reseau"][i]["id"].as<String>() + "';\" class=\"reseau\">" + SPIFFS_Config_Reseau["reseau"][i]["ssid"].as<String>() + "</button><br>";
++    if (Reseaux.size() == 0) {
++      RETOUR = "<div class=\"empty\">Aucun réseau n'est enregistré.</div>";
++    } else {
++      for (int i = 0; i < Reseaux.size(); i++) {
++        String id = SPIFFS_Config_Reseau["reseau"][i]["id"].as<String>();
++        String ssid = SPIFFS_Config_Reseau["reseau"][i]["ssid"].as<String>();
++        RETOUR += "<div class=\"network-item\"><span class=\"network-id\">" + id + "</span>";
++        RETOUR += "<button class=\"network-button\" onclick=\"window.location.href='/load?nav=update&network=" + id + "'\">" + ssid + "</button></div>";
++      }
+     }
+     return RETOUR;
+   }
+@@ -3824,14 +3866,13 @@
+   }
+ 
+   if (var == "SCANRESEAUX") {
+-    RETOUR = "<b><label for=\"ReseauxScannes\">Réseaux scannés</label></b><br><select id=\"RS\" name=\"RS\" class=\"box\" onchange=\"Click(this.value)\" >";
++    RETOUR = "<label for=\"RS\">Réseaux détectés</label><select id=\"RS\" name=\"RS\" class=\"box\" onchange=\"Click(this.value)\">";
+     for (int j = 0; j < 10; j++) {
+       if (ScanReseaux[j] != "") {
+-        RETOUR += " <option id=\"" + ScanReseaux[j] + "\" value=\"" + ScanReseaux[j] + "\">" + ScanReseaux[j] + "</option>";
+-        //RETOUR += "<button onclick=\"Click('" + ScanReseaux[j] + "')\"class=\"reseau\">" + ScanReseaux[j] + "</button><br>";
++        RETOUR += "<option value=\"" + ScanReseaux[j] + "\">" + ScanReseaux[j] + "</option>";
+       }
+     }
+-    RETOUR += "</select><br><br>";
++    RETOUR += "</select>";
+     return RETOUR;
+   }
+ 
+@@ -3906,43 +3947,32 @@
+ 
+   if (var == "PARAMS") {
+     RETOUR = "";
+-    JsonArray Params = SPIFFS_Config_Params["params"];
+-    for (int i = 0; i < Params.size(); i++) {
+-      if (SPIFFS_Config_Params["params"][i]["type"].as<String>() == "text") {
+-        RETOUR += "<b><label>" + SPIFFS_Config_Params["params"][i]["param"].as<String>() + ":</label></b> <br><input class=\"box\" id=\"" + SPIFFS_Config_Params["params"][i]["param"].as<String>() + "\" name=\"" + SPIFFS_Config_Params["params"][i]["param"].as<String>() + "\" style=\"width: 900px; text-align: center;\" value=\"" + SPIFFS_Config_Params["params"][i]["value"].as<String>() + "\" type=\"text\"> <br><br>";
+-      } else if (SPIFFS_Config_Params["params"][i]["type"].as<String>() == "toogle" || SPIFFS_Config_Params["params"][i]["type"].as<String>() == "toggle") {
+-
+-        RETOUR += "<b><div style=\"font-size: 40px;\">" + SPIFFS_Config_Params["params"][i]["param"].as<String>() + "</div></b>";
++    bool hasHttpWidget = false;
+ 
+-        String Nom = SPIFFS_Config_Params["params"][i]["param"].as<String>();
+-        String Value = SPIFFS_Config_Params["params"][i]["value"].as<String>();
+-
+-        if (SPIFFS_Config_Params["params"][i]["value"].as<String>() == "0") {
+-          RETOUR += "<div><label class=\"label1\"><div class=\"toggle\"><input onclick=\"ClickToogle(this, '" + Nom + "')\" class=\"toggle-state\" type=\"checkbox\"><div class=\"toggle-inner\"><div class=\"indicator\"></div></div><div class=\"active-bg\"></div><div id=\"Value" + Nom + "\" class=\"textd\">Inactif</div></div></label></div><br>";
+-        } else {
+-          RETOUR += "<div><label class=\"label1\"><div class=\"toggle\"><input onclick=\"ClickToogle(this,'" + Nom + "')\" class=\"toggle-state\" type=\"checkbox\" checked><div class=\"toggle-inner\"><div class=\"indicator\"></div></div><div class=\"active-bg\"></div><div id=\"Value" + Nom + "\" class=\"textd\">Actif</div></div></label></div><br>";
+-        }
+-        RETOUR += "<input class=\"hide\" id=\"" + Nom + "\" name=\"" + Nom + "\" value=\"" + Value + "\" type=\"text\">";
++    JsonArray Json_Array = mira_Json_LVGL["lvgl"];
++    for (int i = 0; i < Json_Array.size(); i++) {
++      String type = mira_Json_LVGL["lvgl"][i]["type"].as<String>();
++      if (type != "datetime" && type != "info") {
++        String name = mira_Json_LVGL["lvgl"][i]["name"].as<String>();
++        String url = mira_Json_LVGL["lvgl"][i]["url"].as<String>();
++        RETOUR += "<div class=\"field\"><label>" + name + "</label>";
++        RETOUR += "<input id=\"" + name + "\" name=\"" + name + "\" value=\"" + url + "\" type=\"text\" placeholder=\"URL d'envoi d'état\"></div>";
++        hasHttpWidget = true;
+       }
+     }
+ 
+-
+-    JsonArray Json_Array = mira_Json_LVGL["lvgl"];
+-    for (int i = 0; i < Json_Array.size(); i++) {
+-      if (mira_Json_LVGL["lvgl"][i]["type"] != "datetime" && mira_Json_LVGL["lvgl"][i]["type"] != "info")
+-        RETOUR += "<b><label>URL d'envoi d'état: " + mira_Json_LVGL["lvgl"][i]["name"].as<String>() + "</label></b> <br><input class=\"box\" id=\"" + mira_Json_LVGL["lvgl"][i]["name"].as<String>() + "\" name=\"" + mira_Json_LVGL["lvgl"][i]["name"].as<String>() + "\" style=\"width: 900px; text-align: center;\" value=\"" + mira_Json_LVGL["lvgl"][i]["url"].as<String>() + "\" type=\"text\"> <br><br>";
++    if (!hasHttpWidget) {
++      RETOUR = "<div class=\"empty\">Aucun widget avec retour HTTP n'est actuellement déclaré.</div>";
+     }
+     return RETOUR;
+   }
+ 
+   if (var == "ACTIFAP") {
+-    RETOUR = "";
+     String Actif = SPIFFS_Config_Reseau["ap"][0]["actif"].as<String>();
+-    if (Actif == "0") {
+-      RETOUR += "<br><div><label class=\"label1\"><div class=\"toggle\"><input onclick=\"ClickToogle(this)\" class=\"toggle-state\" type=\"checkbox\"><div class=\"toggle-inner\"><div class=\"indicator\"></div></div><div class=\"active-bg\"></div><div id=\"texte\" class=\"textd\">Inactif</div></div></label></div><br>";
+-    } else {
+-      RETOUR += "<br><div><label class=\"label1\"><div class=\"toggle\"><input onclick=\"ClickToogle(this)\" class=\"toggle-state\" type=\"checkbox\" checked><div class=\"toggle-inner\"><div class=\"indicator\"></div></div><div class=\"active-bg\"></div><div id=\"texte\" class=\"textd\">Actif</div></div></label></div><br>";
+-    }
++    String Checked = (Actif == "1") ? " checked" : "";
++    String Texte = (Actif == "1") ? "Actif" : "Inactif";
++    RETOUR = "<div class=\"switchline\"><div><strong>Point d'accès</strong><div class=\"hint\" id=\"texte\" style=\"margin:3px 0 0\">" + Texte + "</div></div>";
++    RETOUR += "<input type=\"checkbox\" onclick=\"ClickToogle(this)\"" + Checked + "></div>";
+     RETOUR += "<input class=\"hide\" id=\"actif\" name=\"actif\" value=\"" + Actif + "\" type=\"text\">";
+     return RETOUR;
+   }
