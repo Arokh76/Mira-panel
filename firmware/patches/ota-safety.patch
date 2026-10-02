@@ -1,0 +1,82 @@
+--- MIRA_PANEL.ino
++++ MIRA_PANEL.ino
+@@ -60,6 +60,25 @@
+ }
+ 
+ void loop() {
++  static bool otaMaintenance = false;
++  const bool otaRunning = Serveur.IsUpdateInProgress();
++
++  if (otaRunning) {
++    if (!otaMaintenance) {
++      otaMaintenance = true;
++      if (MIRA_MQTT_RUNTIME_ENABLED) Mqtt.forceReconnect();
++      Serial.println("[MIRA][OTA] Mode maintenance actif : MQTT/UI suspendus");
++    }
++    delay(5);
++    return;
++  }
++
++  if (otaMaintenance) {
++    otaMaintenance = false;
++    if (MIRA_MQTT_RUNTIME_ENABLED) Mqtt.forceReconnect();
++    Serial.println("[MIRA][OTA] Mode maintenance termine");
++  }
++
+   // Evenements commandes : /updatenr et interactions de l'ecran.
+   int miraEvent = Serveur.IndexGetEvent();
+   if (miraEvent >= 0) Interface.handleMiraEvent(miraEvent);
+--- MiraPanelServer.h
++++ MiraPanelServer.h
+@@ -153,6 +153,7 @@
+ 
+   int GetWiFiStatus();
+   bool IsSetupMode();
++  bool IsUpdateInProgress();
+ 
+   void Debug(bool Value = true);
+   void Scan_Network(bool Value = false);
+--- MiraPanelServer.cpp
++++ MiraPanelServer.cpp
+@@ -414,9 +414,12 @@
+ #define U_PART U_SPIFFS
+ 
+ size_t content_len;
++static int miraManualUpdateLastPercent = -1;
++
+ void handleDoUpdate(AsyncWebServerRequest* request, const String& filename, size_t index, uint8_t* data, size_t len, bool final) {
+   if (!index) {
+     if (_Debug) Serial.println("[MIRA][OTA] Televersement manuel demarre");
++    miraManualUpdateLastPercent = -1;
+     content_len = request->contentLength();
+     // if filename includes spiffs, update the spiffs partition
+     int cmd = (filename.indexOf("spiffs") > -1) ? U_PART : U_FLASH;
+@@ -431,10 +434,13 @@
+     Update.printError(Serial);
+     if (_Debug) Serial.println("[MIRA][OTA] Erreur ecriture firmware");
+     if (_Debug) Serial.printf("[MIRA][OTA] Octets ecrits : %u\n", (unsigned)Update.progress());
+-    if (_Debug) Serial.printf("[MIRA][OTA] Progression : %d%%\n", (Update.progress() * 100) / Update.size());
+   } else {
+-    String update_status = "Progression : " + String((Update.progress() * 100) / Update.size()) + "%";
+-    if (_Debug) Serial.println("[MIRA][OTA] " + update_status);
++    const size_t updateSize = Update.size();
++    const int percent = updateSize ? (int)((Update.progress() * 100) / updateSize) : 0;
++    if (percent != miraManualUpdateLastPercent) {
++      miraManualUpdateLastPercent = percent;
++      if (_Debug) Serial.printf("[MIRA][OTA] Progression : %d%%\n", percent);
++    }
+   }
+ 
+   if (final) {
+@@ -3503,6 +3509,11 @@
+ }
+ 
+ 
++bool MiraPanelServer::IsUpdateInProgress() {
++  return Update.isRunning();
++}
++
++
+ void MiraPanelServer::ScanWiFi() {
+   //Scan des réseaux wifi
+   if (_Debug == true) Serial.println(F("[MIRA] Scan des réseaux Wi-Fi alentours"));
