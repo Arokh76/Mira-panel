@@ -20,7 +20,297 @@
    Serial.println("[MIRA] Interface HTTP, LVGL et MQTT pretes");
 --- MiraPanelServer.cpp
 +++ MiraPanelServer.cpp
-@@ -3776,7 +3776,7 @@
+@@ -66,6 +66,8 @@
+ 
+ static const char* MIRA_GITHUB_VERSION_URL = "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/version.json";
+ static const char* MIRA_GITHUB_BIN_URL = "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/Mira_Panel.bin";
++static const char* MIRA_GITHUB_VERSION_API_URL = "https://api.github.com/repos/Arokh76/Mira-panel/contents/firmware/version.json?ref=main";
++static const char* MIRA_GITHUB_BIN_API_URL = "https://api.github.com/repos/Arokh76/Mira-panel/contents/firmware/Mira_Panel.bin?ref=main";
+ 
+ static int miraCompareVersion(const String& a, const String& b) {
+   int ai = 0, bi = 0;
+@@ -1456,50 +1458,62 @@
+           String githubPayload;
+           int response = -1;
+           String connectionError;
++          const char* versionSources[2] = {MIRA_GITHUB_VERSION_URL, MIRA_GITHUB_VERSION_API_URL};
++          const char* versionSourceNames[2] = {"raw.githubusercontent.com", "api.github.com"};
+ 
+-          for (uint8_t attempt = 1; attempt <= 3; ++attempt) {
+-            WiFiClientSecure secure;
+-            secure.setInsecure();
+-            secure.setTimeout(15000);
+-
+-            HTTPClient http;
+-            http.setTimeout(15000);
+-            http.setReuse(false);
+-            http.useHTTP10(true);
+-            http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+-
+-            if (_Debug) {
+-              Serial.printf("[MIRA][OTA] Verification GitHub %u/3 - WiFi:%d RSSI:%d Heap:%u\n",
+-                            attempt, WiFi.status(), WiFi.RSSI(), (unsigned)ESP.getFreeHeap());
+-            }
+-
+-            if (!http.begin(secure, MIRA_GITHUB_VERSION_URL)) {
+-              connectionError = "initialisation HTTPS impossible";
+-              response = -1;
+-            } else {
+-              response = http.GET();
+-              if (response == HTTP_CODE_OK) {
+-                githubPayload = http.getString();
+-                http.end();
+-                break;
+-              }
++          for (uint8_t source = 0; source < 2 && !githubPayload.length(); ++source) {
++            for (uint8_t attempt = 1; attempt <= 2 && !githubPayload.length(); ++attempt) {
++              WiFiClientSecure secure;
++              secure.setInsecure();
++              secure.setTimeout(15000);
++
++              HTTPClient http;
++              http.setTimeout(15000);
++              http.setReuse(false);
++              http.useHTTP10(true);
++              http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+ 
+-              connectionError = (response < 0)
+-                                  ? HTTPClient::errorToString(response)
+-                                  : ("HTTP " + String(response));
+               if (_Debug) {
+-                Serial.printf("[MIRA][OTA] Echec tentative %u : %d (%s)\n",
+-                              attempt, response, connectionError.c_str());
++                Serial.printf("[MIRA][OTA] Verification via %s %u/2 - WiFi:%d RSSI:%d Heap:%u\n",
++                              versionSourceNames[source], attempt, WiFi.status(), WiFi.RSSI(), (unsigned)ESP.getFreeHeap());
++              }
++
++              if (!http.begin(secure, versionSources[source])) {
++                connectionError = "initialisation HTTPS impossible";
++                response = -1;
++              } else {
++                if (source == 1) {
++                  http.addHeader("User-Agent", "Mira-Panel");
++                  http.addHeader("Accept", "application/vnd.github.raw+json");
++                }
++                response = http.GET();
++                if (response == HTTP_CODE_OK) {
++                  githubPayload = http.getString();
++                  http.end();
++                  break;
++                }
++
++                connectionError = (response < 0)
++                                    ? HTTPClient::errorToString(response)
++                                    : ("HTTP " + String(response));
++                if (_Debug) {
++                  Serial.printf("[MIRA][OTA] Echec %s %u/2 : %d (%s)\n",
++                                versionSourceNames[source], attempt, response, connectionError.c_str());
++                }
++                http.end();
+               }
+-              http.end();
+-            }
+ 
+-            if (attempt < 3) delay(500 * attempt);
++              if (attempt < 2) delay(1000);
++            }
++            if (!githubPayload.length() && source == 0) {
++              if (_Debug) Serial.println("[MIRA][OTA] Bascule vers l'API GitHub");
++              delay(750);
++            }
+           }
+ 
+           if (response != HTTP_CODE_OK || !githubPayload.length()) {
+             TITRE = "Mise à jour";
+-            Retour = "Impossible de vérifier les mises à jour sur GitHub après 3 tentatives.";
++            Retour = "Impossible de vérifier les mises à jour sur GitHub (raw + API).";
+             if (connectionError.length()) {
+               Retour += "<br><br><small>Détail : " + connectionError + " (code " + String(response) + ")</small>";
+             }
+@@ -2488,83 +2502,114 @@
+   if (_Debug) Serial.println("[MIRA][OTA] URL: " + fileName);
+   if (!fileName.length()) return false;
+ 
+-  HTTPClient http;
+-  WiFiClient plainClient;
+-  WiFiClientSecure secureClient;
+-  secureClient.setInsecure();
+-  bool begun = fileName.startsWith("https://") ? http.begin(secureClient, fileName) : http.begin(plainClient, fileName);
+-  if (!begun) {
+-    if (_Debug) Serial.println("[MIRA][OTA] Impossible d'initialiser HTTP");
+-    return false;
+-  }
+-  http.setTimeout(15000);
+-  int resp = http.GET();
+-  if (_Debug) Serial.printf("[MIRA][OTA] HTTP %d\n", resp);
+-  if (resp != HTTP_CODE_OK) {
+-    http.end();
+-    return false;
+-  }
++  String candidates[2];
++  candidates[0] = fileName;
++  candidates[1] = MIRA_GITHUB_BIN_API_URL;
++
++  for (uint8_t source = 0; source < 2; ++source) {
++    const bool githubApi = candidates[source].startsWith("https://api.github.com/");
++    if (source == 1 && candidates[0] == candidates[1]) continue;
+ 
+-  int fileSizeSigned = http.getSize();
+-  if (fileSizeSigned <= 0) {
+-    if (_Debug) Serial.println("[MIRA][OTA] Taille du firmware invalide");
+-    http.end();
+-    return false;
+-  }
+-  size_t fileSize = (size_t)fileSizeSigned;
+-  int cmd = (fileName.indexOf("spiffs") > -1) ? U_SPIFFS : U_FLASH;
+-  if (!Update.begin(fileSize, cmd)) {
+-    Update.printError(Serial);
+-    http.end();
+-    return false;
+-  }
++    HTTPClient http;
++    WiFiClient plainClient;
++    WiFiClientSecure secureClient;
++    secureClient.setInsecure();
++    secureClient.setTimeout(20000);
++
++    bool begun = candidates[source].startsWith("https://")
++                   ? http.begin(secureClient, candidates[source])
++                   : http.begin(plainClient, candidates[source]);
++    if (!begun) {
++      if (_Debug) Serial.printf("[MIRA][OTA] Source %u : initialisation HTTP impossible\n", source + 1);
++      continue;
++    }
++
++    http.setTimeout(20000);
++    http.setReuse(false);
++    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
++    if (githubApi) {
++      http.addHeader("User-Agent", "Mira-Panel");
++      http.addHeader("Accept", "application/vnd.github.raw+json");
++    }
++
++    int resp = http.GET();
++    if (_Debug) Serial.printf("[MIRA][OTA] Source %u HTTP %d\n", source + 1, resp);
++    if (resp != HTTP_CODE_OK) {
++      if (_Debug && resp < 0) {
++        Serial.printf("[MIRA][OTA] Source %u : %s\n", source + 1, HTTPClient::errorToString(resp).c_str());
++      }
++      http.end();
++      if (source == 0) {
++        if (_Debug) Serial.println("[MIRA][OTA] Telechargement raw indisponible, essai via API GitHub");
++        delay(750);
++      }
++      continue;
++    }
++
++    int fileSizeSigned = http.getSize();
++    if (fileSizeSigned <= 0) {
++      if (_Debug) Serial.println("[MIRA][OTA] Taille du firmware invalide");
++      http.end();
++      continue;
++    }
++
++    size_t fileSize = (size_t)fileSizeSigned;
++    int cmd = (fileName.indexOf("spiffs") > -1) ? U_SPIFFS : U_FLASH;
++    if (!Update.begin(fileSize, cmd)) {
++      Update.printError(Serial);
++      http.end();
++      return false;
++    }
+ 
+-  currentLength = 0;
+-  initLength = (int)fileSize;
+-  prec = 0;
+-  memprec = -1;
+-
+-  WiFiClient* stream = http.getStreamPtr();
+-  uint8_t buff[1024];
+-  size_t remaining = fileSize;
+-  while (http.connected() && remaining > 0) {
+-    size_t available = stream->available();
+-    if (available) {
+-      int c = stream->readBytes(buff, (available > sizeof(buff)) ? sizeof(buff) : available);
+-      if (c <= 0) break;
+-      size_t written = Update.write(buff, (size_t)c);
+-      if (written != (size_t)c) {
+-        Update.printError(Serial);
+-        Update.abort();
+-        http.end();
+-        return false;
++    currentLength = 0;
++    initLength = (int)fileSize;
++    prec = 0;
++    memprec = -1;
++
++    WiFiClient* stream = http.getStreamPtr();
++    uint8_t buff[1024];
++    size_t remaining = fileSize;
++    while (http.connected() && remaining > 0) {
++      size_t available = stream->available();
++      if (available) {
++        int c = stream->readBytes(buff, (available > sizeof(buff)) ? sizeof(buff) : available);
++        if (c <= 0) break;
++        size_t written = Update.write(buff, (size_t)c);
++        if (written != (size_t)c) {
++          Update.printError(Serial);
++          Update.abort();
++          http.end();
++          return false;
++        }
++        currentLength += c;
++        remaining -= (size_t)c;
++        prec = (currentLength * 100) / initLength;
++        if (prec != memprec) {
++          memprec = prec;
++          String progress = "Progression: " + String(memprec) + " %";
++          events.send(progress.c_str(), "divmessage", millis());
++          if (_Debug) Serial.println("[MIRA][OTA] " + String(memprec) + "%");
++        }
+       }
+-      currentLength += c;
+-      remaining -= (size_t)c;
+-      prec = (currentLength * 100) / initLength;
+-      if (prec != memprec) {
+-        memprec = prec;
+-        String progress = "Progression: " + String(memprec) + " %";
+-        events.send(progress.c_str(), "divmessage", millis());
+-        if (_Debug) Serial.println("[MIRA][OTA] " + String(memprec) + "%");
+-      }
++      delay(1);
+     }
+-    delay(1);
+-  }
+ 
+-  bool ok = (remaining == 0) && Update.end(true);
+-  if (!ok) {
+-    Update.printError(Serial);
++    bool ok = (remaining == 0) && Update.end(true);
++    if (!ok) {
++      Update.printError(Serial);
++      http.end();
++      return false;
++    }
++
++    events.send("Redémarrage de Mira Panel", "divmessage", millis());
++    if (_Debug) Serial.printf("[MIRA][OTA] Mise à jour réussie via source %u\n", source + 1);
+     http.end();
+-    return false;
++    delay(500);
++    ESP.restart();
++    return true;
+   }
+ 
+-  events.send("Redémarrage de Mira Panel", "divmessage", millis());
+-  if (_Debug) Serial.println("[MIRA][OTA] Mise à jour réussie");
+-  http.end();
+-  delay(500);
+-  ESP.restart();
+-  return true;
++  return false;
+ }
+ 
+@@ -3804,7 +3849,7 @@
    if (var == "VERSION") {
      String v = SPIFFS_Config_Module["module"][0]["version"].as<String>();
      if (v.length()) v = SPIFFS_Uncrypt(v);
