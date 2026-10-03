@@ -89,6 +89,16 @@ jobs:
           grep -q 'ui._server.IndexSetColor(b.id, r, g, bl);' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'lv_obj_set_style_arc_width(b.control, 14, LV_PART_MAIN)' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
 
+          echo '===== ROUND RANGE ====='
+          grep -n -A110 -B20 'void MiraPanelUI::createRoundRange' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp || true
+          grep -n -A80 -B10 'void MiraPanelUI::onRoundRange' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp || true
+          echo '===== RANGE SERVER H ====='
+          grep -n -A15 -B15 'IndexSetRange' firmware/source/work/MIRA_PANEL/MiraPanelServer.h || true
+          echo '===== RANGE SERVER CPP ====='
+          grep -n -A45 -B20 'IndexSetRange' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp || true
+          echo '===== RANGE READBACK ====='
+          grep -n -A70 -B15 'IndexGetRange' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp || true
+
       - name: Setup Arduino CLI
         uses: arduino/setup-arduino-cli@v2
 
