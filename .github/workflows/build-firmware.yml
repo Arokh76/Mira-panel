@@ -27,6 +27,7 @@ on:
       - 'firmware/scripts/v0.5.6.py'
       - 'firmware/scripts/v0.5.7.py'
       - 'firmware/scripts/v0.5.8.py'
+      - 'firmware/scripts/v0.5.9.py'
       - 'firmware/overrides/**'
       - 'firmware/final-overrides/**'
 
@@ -42,7 +43,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Prepare Mira Panel sources
+        shell: bash
         run: |
+          set -euo pipefail
           test -f firmware/source/Mira_Panel_Source_V0.4.3.zip
           rm -rf firmware/source/work
           mkdir -p firmware/source/work
@@ -55,132 +58,38 @@ jobs:
             cp -a firmware/overrides/MIRA_PANEL/. firmware/source/work/MIRA_PANEL/
           fi
 
-          if [ -s firmware/patches/current.patch ]; then
-            echo "Applying current Mira patch"
-            cd firmware/source/work/MIRA_PANEL
-            patch --batch --forward -p0 < ../../../patches/current.patch
-            cd ../../../..
-          fi
-
-          if [ -s firmware/patches/ota-safety.patch ]; then
-            echo "Applying OTA safety patch"
-            cd firmware/source/work/MIRA_PANEL
-            patch --batch --forward -p0 < ../../../patches/ota-safety.patch
-            cd ../../../..
-          fi
-
-          if [ -s firmware/patches/v0.4.5.patch ]; then
-            echo "Applying Mira Panel 0.4.5 patch"
-            cd firmware/source/work/MIRA_PANEL
-            patch --batch --forward -p0 < ../../../patches/v0.4.5.patch
-            cd ../../../..
-          fi
-
-          if [ -s firmware/patches/v0.4.6.patch ]; then
-            echo "Applying Mira Panel 0.4.6 patch"
-            cd firmware/source/work/MIRA_PANEL
-            patch --batch --forward -p0 < ../../../patches/v0.4.6.patch
-            cd ../../../..
-          fi
-
-          if [ -s firmware/patches/v0.4.7.patch ]; then
-            echo "Applying Mira Panel 0.4.7 patch"
-            cd firmware/source/work/MIRA_PANEL
-            patch --batch --forward -p0 < ../../../patches/v0.4.7.patch
-            cd ../../../..
-          fi
+          for p in current.patch ota-safety.patch v0.4.5.patch v0.4.6.patch v0.4.7.patch; do
+            if [ -s "firmware/patches/$p" ]; then
+              echo "Applying $p"
+              (cd firmware/source/work/MIRA_PANEL && patch --batch --forward -p0 < "../../../patches/$p")
+            fi
+          done
 
           if [ -d firmware/final-overrides/MIRA_PANEL ]; then
             echo "Applying final Mira source overrides"
             cp -a firmware/final-overrides/MIRA_PANEL/. firmware/source/work/MIRA_PANEL/
           fi
 
-          echo "Applying Mira Panel 0.4.8 post-processing"
-          python3 firmware/scripts/v0.4.8.py firmware/source/work/MIRA_PANEL
+          for s in \
+            v0.4.8.py v0.4.9.py v0.4.10.py v0.4.11.py \
+            v0.5.0.py v0.5.0_ota_sync.py v0.5.1.py v0.5.2.py v0.5.3.py \
+            v0.5.4.py v0.5.5.py v0.5.6.py v0.5.7.py v0.5.8.py v0.5.9.py; do
+            echo "Applying $s"
+            python3 "firmware/scripts/$s" firmware/source/work/MIRA_PANEL
+          done
 
-          echo "Applying Mira Panel 0.4.9 post-processing"
-          python3 firmware/scripts/v0.4.9.py firmware/source/work/MIRA_PANEL
-
-          echo "Applying Mira Panel 0.4.10 post-processing"
-          python3 firmware/scripts/v0.4.10.py firmware/source/work/MIRA_PANEL
-
-          echo "Applying Mira Panel 0.4.11 post-processing"
-          python3 firmware/scripts/v0.4.11.py firmware/source/work/MIRA_PANEL
-
-          echo "Applying Mira Panel 0.5.0 theme engine"
-          python3 firmware/scripts/v0.5.0.py firmware/source/work/MIRA_PANEL
-
-          echo "Hardening Mira Panel browser OTA freshness"
-          python3 firmware/scripts/v0.5.0_ota_sync.py firmware/source/work/MIRA_PANEL
-
-          echo "Applying Mira Panel 0.5.1 widget styles"
-          python3 firmware/scripts/v0.5.1.py firmware/source/work/MIRA_PANEL
-
-          echo "Applying Mira Panel 0.5.2 slider fix"
-          python3 firmware/scripts/v0.5.2.py firmware/source/work/MIRA_PANEL
-
-          echo "Applying Mira Panel 0.5.3 slider polish"
-          python3 firmware/scripts/v0.5.3.py firmware/source/work/MIRA_PANEL
-
-          echo "Applying Mira Panel 0.5.4 segmented list style"
-          python3 firmware/scripts/v0.5.4.py firmware/source/work/MIRA_PANEL
-
-          echo "Applying Mira Panel 0.5.5 micro animations"
-          python3 firmware/scripts/v0.5.5.py firmware/source/work/MIRA_PANEL
-
-          echo "Applying Mira Panel 0.5.6 readability polish"
-          python3 firmware/scripts/v0.5.6.py firmware/source/work/MIRA_PANEL
-
-          echo "Applying Mira Panel 0.5.7 live controls"
-          python3 firmware/scripts/v0.5.7.py firmware/source/work/MIRA_PANEL
-
-          echo "Applying Mira Panel 0.5.8 render fixes"
-          python3 firmware/scripts/v0.5.8.py firmware/source/work/MIRA_PANEL
-
-          grep -q '"0.5.8"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
-          grep -q 'MiraPanelServer::SetupModule' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
-          grep -q 'MiraPanelServer::IndexSetEvent' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
-          grep -q 'MiraPanelServer::IsUpdateInProgress' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
-          grep -q 'miraManualUpdateSucceeded' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
-          grep -q 'MiraRuntimeVersion' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
-          grep -q 'return MiraRuntimeVersion' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
-          grep -q 'Configuration · étape 1/2' firmware/source/work/MIRA_PANEL/HTML/HTML_Key.h
-          grep -q 'Configuration · étape 2/2' firmware/source/work/MIRA_PANEL/HTML/HTML_ManageurWiFiSansR.h
-          grep -q 'uploadBlob' firmware/source/work/MIRA_PANEL/HTML/HTML_Sys.h
-          grep -q 'Mise à jour en cours' firmware/source/work/MIRA_PANEL/HTML/HTML_Sys.h
-          ! grep -q 'L’ESP n’a plus besoin' firmware/source/work/MIRA_PANEL/HTML/HTML_Sys.h
-          grep -q 'firmwareContainsVersion' firmware/source/work/MIRA_PANEL/HTML/HTML_Sys.h
-          grep -q 'manifests.push' firmware/source/work/MIRA_PANEL/HTML/HTML_Sys.h
-          grep -q 'mira-info' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
-          grep -q 'font-size:clamp(22px,2.6vw,30px)' firmware/source/work/MIRA_PANEL/HTML/HTML_Index.h
-          grep -q 'width:31px;height:25px' firmware/source/work/MIRA_PANEL/HTML/HTML_Index.h
-          ! grep -q 'border-radius:6px' firmware/source/work/MIRA_PANEL/HTML/HTML_Index.h
-          grep -q 'THEME_GLASS' firmware/source/work/MIRA_PANEL/MiraPanelUI.h
-          grep -q 'Mira\\nSombre\\nGlass' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -q 'void MiraPanelUI::onTheme' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -q 'String style = "standard"' firmware/source/work/MIRA_PANEL/MiraPanelUI.h
-          grep -q 'LVGL_Style' firmware/source/work/MIRA_PANEL/SPIFFS_Process.h
-          grep -q 'b.style = widgetStyle' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -q 'LV_SCROLLBAR_MODE_OFF' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -q 'lv_obj_set_flex_flow(b.card, LV_FLEX_FLOW_COLUMN)' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -q 'compact ? 220 : 250' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -q 'b.style == "segmented"' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -q 'lv_obj_fade_in' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -q 'lv_obj_set_style_transform_zoom' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -q 'lv_obj_set_style_anim_time' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -q 'compact ? 16 : 20' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -q '0xF2A23A' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -q 'lastLiveSendMs' firmware/source/work/MIRA_PANEL/MiraPanelUI.h
-          grep -q 'code == LV_EVENT_VALUE_CHANGED' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -q 'code == LV_EVENT_PRESSING' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -q '"0.5.9"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
+          grep -q 'value != b.lastLiveValue;' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -q 'rgb24 != b.lastLiveColor;' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'lv_obj_set_style_arc_width(b.control, 14, LV_PART_MAIN)' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -q 'LV_OPA_COVER, LV_STATE_PRESSED' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
 
       - name: Setup Arduino CLI
         uses: arduino/setup-arduino-cli@v2
 
       - name: Install ESP32 core 2.0.17
+        shell: bash
         run: |
+          set -e
           arduino-cli config init
           arduino-cli config add board_manager.additional_urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
           arduino-cli core update-index
@@ -196,13 +105,21 @@ jobs:
           test "$ok" -eq 1
 
       - name: Install Arduino libraries
+        shell: bash
         run: |
+          set -euo pipefail
           arduino-cli lib update-index
           arduino-cli lib install "lvgl@8.3.11"
           arduino-cli lib install "LovyanGFX@1.1.9"
           arduino-cli lib install "ArduinoJson@6.21.5"
           arduino-cli lib install "AsyncTCP@1.1.4"
           arduino-cli lib install "AsyncHTTPRequest_Generic@1.13.0"
+
+          CW="$HOME/Arduino/libraries/lvgl/src/extra/widgets/colorwheel/lv_colorwheel.c"
+          test -f "$CW"
+          grep -q '#define LV_CPICKER_DEF_QF 3' "$CW"
+          sed -i 's/#define LV_CPICKER_DEF_QF 3/#define LV_CPICKER_DEF_QF 1/' "$CW"
+          grep -q '#define LV_CPICKER_DEF_QF 1' "$CW"
 
       - name: Install Mira LVGL configuration
         run: |
