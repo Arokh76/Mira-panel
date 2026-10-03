@@ -12,6 +12,15 @@ if count != 1:
     raise SystemExit(f'v0.6.0 compatibility patch: expected 1 legacy PARAMS guard, got {count}')
 source = source.replace(old, new, 1)
 
+# Current MiraMqtt prints the States namespace in two startup paths. For the
+# display trace both are valid places, so let this one compatibility replacement
+# update every matching trace while all other replace_once calls stay strict.
+old_replace_guard = """    if count != 1:\n        raise SystemExit(f'{label}: expected exactly 1 match in {path}, got {count}')\n    path.write_text(text.replace(old, new, 1), encoding='utf-8')"""
+new_replace_guard = """    if label == 'mqtt startup display trace' and count >= 1:\n        path.write_text(text.replace(old, new), encoding='utf-8')\n        return\n    if count != 1:\n        raise SystemExit(f'{label}: expected exactly 1 match in {path}, got {count}')\n    path.write_text(text.replace(old, new, 1), encoding='utf-8')"""
+if source.count(old_replace_guard) != 1:
+    raise SystemExit('v0.6.0 compatibility patch: replace_once guard not found')
+source = source.replace(old_replace_guard, new_replace_guard, 1)
+
 # A few old settings callbacks disappeared from the current 0.5.13 UI. They are
 # optional for 0.6.0 because the same settings are now handled by the web/MQTT
 # display engine. Keep strict replacement for every non-optional function.
