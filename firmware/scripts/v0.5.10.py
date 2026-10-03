@@ -15,12 +15,9 @@ def replace_once(path: Path, old: str, new: str, label: str):
     path.write_text(text.replace(old, new, 1), encoding='utf-8')
 
 
-# Version
 replace_once(ino, '"0.5.9"', '"0.5.10"', 'firmware version')
 replace_once(ino, '[MIRA] Firmware 0.5.9 initialise', '[MIRA] Firmware 0.5.10 initialise', 'startup log')
 
-# Per-widget holdoff used to stop delayed MQTT/HTTP echoes from dragging a control
-# backwards while the finger is still moving (or just after release).
 replace_once(
     hdr,
     '    uint32_t lastLiveColor = 0xFFFFFFFFUL;\n',
@@ -29,9 +26,6 @@ replace_once(
     'local interaction holdoff state',
 )
 
-# The LVGL colorwheel changes Hue/Saturation/Value mode on a long press by default,
-# which visually looks like the ring randomly changing style. Lock it permanently
-# to Hue mode.
 replace_once(
     ui,
     '''  lv_obj_set_style_border_color(b.control, colorAccent(), LV_PART_KNOB);\n  lv_obj_align(b.control, LV_ALIGN_CENTER, 0, 12);''',
@@ -39,26 +33,14 @@ replace_once(
     'fixed hue-only colorwheel',
 )
 
-# Linear slider: visual tracking remains purely local and immediate. Network traffic
-# is throttled to ~16 Hz and only MQTT is emitted while moving. The legacy HTTP/event
-# path is sent once on release. This avoids a train of delayed server echoes fighting
-# the finger position.
-replace_once(
-    ui,
-    '''  const uint32_t now = millis();\n  const bool finalSend = code == LV_EVENT_RELEASED;\n  const bool liveSend = code == LV_EVENT_VALUE_CHANGED && value != b.lastLiveValue;\n  if (liveSend || finalSend) {\n    b.lastLiveSendMs = now;\n    b.lastLiveValue = value;\n    ui._server.IndexSetRange(b.id, value);\n    ui._server.IndexSetEvent(b.id);\n    ui.publishMqttAction(b, String(value));\n  }''',
-    '''  const uint32_t now = millis();\n  const bool finalSend = code == LV_EVENT_RELEASED;\n  if (code == LV_EVENT_PRESSED || code == LV_EVENT_PRESSING || code == LV_EVENT_VALUE_CHANGED) {\n    b.localInputUntilMs = now + 250;\n  }\n  if (finalSend) b.localInputUntilMs = now + 350;\n\n  const bool liveSend = code == LV_EVENT_VALUE_CHANGED && value != b.lastLiveValue &&\n                        (b.lastLiveSendMs == 0 || (uint32_t)(now - b.lastLiveSendMs) >= 60);\n  if (liveSend) {\n    b.lastLiveSendMs = now;\n    b.lastLiveValue = value;\n    ui.publishMqttAction(b, String(value));\n  }\n  if (finalSend) {\n    b.lastLiveSendMs = now;\n    b.lastLiveValue = value;\n    ui._server.IndexSetRange(b.id, value);\n    ui._server.IndexSetEvent(b.id);\n    ui.publishMqttAction(b, String(value));\n  }''',
-    'stable live linear range',
-)
+range_old = '''  const uint32_t now = millis();\n  const bool finalSend = code == LV_EVENT_RELEASED;\n  const bool liveSend = code == LV_EVENT_VALUE_CHANGED && value != b.lastLiveValue;\n  if (liveSend || finalSend) {\n    b.lastLiveSendMs = now;\n    b.lastLiveValue = value;\n    ui._server.IndexSetRange(b.id, value);\n    ui._server.IndexSetEvent(b.id);\n    ui.publishMqttAction(b, String(value));\n  }'''
+range_new = '''  const uint32_t now = millis();\n  const bool finalSend = code == LV_EVENT_RELEASED;\n  if (code == LV_EVENT_PRESSED || code == LV_EVENT_PRESSING || code == LV_EVENT_VALUE_CHANGED) {\n    b.localInputUntilMs = now + 250;\n  }\n  if (finalSend) b.localInputUntilMs = now + 350;\n\n  const bool liveSend = code == LV_EVENT_VALUE_CHANGED && value != b.lastLiveValue &&\n                        (b.lastLiveSendMs == 0 || (uint32_t)(now - b.lastLiveSendMs) >= 60);\n  if (liveSend) {\n    b.lastLiveSendMs = now;\n    b.lastLiveValue = value;\n    ui.publishMqttAction(b, String(value));\n  }\n  if (finalSend) {\n    b.lastLiveSendMs = now;\n    b.lastLiveValue = value;\n    ui._server.IndexSetRange(b.id, value);\n    ui._server.IndexSetEvent(b.id);\n    ui.publishMqttAction(b, String(value));\n  }'''
+text = ui.read_text(encoding='utf-8')
+if text.count(range_old) != 2:
+    raise SystemExit(f'stable linear + round range: expected 2 matches, got {text.count(range_old)}')
+text = text.replace(range_old, range_new)
+ui.write_text(text, encoding='utf-8')
 
-# Round range: same local-first / remote-echo holdoff policy.
-replace_once(
-    ui,
-    '''  const uint32_t now = millis();\n  const bool finalSend = code == LV_EVENT_RELEASED;\n  const bool liveSend = code == LV_EVENT_VALUE_CHANGED && value != b.lastLiveValue;\n  if (liveSend || finalSend) {\n    b.lastLiveSendMs = now;\n    b.lastLiveValue = value;\n    ui._server.IndexSetRange(b.id, value);\n    ui._server.IndexSetEvent(b.id);\n    ui.publishMqttAction(b, String(value));\n  }''',
-    '''  const uint32_t now = millis();\n  const bool finalSend = code == LV_EVENT_RELEASED;\n  if (code == LV_EVENT_PRESSED || code == LV_EVENT_PRESSING || code == LV_EVENT_VALUE_CHANGED) {\n    b.localInputUntilMs = now + 250;\n  }\n  if (finalSend) b.localInputUntilMs = now + 350;\n\n  const bool liveSend = code == LV_EVENT_VALUE_CHANGED && value != b.lastLiveValue &&\n                        (b.lastLiveSendMs == 0 || (uint32_t)(now - b.lastLiveSendMs) >= 60);\n  if (liveSend) {\n    b.lastLiveSendMs = now;\n    b.lastLiveValue = value;\n    ui.publishMqttAction(b, String(value));\n  }\n  if (finalSend) {\n    b.lastLiveSendMs = now;\n    b.lastLiveValue = value;\n    ui._server.IndexSetRange(b.id, value);\n    ui._server.IndexSetEvent(b.id);\n    ui.publishMqttAction(b, String(value));\n  }''',
-    'stable live round range',
-)
-
-# Colour wheel: same policy; do not run IndexSetEvent continuously while dragging.
 replace_once(
     ui,
     '''  const uint32_t now = millis();\n  const bool finalSend = code == LV_EVENT_RELEASED;\n  const bool liveSend = (code == LV_EVENT_VALUE_CHANGED || code == LV_EVENT_PRESSING) &&\n                        rgb24 != b.lastLiveColor;\n  if (liveSend || finalSend) {\n    b.lastLiveSendMs = now;\n    b.lastLiveColor = rgb24;\n    ui._server.IndexSetColor(b.id, r, g, bl);\n    ui._server.IndexSetEvent(b.id);\n    char hex[8];\n    snprintf(hex, sizeof(hex), "#%02X%02X%02X", r, g, bl);\n    ui.publishMqttAction(b, String(hex));\n  }''',
@@ -66,9 +48,6 @@ replace_once(
     'stable live colour wheel',
 )
 
-# Ignore delayed server/MQTT state echoes while a local continuous control owns the
-# screen. Do this at the common server-to-widget refresh point so both range types
-# and the colorwheel get the same protection.
 text = ui.read_text(encoding='utf-8')
 needle = 'void MiraPanelUI::updateBindingFromServer('
 pos = text.find(needle)
@@ -82,7 +61,12 @@ params = sig[sig.find('(') + 1:sig.rfind(')')].split(',')
 if not params:
     raise SystemExit('updateBindingFromServer parameters not found')
 first_name = params[0].strip().split()[-1].replace('&', '').replace('*', '')
-insert = (\n    '\n  if (' + first_name + ' >= _bindingCount) return;'\n    '\n  Binding& localBinding = _bindings[' + first_name + '];'\n    '\n  if (localBinding.localInputUntilMs != 0 && '\n    '(int32_t)(millis() - localBinding.localInputUntilMs) < 0) return;\n'\n)
+insert = (
+    '\n  if (' + first_name + ' >= _bindingCount) return;'
+    '\n  Binding& localBinding = _bindings[' + first_name + '];'
+    '\n  if (localBinding.localInputUntilMs != 0 && '
+    '(int32_t)(millis() - localBinding.localInputUntilMs) < 0) return;\n'
+)
 text = text[:brace + 1] + insert + text[brace + 1:]
 ui.write_text(text, encoding='utf-8')
 
