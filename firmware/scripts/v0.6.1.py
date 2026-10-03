@@ -18,6 +18,14 @@ def replace_once(path: Path, old: str, new: str, label: str):
     path.write_text(text.replace(old, new, 1), encoding='utf-8')
 
 
+def replace_first(path: Path, old: str, new: str, label: str):
+    text = path.read_text(encoding='utf-8')
+    count = text.count(old)
+    if count < 1:
+        raise SystemExit(f'{label}: expected at least 1 match in {path}, got {count}')
+    path.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+
 # -----------------------------------------------------------------------------
 # Version
 # -----------------------------------------------------------------------------
@@ -133,7 +141,7 @@ replace_once(
 
 # Keep the browser's native time picker, but submit a hidden HHMM value so the
 # historical parameter saver never has to persist a colon.
-replace_once(
+replace_first(
     html,
     '<form action="/save?config=params" method="POST">',
     '<form id="displayForm" action="/save?config=params" method="POST">',
