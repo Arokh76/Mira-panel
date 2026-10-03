@@ -42,10 +42,10 @@ replace_once(ino, '"0.6.2"', '"0.6.3"', 'firmware version')
 replace_once(ino, '[MIRA] Firmware 0.6.2 initialise', '[MIRA] Firmware 0.6.3 initialise', 'startup log')
 
 # Programmatic LVGL updates must never be treated as user changes. In 0.6.0 the
-# display refresh could set the local brightness slider / switches, fire their
-# callbacks, and synchronously write DISPLAY_* back through the server config.
-# That blocks the same task that renders LVGL and explains the multi-second page
-# construction and delayed sliders visible on the device.
+# display refresh could set the local brightness slider, fire its callback, and
+# synchronously write DISPLAY_* back through the server config. That blocks the
+# same task that renders LVGL and matches the multi-second page construction and
+# delayed sliders visible on the device.
 replace_once(
     ui_h,
     '  bool _manualBrightnessOverride = false;\n',
@@ -69,18 +69,13 @@ replace_in_function(
     'guard programmatic brightness slider',
 )
 
-for signature, label in [
-    ('void MiraPanelUI::onBrightness(lv_event_t* e) {', 'brightness callback guard'),
-    ('void MiraPanelUI::onSleepToggle(lv_event_t* e) {', 'sleep callback guard'),
-    ('void MiraPanelUI::onClockSleepToggle(lv_event_t* e) {', 'clock callback guard'),
-]:
-    replace_in_function(
-        ui,
-        signature,
-        '  if (!ui) return;',
-        '  if (!ui) return;\n  if (ui->_syncingDisplayControls) return;',
-        label,
-    )
+replace_in_function(
+    ui,
+    'void MiraPanelUI::onBrightness(lv_event_t* e) {',
+    '  if (!ui) return;',
+    '  if (!ui) return;\n  if (ui->_syncingDisplayControls) return;',
+    'brightness callback guard',
+)
 
 # The web configuration is background work. Do it only after five seconds of
 # completely quiet local UI and at most once every fifteen seconds. This keeps
