@@ -1,0 +1,17 @@
+{
+  "name": "Mira Panel - mise a jour sans effacement",
+  "version": "0.6.5",
+  "new_install_prompt_erase": false,
+  "new_install_improv_wait_time": 0,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        {
+          "path": "firmware/Mira_Panel.bin",
+          "offset": 65536
+        }
+      ]
+    }
+  ]
+}
