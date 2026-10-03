@@ -77,6 +77,17 @@ replace_in_function(
     'brightness callback guard',
 )
 
+# A fast drag on the local brightness slider must not serialize/write the web
+# configuration for every LVGL value. Treat it like MQTT brightness/set: an
+# immediate runtime override. The scheduled day/night values remain untouched.
+replace_in_function(
+    ui,
+    'void MiraPanelUI::onBrightness(lv_event_t* e) {',
+    '''  ui->_manualBrightnessOverride = false;\n  if (ui->_nightScheduleEnabled && ui->_nightActive) {\n    ui->_nightBrightnessPct = pct;\n    ui->_server.UpdateParamText("DISPLAY_Nuit", String(pct));\n  } else {\n    ui->_dayBrightnessPct = pct;\n    ui->_server.UpdateParamText("DISPLAY_Jour", String(pct));\n  }''',
+    '''  ui->_manualBrightnessPct = pct;\n  ui->_manualBrightnessOverride = true;''',
+    'nonblocking local brightness override',
+)
+
 # The web configuration is background work. Do it only after five seconds of
 # completely quiet local UI and at most once every fifteen seconds. This keeps
 # navigation / rendering / fast sliders ahead of config JSON access.
@@ -96,4 +107,4 @@ replace_once(
     'display mqtt background interval',
 )
 
-print('Mira Panel 0.6.3 programmatic-control guard + UI-priority background polling applied')
+print('Mira Panel 0.6.3 programmatic-control guard + nonblocking brightness override applied')
