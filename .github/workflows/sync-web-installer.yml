@@ -73,7 +73,7 @@ jobs:
 
           echo "matching=true" >> "$GITHUB_OUTPUT"
 
-      - name: Update installer firmware and manifest
+      - name: Update installer firmware and manifests
         if: steps.select.outputs.matching == 'true'
         env:
           VERSION: ${{ steps.select.outputs.version }}
@@ -83,6 +83,7 @@ jobs:
           mkdir -p docs/firmware
           cp artifact/Mira_Panel_Factory.bin firmware/Mira_Panel_Factory.bin
           cp artifact/Mira_Panel_Factory.bin docs/firmware/Mira_Panel_Factory.bin
+          cp artifact/MIRA_PANEL.ino.bin docs/firmware/Mira_Panel.bin
 
           python3 - <<'PY'
           import json
@@ -103,6 +104,18 @@ jobs:
           }]
           manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
 
+          update_manifest_path = Path('docs/manifest-update.json')
+          update_manifest = json.loads(update_manifest_path.read_text(encoding='utf-8'))
+          update_manifest['name'] = 'Mira Panel - mise a jour sans effacement'
+          update_manifest['version'] = version
+          update_manifest['new_install_prompt_erase'] = False
+          update_manifest['new_install_improv_wait_time'] = 0
+          update_manifest['builds'] = [{
+              'chipFamily': 'ESP32-S3',
+              'parts': [{'path': 'firmware/Mira_Panel.bin', 'offset': 65536}],
+          }]
+          update_manifest_path.write_text(json.dumps(update_manifest, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+
           version_path = Path('firmware/version.json')
           data = json.loads(version_path.read_text(encoding='utf-8'))
           data['project'] = 'Mira Panel'
@@ -111,9 +124,10 @@ jobs:
           version_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
           PY
 
-          ls -lh firmware/Mira_Panel_Factory.bin docs/firmware/Mira_Panel_Factory.bin
-          sha256sum firmware/Mira_Panel_Factory.bin
+          ls -lh firmware/Mira_Panel_Factory.bin docs/firmware/Mira_Panel_Factory.bin docs/firmware/Mira_Panel.bin
+          sha256sum firmware/Mira_Panel_Factory.bin docs/firmware/Mira_Panel.bin
           cat docs/manifest.json
+          cat docs/manifest-update.json
 
       - name: Commit installer release
         if: steps.select.outputs.matching == 'true'
@@ -122,7 +136,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add firmware/Mira_Panel_Factory.bin firmware/version.json docs/manifest.json docs/firmware/Mira_Panel_Factory.bin
+          git add firmware/Mira_Panel_Factory.bin firmware/version.json docs/manifest.json docs/manifest-update.json docs/firmware/Mira_Panel_Factory.bin docs/firmware/Mira_Panel.bin
 
           if git diff --cached --quiet; then
             echo "Web Installer deja synchronise."
