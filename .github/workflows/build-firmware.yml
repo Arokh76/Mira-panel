@@ -114,6 +114,24 @@ jobs:
           grep -q 'const float setpoint = rawValue \* 0.5f;' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'lv_colorwheel_set_mode_fixed(b.control, true)' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
 
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp')
+          t = p.read_text(encoding='utf-8')
+          for needle in ['"/save"', 'config == "params"', 'config=params', 'hasParam(', 'UpdateParamText']:
+              print(f'===== {needle} =====')
+              start = 0
+              shown = 0
+              while True:
+                  i = t.find(needle, start)
+                  if i < 0 or shown >= 8:
+                      break
+                  print(t[max(0, i-900):min(len(t), i+1800)])
+                  print('\n-----\n')
+                  start = i + len(needle)
+                  shown += 1
+          PY
+
       - name: Setup Arduino CLI
         uses: arduino/setup-arduino-cli@v2
 
