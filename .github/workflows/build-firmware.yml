@@ -29,6 +29,7 @@ on:
       - 'firmware/scripts/v0.5.8.py'
       - 'firmware/scripts/v0.5.9.py'
       - 'firmware/scripts/v0.5.10.py'
+      - 'firmware/scripts/v0.5.11.py'
       - 'firmware/overrides/**'
       - 'firmware/final-overrides/**'
 
@@ -74,15 +75,17 @@ jobs:
           for s in \
             v0.4.8.py v0.4.9.py v0.4.10.py v0.4.11.py \
             v0.5.0.py v0.5.0_ota_sync.py v0.5.1.py v0.5.2.py v0.5.3.py \
-            v0.5.4.py v0.5.5.py v0.5.6.py v0.5.7.py v0.5.8.py v0.5.9.py v0.5.10.py; do
+            v0.5.4.py v0.5.5.py v0.5.6.py v0.5.7.py v0.5.8.py v0.5.9.py v0.5.10.py v0.5.11.py; do
             echo "Applying $s"
             python3 "firmware/scripts/$s" firmware/source/work/MIRA_PANEL
           done
 
-          grep -q '"0.5.10"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
+          grep -q '"0.5.11"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
           grep -q 'localInputUntilMs' firmware/source/work/MIRA_PANEL/MiraPanelUI.h
           grep -q 'lv_colorwheel_set_mode_fixed(b.control, true)' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -q 'now - b.lastLiveSendMs) >= 60' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          ! grep -q 'now - b.lastLiveSendMs) >= 60' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -q 'value != b.lastLiveValue;' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -q 'rgb24 != b.lastLiveColor;' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'lv_obj_set_style_arc_width(b.control, 14, LV_PART_MAIN)' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
 
       - name: Setup Arduino CLI
