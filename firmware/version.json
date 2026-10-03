@@ -1,5 +1,7 @@
 {
   "project": "Mira Panel",
   "version": "0.6.5",
-  "bin": "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/Mira_Panel.bin"
+  "bin": "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/Mira_Panel.bin",
+  "factory": "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/Mira_Panel_Factory.bin",
+  "installer": "https://arokh76.github.io/Mira-panel/"
 }
