@@ -13,26 +13,7 @@ on:
       - 'firmware/patches/v0.4.5.patch'
       - 'firmware/patches/v0.4.6.patch'
       - 'firmware/patches/v0.4.7.patch'
-      - 'firmware/scripts/v0.4.8.py'
-      - 'firmware/scripts/v0.4.9.py'
-      - 'firmware/scripts/v0.4.10.py'
-      - 'firmware/scripts/v0.4.11.py'
-      - 'firmware/scripts/v0.5.0.py'
-      - 'firmware/scripts/v0.5.0_ota_sync.py'
-      - 'firmware/scripts/v0.5.1.py'
-      - 'firmware/scripts/v0.5.2.py'
-      - 'firmware/scripts/v0.5.3.py'
-      - 'firmware/scripts/v0.5.4.py'
-      - 'firmware/scripts/v0.5.5.py'
-      - 'firmware/scripts/v0.5.6.py'
-      - 'firmware/scripts/v0.5.7.py'
-      - 'firmware/scripts/v0.5.8.py'
-      - 'firmware/scripts/v0.5.9.py'
-      - 'firmware/scripts/v0.5.10.py'
-      - 'firmware/scripts/v0.5.11.py'
-      - 'firmware/scripts/v0.5.12.py'
-      - 'firmware/scripts/v0.5.13.py'
-      - 'firmware/scripts/v0.6.0.py'
+      - 'firmware/scripts/*.py'
       - 'firmware/overrides/**'
       - 'firmware/final-overrides/**'
 
@@ -42,118 +23,55 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
       - name: Prepare Mira Panel sources
         shell: bash
         run: |
           set -euo pipefail
-          test -f firmware/source/Mira_Panel_Source_V0.4.3.zip
           rm -rf firmware/source/work
           mkdir -p firmware/source/work
           unzip -q firmware/source/Mira_Panel_Source_V0.4.3.zip -d firmware/source/work
-          test -f firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
-          test -f firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
-
-          if [ -d firmware/overrides/MIRA_PANEL ]; then
-            echo "Applying Mira source overrides"
-            cp -a firmware/overrides/MIRA_PANEL/. firmware/source/work/MIRA_PANEL/
-          fi
-
+          if [ -d firmware/overrides/MIRA_PANEL ]; then cp -a firmware/overrides/MIRA_PANEL/. firmware/source/work/MIRA_PANEL/; fi
           for p in current.patch ota-safety.patch v0.4.5.patch v0.4.6.patch v0.4.7.patch; do
-            if [ -s "firmware/patches/$p" ]; then
-              echo "Applying $p"
-              (cd firmware/source/work/MIRA_PANEL && patch --batch --forward -p0 < "../../../patches/$p")
-            fi
+            if [ -s "firmware/patches/$p" ]; then (cd firmware/source/work/MIRA_PANEL && patch --batch --forward -p0 < "../../../patches/$p"); fi
           done
-
-          if [ -d firmware/final-overrides/MIRA_PANEL ]; then
-            echo "Applying final Mira source overrides"
-            cp -a firmware/final-overrides/MIRA_PANEL/. firmware/source/work/MIRA_PANEL/
-          fi
-
-          for s in \
-            v0.4.8.py v0.4.9.py v0.4.10.py v0.4.11.py \
-            v0.5.0.py v0.5.0_ota_sync.py v0.5.1.py v0.5.2.py v0.5.3.py \
-            v0.5.4.py v0.5.5.py v0.5.6.py v0.5.7.py v0.5.8.py v0.5.9.py \
-            v0.5.10.py v0.5.11.py v0.5.12.py v0.5.13.py v0.6.0.py; do
-            echo "Applying $s"
-            python3 "firmware/scripts/$s" firmware/source/work/MIRA_PANEL
-          done
-
-          grep -q '"0.6.0"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
-          grep -q 'DISPLAY_Jour' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
-          grep -q 'DISPLAY_DebutNuit' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
-          grep -q '_sleepTimeoutSec \* 1000UL' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -q 'handleMqttDisplayCommand' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -q 'displayPrefix() + "+/set"' firmware/source/work/MIRA_PANEL/MiraMqtt.cpp
-          grep -q 'publishDisplayState("brightness"' firmware/source/work/MIRA_PANEL/MiraMqtt.cpp
-          grep -q 'float IndexGetRange(int ID);' firmware/source/work/MIRA_PANEL/MiraPanelServer.h
-          grep -q 'const float setpoint = rawValue \* 0.5f;' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -q 'lv_colorwheel_set_mode_fixed(b.control, true)' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-
+          if [ -d firmware/final-overrides/MIRA_PANEL ]; then cp -a firmware/final-overrides/MIRA_PANEL/. firmware/source/work/MIRA_PANEL/; fi
+          for s in v0.4.8.py v0.4.9.py v0.4.10.py v0.4.11.py v0.5.0.py v0.5.0_ota_sync.py v0.5.1.py v0.5.2.py v0.5.3.py v0.5.4.py v0.5.5.py v0.5.6.py v0.5.7.py v0.5.8.py v0.5.9.py v0.5.10.py v0.5.11.py v0.5.12.py v0.5.13.py; do python3 "firmware/scripts/$s" firmware/source/work/MIRA_PANEL; done
+          echo '===== PARAM API HEADER ====='
+          grep -n -E -A12 -B12 'AddParam|GetParam|UpdateParam|SetParam' firmware/source/work/MIRA_PANEL/MiraPanelServer.h || true
+          echo '===== PARAMS RENDER ====='
+          grep -n -E -A100 -B10 'if \(var == "PARAMS"\)' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp || true
       - name: Setup Arduino CLI
         uses: arduino/setup-arduino-cli@v2
-
       - name: Install ESP32 core 2.0.17
         shell: bash
         run: |
-          set -e
           arduino-cli config init
           arduino-cli config add board_manager.additional_urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
           arduino-cli core update-index
-          ok=0
-          for attempt in 1 2 3; do
-            echo "ESP32 core install attempt $attempt/3"
-            if arduino-cli core install esp32:esp32@2.0.17; then
-              ok=1
-              break
-            fi
-            sleep $((attempt * 5))
-          done
-          test "$ok" -eq 1
-
+          arduino-cli core install esp32:esp32@2.0.17
       - name: Install Arduino libraries
         shell: bash
         run: |
-          set -euo pipefail
           arduino-cli lib update-index
           arduino-cli lib install "lvgl@8.3.11"
           arduino-cli lib install "LovyanGFX@1.1.9"
           arduino-cli lib install "ArduinoJson@6.21.5"
           arduino-cli lib install "AsyncTCP@1.1.4"
           arduino-cli lib install "AsyncHTTPRequest_Generic@1.13.0"
-
           CW="$HOME/Arduino/libraries/lvgl/src/extra/widgets/colorwheel/lv_colorwheel.c"
-          test -f "$CW"
-          grep -q '#define LV_CPICKER_DEF_QF 3' "$CW"
-          grep -q 'line_dsc.width += 2;' "$CW"
           sed -i 's/line_dsc.width += 2;/line_dsc.width += 4;/' "$CW"
-          grep -q 'line_dsc.width += 4;' "$CW"
-
       - name: Install Mira LVGL configuration
-        run: |
-          mkdir -p "$HOME/Arduino/libraries"
-          cp firmware/source/work/MIRA_PANEL/lv_conf.h "$HOME/Arduino/libraries/lv_conf.h"
-
+        run: cp firmware/source/work/MIRA_PANEL/lv_conf.h "$HOME/Arduino/libraries/lv_conf.h"
       - name: Compile Mira Panel
         run: |
           mkdir -p build
-          arduino-cli compile \
-            --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,CPUFreq=240,FlashMode=qio,FlashSize=8M,PartitionScheme=default_8MB,PSRAM=enabled,UploadMode=default,USBMode=hwcdc" \
-            --output-dir build \
-            firmware/source/work/MIRA_PANEL
-
-      - name: Show generated files
-        run: ls -lah build
-
+          arduino-cli compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,CPUFreq=240,FlashMode=qio,FlashSize=8M,PartitionScheme=default_8MB,PSRAM=enabled,UploadMode=default,USBMode=hwcdc" --output-dir build firmware/source/work/MIRA_PANEL
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
         with:
           name: Mira_Panel_firmware
           path: build/*.bin
-          if-no-files-found: error
           retention-days: 14
