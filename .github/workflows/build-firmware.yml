@@ -175,17 +175,16 @@ jobs:
           test -f build/MIRA_PANEL.ino.bin
 
           ESPTOOL_DIR=$(find "$HOME/.arduino15/packages/esp32/tools/esptool_py" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
-          if [ -x "$ESPTOOL_DIR/esptool" ]; then
-            ESPTOOL="$ESPTOOL_DIR/esptool"
-            "$ESPTOOL" --chip esp32s3 merge_bin \
-              -o build/Mira_Panel_Factory.bin \
-              --flash_mode dio --flash_freq 80m --flash_size 8MB \
-              0x0 build/MIRA_PANEL.ino.bootloader.bin \
-              0x8000 build/MIRA_PANEL.ino.partitions.bin \
-              0xe000 "$BOOT_APP0" \
-              0x10000 build/MIRA_PANEL.ino.bin
-          elif [ -f "$ESPTOOL_DIR/esptool.py" ]; then
-            python3 "$ESPTOOL_DIR/esptool.py" --chip esp32s3 merge_bin \
+          ESPTOOL=$(find "$ESPTOOL_DIR" -maxdepth 2 -type f \( -name 'esptool.py' -o -name 'esptool' \) -print -quit)
+          if [ -z "$ESPTOOL" ]; then
+            echo "esptool introuvable dans $ESPTOOL_DIR"
+            find "$ESPTOOL_DIR" -maxdepth 2 -type f -print
+            exit 1
+          fi
+
+          echo "Using esptool: $ESPTOOL"
+          if [[ "$ESPTOOL" == *.py ]]; then
+            python3 "$ESPTOOL" --chip esp32s3 merge_bin \
               -o build/Mira_Panel_Factory.bin \
               --flash_mode dio --flash_freq 80m --flash_size 8MB \
               0x0 build/MIRA_PANEL.ino.bootloader.bin \
@@ -193,8 +192,13 @@ jobs:
               0xe000 "$BOOT_APP0" \
               0x10000 build/MIRA_PANEL.ino.bin
           else
-            echo "esptool introuvable dans $ESPTOOL_DIR"
-            exit 1
+            "$ESPTOOL" --chip esp32s3 merge_bin \
+              -o build/Mira_Panel_Factory.bin \
+              --flash_mode dio --flash_freq 80m --flash_size 8MB \
+              0x0 build/MIRA_PANEL.ino.bootloader.bin \
+              0x8000 build/MIRA_PANEL.ino.partitions.bin \
+              0xe000 "$BOOT_APP0" \
+              0x10000 build/MIRA_PANEL.ino.bin
           fi
 
           test -s build/Mira_Panel_Factory.bin
