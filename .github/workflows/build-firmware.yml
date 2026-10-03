@@ -33,6 +33,7 @@ on:
       - 'firmware/scripts/v0.5.12.py'
       - 'firmware/scripts/v0.5.13.py'
       - 'firmware/scripts/v0.6.0.py'
+      - 'firmware/scripts/v0.6.0_runner.py'
       - 'firmware/overrides/**'
       - 'firmware/final-overrides/**'
 
@@ -79,10 +80,12 @@ jobs:
             v0.4.8.py v0.4.9.py v0.4.10.py v0.4.11.py \
             v0.5.0.py v0.5.0_ota_sync.py v0.5.1.py v0.5.2.py v0.5.3.py \
             v0.5.4.py v0.5.5.py v0.5.6.py v0.5.7.py v0.5.8.py v0.5.9.py \
-            v0.5.10.py v0.5.11.py v0.5.12.py v0.5.13.py v0.6.0.py; do
+            v0.5.10.py v0.5.11.py v0.5.12.py v0.5.13.py; do
             echo "Applying $s"
             python3 "firmware/scripts/$s" firmware/source/work/MIRA_PANEL
           done
+          echo "Applying v0.6.0.py through compatibility runner"
+          python3 firmware/scripts/v0.6.0_runner.py firmware/source/work/MIRA_PANEL
 
           grep -q '"0.6.0"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
           grep -q 'DISPLAY_Jour' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
