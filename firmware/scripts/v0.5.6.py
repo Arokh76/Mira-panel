@@ -87,8 +87,8 @@ replace_once(
 # the reference panel, while the normal/selected colours remain Mira cyan.
 replace_once(
     ui,
-    '  lv_obj_set_style_bg_color(b.control, colorAccent(), LV_STATE_PRESSED);',
-    '  lv_obj_set_style_bg_color(b.control, lv_color_hex(0xF2A23A), LV_STATE_PRESSED);',
+    '  lv_obj_set_style_bg_color(b.control, colorAccent(), LV_STATE_PRESSED);\n  lv_obj_set_style_transform_zoom(b.control, 244, LV_STATE_PRESSED);',
+    '  lv_obj_set_style_bg_color(b.control, lv_color_hex(0xF2A23A), LV_STATE_PRESSED);\n  lv_obj_set_style_transform_zoom(b.control, 244, LV_STATE_PRESSED);',
     'button warm press confirmation',
 )
 replace_all_exact(
