@@ -34,6 +34,7 @@ on:
       - 'firmware/scripts/v0.5.13.py'
       - 'firmware/scripts/v0.6.0.py'
       - 'firmware/scripts/v0.6.0_runner.py'
+      - 'firmware/scripts/v0.6.1.py'
       - 'firmware/overrides/**'
       - 'firmware/final-overrides/**'
 
@@ -86,14 +87,19 @@ jobs:
           done
           echo "Applying v0.6.0.py through compatibility runner"
           python3 firmware/scripts/v0.6.0_runner.py firmware/source/work/MIRA_PANEL
+          echo "Applying v0.6.1.py"
+          python3 firmware/scripts/v0.6.1.py firmware/source/work/MIRA_PANEL
 
-          grep -q '"0.6.0"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
+          grep -q '"0.6.1"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
           grep -q 'DISPLAY_Jour' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
           grep -q 'DISPLAY_DebutNuit' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
           grep -q '_sleepTimeoutSec \* 1000UL' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'handleMqttDisplayCommand' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'displayPrefix() + "+/set"' firmware/source/work/MIRA_PANEL/MiraMqtt.cpp
-          grep -q 'publishDisplayState("brightness"' firmware/source/work/MIRA_PANEL/MiraMqtt.cpp
+          grep -q '_lastDisplayStateCheckMs' firmware/source/work/MIRA_PANEL/MiraMqtt.cpp
+          grep -q 'now - _lastDisplayStateCheckMs' firmware/source/work/MIRA_PANEL/MiraMqtt.cpp
+          grep -q 'DISPLAY_DebutNuit_UI' firmware/source/work/MIRA_PANEL/HTML/HTML_Parametres.h
+          grep -q 'replace' firmware/source/work/MIRA_PANEL/HTML/HTML_Parametres.h
           grep -q 'float IndexGetRange(int ID);' firmware/source/work/MIRA_PANEL/MiraPanelServer.h
           grep -q 'const float setpoint = rawValue \* 0.5f;' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'lv_colorwheel_set_mode_fixed(b.control, true)' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
