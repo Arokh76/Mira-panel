@@ -142,23 +142,4 @@ replace_once(
     'page fade transition',
 )
 
-# Temporary inspection for the 0.5.7 live-control pass.
-text = ui.read_text(encoding='utf-8')
-print('--- MIRA LIVE CONTROL HANDLERS BEGIN ---')
-for signature in (
-    'void MiraPanelUI::createColor',
-    'void MiraPanelUI::onRange',
-    'void MiraPanelUI::onRoundRange',
-    'void MiraPanelUI::onColor',
-):
-    start = text.find(signature)
-    if start < 0:
-        print('NOT FOUND:', signature)
-        continue
-    nxt = text.find('\nvoid MiraPanelUI::', start + len(signature))
-    if nxt < 0:
-        nxt = min(len(text), start + 6000)
-    print(text[start:nxt])
-print('--- MIRA LIVE CONTROL HANDLERS END ---')
-
 print('Mira Panel 0.5.6 readability, spacing, navigation and touch confirmation applied')
