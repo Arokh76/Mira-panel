@@ -91,6 +91,13 @@ jobs:
           grep -q 'ui._server.IndexSetRange(b.id, setpoint);' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'lv_colorwheel_set_mode_fixed(b.control, true)' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
 
+          echo '===== DISPLAY MEMBERS / SLEEP ====='
+          grep -n -E -A20 -B10 '_brightness|_sleep|enterSleep|wakeFromSleep|onBrightness|onSleep' firmware/source/work/MIRA_PANEL/MiraPanelUI.h firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp || true
+          echo '===== MQTT ====='
+          grep -n -E -A40 -B15 'mqtt|MQTT|subscribe|onMessage|callback' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp firmware/source/work/MIRA_PANEL/MiraPanelUI.h firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp firmware/source/work/MIRA_PANEL/MiraPanelServer.h || true
+          echo '===== SERVER PARAM / ROUTES ====='
+          grep -n -E -A35 -B15 'PARAMS|params|hasParam|/load|nav=' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp | head -n 900 || true
+
       - name: Setup Arduino CLI
         uses: arduino/setup-arduino-cli@v2
 
