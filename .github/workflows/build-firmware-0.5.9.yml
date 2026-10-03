@@ -49,7 +49,8 @@ jobs:
           done
 
           grep -q '"0.5.9"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
-          ! grep -q '>= 100' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -q 'value != b.lastLiveValue;' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -q 'rgb24 != b.lastLiveColor;' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
 
       - name: Setup Arduino CLI
         uses: arduino/setup-arduino-cli@v2
