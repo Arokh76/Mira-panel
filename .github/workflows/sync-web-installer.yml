@@ -1,0 +1,134 @@
+name: Sync Mira Panel Web Installer
+
+on:
+  workflow_run:
+    workflows:
+      - 'Build Mira Panel firmware'
+    types:
+      - completed
+  push:
+    branches:
+      - main
+    paths:
+      - 'firmware/version.json'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  sync:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Select matching successful build
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=$(python3 -c 'import json; print(json.load(open("firmware/version.json"))["version"])')
+          echo "Stable version: $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            RUN_ID="${{ github.event.workflow_run.id }}"
+          else
+            RUN_ID=$(gh run list \
+              --workflow build-firmware.yml \
+              --branch main \
+              --status success \
+              --limit 1 \
+              --json databaseId \
+              --jq '.[0].databaseId')
+          fi
+
+          if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+            echo "Aucun build Mira Panel reussi trouve."
+            exit 1
+          fi
+
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          rm -rf artifact
+          mkdir -p artifact
+          gh run download "$RUN_ID" --name Mira_Panel_firmware --dir artifact
+
+          test -f artifact/MIRA_PANEL.ino.bin
+          test -f artifact/Mira_Panel_Factory.bin
+
+          if ! strings artifact/MIRA_PANEL.ino.bin | grep -Fxq "$VERSION"; then
+            echo "Le build #$RUN_ID ne correspond pas a la version stable $VERSION."
+            echo "Synchronisation Web Installer ignoree jusqu'a la publication de cette version."
+            echo "matching=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "matching=true" >> "$GITHUB_OUTPUT"
+
+      - name: Update installer firmware and manifest
+        if: steps.select.outputs.matching == 'true'
+        env:
+          VERSION: ${{ steps.select.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p docs/firmware
+          cp artifact/Mira_Panel_Factory.bin firmware/Mira_Panel_Factory.bin
+          cp artifact/Mira_Panel_Factory.bin docs/firmware/Mira_Panel_Factory.bin
+
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          version = os.environ['VERSION']
+
+          manifest_path = Path('docs/manifest.json')
+          manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+          manifest['name'] = 'Mira Panel'
+          manifest['version'] = version
+          manifest['new_install_prompt_erase'] = False
+          manifest['new_install_improv_wait_time'] = 0
+          manifest['builds'] = [{
+              'chipFamily': 'ESP32-S3',
+              'parts': [{'path': 'firmware/Mira_Panel_Factory.bin', 'offset': 0}],
+          }]
+          manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+
+          version_path = Path('firmware/version.json')
+          data = json.loads(version_path.read_text(encoding='utf-8'))
+          data['project'] = 'Mira Panel'
+          data['factory'] = 'https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/Mira_Panel_Factory.bin'
+          data['installer'] = 'https://arokh76.github.io/Mira-panel/'
+          version_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+          PY
+
+          ls -lh firmware/Mira_Panel_Factory.bin docs/firmware/Mira_Panel_Factory.bin
+          sha256sum firmware/Mira_Panel_Factory.bin
+          cat docs/manifest.json
+
+      - name: Commit installer release
+        if: steps.select.outputs.matching == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add firmware/Mira_Panel_Factory.bin firmware/version.json docs/manifest.json docs/firmware/Mira_Panel_Factory.bin
+
+          if git diff --cached --quiet; then
+            echo "Web Installer deja synchronise."
+            exit 0
+          fi
+
+          git commit -m "Sync Mira Panel Web Installer ${{ steps.select.outputs.version }}"
+          git pull --rebase origin main
+          git push origin HEAD:main
