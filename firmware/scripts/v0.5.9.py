@@ -14,6 +14,14 @@ def replace_once(path: Path, old: str, new: str, label: str):
     path.write_text(text.replace(old, new, 1), encoding='utf-8')
 
 
+def replace_exact(path: Path, old: str, new: str, expected: int, label: str):
+    text = path.read_text(encoding='utf-8')
+    count = text.count(old)
+    if count != expected:
+        raise SystemExit(f'{label}: expected exactly {expected} matches in {path}, got {count}')
+    path.write_text(text.replace(old, new), encoding='utf-8')
+
+
 # Version
 replace_once(ino, '"0.5.8"', '"0.5.9"', 'firmware version')
 replace_once(ino, '[MIRA] Firmware 0.5.8 initialise', '[MIRA] Firmware 0.5.9 initialise', 'startup log')
@@ -21,20 +29,13 @@ replace_once(ino, '[MIRA] Firmware 0.5.8 initialise', '[MIRA] Firmware 0.5.9 ini
 # Live controls: remove the 100 ms gate completely. LVGL still updates locally first,
 # while duplicate values are filtered by lastLiveValue / lastLiveColor. This keeps
 # the control and the external state return visually in phase instead of trailing.
-replace_once(
+replace_exact(
     ui,
     '''  const bool liveSend = code == LV_EVENT_VALUE_CHANGED && value != b.lastLiveValue &&
                         (b.lastLiveSendMs == 0 || (uint32_t)(now - b.lastLiveSendMs) >= 100);''',
     '''  const bool liveSend = code == LV_EVENT_VALUE_CHANGED && value != b.lastLiveValue;''',
-    'linear range zero-latency live send',
-)
-
-replace_once(
-    ui,
-    '''  const bool liveSend = code == LV_EVENT_VALUE_CHANGED && value != b.lastLiveValue &&
-                        (b.lastLiveSendMs == 0 || (uint32_t)(now - b.lastLiveSendMs) >= 100);''',
-    '''  const bool liveSend = code == LV_EVENT_VALUE_CHANGED && value != b.lastLiveValue;''',
-    'round range zero-latency live send',
+    2,
+    'linear + round range zero-latency live send',
 )
 
 replace_once(
