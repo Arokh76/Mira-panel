@@ -38,6 +38,7 @@ on:
       - 'firmware/scripts/v0.6.2.py'
       - 'firmware/scripts/v0.6.3.py'
       - 'firmware/scripts/v0.6.4.py'
+      - 'firmware/scripts/v0.6.5.py'
       - 'firmware/overrides/**'
       - 'firmware/final-overrides/**'
 
@@ -90,19 +91,21 @@ jobs:
           done
           echo "Applying v0.6.0.py through compatibility runner"
           python3 firmware/scripts/v0.6.0_runner.py firmware/source/work/MIRA_PANEL
-          for s in v0.6.1.py v0.6.2.py v0.6.3.py v0.6.4.py; do
+          for s in v0.6.1.py v0.6.2.py v0.6.3.py v0.6.4.py v0.6.5.py; do
             echo "Applying $s"
             python3 "firmware/scripts/$s" firmware/source/work/MIRA_PANEL
           done
 
-          grep -q '"0.6.4"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
+          grep -q '"0.6.5"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
           grep -q 'server.on("/display-save", HTTP_POST' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
           grep -q 'DISPLAY_NuitAuto_Check' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
           grep -q 'action="/display-save"' firmware/source/work/MIRA_PANEL/HTML/HTML_Parametres.h
           grep -q 'name="DISPLAY_DebutNuit" type="time"' firmware/source/work/MIRA_PANEL/HTML/HTML_Parametres.h
           grep -q 'name="DISPLAY_FinNuit" type="time"' firmware/source/work/MIRA_PANEL/HTML/HTML_Parametres.h
           grep -q '_syncingDisplayControls' firmware/source/work/MIRA_PANEL/MiraPanelUI.h
-          grep -q 'getLocalTime(&t, 0)' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -q 'time_t epoch = time(nullptr);' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -q 'localtime_r(&epoch, &t);' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -q '_lastScheduleCheckMs) < 1000UL' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'float IndexGetRange(int ID);' firmware/source/work/MIRA_PANEL/MiraPanelServer.h
           grep -q 'const float setpoint = rawValue \* 0.5f;' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'lv_colorwheel_set_mode_fixed(b.control, true)' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
