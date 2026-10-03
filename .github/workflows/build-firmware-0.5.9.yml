@@ -1,0 +1,107 @@
+name: Build Mira Panel firmware 0.5.9
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-firmware-0.5.9.yml'
+      - 'firmware/scripts/v0.5.9.py'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare Mira Panel 0.5.9 sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf firmware/source/work
+          mkdir -p firmware/source/work
+          unzip -q firmware/source/Mira_Panel_Source_V0.4.3.zip -d firmware/source/work
+
+          if [ -d firmware/overrides/MIRA_PANEL ]; then
+            cp -a firmware/overrides/MIRA_PANEL/. firmware/source/work/MIRA_PANEL/
+          fi
+
+          for p in current.patch ota-safety.patch v0.4.5.patch v0.4.6.patch v0.4.7.patch; do
+            if [ -s "firmware/patches/$p" ]; then
+              (cd firmware/source/work/MIRA_PANEL && patch --batch --forward -p0 < "../../../patches/$p")
+            fi
+          done
+
+          if [ -d firmware/final-overrides/MIRA_PANEL ]; then
+            cp -a firmware/final-overrides/MIRA_PANEL/. firmware/source/work/MIRA_PANEL/
+          fi
+
+          for s in \
+            v0.4.8.py v0.4.9.py v0.4.10.py v0.4.11.py \
+            v0.5.0.py v0.5.0_ota_sync.py v0.5.1.py v0.5.2.py v0.5.3.py \
+            v0.5.4.py v0.5.5.py v0.5.6.py v0.5.7.py v0.5.8.py v0.5.9.py; do
+            echo "Applying $s"
+            python3 "firmware/scripts/$s" firmware/source/work/MIRA_PANEL
+          done
+
+          grep -q '"0.5.9"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
+          ! grep -q '>= 100' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+
+      - name: Setup Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Install ESP32 core 2.0.17
+        shell: bash
+        run: |
+          set -e
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli core update-index
+          for attempt in 1 2 3; do
+            arduino-cli core install esp32:esp32@2.0.17 && break
+            test "$attempt" -lt 3
+            sleep $((attempt * 5))
+          done
+
+      - name: Install Arduino libraries and smooth LVGL colorwheel renderer
+        shell: bash
+        run: |
+          set -euo pipefail
+          arduino-cli lib update-index
+          arduino-cli lib install "lvgl@8.3.11"
+          arduino-cli lib install "LovyanGFX@1.1.9"
+          arduino-cli lib install "ArduinoJson@6.21.5"
+          arduino-cli lib install "AsyncTCP@1.1.4"
+          arduino-cli lib install "AsyncHTTPRequest_Generic@1.13.0"
+
+          CW="$HOME/Arduino/libraries/lvgl/src/extra/widgets/colorwheel/lv_colorwheel.c"
+          test -f "$CW"
+          grep -q '#define LV_CPICKER_DEF_QF 3' "$CW"
+          sed -i 's/#define LV_CPICKER_DEF_QF 3/#define LV_CPICKER_DEF_QF 1/' "$CW"
+          grep -q '#define LV_CPICKER_DEF_QF 1' "$CW"
+
+          mkdir -p "$HOME/Arduino/libraries"
+          cp firmware/source/work/MIRA_PANEL/lv_conf.h "$HOME/Arduino/libraries/lv_conf.h"
+
+      - name: Compile Mira Panel 0.5.9
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          arduino-cli compile \
+            --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,CPUFreq=240,FlashMode=qio,FlashSize=8M,PartitionScheme=default_8MB,PSRAM=enabled,UploadMode=default,USBMode=hwcdc" \
+            --output-dir build \
+            firmware/source/work/MIRA_PANEL
+          ls -lah build
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mira_Panel_0.5.9
+          path: build/*.bin
+          if-no-files-found: error
+          retention-days: 14
