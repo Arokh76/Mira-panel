@@ -99,4 +99,23 @@ replace_all_exact(
     'list warm press confirmation',
 )
 
+# Temporary build-log inspection so the next pass can hook page/navigation
+# transitions to the exact current LVGL source rather than guessing.
+text = ui.read_text(encoding='utf-8')
+print('--- MIRA NAV/PAGE HOOKS BEGIN ---')
+for token in ('_navButtons', 'LV_OBJ_FLAG_HIDDEN'):
+    pos = 0
+    shown = 0
+    while shown < 8:
+        idx = text.find(token, pos)
+        if idx < 0:
+            break
+        a = max(0, idx - 500)
+        b = min(len(text), idx + 900)
+        print(f'--- token {token} occurrence {shown + 1} ---')
+        print(text[a:b])
+        pos = idx + len(token)
+        shown += 1
+print('--- MIRA NAV/PAGE HOOKS END ---')
+
 print('Mira Panel 0.5.6 readability, spacing and warm touch confirmation applied')
