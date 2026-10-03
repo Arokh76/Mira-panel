@@ -99,23 +99,47 @@ replace_all_exact(
     'list warm press confirmation',
 )
 
-# Temporary build-log inspection so the next pass can hook page/navigation
-# transitions to the exact current LVGL source rather than guessing.
-text = ui.read_text(encoding='utf-8')
-print('--- MIRA NAV/PAGE HOOKS BEGIN ---')
-for token in ('_navButtons', 'LV_OBJ_FLAG_HIDDEN'):
-    pos = 0
-    shown = 0
-    while shown < 8:
-        idx = text.find(token, pos)
-        if idx < 0:
-            break
-        a = max(0, idx - 500)
-        b = min(len(text), idx + 900)
-        print(f'--- token {token} occurrence {shown + 1} ---')
-        print(text[a:b])
-        pos = idx + len(token)
-        shown += 1
-print('--- MIRA NAV/PAGE HOOKS END ---')
+# Bottom navigation keeps the existing three-destination concept, but gives a
+# small tactile press animation. The current page remains intentionally absent.
+replace_once(
+    ui,
+    '    lv_obj_set_style_shadow_width(_navButtons[i], 0, 0);\n    lv_obj_add_event_cb(_navButtons[i], onNav, LV_EVENT_CLICKED, (void*)(uintptr_t)i);',
+    '    lv_obj_set_style_shadow_width(_navButtons[i], 0, 0);\n'
+    '    lv_obj_set_style_transform_zoom(_navButtons[i], 246, LV_STATE_PRESSED);\n'
+    '    lv_obj_set_style_anim_time(_navButtons[i], 100, LV_STATE_DEFAULT);\n'
+    '    lv_obj_add_event_cb(_navButtons[i], onNav, LV_EVENT_CLICKED, (void*)(uintptr_t)i);',
+    'navigation touch feedback',
+)
 
-print('Mira Panel 0.5.6 readability, spacing and warm touch confirmation applied')
+# Page changes were abrupt. Fade in the new page very briefly while preserving
+# the current hidden-page architecture and fixed bottom navigation.
+replace_once(
+    ui,
+    '''void MiraPanelUI::showPage(uint8_t index) {
+  if (index >= PAGE_COUNT) return;
+  for (uint8_t i = 0; i < PAGE_COUNT; ++i) {
+    if (i == index) lv_obj_clear_flag(_pages[i], LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(_pages[i], LV_OBJ_FLAG_HIDDEN);
+  }
+  _currentPage = index;
+  setNavActive(index);
+  noteActivity();
+}''',
+    '''void MiraPanelUI::showPage(uint8_t index) {
+  if (index >= PAGE_COUNT) return;
+  for (uint8_t i = 0; i < PAGE_COUNT; ++i) {
+    if (i == index) {
+      lv_obj_clear_flag(_pages[i], LV_OBJ_FLAG_HIDDEN);
+      lv_obj_fade_in(_pages[i], 160, 0);
+    } else {
+      lv_obj_add_flag(_pages[i], LV_OBJ_FLAG_HIDDEN);
+    }
+  }
+  _currentPage = index;
+  setNavActive(index);
+  noteActivity();
+}''',
+    'page fade transition',
+)
+
+print('Mira Panel 0.5.6 readability, spacing, navigation and touch confirmation applied')
