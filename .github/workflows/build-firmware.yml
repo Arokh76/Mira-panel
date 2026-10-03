@@ -162,6 +162,47 @@ jobs:
             --output-dir build \
             firmware/source/work/MIRA_PANEL
 
+      - name: Create Web Installer factory image
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CORE="$HOME/.arduino15/packages/esp32/hardware/esp32/2.0.17"
+          BOOT_APP0="$CORE/tools/partitions/boot_app0.bin"
+          test -f "$BOOT_APP0"
+          test -f build/MIRA_PANEL.ino.bootloader.bin
+          test -f build/MIRA_PANEL.ino.partitions.bin
+          test -f build/MIRA_PANEL.ino.bin
+
+          ESPTOOL_DIR=$(find "$HOME/.arduino15/packages/esp32/tools/esptool_py" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          if [ -x "$ESPTOOL_DIR/esptool" ]; then
+            ESPTOOL="$ESPTOOL_DIR/esptool"
+            "$ESPTOOL" --chip esp32s3 merge_bin \
+              -o build/Mira_Panel_Factory.bin \
+              --flash_mode dio --flash_freq 80m --flash_size 8MB \
+              0x0 build/MIRA_PANEL.ino.bootloader.bin \
+              0x8000 build/MIRA_PANEL.ino.partitions.bin \
+              0xe000 "$BOOT_APP0" \
+              0x10000 build/MIRA_PANEL.ino.bin
+          elif [ -f "$ESPTOOL_DIR/esptool.py" ]; then
+            python3 "$ESPTOOL_DIR/esptool.py" --chip esp32s3 merge_bin \
+              -o build/Mira_Panel_Factory.bin \
+              --flash_mode dio --flash_freq 80m --flash_size 8MB \
+              0x0 build/MIRA_PANEL.ino.bootloader.bin \
+              0x8000 build/MIRA_PANEL.ino.partitions.bin \
+              0xe000 "$BOOT_APP0" \
+              0x10000 build/MIRA_PANEL.ino.bin
+          else
+            echo "esptool introuvable dans $ESPTOOL_DIR"
+            exit 1
+          fi
+
+          test -s build/Mira_Panel_Factory.bin
+          strings build/Mira_Panel_Factory.bin | grep -Fxq "0.6.5"
+          echo "Factory image ready:"
+          ls -lh build/Mira_Panel_Factory.bin
+          sha256sum build/Mira_Panel_Factory.bin
+
       - name: Show generated files
         run: ls -lah build
 
