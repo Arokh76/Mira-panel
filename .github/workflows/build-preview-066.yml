@@ -1,4 +1,4 @@
-name: Build Mira Panel 0.6.12 preview
+name: Build Mira Panel 0.6.13 preview
 
 on:
   workflow_dispatch:
@@ -13,6 +13,7 @@ on:
       - 'firmware/scripts/v0.6.10.py'
       - 'firmware/scripts/v0.6.11.py'
       - 'firmware/scripts/v0.6.12.py'
+      - 'firmware/scripts/v0.6.13.py'
 
 permissions:
   contents: read
@@ -57,7 +58,7 @@ jobs:
           cp firmware/source/work/MIRA_PANEL/MiraMqtt.cpp /tmp/MiraMqtt.before
           cp firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp /tmp/MiraPanelUI.before
 
-      - name: Apply 0.6.6 to 0.6.12 preview fixes
+      - name: Apply 0.6.6 to 0.6.13 preview fixes
         shell: bash
         run: |
           set -euo pipefail
@@ -68,8 +69,10 @@ jobs:
           python3 firmware/scripts/v0.6.10.py firmware/source/work/MIRA_PANEL
           python3 firmware/scripts/v0.6.11.py firmware/source/work/MIRA_PANEL
           python3 firmware/scripts/v0.6.12.py firmware/source/work/MIRA_PANEL
-          grep -q '"0.6.12"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
+          python3 firmware/scripts/v0.6.13.py firmware/source/work/MIRA_PANEL
+          grep -q '"0.6.13"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
           grep -q 'LV_FLEX_FLOW_ROW_WRAP' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -q 'LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q '_homeStandardInfoTotal' firmware/source/work/MIRA_PANEL/MiraPanelUI.h
           grep -q 'lastOddTile' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'makeCard(pageIndex(b.location), 82)' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
@@ -80,7 +83,6 @@ jobs:
           grep -q 'DynamicJsonDocument mira_Json_LVGL(16384);' firmware/source/work/MIRA_PANEL/SPIFFS_Process.h
           grep -q 'document LVGL sature' firmware/source/work/MIRA_PANEL/SPIFFS_Process.h
 
-          # Keep the proven Jeedom/server/MQTT protocol implementation untouched.
           cmp /tmp/MiraPanelServer.before firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
           cmp /tmp/MiraMqtt.before firmware/source/work/MIRA_PANEL/MiraMqtt.cpp
 
@@ -125,7 +127,7 @@ jobs:
           mkdir -p "$HOME/Arduino/libraries"
           cp firmware/source/work/MIRA_PANEL/lv_conf.h "$HOME/Arduino/libraries/lv_conf.h"
 
-      - name: Compile 0.6.12 preview
+      - name: Compile 0.6.13 preview
         shell: bash
         run: |
           set -euo pipefail
@@ -135,14 +137,14 @@ jobs:
             --output-dir build \
             firmware/source/work/MIRA_PANEL
           test -s build/MIRA_PANEL.ino.bin
-          strings build/MIRA_PANEL.ino.bin | grep -Fxq '0.6.12'
+          strings build/MIRA_PANEL.ino.bin | grep -Fxq '0.6.13'
           ls -lh build/*.bin
           sha256sum build/MIRA_PANEL.ino.bin
 
       - name: Upload preview firmware
         uses: actions/upload-artifact@v4
         with:
-          name: Mira_Panel_0.6.12_preview
+          name: Mira_Panel_0.6.13_preview
           path: build/MIRA_PANEL.ino.bin
           if-no-files-found: error
           retention-days: 14
