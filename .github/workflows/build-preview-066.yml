@@ -18,6 +18,7 @@ on:
       - 'firmware/scripts/v0.6.15.py'
       - 'firmware/scripts/v0.6.16.py'
       - 'firmware/scripts/v0.6.17.py'
+      - 'firmware/scripts/v0.6.17_fontfix.py'
 
 permissions:
   contents: read
@@ -38,26 +39,14 @@ jobs:
           unzip -q firmware/source/Mira_Panel_Source_V0.4.3.zip -d firmware/source/work
           test -f firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
           test -f firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-
-          if [ -d firmware/overrides/MIRA_PANEL ]; then
-            cp -a firmware/overrides/MIRA_PANEL/. firmware/source/work/MIRA_PANEL/
-          fi
+          if [ -d firmware/overrides/MIRA_PANEL ]; then cp -a firmware/overrides/MIRA_PANEL/. firmware/source/work/MIRA_PANEL/; fi
           for p in current.patch ota-safety.patch v0.4.5.patch v0.4.6.patch v0.4.7.patch; do
-            if [ -s "firmware/patches/$p" ]; then
-              (cd firmware/source/work/MIRA_PANEL && patch --batch --forward -p0 < "../../../patches/$p")
-            fi
+            if [ -s "firmware/patches/$p" ]; then (cd firmware/source/work/MIRA_PANEL && patch --batch --forward -p0 < "../../../patches/$p"); fi
           done
-          if [ -d firmware/final-overrides/MIRA_PANEL ]; then
-            cp -a firmware/final-overrides/MIRA_PANEL/. firmware/source/work/MIRA_PANEL/
-          fi
-          for s in v0.4.8.py v0.4.9.py v0.4.10.py v0.4.11.py v0.5.0.py v0.5.0_ota_sync.py v0.5.1.py v0.5.2.py v0.5.3.py v0.5.4.py v0.5.5.py v0.5.6.py v0.5.7.py v0.5.8.py v0.5.9.py v0.5.10.py v0.5.11.py v0.5.12.py v0.5.13.py; do
-            python3 "firmware/scripts/$s" firmware/source/work/MIRA_PANEL
-          done
+          if [ -d firmware/final-overrides/MIRA_PANEL ]; then cp -a firmware/final-overrides/MIRA_PANEL/. firmware/source/work/MIRA_PANEL/; fi
+          for s in v0.4.8.py v0.4.9.py v0.4.10.py v0.4.11.py v0.5.0.py v0.5.0_ota_sync.py v0.5.1.py v0.5.2.py v0.5.3.py v0.5.4.py v0.5.5.py v0.5.6.py v0.5.7.py v0.5.8.py v0.5.9.py v0.5.10.py v0.5.11.py v0.5.12.py v0.5.13.py; do python3 "firmware/scripts/$s" firmware/source/work/MIRA_PANEL; done
           python3 firmware/scripts/v0.6.0_runner.py firmware/source/work/MIRA_PANEL
-          for s in v0.6.1.py v0.6.2.py v0.6.3.py v0.6.4.py v0.6.5.py; do
-            python3 "firmware/scripts/$s" firmware/source/work/MIRA_PANEL
-          done
-
+          for s in v0.6.1.py v0.6.2.py v0.6.3.py v0.6.4.py v0.6.5.py; do python3 "firmware/scripts/$s" firmware/source/work/MIRA_PANEL; done
           cp firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp /tmp/MiraPanelServer.before
           cp firmware/source/work/MIRA_PANEL/MiraMqtt.cpp /tmp/MiraMqtt.before
           cp firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp /tmp/MiraPanelUI.before
@@ -66,19 +55,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 firmware/scripts/v0.6.6.py firmware/source/work/MIRA_PANEL
-          python3 firmware/scripts/v0.6.7.py firmware/source/work/MIRA_PANEL
-          python3 firmware/scripts/v0.6.8.py firmware/source/work/MIRA_PANEL
-          python3 firmware/scripts/v0.6.9.py firmware/source/work/MIRA_PANEL
-          python3 firmware/scripts/v0.6.10.py firmware/source/work/MIRA_PANEL
-          python3 firmware/scripts/v0.6.11.py firmware/source/work/MIRA_PANEL
-          python3 firmware/scripts/v0.6.12.py firmware/source/work/MIRA_PANEL
-          python3 firmware/scripts/v0.6.13.py firmware/source/work/MIRA_PANEL
-          python3 firmware/scripts/v0.6.14.py firmware/source/work/MIRA_PANEL
-          python3 firmware/scripts/v0.6.15.py firmware/source/work/MIRA_PANEL
-          python3 firmware/scripts/v0.6.16.py firmware/source/work/MIRA_PANEL
-          python3 firmware/scripts/v0.6.17.py firmware/source/work/MIRA_PANEL
-
+          for s in v0.6.6.py v0.6.7.py v0.6.8.py v0.6.9.py v0.6.10.py v0.6.11.py v0.6.12.py v0.6.13.py v0.6.14.py v0.6.15.py v0.6.16.py v0.6.17.py v0.6.17_fontfix.py; do python3 "firmware/scripts/$s" firmware/source/work/MIRA_PANEL; done
           grep -q '"0.6.17"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
           grep -q 'String LVGL_Layout = "auto";' firmware/source/work/MIRA_PANEL/SPIFFS_Process.h
           grep -q 'lvgl_array\["layout"\]' firmware/source/work/MIRA_PANEL/SPIFFS_Process.h
@@ -88,17 +65,15 @@ jobs:
           grep -q 'forcedTile' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'forcedWide' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'forcedHero' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -q '&lv_font_montserrat_28' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          ! grep -q 'lv_font_montserrat_32' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'LV_FLEX_FLOW_ROW_WRAP' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'if (i == 1 || i == 2) lv_obj_set_style_pad_top(_pages\[i\], 8, 0);' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'lv_obj_set_scrollbar_mode(b.card, LV_SCROLLBAR_MODE_OFF);' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'DynamicJsonDocument mira_Json_LVGL(16384);' firmware/source/work/MIRA_PANEL/SPIFFS_Process.h
           grep -q 'document LVGL sature' firmware/source/work/MIRA_PANEL/SPIFFS_Process.h
-
-          # MQTT protocol must remain untouched. Server is intentionally changed in 0.6.17
-          # only to accept the optional presentation layout parameter.
           cmp /tmp/MiraMqtt.before firmware/source/work/MIRA_PANEL/MiraMqtt.cpp
-
           echo 'Files changed by visual/layout pass:'
           diff -q /tmp/MiraPanelUI.before firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp || true
           diff -q /tmp/MiraPanelServer.before firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp || true
