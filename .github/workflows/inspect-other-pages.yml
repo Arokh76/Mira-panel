@@ -27,16 +27,17 @@ jobs:
           for s in v0.4.8.py v0.4.9.py v0.4.10.py v0.4.11.py v0.5.0.py v0.5.0_ota_sync.py v0.5.1.py v0.5.2.py v0.5.3.py v0.5.4.py v0.5.5.py v0.5.6.py v0.5.7.py v0.5.8.py v0.5.9.py v0.5.10.py v0.5.11.py v0.5.12.py v0.5.13.py; do python3 "firmware/scripts/$s" firmware/source/work/MIRA_PANEL; done
           python3 firmware/scripts/v0.6.0_runner.py firmware/source/work/MIRA_PANEL
           for s in v0.6.1.py v0.6.2.py v0.6.3.py v0.6.4.py v0.6.5.py v0.6.6.py v0.6.7.py v0.6.8.py v0.6.9.py v0.6.10.py v0.6.11.py v0.6.12.py v0.6.13.py v0.6.14.py; do python3 "firmware/scripts/$s" firmware/source/work/MIRA_PANEL; done
-      - name: Dump widget page functions
+      - name: Dump toggle and page helper functions
         shell: bash
         run: |
           set -euo pipefail
           UI=firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          for fn in createSwitch createRange createRoundRange createList createColor styleMainCard applyTheme updateListVisual; do
+          grep -n '^void MiraPanelUI::create' "$UI" | head -80
+          for fn in createToggle makeNameLabel; do
             echo "===== $fn ====="
             awk -v fn="$fn" '
               $0 ~ ("MiraPanelUI::" fn "\\(") {p=1}
               p {print}
               p && NR>1 && /^void MiraPanelUI::/ && $0 !~ ("MiraPanelUI::" fn "\\(") {exit}
-            ' "$UI" | head -260 || true
+            ' "$UI" | head -220 || true
           done
