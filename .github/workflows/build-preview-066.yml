@@ -1,4 +1,4 @@
-name: Build Mira Panel 0.6.16 preview
+name: Build Mira Panel 0.6.17 preview
 
 on:
   workflow_dispatch:
@@ -17,6 +17,7 @@ on:
       - 'firmware/scripts/v0.6.14.py'
       - 'firmware/scripts/v0.6.15.py'
       - 'firmware/scripts/v0.6.16.py'
+      - 'firmware/scripts/v0.6.17.py'
 
 permissions:
   contents: read
@@ -61,7 +62,7 @@ jobs:
           cp firmware/source/work/MIRA_PANEL/MiraMqtt.cpp /tmp/MiraMqtt.before
           cp firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp /tmp/MiraPanelUI.before
 
-      - name: Apply 0.6.6 to 0.6.16 preview fixes
+      - name: Apply 0.6.6 to 0.6.17 preview fixes
         shell: bash
         run: |
           set -euo pipefail
@@ -76,27 +77,31 @@ jobs:
           python3 firmware/scripts/v0.6.14.py firmware/source/work/MIRA_PANEL
           python3 firmware/scripts/v0.6.15.py firmware/source/work/MIRA_PANEL
           python3 firmware/scripts/v0.6.16.py firmware/source/work/MIRA_PANEL
-          grep -q '"0.6.16"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
+          python3 firmware/scripts/v0.6.17.py firmware/source/work/MIRA_PANEL
+
+          grep -q '"0.6.17"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
+          grep -q 'String LVGL_Layout = "auto";' firmware/source/work/MIRA_PANEL/SPIFFS_Process.h
+          grep -q 'lvgl_array\["layout"\]' firmware/source/work/MIRA_PANEL/SPIFFS_Process.h
+          grep -q 'request->hasParam("layout")' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
+          grep -q 'String layout = "auto";' firmware/source/work/MIRA_PANEL/MiraPanelUI.h
+          grep -q 'b.layout = widgetLayout;' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -q 'forcedTile' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -q 'forcedWide' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -q 'forcedHero' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'LV_FLEX_FLOW_ROW_WRAP' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'if (i == 1 || i == 2) lv_obj_set_style_pad_top(_pages\[i\], 8, 0);' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -q 'makeCard(pageIndex(b.location), compact ? 44 : 54)' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -q 'lv_obj_set_ext_click_area(b.control, 6);' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -q 'makeCard(pageIndex(b.location), 196)' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -q 'const int cardH = compact ? 194 : 238;' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -q 'const int arc = compact ? 142 : 182;' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -q 'asButtons ? LV_SIZE_CONTENT : (compact ? 68 : 82)' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'lv_obj_set_scrollbar_mode(b.card, LV_SCROLLBAR_MODE_OFF);' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -q '_homeStandardInfoTotal' firmware/source/work/MIRA_PANEL/MiraPanelUI.h
-          grep -q 'lastOddTile' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'DynamicJsonDocument mira_Json_LVGL(16384);' firmware/source/work/MIRA_PANEL/SPIFFS_Process.h
           grep -q 'document LVGL sature' firmware/source/work/MIRA_PANEL/SPIFFS_Process.h
 
-          cmp /tmp/MiraPanelServer.before firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
+          # MQTT protocol must remain untouched. Server is intentionally changed in 0.6.17
+          # only to accept the optional presentation layout parameter.
           cmp /tmp/MiraMqtt.before firmware/source/work/MIRA_PANEL/MiraMqtt.cpp
 
-          echo 'Files changed by visual/dashboard pass:'
+          echo 'Files changed by visual/layout pass:'
           diff -q /tmp/MiraPanelUI.before firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp || true
+          diff -q /tmp/MiraPanelServer.before firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp || true
 
       - name: Setup Arduino CLI
         uses: arduino/setup-arduino-cli@v2
@@ -136,7 +141,7 @@ jobs:
           mkdir -p "$HOME/Arduino/libraries"
           cp firmware/source/work/MIRA_PANEL/lv_conf.h "$HOME/Arduino/libraries/lv_conf.h"
 
-      - name: Compile 0.6.16 preview
+      - name: Compile 0.6.17 preview
         shell: bash
         run: |
           set -euo pipefail
@@ -146,14 +151,14 @@ jobs:
             --output-dir build \
             firmware/source/work/MIRA_PANEL
           test -s build/MIRA_PANEL.ino.bin
-          strings build/MIRA_PANEL.ino.bin | grep -Fxq '0.6.16'
+          strings build/MIRA_PANEL.ino.bin | grep -Fxq '0.6.17'
           ls -lh build/*.bin
           sha256sum build/MIRA_PANEL.ino.bin
 
       - name: Upload preview firmware
         uses: actions/upload-artifact@v4
         with:
-          name: Mira_Panel_0.6.16_preview
+          name: Mira_Panel_0.6.17_preview
           path: build/MIRA_PANEL.ino.bin
           if-no-files-found: error
           retention-days: 14
