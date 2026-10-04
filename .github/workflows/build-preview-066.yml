@@ -1,4 +1,4 @@
-name: Build Mira Panel 0.6.15 preview
+name: Build Mira Panel 0.6.16 preview
 
 on:
   workflow_dispatch:
@@ -16,6 +16,7 @@ on:
       - 'firmware/scripts/v0.6.13.py'
       - 'firmware/scripts/v0.6.14.py'
       - 'firmware/scripts/v0.6.15.py'
+      - 'firmware/scripts/v0.6.16.py'
 
 permissions:
   contents: read
@@ -60,7 +61,7 @@ jobs:
           cp firmware/source/work/MIRA_PANEL/MiraMqtt.cpp /tmp/MiraMqtt.before
           cp firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp /tmp/MiraPanelUI.before
 
-      - name: Apply 0.6.6 to 0.6.15 preview fixes
+      - name: Apply 0.6.6 to 0.6.16 preview fixes
         shell: bash
         run: |
           set -euo pipefail
@@ -74,7 +75,8 @@ jobs:
           python3 firmware/scripts/v0.6.13.py firmware/source/work/MIRA_PANEL
           python3 firmware/scripts/v0.6.14.py firmware/source/work/MIRA_PANEL
           python3 firmware/scripts/v0.6.15.py firmware/source/work/MIRA_PANEL
-          grep -q '"0.6.15"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
+          python3 firmware/scripts/v0.6.16.py firmware/source/work/MIRA_PANEL
+          grep -q '"0.6.16"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
           grep -q 'LV_FLEX_FLOW_ROW_WRAP' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'if (i == 1 || i == 2) lv_obj_set_style_pad_top(_pages\[i\], 8, 0);' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
@@ -83,7 +85,8 @@ jobs:
           grep -q 'makeCard(pageIndex(b.location), 196)' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'const int cardH = compact ? 194 : 238;' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'const int arc = compact ? 142 : 182;' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -q 'asButtons ? LV_SIZE_CONTENT : (compact ? 64 : 76)' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -q 'asButtons ? LV_SIZE_CONTENT : (compact ? 68 : 82)' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -q 'lv_obj_set_scrollbar_mode(b.card, LV_SCROLLBAR_MODE_OFF);' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q '_homeStandardInfoTotal' firmware/source/work/MIRA_PANEL/MiraPanelUI.h
           grep -q 'lastOddTile' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'DynamicJsonDocument mira_Json_LVGL(16384);' firmware/source/work/MIRA_PANEL/SPIFFS_Process.h
@@ -133,7 +136,7 @@ jobs:
           mkdir -p "$HOME/Arduino/libraries"
           cp firmware/source/work/MIRA_PANEL/lv_conf.h "$HOME/Arduino/libraries/lv_conf.h"
 
-      - name: Compile 0.6.15 preview
+      - name: Compile 0.6.16 preview
         shell: bash
         run: |
           set -euo pipefail
@@ -143,14 +146,14 @@ jobs:
             --output-dir build \
             firmware/source/work/MIRA_PANEL
           test -s build/MIRA_PANEL.ino.bin
-          strings build/MIRA_PANEL.ino.bin | grep -Fxq '0.6.15'
+          strings build/MIRA_PANEL.ino.bin | grep -Fxq '0.6.16'
           ls -lh build/*.bin
           sha256sum build/MIRA_PANEL.ino.bin
 
       - name: Upload preview firmware
         uses: actions/upload-artifact@v4
         with:
-          name: Mira_Panel_0.6.15_preview
+          name: Mira_Panel_0.6.16_preview
           path: build/MIRA_PANEL.ino.bin
           if-no-files-found: error
           retention-days: 14
