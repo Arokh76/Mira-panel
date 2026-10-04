@@ -1,4 +1,4 @@
-name: Build Mira Panel 0.6.7 preview
+name: Build Mira Panel 0.6.8 preview
 
 on:
   workflow_dispatch:
@@ -8,6 +8,7 @@ on:
       - '.github/workflows/build-preview-066.yml'
       - 'firmware/scripts/v0.6.6.py'
       - 'firmware/scripts/v0.6.7.py'
+      - 'firmware/scripts/v0.6.8.py'
 
 permissions:
   contents: read
@@ -52,23 +53,24 @@ jobs:
           cp firmware/source/work/MIRA_PANEL/MiraMqtt.cpp /tmp/MiraMqtt.before
           cp firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp /tmp/MiraPanelUI.before
 
-      - name: Apply 0.6.6 and 0.6.7 visual-only theme
+      - name: Apply 0.6.6 to 0.6.8 visual dashboard
         shell: bash
         run: |
           set -euo pipefail
           python3 firmware/scripts/v0.6.6.py firmware/source/work/MIRA_PANEL
           python3 firmware/scripts/v0.6.7.py firmware/source/work/MIRA_PANEL
-          grep -q '"0.6.7"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
-          grep -q '0x17354B' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -q 'LV_OPA_50' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -q '0x10283D' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -q 'widget integration unchanged' firmware/scripts/v0.6.7.py
+          python3 firmware/scripts/v0.6.8.py firmware/source/work/MIRA_PANEL
+          grep -q '"0.6.8"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
+          grep -q 'LV_FLEX_FLOW_ROW_WRAP' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -q 'dashboardTile' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -q 'lv_obj_set_width(b.card, 149)' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -q 'widget integration unchanged' firmware/scripts/v0.6.8.py
 
-          # Visual previews must not alter the Jeedom/server/MQTT protocol implementation.
+          # Visual/dashboard previews must not alter Jeedom/server/MQTT protocol implementation.
           cmp /tmp/MiraPanelServer.before firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
           cmp /tmp/MiraMqtt.before firmware/source/work/MIRA_PANEL/MiraMqtt.cpp
 
-          echo 'Files changed by visual pass:'
+          echo 'Files changed by visual/dashboard pass:'
           diff -q /tmp/MiraPanelUI.before firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp || true
 
       - name: Setup Arduino CLI
@@ -109,7 +111,7 @@ jobs:
           mkdir -p "$HOME/Arduino/libraries"
           cp firmware/source/work/MIRA_PANEL/lv_conf.h "$HOME/Arduino/libraries/lv_conf.h"
 
-      - name: Compile 0.6.7 preview
+      - name: Compile 0.6.8 preview
         shell: bash
         run: |
           set -euo pipefail
@@ -119,14 +121,14 @@ jobs:
             --output-dir build \
             firmware/source/work/MIRA_PANEL
           test -s build/MIRA_PANEL.ino.bin
-          strings build/MIRA_PANEL.ino.bin | grep -Fxq '0.6.7'
+          strings build/MIRA_PANEL.ino.bin | grep -Fxq '0.6.8'
           ls -lh build/*.bin
           sha256sum build/MIRA_PANEL.ino.bin
 
       - name: Upload preview firmware
         uses: actions/upload-artifact@v4
         with:
-          name: Mira_Panel_0.6.7_preview
+          name: Mira_Panel_0.6.8_preview
           path: build/MIRA_PANEL.ino.bin
           if-no-files-found: error
           retention-days: 14
