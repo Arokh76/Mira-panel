@@ -31,15 +31,15 @@ jobs:
           for s in v0.4.8.py v0.4.9.py v0.4.10.py v0.4.11.py v0.5.0.py v0.5.0_ota_sync.py v0.5.1.py v0.5.2.py v0.5.3.py v0.5.4.py v0.5.5.py v0.5.6.py v0.5.7.py v0.5.8.py v0.5.9.py v0.5.10.py v0.5.11.py v0.5.12.py v0.5.13.py; do python3 "firmware/scripts/$s" firmware/source/work/MIRA_PANEL; done
           python3 firmware/scripts/v0.6.0_runner.py firmware/source/work/MIRA_PANEL
           for s in v0.6.1.py v0.6.2.py v0.6.3.py v0.6.4.py v0.6.5.py v0.6.6.py v0.6.7.py v0.6.8.py v0.6.9.py; do python3 "firmware/scripts/$s" firmware/source/work/MIRA_PANEL; done
-      - name: Dump dashboard functions
+      - name: Dump dashboard state and builder
         shell: bash
         run: |
           set -euo pipefail
           UI=firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          for fn in 'createDateTime' 'loadWidgets' 'buildWidgets' 'loadJson' 'createWidget' 'createInfo'; do
-            echo "===== $fn ====="
-            L=$(grep -n "MiraPanelUI::$fn" "$UI" | head -1 | cut -d: -f1 || true)
-            if [ -n "$L" ]; then sed -n "$L,$((L+180))p" "$UI"; fi
-          done
-          echo '===== binding creation loop context ====='
-          grep -n -A140 -B40 'createDateTime\|createInfo\|createList' "$UI" | head -520
+          H=firmware/source/work/MIRA_PANEL/MiraPanelUI.h
+          echo '===== header binding state ====='
+          grep -n -A45 -B25 '_bindingCount' "$H" || true
+          echo '===== builder around JsonArray ====='
+          grep -n -A120 -B80 'for (JsonObject obj : arr) registerAndCreate' "$UI" || true
+          echo '===== createDateTime ====='
+          L=$(grep -n 'void MiraPanelUI::createDateTime' "$UI" | head -1 | cut -d: -f1); sed -n "$L,$((L+45))p" "$UI"
