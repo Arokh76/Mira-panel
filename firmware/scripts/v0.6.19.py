@@ -157,7 +157,7 @@ replace_once(
     'apply free layout after widget creation',
 )
 
-# Free cards are taken out of flex flow. Pages remain vertically scrollable.
+# Free cards are ignored by flex layout but still scroll with the page.
 anchor = '''lv_obj_t* MiraPanelUI::makeSettingsCard(lv_coord_t height) {
 '''
 helper = r'''void MiraPanelUI::applyFreeLayout(uint8_t idx) {
@@ -182,7 +182,7 @@ helper = r'''void MiraPanelUI::applyFreeLayout(uint8_t idx) {
   if (x + w > MIRA_DISPLAY_WIDTH) x = MIRA_DISPLAY_WIDTH - w;
   if (y < 0) y = 0;
 
-  lv_obj_add_flag(b.card, LV_OBJ_FLAG_FLOATING);
+  lv_obj_add_flag(b.card, LV_OBJ_FLAG_IGNORE_LAYOUT);
   lv_obj_set_pos(b.card, (lv_coord_t)x, (lv_coord_t)y);
   lv_obj_set_size(b.card, (lv_coord_t)w, (lv_coord_t)h);
   lv_obj_clear_flag(b.card, LV_OBJ_FLAG_SCROLLABLE);
