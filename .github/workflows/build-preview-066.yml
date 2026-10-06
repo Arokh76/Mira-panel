@@ -1,4 +1,4 @@
-name: Build Mira Panel 0.6.21 preview
+name: Build Mira Panel 0.6.22 preview
 
 on:
   workflow_dispatch:
@@ -23,6 +23,7 @@ on:
       - 'firmware/scripts/v0.6.19.py'
       - 'firmware/scripts/v0.6.20.py'
       - 'firmware/scripts/v0.6.21.py'
+      - 'firmware/scripts/v0.6.22.py'
 
 permissions:
   contents: read
@@ -55,12 +56,15 @@ jobs:
           cp firmware/source/work/MIRA_PANEL/MiraMqtt.cpp /tmp/MiraMqtt.before
           cp firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp /tmp/MiraPanelUI.before
 
-      - name: Apply 0.6.6 to 0.6.21 preview fixes
+      - name: Apply 0.6.6 to 0.6.22 preview fixes
         shell: bash
         run: |
           set -euo pipefail
-          for s in v0.6.6.py v0.6.7.py v0.6.8.py v0.6.9.py v0.6.10.py v0.6.11.py v0.6.12.py v0.6.13.py v0.6.14.py v0.6.15.py v0.6.16.py v0.6.17.py v0.6.17_fontfix.py v0.6.18.py v0.6.19.py v0.6.20.py v0.6.21.py; do python3 "firmware/scripts/$s" firmware/source/work/MIRA_PANEL; done
-          grep -q '"0.6.21"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
+          for s in v0.6.6.py v0.6.7.py v0.6.8.py v0.6.9.py v0.6.10.py v0.6.11.py v0.6.12.py v0.6.13.py v0.6.14.py v0.6.15.py v0.6.16.py v0.6.17.py v0.6.17_fontfix.py v0.6.18.py v0.6.19.py v0.6.20.py v0.6.21.py v0.6.22.py; do python3 "firmware/scripts/$s" firmware/source/work/MIRA_PANEL; done
+          grep -q '"0.6.22"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
+          grep -q '_pendingNavPage' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -q 'y >= MIRA_CONTENT_HEIGHT' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -q 'navOrder\[PAGE_COUNT\]\[3\]' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'waitDMA' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'MIRA_DRAW_BUFFER_LINES 32' firmware/source/work/MIRA_PANEL/MiraDisplayProfile.h
           grep -q 'server.on("/programui", HTTP_POST' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
@@ -136,7 +140,7 @@ jobs:
           mkdir -p "$HOME/Arduino/libraries"
           cp firmware/source/work/MIRA_PANEL/lv_conf.h "$HOME/Arduino/libraries/lv_conf.h"
 
-      - name: Compile 0.6.21 preview
+      - name: Compile 0.6.22 preview
         shell: bash
         run: |
           set -euo pipefail
@@ -146,14 +150,14 @@ jobs:
             --output-dir build \
             firmware/source/work/MIRA_PANEL
           test -s build/MIRA_PANEL.ino.bin
-          strings build/MIRA_PANEL.ino.bin | grep -Fxq '0.6.21'
+          strings build/MIRA_PANEL.ino.bin | grep -Fxq '0.6.22'
           ls -lh build/*.bin
           sha256sum build/MIRA_PANEL.ino.bin
 
       - name: Upload preview firmware
         uses: actions/upload-artifact@v4
         with:
-          name: Mira_Panel_0.6.21_preview
+          name: Mira_Panel_0.6.22_preview
           path: build/MIRA_PANEL.ino.bin
           if-no-files-found: error
           retention-days: 14
