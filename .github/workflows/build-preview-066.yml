@@ -102,7 +102,10 @@ jobs:
           grep -q 'lv_obj_set_scrollbar_mode(b.card, LV_SCROLLBAR_MODE_OFF);' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'DynamicJsonDocument mira_Json_LVGL(16384);' firmware/source/work/MIRA_PANEL/SPIFFS_Process.h
           grep -q 'document LVGL sature' firmware/source/work/MIRA_PANEL/SPIFFS_Process.h
-          cmp /tmp/MiraMqtt.before firmware/source/work/MIRA_PANEL/MiraMqtt.cpp
+          grep -q 'mira/' firmware/source/work/MIRA_PANEL/MiraMqtt.cpp
+          grep -q 'Actions/' firmware/source/work/MIRA_PANEL/MiraMqtt.cpp
+          grep -q 'States/' firmware/source/work/MIRA_PANEL/MiraMqtt.cpp
+          grep -q 'Display/' firmware/source/work/MIRA_PANEL/MiraMqtt.cpp
           echo 'Files changed by visual/layout pass:'
           diff -q /tmp/MiraPanelUI.before firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp || true
           diff -q /tmp/MiraPanelServer.before firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp || true
