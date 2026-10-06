@@ -1,4 +1,4 @@
-name: Build Mira Panel 0.6.18 preview
+name: Build Mira Panel 0.6.19 preview
 
 on:
   workflow_dispatch:
@@ -20,6 +20,7 @@ on:
       - 'firmware/scripts/v0.6.17.py'
       - 'firmware/scripts/v0.6.17_fontfix.py'
       - 'firmware/scripts/v0.6.18.py'
+      - 'firmware/scripts/v0.6.19.py'
 
 permissions:
   contents: read
@@ -52,12 +53,17 @@ jobs:
           cp firmware/source/work/MIRA_PANEL/MiraMqtt.cpp /tmp/MiraMqtt.before
           cp firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp /tmp/MiraPanelUI.before
 
-      - name: Apply 0.6.6 to 0.6.18 preview fixes
+      - name: Apply 0.6.6 to 0.6.19 preview fixes
         shell: bash
         run: |
           set -euo pipefail
-          for s in v0.6.6.py v0.6.7.py v0.6.8.py v0.6.9.py v0.6.10.py v0.6.11.py v0.6.12.py v0.6.13.py v0.6.14.py v0.6.15.py v0.6.16.py v0.6.17.py v0.6.17_fontfix.py v0.6.18.py; do python3 "firmware/scripts/$s" firmware/source/work/MIRA_PANEL; done
-          grep -q '"0.6.18"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
+          for s in v0.6.6.py v0.6.7.py v0.6.8.py v0.6.9.py v0.6.10.py v0.6.11.py v0.6.12.py v0.6.13.py v0.6.14.py v0.6.15.py v0.6.16.py v0.6.17.py v0.6.17_fontfix.py v0.6.18.py v0.6.19.py; do python3 "firmware/scripts/$s" firmware/source/work/MIRA_PANEL; done
+          grep -q '"0.6.19"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
+          grep -q 'LVGL_LayoutX = -1' firmware/source/work/MIRA_PANEL/SPIFFS_Process.h
+          grep -q 'lvgl_array\["lx"\]' firmware/source/work/MIRA_PANEL/SPIFFS_Process.h
+          grep -q 'LV_OBJ_FLAG_FLOATING' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -q 'DynamicJsonDocument doc(16384)' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -q 'displayInfo\["freeLayout"\] = true' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
           grep -q 'MIRA_DISPLAY_PROFILE_ID "wt32-sc01-plus"' firmware/source/work/MIRA_PANEL/MiraDisplayProfile.h
           grep -q 'MIRA_DISPLAY_WIDTH 320' firmware/source/work/MIRA_PANEL/MiraDisplayProfile.h
           grep -q 'MIRA_LAYOUT_LOGICAL_WIDTH 1000' firmware/source/work/MIRA_PANEL/MiraDisplayProfile.h
@@ -123,7 +129,7 @@ jobs:
           mkdir -p "$HOME/Arduino/libraries"
           cp firmware/source/work/MIRA_PANEL/lv_conf.h "$HOME/Arduino/libraries/lv_conf.h"
 
-      - name: Compile 0.6.18 preview
+      - name: Compile 0.6.19 preview
         shell: bash
         run: |
           set -euo pipefail
@@ -133,14 +139,14 @@ jobs:
             --output-dir build \
             firmware/source/work/MIRA_PANEL
           test -s build/MIRA_PANEL.ino.bin
-          strings build/MIRA_PANEL.ino.bin | grep -Fxq '0.6.18'
+          strings build/MIRA_PANEL.ino.bin | grep -Fxq '0.6.19'
           ls -lh build/*.bin
           sha256sum build/MIRA_PANEL.ino.bin
 
       - name: Upload preview firmware
         uses: actions/upload-artifact@v4
         with:
-          name: Mira_Panel_0.6.18_preview
+          name: Mira_Panel_0.6.19_preview
           path: build/MIRA_PANEL.ino.bin
           if-no-files-found: error
           retention-days: 14
