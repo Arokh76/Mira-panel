@@ -61,7 +61,7 @@ jobs:
           grep -q '"0.6.19"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
           grep -q 'LVGL_LayoutX = -1' firmware/source/work/MIRA_PANEL/SPIFFS_Process.h
           grep -q 'lvgl_array\["lx"\]' firmware/source/work/MIRA_PANEL/SPIFFS_Process.h
-          grep -q 'LV_OBJ_FLAG_FLOATING' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -q 'LV_OBJ_FLAG_IGNORE_LAYOUT' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'DynamicJsonDocument doc(16384)' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'displayInfo\["freeLayout"\] = true' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
           grep -q 'MIRA_DISPLAY_PROFILE_ID "wt32-sc01-plus"' firmware/source/work/MIRA_PANEL/MiraDisplayProfile.h
