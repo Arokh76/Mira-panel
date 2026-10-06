@@ -28,8 +28,8 @@ profile.write_text(text, encoding='utf-8')
 
 replace_once(
     ui,
-    'lv_color_t MiraPanelUI::_buf1[320 * 20];\\nlv_color_t MiraPanelUI::_buf2[320 * 20];\\n',
-    'lv_color_t MiraPanelUI::_buf1[MIRA_DISPLAY_WIDTH * MIRA_DRAW_BUFFER_LINES];\\nlv_color_t MiraPanelUI::_buf2[MIRA_DISPLAY_WIDTH * MIRA_DRAW_BUFFER_LINES];\\n',
+    'lv_color_t MiraPanelUI::_buf1[320 * 20];\nlv_color_t MiraPanelUI::_buf2[320 * 20];\n',
+    'lv_color_t MiraPanelUI::_buf1[MIRA_DISPLAY_WIDTH * MIRA_DRAW_BUFFER_LINES];\nlv_color_t MiraPanelUI::_buf2[MIRA_DISPLAY_WIDTH * MIRA_DRAW_BUFFER_LINES];\n',
     'draw buffer definitions',
 )
 
