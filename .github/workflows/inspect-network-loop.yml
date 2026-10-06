@@ -1,0 +1,47 @@
+name: Inspect Mira network loop
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/inspect-network-loop.yml']
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct 0.6.22
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf firmware/source/work && mkdir -p firmware/source/work
+          unzip -q firmware/source/Mira_Panel_Source_V0.4.3.zip -d firmware/source/work
+          cp -a firmware/overrides/MIRA_PANEL/. firmware/source/work/MIRA_PANEL/
+          for p in current.patch ota-safety.patch v0.4.5.patch v0.4.6.patch v0.4.7.patch; do
+            if [ -s "firmware/patches/$p" ]; then (cd firmware/source/work/MIRA_PANEL && patch --batch --forward -p0 < "../../../patches/$p"); fi
+          done
+          if [ -d firmware/final-overrides/MIRA_PANEL ]; then cp -a firmware/final-overrides/MIRA_PANEL/. firmware/source/work/MIRA_PANEL/; fi
+          for s in v0.4.8.py v0.4.9.py v0.4.10.py v0.4.11.py v0.5.0.py v0.5.0_ota_sync.py v0.5.1.py v0.5.2.py v0.5.3.py v0.5.4.py v0.5.5.py v0.5.6.py v0.5.7.py v0.5.8.py v0.5.9.py v0.5.10.py v0.5.11.py v0.5.12.py v0.5.13.py; do python3 "firmware/scripts/$s" firmware/source/work/MIRA_PANEL; done
+          python3 firmware/scripts/v0.6.0_runner.py firmware/source/work/MIRA_PANEL
+          for s in v0.6.1.py v0.6.2.py v0.6.3.py v0.6.4.py v0.6.5.py v0.6.6.py v0.6.7.py v0.6.8.py v0.6.9.py v0.6.10.py v0.6.11.py v0.6.12.py v0.6.13.py v0.6.14.py v0.6.15.py v0.6.16.py v0.6.17.py v0.6.17_fontfix.py v0.6.18.py v0.6.19.py v0.6.20.py v0.6.21.py v0.6.22.py; do python3 "firmware/scripts/$s" firmware/source/work/MIRA_PANEL; done
+      - name: Dump network loop
+        shell: bash
+        run: |
+          set -euo pipefail
+          UI=firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          M=firmware/source/work/MIRA_PANEL/MiraMqtt.cpp
+          I=firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
+          S=firmware/source/work/MIRA_PANEL/SPIFFS_Process.h
+          echo '===== LOOP ====='
+          grep -n -A70 -B10 'void MiraPanelUI::loop' "$UI" || true
+          echo '===== NTP ====='
+          grep -n -A120 -B20 'startNtpIfPossible' "$UI" || true
+          echo '===== DISPLAY CONFIG ====='
+          grep -n -A160 -B20 'refreshDisplayConfig' "$UI" || true
+          echo '===== MQTT LOOP / RECONNECT ====='
+          grep -n -A180 -B20 'void MiraMqtt::loop' "$M" || true
+          grep -n -A120 -B20 'reconnect' "$M" || true
+          echo '===== MAIN LOOP ====='
+          grep -n -A100 -B20 'void loop' "$I" || true
+          echo '===== HTTP GET HELPERS ====='
+          grep -n -A55 -B10 'String GetHttp' "$S" || true
