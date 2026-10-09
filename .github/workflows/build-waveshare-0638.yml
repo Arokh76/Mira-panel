@@ -131,7 +131,7 @@ jobs:
           # from the official 16 MHz to 12 MHz. Preserve triple buffer,
           # bounce buffer, VSYNC, LVGL, PSRAM, UI and backlight code.
           grep -Fq '#define EXAMPLE_LCD_PIXEL_CLOCK_HZ      (16 * 1000 * 1000)' "$WS_RGB_H"
-          sed -i 's/(16 \\* 1000 \\* 1000)/(12 * 1000 * 1000)/' "$WS_RGB_H"
+          python3 -c "from pathlib import Path; p=Path('firmware/source/work/MIRA_PANEL/src/WaveshareOfficial/rgb_lcd_port/rgb_lcd_port.h'); s=p.read_text(); old='(16 * 1000 * 1000)'; assert s.count(old) == 1, 'expected one 16 MHz LCD clock macro'; p.write_text(s.replace(old, '(12 * 1000 * 1000)', 1))"
           grep -Fq '#define EXAMPLE_LCD_PIXEL_CLOCK_HZ      (12 * 1000 * 1000)' "$WS_RGB_H"
           echo '[MIRA][WAVESHARE] RGB diagnostic: pixel clock = 12 MHz'
 
