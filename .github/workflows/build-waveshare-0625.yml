@@ -87,8 +87,10 @@ jobs:
           set -euo pipefail
           arduino-cli core uninstall esp32:esp32
           arduino-cli core install esp32:esp32@3.3.11
+          arduino-cli config set library.enable_unsafe_install true
           arduino-cli lib uninstall AsyncTCP || true
-          arduino-cli lib install "AsyncTCP"
+          rm -rf "$HOME/Arduino/libraries/AsyncTCP"
+          arduino-cli lib install --git-url https://github.com/ESP32Async/AsyncTCP.git
 
       - name: Build Waveshare 4.3C target
         shell: bash
