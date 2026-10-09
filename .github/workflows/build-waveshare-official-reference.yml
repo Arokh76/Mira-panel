@@ -1,0 +1,82 @@
+name: Build Waveshare Official LVGL Reference
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-waveshare-official-reference.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Mira repository
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned Waveshare repository
+        uses: actions/checkout@v4
+        with:
+          repository: waveshareteam/ESP32-S3-Touch-LCD-4.3C
+          ref: 44e412f08c1e68c0da826bc5f51436f156a02eea
+          path: waveshare
+
+      - name: Setup Arduino CLI 1.5.1
+        uses: arduino/setup-arduino-cli@v2
+        with:
+          version: 1.5.1
+
+      - name: Install ESP32 Arduino 3.3.11
+        shell: bash
+        run: |
+          set -euo pipefail
+          arduino-cli config init --overwrite
+          arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install "esp32:esp32@3.3.11"
+
+      - name: Compile official 12_lvgl_transplant unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          FQBN='esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,CPUFreq=240,FlashMode=qio,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,PSRAM=opi,UploadMode=default,UploadSpeed=921600,LoopCore=1,EventsCore=1'
+          rm -rf build-reference package-reference
+          mkdir -p build-reference package-reference
+          arduino-cli compile             --fqbn "$FQBN"             --libraries waveshare/examples/arduino/libraries             --export-binaries             --build-path build-reference             waveshare/examples/arduino/12_lvgl_transplant
+
+          find build-reference -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
+
+          MERGED="$(find build-reference -maxdepth 1 -name '*merged.bin' -type f | head -n1 || true)"
+          if [ -z "$MERGED" ]; then
+            python3 -m pip install --quiet esptool
+            APP="$(find build-reference -maxdepth 1 -name '*.ino.bin' -type f | head -n1)"
+            BOOT="$(find build-reference -maxdepth 1 -name '*.bootloader.bin' -type f | head -n1)"
+            PART="$(find build-reference -maxdepth 1 -name '*.partitions.bin' -type f | head -n1)"
+            BOOTAPP="$(find "$HOME/.arduino15/packages/esp32" -name boot_app0.bin -type f | head -n1)"
+            python3 -m esptool --chip esp32s3 merge-bin               -o package-reference/Waveshare_12_lvgl_transplant_OFFICIAL_FACTORY.bin               --flash-mode qio --flash-freq 80m --flash-size 16MB               0x0000 "$BOOT"               0x8000 "$PART"               0xE000 "$BOOTAPP"               0x10000 "$APP"
+          else
+            cp "$MERGED" package-reference/Waveshare_12_lvgl_transplant_OFFICIAL_FACTORY.bin
+          fi
+
+          test -s package-reference/Waveshare_12_lvgl_transplant_OFFICIAL_FACTORY.bin
+          sha256sum package-reference/Waveshare_12_lvgl_transplant_OFFICIAL_FACTORY.bin             | tee package-reference/SHA256.txt
+          cat > package-reference/README.txt <<'EOF'
+          Official Waveshare ESP32-S3-Touch-LCD-4.3C Arduino example:
+          examples/arduino/12_lvgl_transplant
+          Source commit: 44e412f08c1e68c0da826bc5f51436f156a02eea
+          Arduino CLI: 1.5.1
+          Arduino-ESP32: 3.3.11
+          Flash combined image at 0x0000.
+          This build contains no Mira source code.
+          EOF
+
+      - name: Upload reference firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: Waveshare_12_lvgl_transplant_OFFICIAL_reference
+          path: package-reference/
+          if-no-files-found: error
+          retention-days: 14
