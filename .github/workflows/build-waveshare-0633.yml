@@ -98,7 +98,7 @@ jobs:
           # Waveshare's bundled LVGL is v8.4.0. Mira keeps its own configuration,
           # including profile-specific RGB565 byte order.
           grep -q 'Configuration file for v8.4.0' waveshare-official/examples/arduino/libraries/lv_conf.h
-          grep -q '#define LVGL_VERSION_MINOR 4' waveshare-official/examples/arduino/libraries/lvgl/src/lv_version.h
+          grep -q '#define LVGL_VERSION_MINOR 4' waveshare-official/examples/arduino/libraries/lvgl/lvgl.h
           cp firmware/source/work/MIRA_PANEL/lv_conf.h waveshare-official/examples/arduino/libraries/lv_conf.h
 
       - name: Build Waveshare 4.3C with Mira SPIFFS map
