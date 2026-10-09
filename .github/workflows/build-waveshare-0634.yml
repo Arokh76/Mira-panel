@@ -117,6 +117,12 @@ jobs:
           test -f firmware/source/work/MIRA_PANEL/src/WaveshareOfficial/lvgl_port/lvgl_port.cpp
           test -f firmware/source/work/MIRA_PANEL/src/WaveshareOfficial/rgb_lcd_port/rgb_lcd_port.cpp
 
+          # Critical: a sketch-local lv_conf.h has priority over the library's
+          # sibling lv_conf.h. Remove Mira's WT32 config for this build, otherwise
+          # the "official LVGL 8.4" silently runs with Mira's old LVGL config.
+          rm -f firmware/source/work/MIRA_PANEL/lv_conf.h
+          test ! -f firmware/source/work/MIRA_PANEL/lv_conf.h
+
       - name: Build Waveshare 4.3C with Mira SPIFFS map
         shell: bash
         run: |
