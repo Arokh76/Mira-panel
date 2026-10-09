@@ -2,6 +2,8 @@ name: Build Mira Panel 0.6.38 Waveshare 12MHz RGB diagnostic
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
   push:
     branches: [mira-0638-rgb12mhz-diag]
     paths:
