@@ -3,7 +3,7 @@ import sys
 
 root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path('firmware/source/work/MIRA_PANEL')
 ino = root / 'MIRA_PANEL.ino'
-partitions = root / 'partitions.csv'
+partitions = root / 'MiraPartitionsWaveshare16MB.csv'
 
 def replace_once(path: Path, old: str, new: str, label: str):
     text = path.read_text(encoding='utf-8')
@@ -15,10 +15,9 @@ def replace_once(path: Path, old: str, new: str, label: str):
 replace_once(ino, '"0.6.26"', '"0.6.27"', 'firmware version')
 replace_once(ino, '[MIRA] Firmware 0.6.26 initialise', '[MIRA] Firmware 0.6.27 initialise', 'startup log')
 
-# 16 MB layout for Mira on Waveshare:
-# keep two 3 MB OTA slots, but use SPIFFS (not FFat) for Mira configuration.
-# The previous app3M_fat9M_16MB board preset exposed a FAT partition, therefore
-# SPIFFS.begin()/config writes could not work even though Wi-Fi/web did.
+# 16 MB layout for Mira on Waveshare only. The workflow copies this profile to
+# partitions.csv only for the Waveshare target, so the proven WT32 partition map
+# remains untouched. Keep two 3 MB OTA slots and use SPIFFS (not FFat).
 partitions.write_text("""# Name,   Type, SubType, Offset,   Size,     Flags
 nvs,      data, nvs,     0x9000,   0x5000,
 otadata,  data, ota,     0xE000,   0x2000,
