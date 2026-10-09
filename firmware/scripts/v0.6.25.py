@@ -8,6 +8,8 @@ hdr = root / 'MiraPanelUI.h'
 profile = root / 'MiraDisplayProfile.h'
 sc01 = root / 'SC01PlusDisplay.h'
 async_http = root / 'Async_HTTP.h'
+web_auth = root / 'src' / 'WebAuthentication.cpp'
+async_ws = root / 'src' / 'AsyncWebSocket.cpp'
 
 def replace_once(path: Path, old: str, new: str, label: str):
     text = path.read_text(encoding='utf-8')
@@ -356,5 +358,43 @@ bool miraAsyncHTTPGet(char *URL, bool GET = true) {
 ''' + legacy_async + r'''
 #endif
 ''', encoding='utf-8')
+
+# ESPAsyncWebServer bundled by the historical Mira source targets mbedTLS 2.x.
+# Arduino-ESP32 3.x ships mbedTLS 3.x, where the *_ret names disappeared.
+# Add source-level compatibility aliases while preserving the exact core-2 path.
+replace_once(
+    web_auth,
+    '#include "mbedtls/md5.h"\n',
+    '''#include "mbedtls/md5.h"
+#include "mbedtls/version.h"
+#if MBEDTLS_VERSION_MAJOR >= 3
+#define mbedtls_md5_starts_ret mbedtls_md5_starts
+#define mbedtls_md5_update_ret mbedtls_md5_update
+#define mbedtls_md5_finish_ret mbedtls_md5_finish
+#endif
+''',
+    'mbedtls MD5 core3 compatibility',
+)
+
+replace_once(
+    async_ws,
+    '#include "mbedtls/sha1.h"\n',
+    '''#include "mbedtls/sha1.h"
+#include "mbedtls/version.h"
+#if MBEDTLS_VERSION_MAJOR >= 3
+#define mbedtls_sha1_starts_ret mbedtls_sha1_starts
+#define mbedtls_sha1_update_ret mbedtls_sha1_update
+#define mbedtls_sha1_finish_ret mbedtls_sha1_finish
+#endif
+''',
+    'mbedtls SHA1 core3 compatibility',
+)
+
+replace_once(
+    async_ws,
+    '        return IPAddress(0U);\n',
+    '        return IPAddress((uint32_t)0);\n',
+    'IPAddress core3 overload compatibility',
+)
 
 print('Mira Panel 0.6.25 applied: universal display adapter + Waveshare 4.3C profile')
