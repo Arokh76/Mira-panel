@@ -128,59 +128,13 @@ private:
 };
 ''', encoding='utf-8')
 
-old_init = '''  lv_init();
-#if MIRA_RGB_DIRECT_FRAMEBUFFER
-  void* fb1 = nullptr;
-  void* fb2 = nullptr;
-  if (!_display.miraGetFrameBuffers(&fb1, &fb2)) {
-    Serial.println("[MIRA][WAVESHARE] ERREUR double framebuffer RGB indisponible");
-    return;
-  }
-
-  _buf1 = reinterpret_cast<lv_color_t*>(fb1);
-  _buf2 = reinterpret_cast<lv_color_t*>(fb2);
-  const size_t frameBytes =
-      MIRA_DISPLAY_WIDTH * MIRA_DISPLAY_HEIGHT * sizeof(lv_color_t);
-
-  memset(_buf1, 0, frameBytes);
-  memset(_buf2, 0, frameBytes);
-
-  // Force both panel-owned framebuffers through esp_lcd once before LVGL starts.
-  // This mirrors the ownership model of Waveshare's official direct-mode port.
-  _display.miraFlush(
-    0, 0, MIRA_DISPLAY_WIDTH, MIRA_DISPLAY_HEIGHT,
-    reinterpret_cast<const uint16_t*>(_buf1)
-  );
-  _display.miraFlush(
-    0, 0, MIRA_DISPLAY_WIDTH, MIRA_DISPLAY_HEIGHT,
-    reinterpret_cast<const uint16_t*>(_buf2)
-  );
-
-  lv_disp_draw_buf_init(
-    &_drawBuffer,
-    _buf1,
-    _buf2,
-    MIRA_DISPLAY_WIDTH * MIRA_DISPLAY_HEIGHT
-  );
-
-  Serial.printf("[MIRA][WAVESHARE] LVGL direct double FB: %p / %p (%u px chacun)\n",
-                _buf1, _buf2,
-                (unsigned)(MIRA_DISPLAY_WIDTH * MIRA_DISPLAY_HEIGHT));
-#else
-  lv_disp_draw_buf_init(&_drawBuffer, _buf1, _buf2, MIRA_DISPLAY_WIDTH * MIRA_DRAW_BUFFER_LINES);
-#endif
-
-  static lv_disp_drv_t dispDrv;
-  lv_disp_drv_init(&dispDrv);
-  dispDrv.hor_res = MIRA_DISPLAY_WIDTH;
-  dispDrv.ver_res = MIRA_DISPLAY_HEIGHT;
-  dispDrv.flush_cb = displayFlush;
-  dispDrv.draw_buf = &_drawBuffer;
-#if MIRA_RGB_DIRECT_FRAMEBUFFER
-  dispDrv.direct_mode = 1;
-#endif
-  lv_disp_drv_register(&dispDrv);
-'''
+start_marker = '  lv_init();\\n'
+end_marker = '  static lv_indev_drv_t indevDrv;\\n'
+text = ui.read_text(encoding='utf-8')
+if text.count(start_marker) != 1 or text.count(end_marker) != 1:
+    raise SystemExit('Waveshare LVGL init markers not unique')
+start = text.index(start_marker)
+end = text.index(end_marker, start)
 new_init = '''#if defined(MIRA_TARGET_WAVESHARE_43C)
   // Important: unlike 0.6.25..0.6.33, Mira does not create or register the
   // Waveshare display driver here. The official Waveshare port does all of it.
@@ -204,8 +158,11 @@ new_init = '''#if defined(MIRA_TARGET_WAVESHARE_43C)
   dispDrv.draw_buf = &_drawBuffer;
   lv_disp_drv_register(&dispDrv);
 #endif
+
 '''
-replace_once(ui, old_init, new_init, 'replace adapted Waveshare LVGL init with official port')
+ui.write_text(text[:start] + new_init + text[end:], encoding='utf-8')
+
+
 
 replace_once(
     ui,
