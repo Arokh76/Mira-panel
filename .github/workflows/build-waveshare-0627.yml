@@ -111,11 +111,12 @@ jobs:
           0x10000 Mira_Panel_Waveshare_4.3C_0.6.27.bin
           EOF
 
-          ESPTOOL="$(find "$HOME/.arduino15/packages/esp32" -path '*esptool_py*' -name esptool.py -type f | head -n1 || true)"
-          if [ -n "$ESPTOOL" ]; then
-            python3 "$ESPTOOL" --chip esp32s3 merge_bin -o package-waveshare/Mira_Panel_Waveshare_4.3C_0.6.27_FACTORY.bin               --flash_mode qio --flash_freq 80m --flash_size 16MB               0x0000 package-waveshare/bootloader.bin               0x8000 package-waveshare/partitions.bin               0xE000 package-waveshare/boot_app0.bin               0x10000 package-waveshare/Mira_Panel_Waveshare_4.3C_0.6.27.bin
+          MERGED="$(find build-waveshare -maxdepth 1 -name '*merged.bin' -type f | head -n1 || true)"
+          if [ -n "$MERGED" ]; then
+            cp "$MERGED" package-waveshare/Mira_Panel_Waveshare_4.3C_0.6.27_FACTORY.bin
           else
-            python3 -m esptool --chip esp32s3 merge_bin -o package-waveshare/Mira_Panel_Waveshare_4.3C_0.6.27_FACTORY.bin               --flash_mode qio --flash_freq 80m --flash_size 16MB               0x0000 package-waveshare/bootloader.bin               0x8000 package-waveshare/partitions.bin               0xE000 package-waveshare/boot_app0.bin               0x10000 package-waveshare/Mira_Panel_Waveshare_4.3C_0.6.27.bin
+            python3 -m pip install --quiet esptool
+            python3 -m esptool --chip esp32s3 merge-bin -o package-waveshare/Mira_Panel_Waveshare_4.3C_0.6.27_FACTORY.bin --flash-mode qio --flash-freq 80m --flash-size 16MB 0x0000 package-waveshare/bootloader.bin 0x8000 package-waveshare/partitions.bin 0xE000 package-waveshare/boot_app0.bin 0x10000 package-waveshare/Mira_Panel_Waveshare_4.3C_0.6.27.bin
           fi
           test -s package-waveshare/Mira_Panel_Waveshare_4.3C_0.6.27_FACTORY.bin
           ls -lh package-waveshare/
