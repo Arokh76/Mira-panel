@@ -1,4 +1,4 @@
-name: Build Mira Panel 0.6.29 Waveshare SPIFFS fix
+name: Build Mira Panel 0.6.29 Waveshare LVGL timing test
 
 on:
   workflow_dispatch:
