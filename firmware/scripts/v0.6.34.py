@@ -128,8 +128,8 @@ private:
 };
 ''', encoding='utf-8')
 
-start_marker = '  lv_init();\\n'
-end_marker = '  static lv_indev_drv_t indevDrv;\\n'
+start_marker = '  lv_init();'
+end_marker = '  static lv_indev_drv_t indevDrv;'
 text = ui.read_text(encoding='utf-8')
 if text.count(start_marker) != 1 or text.count(end_marker) != 1:
     raise SystemExit('Waveshare LVGL init markers not unique')
