@@ -1,0 +1,130 @@
+name: Build Mira Panel 0.6.30 Waveshare LVGL timing test
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-waveshare-0630.yml'
+      - 'firmware/scripts/v0.6.25.py'
+      - 'firmware/scripts/v0.6.26.py'
+      - 'firmware/scripts/v0.6.30.py'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Reconstruct Mira and apply 0.6.30
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf firmware/source/work
+          mkdir -p firmware/source/work
+          unzip -q firmware/source/Mira_Panel_Source_V0.4.3.zip -d firmware/source/work
+          if [ -d firmware/overrides/MIRA_PANEL ]; then cp -a firmware/overrides/MIRA_PANEL/. firmware/source/work/MIRA_PANEL/; fi
+          for p in current.patch ota-safety.patch v0.4.5.patch v0.4.6.patch v0.4.7.patch; do
+            if [ -s "firmware/patches/$p" ]; then (cd firmware/source/work/MIRA_PANEL && patch --batch --forward -p0 < "../../../patches/$p"); fi
+          done
+          if [ -d firmware/final-overrides/MIRA_PANEL ]; then cp -a firmware/final-overrides/MIRA_PANEL/. firmware/source/work/MIRA_PANEL/; fi
+          for s in v0.4.8.py v0.4.9.py v0.4.10.py v0.4.11.py v0.5.0.py v0.5.0_ota_sync.py v0.5.1.py v0.5.2.py v0.5.3.py v0.5.4.py v0.5.5.py v0.5.6.py v0.5.7.py v0.5.8.py v0.5.9.py v0.5.10.py v0.5.11.py v0.5.12.py v0.5.13.py; do python3 "firmware/scripts/$s" firmware/source/work/MIRA_PANEL; done
+          python3 firmware/scripts/v0.6.0_runner.py firmware/source/work/MIRA_PANEL
+          for s in v0.6.1.py v0.6.2.py v0.6.3.py v0.6.4.py v0.6.5.py v0.6.6.py v0.6.7.py v0.6.8.py v0.6.9.py v0.6.10.py v0.6.11.py v0.6.12.py v0.6.13.py v0.6.14.py v0.6.15.py v0.6.16.py v0.6.17.py v0.6.17_fontfix.py v0.6.18.py v0.6.19.py v0.6.20.py v0.6.21.py v0.6.22.py v0.6.23.py v0.6.24.py v0.6.25.py v0.6.26.py v0.6.27.py v0.6.28.py v0.6.30.py; do python3 "firmware/scripts/$s" firmware/source/work/MIRA_PANEL; done
+          grep -q '"0.6.30"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
+          grep -q '#define LV_COLOR_16_SWAP 0' firmware/source/work/MIRA_PANEL/lv_conf.h
+          test -f firmware/source/work/MIRA_PANEL/MiraPartitionsWaveshare16MB.csv
+
+      - name: Setup Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Configure Arduino
+        shell: bash
+        run: |
+          set -euo pipefail
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli lib update-index
+          arduino-cli lib install "lvgl@8.3.11"
+          arduino-cli lib install "LovyanGFX@1.1.9"
+          arduino-cli lib install "ArduinoJson@6.21.5"
+          arduino-cli lib install "AsyncHTTPRequest_Generic@1.13.0"
+
+      - name: Build WT32 regression target
+        shell: bash
+        run: |
+          set -euo pipefail
+          arduino-cli core install esp32:esp32@2.0.17
+          arduino-cli lib install "AsyncTCP@1.1.4"
+          CW="$HOME/Arduino/libraries/lvgl/src/extra/widgets/colorwheel/lv_colorwheel.c"
+          sed -i 's/line_dsc.width += 2;/line_dsc.width += 4;/' "$CW"
+          cp firmware/source/work/MIRA_PANEL/lv_conf.h "$HOME/Arduino/libraries/lv_conf.h"
+          rm -f firmware/source/work/MIRA_PANEL/partitions.csv
+          rm -rf build-wt32 && mkdir build-wt32
+          arduino-cli compile             --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,CPUFreq=240,FlashMode=qio,FlashSize=8M,PartitionScheme=default_8MB,PSRAM=enabled,UploadMode=default,USBMode=hwcdc"             --output-dir build-wt32             firmware/source/work/MIRA_PANEL
+          test -s build-wt32/MIRA_PANEL.ino.bin
+          strings build-wt32/MIRA_PANEL.ino.bin | grep -Fxq '0.6.30'
+
+      - name: Switch to ESP32 core 3.3.11
+        shell: bash
+        run: |
+          set -euo pipefail
+          arduino-cli core uninstall esp32:esp32
+          arduino-cli core install esp32:esp32@3.3.11
+          arduino-cli config set library.enable_unsafe_install true
+          arduino-cli lib uninstall AsyncTCP || true
+          rm -rf "$HOME/Arduino/libraries/AsyncTCP" "$HOME/Arduino/libraries/Async_TCP"
+          arduino-cli lib install --git-url https://github.com/ESP32Async/AsyncTCP.git
+
+      - name: Build Waveshare 4.3C with Mira SPIFFS map
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp firmware/source/work/MIRA_PANEL/MiraPartitionsWaveshare16MB.csv firmware/source/work/MIRA_PANEL/partitions.csv
+          rm -rf build-waveshare package-waveshare
+          mkdir -p build-waveshare package-waveshare
+          arduino-cli compile             --fqbn "esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,CPUFreq=240,FlashMode=qio,FlashSize=16M,PSRAM=opi,PartitionScheme=app3M_fat9M_16MB"             --build-property "compiler.cpp.extra_flags=-DMIRA_TARGET_WAVESHARE_43C=1"             --output-dir build-waveshare             firmware/source/work/MIRA_PANEL
+          test -s build-waveshare/MIRA_PANEL.ino.bin
+          strings build-waveshare/MIRA_PANEL.ino.bin | grep -Fxq '0.6.30'
+          PARTTOOL="$(find "$HOME/.arduino15/packages/esp32" -name gen_esp32part.py -type f | head -n1)"
+          test -n "$PARTTOOL"
+          python3 "$PARTTOOL" build-waveshare/MIRA_PANEL.ino.partitions.bin > /tmp/partitions-decoded.csv
+          cat /tmp/partitions-decoded.csv
+          grep -q 'spiffs' /tmp/partitions-decoded.csv
+          ! grep -q 'ffat' /tmp/partitions-decoded.csv
+
+          cp build-waveshare/MIRA_PANEL.ino.bin package-waveshare/Mira_Panel_Waveshare_4.3C_0.6.30.bin
+          cp build-waveshare/MIRA_PANEL.ino.bootloader.bin package-waveshare/bootloader.bin
+          cp build-waveshare/MIRA_PANEL.ino.partitions.bin package-waveshare/partitions.bin
+          BOOTAPP="$(find "$HOME/.arduino15/packages/esp32" -name boot_app0.bin -type f | head -n1)"
+          cp "$BOOTAPP" package-waveshare/boot_app0.bin
+          cat > package-waveshare/flash_args.txt <<'EOF'
+          ESP32-S3 / 16 MB / Mira SPIFFS:
+          0x0000  bootloader.bin
+          0x8000  partitions.bin
+          0xE000  boot_app0.bin
+          0x10000 Mira_Panel_Waveshare_4.3C_0.6.30.bin
+          EOF
+
+          MERGED="$(find build-waveshare -maxdepth 1 -name '*merged.bin' -type f | head -n1 || true)"
+          if [ -n "$MERGED" ]; then
+            cp "$MERGED" package-waveshare/Mira_Panel_Waveshare_4.3C_0.6.30_FACTORY.bin
+          else
+            python3 -m pip install --quiet esptool
+            python3 -m esptool --chip esp32s3 merge-bin -o package-waveshare/Mira_Panel_Waveshare_4.3C_0.6.30_FACTORY.bin --flash-mode qio --flash-freq 80m --flash-size 16MB 0x0000 package-waveshare/bootloader.bin 0x8000 package-waveshare/partitions.bin 0xE000 package-waveshare/boot_app0.bin 0x10000 package-waveshare/Mira_Panel_Waveshare_4.3C_0.6.30.bin
+          fi
+          test -s package-waveshare/Mira_Panel_Waveshare_4.3C_0.6.30_FACTORY.bin
+          ls -lh package-waveshare/
+
+      - name: Upload Waveshare preview package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mira_Panel_Waveshare_4.3C_0.6.30_preview
+          path: package-waveshare/
+          if-no-files-found: error
+          retention-days: 14
