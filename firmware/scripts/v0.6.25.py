@@ -7,6 +7,7 @@ ui = root / 'MiraPanelUI.cpp'
 hdr = root / 'MiraPanelUI.h'
 profile = root / 'MiraDisplayProfile.h'
 sc01 = root / 'SC01PlusDisplay.h'
+async_http = root / 'Async_HTTP.h'
 
 def replace_once(path: Path, old: str, new: str, label: str):
     text = path.read_text(encoding='utf-8')
@@ -318,5 +319,42 @@ replace_once(
     '    lv_obj_set_pos(btn, 1 + slot * (MIRA_DISPLAY_WIDTH / 3), 1);\n',
     'profile nav button position',
 )
+
+# Arduino-ESP32 3.x no longer builds the historical AsyncHTTPRequest_Generic
+# dependency cleanly. Keep the proven WT32 path untouched, while the Waveshare
+# core-3 target uses the native HTTPClient API behind the same Mira helper.
+legacy_async = async_http.read_text(encoding='utf-8')
+async_http.write_text(r'''#pragma once
+
+#if defined(MIRA_TARGET_WAVESHARE_43C)
+#include <HTTPClient.h>
+
+String ReponseAsync = "null";
+
+bool miraAsyncHTTPGet(char *URL, bool GET = true) {
+  if (!URL || !URL[0]) return false;
+
+  HTTPClient http;
+  http.setConnectTimeout(500);
+  http.setTimeout(1000);
+  if (!http.begin(URL)) {
+    Serial.println(F("[MIRA][HTTP] Ouverture HTTP impossible"));
+    return false;
+  }
+
+  int code = GET ? http.GET() : http.POST("");
+  bool ok = code > 0;
+  if (code == HTTP_CODE_OK) {
+    ReponseAsync = http.getString();
+  }
+  http.end();
+
+  if (!ok) Serial.println(F("[MIRA][HTTP] Requete HTTP impossible"));
+  return ok;
+}
+#else
+''' + legacy_async + r'''
+#endif
+''', encoding='utf-8')
 
 print('Mira Panel 0.6.25 applied: universal display adapter + Waveshare 4.3C profile')
