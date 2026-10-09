@@ -1,0 +1,38 @@
+name: Inspect Mira 0.6.33 reconstructed source
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/inspect-mira-0633.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct 0.6.33
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf firmware/source/work
+          mkdir -p firmware/source/work
+          unzip -q firmware/source/Mira_Panel_Source_V0.4.3.zip -d firmware/source/work
+          if [ -d firmware/overrides/MIRA_PANEL ]; then cp -a firmware/overrides/MIRA_PANEL/. firmware/source/work/MIRA_PANEL/; fi
+          for p in current.patch ota-safety.patch v0.4.5.patch v0.4.6.patch v0.4.7.patch; do
+            if [ -s "firmware/patches/$p" ]; then (cd firmware/source/work/MIRA_PANEL && patch --batch --forward -p0 < "../../../patches/$p"); fi
+          done
+          if [ -d firmware/final-overrides/MIRA_PANEL ]; then cp -a firmware/final-overrides/MIRA_PANEL/. firmware/source/work/MIRA_PANEL/; fi
+          for s in v0.4.8.py v0.4.9.py v0.4.10.py v0.4.11.py v0.5.0.py v0.5.0_ota_sync.py v0.5.1.py v0.5.2.py v0.5.3.py v0.5.4.py v0.5.5.py v0.5.6.py v0.5.7.py v0.5.8.py v0.5.9.py v0.5.10.py v0.5.11.py v0.5.12.py v0.5.13.py; do python3 "firmware/scripts/$s" firmware/source/work/MIRA_PANEL; done
+          python3 firmware/scripts/v0.6.0_runner.py firmware/source/work/MIRA_PANEL
+          for s in v0.6.1.py v0.6.2.py v0.6.3.py v0.6.4.py v0.6.5.py v0.6.6.py v0.6.7.py v0.6.8.py v0.6.9.py v0.6.10.py v0.6.11.py v0.6.12.py v0.6.13.py v0.6.14.py v0.6.15.py v0.6.16.py v0.6.17.py v0.6.17_fontfix.py v0.6.18.py v0.6.19.py v0.6.20.py v0.6.21.py v0.6.22.py v0.6.23.py v0.6.24.py v0.6.25.py v0.6.26.py v0.6.27.py v0.6.28.py v0.6.29.py v0.6.30.py v0.6.31.py v0.6.32.py v0.6.33.py; do python3 "firmware/scripts/$s" firmware/source/work/MIRA_PANEL; done
+      - name: Upload reconstructed source
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mira_0.6.33_reconstructed_source
+          path: firmware/source/work/MIRA_PANEL/
+          retention-days: 1
