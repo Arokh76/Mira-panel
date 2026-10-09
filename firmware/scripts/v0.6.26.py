@@ -31,3 +31,5 @@ replace_once(
 )
 
 print('Mira Panel 0.6.26 applied: per-profile RGB565 byte order (WT32=swap, Waveshare=native)')
+
+# Build trigger: Waveshare RGB565 validation
