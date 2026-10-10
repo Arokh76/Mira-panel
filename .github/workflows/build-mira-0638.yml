@@ -84,6 +84,7 @@ jobs:
           arduino-cli compile             --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,CPUFreq=240,FlashMode=qio,FlashSize=8M,PartitionScheme=default_8MB,PSRAM=enabled,UploadMode=default,USBMode=hwcdc"             --output-dir build-wt32             firmware/source/work/MIRA_PANEL
           test -s build-wt32/MIRA_PANEL.ino.bin
           strings build-wt32/MIRA_PANEL.ino.bin | grep -Fxq '0.6.38'
+          strings build-wt32/MIRA_PANEL.ino.bin | grep -Fq 'WT32-SC01 Plus'
 
       - name: Package WT32-SC01 Plus 0.6.38 OTA preview
         shell: bash
@@ -187,6 +188,7 @@ jobs:
             firmware/source/work/MIRA_PANEL
           test -s build-waveshare/MIRA_PANEL.ino.bin
           strings build-waveshare/MIRA_PANEL.ino.bin | grep -Fxq '0.6.38'
+          strings build-waveshare/MIRA_PANEL.ino.bin | grep -Fq 'Waveshare ESP32-S3 Touch LCD 4.3C'
           strings build-waveshare/MIRA_PANEL.ino.bin | grep -Fq '[MIRA][WAVESHARE] Port LVGL Waveshare officiel actif'
           PARTTOOL="$(find "$HOME/.arduino15/packages/esp32" -name gen_esp32part.py -type f | head -n1)"
           test -n "$PARTTOOL"
