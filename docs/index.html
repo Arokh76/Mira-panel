@@ -62,7 +62,7 @@
     <section class="card">
       <h1>Installer Mira Panel</h1>
       <p class="lead">Branchez votre écran en USB et installez le firmware directement depuis votre navigateur. Aucun logiciel ni Arduino IDE n'est nécessaire.</p>
-      <div class="version"><span class="badge"><span class="dot"></span>Version stable <span id="version">…</span></span></div>
+      <div class="version"><span class="badge"><span class="dot"></span>Version du firmware <span id="version">…</span></span></div>
 
       <ol class="steps">
         <li><span class="num">1</span><div><b>Branchez l'écran en USB</b><span>Utilisez le port USB de l'écran relié directement à votre ordinateur.</span></div></li>
@@ -85,11 +85,13 @@
         </div>
         <div id="installerSlot" data-ready="false">
           <div class="selectFirst">Le bouton d'installation apparaît dès qu'un firmware compatible est disponible.</div>
-          <esp-web-install-button id="miraInstaller" manifest="manifest-wt32.json">
+          <template id="installerTemplate">
+          <esp-web-install-button>
           <button slot="activate" class="installBtn">Installer Mira Panel</button>
           <span slot="unsupported" class="unsupported">Ce navigateur ne permet pas l'installation USB. Ouvrez cette page avec Google Chrome ou Microsoft Edge sur un ordinateur.</span>
           <span slot="not-allowed" class="unsupported">L'accès au port USB est bloqué par le navigateur. Rechargez la page en HTTPS puis réessayez.</span>
           </esp-web-install-button>
+          </template>
         </div>
         <p class="note"><strong>Attention :</strong> l'installation USB complète efface la configuration présente sur l'écran. Pour une mise à jour normale d'un Mira Panel fonctionnel, utilisez uniquement l'OTA depuis son interface.</p>
       </div>
@@ -103,20 +105,30 @@
     (() => {
       const select = document.getElementById('hardware');
       const slot = document.getElementById('installerSlot');
-      const button = document.getElementById('miraInstaller');
+      const template = document.getElementById('installerTemplate');
+      let activeInstaller = null;
       const help = document.getElementById('deviceHelp');
       const version = document.getElementById('version');
       // The allowed filenames are fixed. Never construct a manifest URL from
       // arbitrary query-string input.
       const supported = {
-        'wt32-sc01-plus': 'manifest-wt32.json',
-        'waveshare-esp32s3-touch-lcd-4.3c': 'manifest-waveshare.json'
+        'wt32-sc01-plus': {
+          manifest: 'manifest-wt32.json',
+          factory: 'firmware/Mira_Panel_WT32_SC01_Plus_FACTORY.bin',
+          legacyFactory: 'firmware/Mira_Panel_Factory.bin'
+        },
+        'waveshare-esp32s3-touch-lcd-4.3c': {
+          manifest: 'manifest-waveshare.json',
+          factory: 'firmware/Mira_Panel_Waveshare_4.3C_FACTORY.bin'
+        }
       };
       let requestToken = 0;
 
       async function updateDevice() {
         const token = ++requestToken;
         slot.dataset.ready = 'false';
+        // Never reuse a Web Serial element initialized for another board.
+        if (activeInstaller) { activeInstaller.remove(); activeInstaller = null; }
         help.className = 'deviceHelp warning';
         const id = select.value;
         if (!Object.hasOwn(supported, id)) {
@@ -124,14 +136,25 @@
           return;
         }
         try {
-          const path = supported[id];
+          const profile = supported[id];
+          const path = profile.manifest;
           const response = await fetch(path + '?t=' + Date.now(), {cache:'no-store'});
           if (!response.ok) throw new Error('image non publiée');
           const manifest = await response.json();
-          if (!manifest.version || !Array.isArray(manifest.builds) || !manifest.builds.length)
-            throw new Error('manifeste incomplet');
+          if (!manifest.version || !Array.isArray(manifest.builds) ||
+              manifest.builds.length !== 1 ||
+              manifest.builds[0].chipFamily !== 'ESP32-S3' ||
+              !Array.isArray(manifest.builds[0].parts) ||
+              manifest.builds[0].parts.length !== 1 ||
+              manifest.builds[0].parts[0].offset !== 0 ||
+              (manifest.builds[0].parts[0].path !== profile.factory &&
+               manifest.builds[0].parts[0].path !== profile.legacyFactory))
+            throw new Error('manifeste incompatible avec le modèle sélectionné');
           if (token !== requestToken) return;
-          button.setAttribute('manifest', path);
+          const installer = template.content.firstElementChild.cloneNode(true);
+          installer.setAttribute('manifest', path);
+          slot.appendChild(installer);
+          activeInstaller = installer;
           slot.dataset.ready = 'true';
           help.className = 'deviceHelp';
           help.textContent = 'Image ' + manifest.version + ' prête pour ' +

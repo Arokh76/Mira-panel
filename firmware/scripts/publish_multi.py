@@ -8,7 +8,6 @@ import argparse
 import hashlib
 import json
 import re
-import shutil
 from pathlib import Path
 
 TARGETS = {
@@ -97,6 +96,24 @@ def prepare(inputs: Path, root: Path, version: str) -> dict:
         dest = root / "docs" / spec["manifest"]
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(json.dumps(web_manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    # Legacy WT32 0.6.5 installations still use the generic OTA URL.
+    # These two files MUST remain specific to WT32, never to Waveshare.
+    wt32_ota = prepared["wt32-sc01-plus"]["ota"]
+    (root / "firmware" / "Mira_Panel.bin").write_bytes(wt32_ota)
+    wt32_manifest = root / "docs" / TARGETS["wt32-sc01-plus"]["manifest"]
+    (root / "docs" / "manifest.json").write_bytes(wt32_manifest.read_bytes())
+    legacy_version = {
+        "project": "Mira Panel",
+        "version": version,
+        "bin": RAW_BASE + "firmware/Mira_Panel.bin",
+        "factory": targets["wt32-sc01-plus"]["factory"],
+        "installer": "https://arokh76.github.io/Mira-panel/",
+    }
+    (root / "firmware" / "version.json").write_text(
+        json.dumps(legacy_version, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
 
     release = {"project": "Mira Panel", "version": version, "targets": targets}
     outfile = root / "firmware" / "targets.json"

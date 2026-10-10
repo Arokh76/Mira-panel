@@ -20,6 +20,14 @@ class MultiReleaseTests(unittest.TestCase):
             self.assertTrue((p / "repo/docs/manifest-wt32.json").is_file())
             self.assertTrue((p / "repo/docs/manifest-waveshare.json").is_file())
             self.assertTrue((p / "repo/firmware/targets.json").is_file())
+            import json
+            legacy = json.loads((p / "repo/firmware/version.json").read_text())
+            self.assertEqual(legacy["version"], "0.6.38")
+            self.assertTrue(legacy["bin"].endswith("/firmware/Mira_Panel.bin"))
+            self.assertEqual((p / "repo/firmware/Mira_Panel.bin").read_bytes(),
+                             (p / "inputs/wt32/Mira_Panel_WT32_SC01_Plus_0.6.38.bin").read_bytes())
+            self.assertEqual((p / "repo/docs/manifest.json").read_bytes(),
+                             (p / "repo/docs/manifest-wt32.json").read_bytes())
 
     def test_missing_target_does_not_publish_partial_release(self):
         with tempfile.TemporaryDirectory() as work:
