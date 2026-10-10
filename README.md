@@ -1,19 +1,20 @@
 # Mira Panel
 
-Écran domotique pour Jeedom : **WT32-SC01 Plus** et **Waveshare ESP32-S3 Touch LCD 4.3C**.
+Écran domotique pour Jeedom : **WT32-SC01 Plus**, **Waveshare ESP32-S3 Touch LCD 4.3C** et, à terme, **Open Nextion ONX2432G028 (2,8 pouces)**.
 
 Le dépôt contient les sources, les correctifs successifs et les automatisations de compilation des deux matériels.
 
-**Objectif du projet : un seul fichier firmware OTA universel**, identique pour WT32-SC01 Plus et Waveshare 4.3C, avec auto-détection matérielle au démarrage, interface Mira commune et LVGL 8.4 sur les deux cibles. **Cet objectif n'est pas encore atteint.** Les compilations 0.6.38 actuelles produisent temporairement des binaires distincts ; ne pas flasher le binaire Waveshare sur un WT32 ou inversement.
+**Objectif du projet : un seul code source Mira, une seule version et une seule publication, avec des binaires adaptés à chaque matériel et choisis automatiquement par l'installateur.** Les fichiers propres aux cartes ne sont pas interchangeables. L'installation automatique multi-matériel n'est pas encore développée ; l'architecture cible compte aussi le futur Open Nextion 2,8 pouces.
 
-Voir [FIRMWARE_UNIVERSEL.md](FIRMWARE_UNIVERSEL.md) pour les verrous techniques à lever avant d'essayer un firmware commun.
+Voir [FIRMWARE_UNIVERSEL.md](FIRMWARE_UNIVERSEL.md) pour la stratégie de build, de détection avant flash USB, de publication unique et d'OTA par profil.
 
 ## Versions conservées
 
 | Cible | Version | État | Source de build |
 | --- | --- | --- | --- |
-| WT32-SC01 Plus (8 Mo) | 0.6.38 (preview), 0.6.5 (publiée) | La 0.6.38 compile ; essai matériel encore à faire | `.github/workflows/build-mira-0638.yml` (preview) et `build-firmware.yml` (publication actuelle) |
+| WT32-SC01 Plus (8 Mo) | 0.6.38 testée, 0.6.5 publiée | Mise à jour 0.6.38 installée et validée sur appareil par l'utilisateur | `.github/workflows/build-mira-0638.yml` (preview) et `build-firmware.yml` (publication actuelle) |
 | Waveshare 4.3C (16 Mo, 800×480) | 0.6.38 | Testée sur écran réel ; stabilité encourageante, validation longue durée en cours | `.github/workflows/build-mira-0638.yml` |
+| Open Nextion ONX2432G028 (16 Mo, 240×320) | Portage prévu | Matériel non encore porté dans Mira | À intégrer au même workflow |
 
 **Waveshare 0.6.38** : port LVGL 8.4 Waveshare, trois buffers RGB, rafraîchissement complet et pixel clock réduit de **16 MHz à 12 MHz**. Cette seule modification de la 0.6.37 a supprimé les artefacts observés pendant les premiers essais. Il reste à confirmer la stabilité sur la durée.
 
@@ -21,7 +22,7 @@ Le premier build Waveshare 0.6.38 validé par GitHub Actions est consultable ici
 [Build 0.6.38](https://github.com/Arokh76/Mira-panel/actions/runs/38003987693).
 L'artefact `Mira_Panel_Waveshare_4.3C_0.6.38_preview` contient un binaire **OTA** ainsi qu'une image **FACTORY** ; l'archive GitHub Actions a une durée de rétention limitée.
 
-**Important** : la 0.6.38 est une **base de code commune**, adaptée à la compilation de chaque écran. La compatibilité WT32 est compilée mais **pas encore validée sur matériel**. Les artifacts CI sont deux ZIP indépendants avec des `.bin` OTA explicitement nommés. `firmware/version.json`, `firmware/Mira_Panel.bin` et l'installateur `docs/` publient pour l'instant **WT32 0.6.5** ; aucune publication automatique 0.6.38 n'est activée avant essai WT32.
+**Important** : la 0.6.38 est une **base de code commune**, compilée avec un profil par matériel. Les deux appareils existants ont été testés sur matériel. Les artefacts CI sont deux ZIP indépendants avec des `.bin` OTA explicitement nommés. `firmware/version.json`, `firmware/Mira_Panel.bin` et l'installateur `docs/` publient pour l'instant **WT32 0.6.5** : la publication multi-profils 0.6.38 et l'auto-détection initiale ne sont pas encore actives.
 
 ## Workflows actifs
 
