@@ -1,6 +1,10 @@
 name: Publish Mira Panel - one release, multiple hardware targets
 
 on:
+  workflow_run:
+    workflows:
+      - 'Build Mira Panel 0.6.39 - WT32 SC01 Plus et Waveshare 4.3C'
+    types: [completed]
   workflow_dispatch:
     inputs:
       version:
@@ -23,7 +27,15 @@ concurrency:
 
 jobs:
   publish:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
+    env:
+      RELEASE_VERSION: ${{ github.event_name == 'workflow_run' && '0.6.39' || inputs.version }}
+      RELEASE_RUN_ID: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || inputs.run_id }}
     steps:
       - name: Checkout current main
         uses: actions/checkout@v4
@@ -37,7 +49,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
-          RUN_ID: ${{ inputs.run_id }}
+          RUN_ID: ${{ env.RELEASE_RUN_ID }}
         shell: bash
         run: |
           set -euo pipefail
@@ -56,8 +68,8 @@ jobs:
       - name: Download the two hardware artifacts
         env:
           GH_TOKEN: ${{ github.token }}
-          RUN_ID: ${{ inputs.run_id }}
-          VERSION: ${{ inputs.version }}
+          RUN_ID: ${{ env.RELEASE_RUN_ID }}
+          VERSION: ${{ env.RELEASE_VERSION }}
         shell: bash
         run: |
           set -euo pipefail
@@ -71,7 +83,7 @@ jobs:
 
       - name: Prepare all target files and manifests atomically
         env:
-          VERSION: ${{ inputs.version }}
+          VERSION: ${{ env.RELEASE_VERSION }}
         shell: bash
         run: |
           set -euo pipefail
@@ -90,7 +102,7 @@ jobs:
 
       - name: Publish both hardware profiles in one commit
         env:
-          VERSION: ${{ inputs.version }}
+          VERSION: ${{ env.RELEASE_VERSION }}
         shell: bash
         run: |
           set -euo pipefail
