@@ -78,6 +78,8 @@ R"rawliteral(';
   var CURRENT='%VERSION%';
   var remoteBin='';
   var remoteVer='';
+  var remoteSize=0;
+  var remoteSha='';
 
   var checkBtn=document.getElementById('checkUpdate');
   var statusBox=document.getElementById('updateStatus');
@@ -164,12 +166,14 @@ R"rawliteral(';
     checkBtn.disabled=true;
     checkBtn.textContent='Vérification…';
     installRow.classList.remove('show');
-    remoteBin='';remoteVer='';
+    remoteBin='';remoteVer='';remoteSize=0;remoteSha='';
     setStatus('','Recherche d’une mise à jour…','Vérification effectuée par ton navigateur, pas par l’ESP.');
     try{
       var data=await fetchManifest();
       remoteVer=String(data.version||'');
       remoteBin=String(data.bin||'');
+      remoteSize=Number(data.size||0);
+      remoteSha=String(data.sha256||'').toLowerCase();
       if(remoteBin.indexOf('https://raw.githubusercontent.com/Arokh76/Mira-panel/')!==0){
         throw new Error('adresse du firmware inattendue');
       }
@@ -188,6 +192,29 @@ R"rawliteral(';
     checkBtn.disabled=false;
   });
 
+  async function validateDownloadedFirmware(blob){
+    if(blob.size<500000)throw new Error('firmware trop petit');
+    if(remoteSize && blob.size!==remoteSize){
+      throw new Error('Taille du firmware différente du manifeste');
+    }
+    var bytes=new Uint8Array(await blob.arrayBuffer());
+    var expected=new TextEncoder().encode(remoteVer);
+    var hasVersion=false;
+    outer:for(var i=0;i<=bytes.length-expected.length;i++){
+      for(var j=0;j<expected.length;j++)if(bytes[i+j]!==expected[j])continue outer;
+      hasVersion=true;break;
+    }
+    if(!hasVersion)throw new Error('Version annoncée absente du firmware téléchargé');
+    // WebCrypto is available only in secure browser contexts. Mira normally
+    // serves its own Web UI over HTTP, so the release size and version checks
+    // remain mandatory even if SHA-256 cannot be calculated by the browser.
+    if(remoteSha && window.crypto && crypto.subtle){
+      var digest=new Uint8Array(await crypto.subtle.digest('SHA-256',bytes));
+      var hex=Array.from(digest).map(function(x){return x.toString(16).padStart(2,'0');}).join('');
+      if(hex!==remoteSha)throw new Error('Empreinte SHA-256 invalide');
+    }
+  }
+
   async function fetchFirmware(){
     var candidates=[{url:remoteBin,opt:{cache:'no-store'}}];
     var lastError='';
@@ -199,8 +226,8 @@ R"rawliteral(';
         var total=parseInt(r.headers.get('content-length')||'0',10);
         if(!r.body||!r.body.getReader){
           var blob=await r.blob();
-          if(blob.size<500000)throw new Error('firmware trop petit');
-          setProgress(45,'Firmware téléchargé. Préparation de l’envoi local…','Mise à jour '+remoteVer);
+          await validateDownloadedFirmware(blob);
+          setProgress(45,'Firmware vérifié. Préparation de l’envoi local…','Mise à jour '+remoteVer);
           return blob;
         }
         var reader=r.body.getReader(),chunks=[],loaded=0;
@@ -212,8 +239,8 @@ R"rawliteral(';
           setProgress(pct,'Téléchargement depuis GitHub…','Mise à jour '+remoteVer);
         }
         var b=new Blob(chunks,{type:'application/octet-stream'});
-        if(b.size<500000)throw new Error('firmware trop petit');
-        setProgress(45,'Firmware téléchargé. Préparation de l’envoi local…','Mise à jour '+remoteVer);
+        await validateDownloadedFirmware(b);
+        setProgress(45,'Firmware vérifié. Préparation de l’envoi local…','Mise à jour '+remoteVer);
         return b;
       }catch(e){lastError=e&&e.message?e.message:String(e);}
     }
