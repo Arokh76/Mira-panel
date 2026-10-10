@@ -8,20 +8,20 @@ Le dépôt contient les sources, les correctifs successifs et les automatisation
 
 | Cible | Version | État | Source de build |
 | --- | --- | --- | --- |
-| WT32-SC01 Plus (8 Mo) | 0.6.5 | Version publiée pour la mise à jour automatique | `.github/workflows/build-firmware.yml` |
-| Waveshare 4.3C (16 Mo, 800×480) | 0.6.38 | Testée sur écran réel ; stabilité encourageante, validation longue durée en cours | `.github/workflows/build-waveshare-0638.yml` |
+| WT32-SC01 Plus (8 Mo) | 0.6.38 (preview), 0.6.5 (publiée) | La 0.6.38 compile ; essai matériel encore à faire | `.github/workflows/build-mira-0638.yml` (preview) et `build-firmware.yml` (publication actuelle) |
+| Waveshare 4.3C (16 Mo, 800×480) | 0.6.38 | Testée sur écran réel ; stabilité encourageante, validation longue durée en cours | `.github/workflows/build-mira-0638.yml` |
 
 **Waveshare 0.6.38** : port LVGL 8.4 Waveshare, trois buffers RGB, rafraîchissement complet et pixel clock réduit de **16 MHz à 12 MHz**. Cette seule modification de la 0.6.37 a supprimé les artefacts observés pendant les premiers essais. Il reste à confirmer la stabilité sur la durée.
 
-Le dernier build Waveshare validé par GitHub Actions est consultable ici :
+Le premier build Waveshare 0.6.38 validé par GitHub Actions est consultable ici :
 [Build 0.6.38](https://github.com/Arokh76/Mira-panel/actions/runs/38003987693).
 L'artefact `Mira_Panel_Waveshare_4.3C_0.6.38_preview` contient un binaire **OTA** ainsi qu'une image **FACTORY** ; l'archive GitHub Actions a une durée de rétention limitée.
 
-**Attention** : `firmware/version.json`, `firmware/Mira_Panel.bin` et l'installateur `docs/` concernent toujours le **WT32 0.6.5**. Ils ne doivent pas être remplacés par un binaire 16 Mo du Waveshare.
+**Important** : la 0.6.38 est une **base de code commune**, adaptée à la compilation de chaque écran. La compatibilité WT32 est compilée mais **pas encore validée sur matériel**. Les artifacts CI sont deux ZIP indépendants avec des `.bin` OTA explicitement nommés. `firmware/version.json`, `firmware/Mira_Panel.bin` et l'installateur `docs/` publient pour l'instant **WT32 0.6.5** ; aucune publication automatique 0.6.38 n'est activée avant essai WT32.
 
 ## Workflows actifs
 
-- `build-waveshare-0638.yml` : firmware Waveshare 0.6.38 et vérification de compilation WT32.
+- `build-mira-0638.yml` : compile et génère **deux firmwares OTA distincts de version 0.6.38** : WT32-SC01 Plus (8 Mo) et Waveshare 4.3C (16 Mo).
 - `build-firmware.yml` : build de publication WT32 0.6.5.
 - `publish-firmware.yml` et `sync-web-installer.yml` : publication WT32 ; ne pas utiliser pour le Waveshare.
 - `pages.yml` : déploiement de l'installateur web.
