@@ -4,10 +4,11 @@
 
 | Cible | Flash | Propriété |
 | --- | ---: | --- |
-| WT32-SC01 Plus | 8 Mo | Firmware 0.6.38 en compilation preview sur la même base Mira (essai matériel restant) ; OTA et Web Installer publiés encore en 0.6.5 |
+| WT32-SC01 Plus | 8 Mo | Firmware 0.6.38 installé et confirmé fonctionnel sur matériel ; OTA et Web Installer publiés encore en 0.6.5 |
 | Waveshare Touch LCD 4.3C | 16 Mo | Firmware d'essai 0.6.38 ; RGB 800×480 ; LVGL 8.4 et triple-buffer |
+| Open Nextion ONX2432G028 | 16 Mo | Future cible 2,8 pouces ; ESP32-S3R8, LVGL, ST7789 240×320 et CST826 ; firmware à porter |
 
-Le firmware Waveshare ne doit **jamais** être publié sous les anciens noms génériques destinés au WT32. Prévoir à terme `firmware/waveshare/` et un manifeste séparé avant d'activer une OTA publique pour ce matériel.
+Ne jamais publier un firmware Waveshare ou Nextion sous un chemin OTA générique WT32. À terme, publier **un seul manifeste de version Mira comportant une entrée par matériel** ; le système d'installation choisira le fichier correspondant au profil détecté, avec vérification du modèle avant flash.
 
 ## Point de récupération Waveshare
 
@@ -34,7 +35,7 @@ Avant de les archiver, effectuer un export consolidé des sources 0.6.38, le com
 
 ## Workflows et archivage
 
-Le workflow **`.github/workflows/build-mira-0638.yml`** génère deux archives séparées : `Mira_Panel_WT32_SC01_Plus_0.6.38_preview` (OTA ESP32-S3 8 Mo avec LVGL 8.3.11) et `Mira_Panel_Waveshare_4.3C_0.6.38_preview` (OTA + FACTORY 16 Mo avec LVGL 8.4, triple-buffer, RGB 12 MHz). Les deux partagent les mêmes scripts Mira, mais **pas les paramètres du pilote ni le partitionnement**. La compilation seule ne garantit pas le fonctionnement sur WT32 : il faut valider OTA, affichage, tactile et Jeedom sur matériel.
+Le workflow **`.github/workflows/build-mira-0638.yml`** génère deux archives séparées : `Mira_Panel_WT32_SC01_Plus_0.6.38_preview` (OTA ESP32-S3 8 Mo avec LVGL 8.3.11) et `Mira_Panel_Waveshare_4.3C_0.6.38_preview` (OTA + FACTORY 16 Mo avec LVGL 8.4, triple-buffer, RGB 12 MHz). Les deux partagent les mêmes scripts Mira, mais **pas les paramètres du pilote ni le partitionnement**. Le WT32 et le Waveshare 0.6.38 ont été validés par l'utilisateur sur matériel ; le Nextion attend son portage et ses tests.
 
 Les workflows GitHub Actions exécutables vivent exclusivement dans `.github/workflows/`. Les workflows de diagnostic et de versions dépassées sont archivés en `.github/archive/workflows/`, avec contenu identique et historique conservé. Si un ancien workflow est utile, il suffit de le restaurer dans `.github/workflows/` dans une branche de travail.
 
@@ -42,6 +43,7 @@ Les workflows de publication du WT32 restent actifs : `build-firmware.yml`, `pub
 
 ## Prochaines étapes proposées
 
-1. Vérifier la 0.6.38 WT32 sur matériel (OTA, affichage, tactile, widgets et Jeedom), puis poursuivre la stabilité longue durée Waveshare.
-2. Corriger l'affichage du pourcentage de luminosité dans une version ultérieure, sans modifier le RGB.
-3. Consolider les sources de firmware et introduire deux parcours de publication séparés WT32 / Waveshare.
+1. Compléter les tests longue durée des deux 0.6.38 existantes et corriger les libellés de plateforme.
+2. Construire la **publication multi-profils** : un seul numéro de version, un seul workflow de publication, plusieurs fichiers ciblés, un seul manifeste, auto-détection avant installation quand elle est fiable.
+3. Étudier le portage de l'Open Nextion ONX2432G028 2,8 pouces, avec son pilote ST7789 et son tactile CST826.
+4. Consolider les sources et, dans une révision distincte, corriger le pourcentage de luminosité sans modifier le RGB Waveshare.
