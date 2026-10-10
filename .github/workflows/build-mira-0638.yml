@@ -245,3 +245,28 @@ jobs:
           path: package-waveshare/
           if-no-files-found: error
           retention-days: 14
+
+      - name: Smoke-test multi-target publication with the actual compiled binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/mira-release-check/inputs/wt32 /tmp/mira-release-check/inputs/waveshare
+          cp package-wt32/Mira_Panel_WT32_SC01_Plus_0.6.38*.bin /tmp/mira-release-check/inputs/wt32/
+          cp package-waveshare/Mira_Panel_Waveshare_4.3C_0.6.38*.bin /tmp/mira-release-check/inputs/waveshare/
+          python3 firmware/scripts/publish_multi.py \
+            --inputs /tmp/mira-release-check/inputs \
+            --repo /tmp/mira-release-check/output \
+            --version 0.6.38
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          p = Path('/tmp/mira-release-check/output/firmware/targets.json')
+          data = json.loads(p.read_text())
+          assert data['version'] == '0.6.38'
+          assert len(data['targets']) == 2
+          for profile, spec in data['targets'].items():
+              assert len(spec['otaSha256']) == 64
+              assert len(spec['factorySha256']) == 64
+              assert spec['otaBytes'] > 500000
+          print('Both real Mira firmware profiles can be published together')
+          PY
