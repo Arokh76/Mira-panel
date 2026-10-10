@@ -2,7 +2,11 @@
 
 Écran domotique pour Jeedom : **WT32-SC01 Plus** et **Waveshare ESP32-S3 Touch LCD 4.3C**.
 
-Le dépôt contient les sources, les correctifs successifs et les automatisations de compilation des deux matériels. **Les firmwares ne sont pas interchangeables** : ne pas flasher un binaire Waveshare sur un WT32 (ni l'inverse).
+Le dépôt contient les sources, les correctifs successifs et les automatisations de compilation des deux matériels.
+
+**Objectif du projet : un seul fichier firmware OTA universel**, identique pour WT32-SC01 Plus et Waveshare 4.3C, avec auto-détection matérielle au démarrage, interface Mira commune et LVGL 8.4 sur les deux cibles. **Cet objectif n'est pas encore atteint.** Les compilations 0.6.38 actuelles produisent temporairement des binaires distincts ; ne pas flasher le binaire Waveshare sur un WT32 ou inversement.
+
+Voir [FIRMWARE_UNIVERSEL.md](FIRMWARE_UNIVERSEL.md) pour les verrous techniques à lever avant d'essayer un firmware commun.
 
 ## Versions conservées
 
