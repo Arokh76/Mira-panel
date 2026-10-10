@@ -1,3 +1,12 @@
+// Human-readable board name on the System page.
+// NOTE: This follows the current build-target selection. The planned
+// universal OTA firmware will replace it with actual runtime board detection.
+#if defined(MIRA_TARGET_WAVESHARE_43C)
+  #define MIRA_SYS_PLATFORM_LABEL "Waveshare ESP32-S3 Touch LCD 4.3C"
+#else
+  #define MIRA_SYS_PLATFORM_LABEL "WT32-SC01 Plus"
+#endif
+
 const char Page_Sys[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html lang="fr">
@@ -20,7 +29,9 @@ main{max-width:940px;margin:28px auto;padding:0 18px 42px}.hero{margin-bottom:16
 <main>
   <div class="hero"><h1>Système</h1><p>Maintenance, informations et mises à jour de Mira Panel.</p></div>
   <div class="grid">
-    <section class="card"><h2>Informations</h2><p class="hint">État général du panneau.</p><div class="kv"><span>Firmware</span><strong>%VERSION%</strong></div><div class="kv"><span>Adresse IP</span><strong>%LOCALIP%</strong></div><div class="kv"><span>Plateforme</span><strong>WT32-SC01 Plus</strong></div></section>
+    <section class="card"><h2>Informations</h2><p class="hint">État général du panneau.</p><div class="kv"><span>Firmware</span><strong>%VERSION%</strong></div><div class="kv"><span>Adresse IP</span><strong>%LOCALIP%</strong></div><div class="kv"><span>Plateforme</span><strong>)rawliteral"
+MIRA_SYS_PLATFORM_LABEL
+R"rawliteral(</strong></div></section>
     <section class="card"><h2>Maintenance</h2><p class="hint">Actions locales sur le panneau.</p><div class="buttons"><button class="btn secondary" onclick="window.location.href='/load?nav=reboot'">Redémarrer</button><button class="btn" onclick="window.location.href='/load?nav=rst'">Gestion des données</button></div></section>
 
     <section class="card full">
