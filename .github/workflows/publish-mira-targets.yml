@@ -4,12 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version produced by build-mira-0638.yml (example 0.6.38)"
+        description: "Version produced by build-mira.yml (example 0.6.39)"
         required: true
-        default: "0.6.38"
+        default: "0.6.39"
         type: string
       run_id:
-        description: "Successful build-mira-0638.yml run ID on main, same commit"
+        description: "Successful build-mira.yml run ID on main, same commit"
         required: true
         type: string
 
@@ -49,7 +49,7 @@ jobs:
             and .head_branch == "main"
             and .event == "push"
             and .head_sha == $commit
-            and .path == ".github/workflows/build-mira-0638.yml"
+            and .path == ".github/workflows/build-mira.yml"
           ' /tmp/mira-build.json
           echo "Verified build #$RUN_ID of main commit $COMMIT"
 

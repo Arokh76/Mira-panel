@@ -35,11 +35,15 @@ Avant de les archiver, effectuer un export consolidé des sources 0.6.38, le com
 
 ## Workflows et archivage
 
-Le workflow **`.github/workflows/build-mira-0638.yml`** génère deux archives séparées : `Mira_Panel_WT32_SC01_Plus_0.6.38_preview` (OTA ESP32-S3 8 Mo avec LVGL 8.3.11) et `Mira_Panel_Waveshare_4.3C_0.6.38_preview` (OTA + FACTORY 16 Mo avec LVGL 8.4, triple-buffer, RGB 12 MHz). Les deux partagent les mêmes scripts Mira, mais **pas les paramètres du pilote ni le partitionnement**. Le WT32 et le Waveshare 0.6.38 ont été validés par l'utilisateur sur matériel ; le Nextion attend son portage et ses tests.
+Le workflow **`.github/workflows/build-mira.yml`** génère deux archives séparées : `Mira_Panel_WT32_SC01_Plus_0.6.38_preview` (OTA ESP32-S3 8 Mo avec LVGL 8.3.11) et `Mira_Panel_Waveshare_4.3C_0.6.38_preview` (OTA + FACTORY 16 Mo avec LVGL 8.4, triple-buffer, RGB 12 MHz). Les deux partagent les mêmes scripts Mira, mais **pas les paramètres du pilote ni le partitionnement**. Le WT32 et le Waveshare 0.6.38 ont été validés par l'utilisateur sur matériel ; le Nextion attend son portage et ses tests.
 
 Les workflows GitHub Actions exécutables vivent exclusivement dans `.github/workflows/`. Les workflows de diagnostic et de versions dépassées sont archivés en `.github/archive/workflows/`, avec contenu identique et historique conservé. Si un ancien workflow est utile, il suffit de le restaurer dans `.github/workflows/` dans une branche de travail.
 
 Les workflows de publication du WT32 restent actifs : `build-firmware.yml`, `publish-firmware.yml`, `sync-web-installer.yml`, `pages.yml`. Le workflow Waveshare officiel de référence reste disponible. **Ne pas relier le workflow 0.6.38 à la publication générique WT32.**
+
+## Aperçu multi-écrans 0.6.39
+
+Le workflow `build-mira.yml` doit désormais produire la préversion 0.6.39 en parallèle pour WT32 et Waveshare, tandis que les 0.6.38 restent les points de restauration validés. La publication doit rester désactivée en attendant les tests de la préversion sur les deux modèles.
 
 ## Prochaines étapes proposées
 
