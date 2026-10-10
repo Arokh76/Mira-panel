@@ -1,14 +1,13 @@
 {
-  "name": "Mira Panel",
-  "version": "0.6.5",
-  "new_install_prompt_erase": false,
-  "new_install_improv_wait_time": 0,
+  "name": "Mira Panel - WT32-SC01 Plus",
+  "version": "0.6.39",
+  "new_install_prompt_erase": true,
   "builds": [
     {
       "chipFamily": "ESP32-S3",
       "parts": [
         {
-          "path": "firmware/Mira_Panel_Factory.bin",
+          "path": "firmware/Mira_Panel_WT32_SC01_Plus_FACTORY.bin",
           "offset": 0
         }
       ]

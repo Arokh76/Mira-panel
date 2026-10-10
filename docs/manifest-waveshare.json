@@ -1,5 +1,5 @@
 {
-  "name": "Mira Panel - WT32-SC01 Plus",
+  "name": "Mira Panel - Waveshare ESP32-S3 Touch LCD 4.3C",
   "version": "0.6.39",
   "new_install_prompt_erase": true,
   "builds": [
@@ -7,7 +7,7 @@
       "chipFamily": "ESP32-S3",
       "parts": [
         {
-          "path": "firmware/Mira_Panel_WT32_SC01_Plus_FACTORY.bin",
+          "path": "firmware/Mira_Panel_Waveshare_4.3C_FACTORY.bin",
           "offset": 0
         }
       ]
