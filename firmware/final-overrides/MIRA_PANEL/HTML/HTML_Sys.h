@@ -1,3 +1,14 @@
+// Human-readable board name on the System page.
+// NOTE: This follows the current build-target selection. The planned
+// universal OTA firmware will replace it with actual runtime board detection.
+#if defined(MIRA_TARGET_WAVESHARE_43C)
+  #define MIRA_SYS_PLATFORM_LABEL "Waveshare ESP32-S3 Touch LCD 4.3C"
+  #define MIRA_SYS_PLATFORM_ID "waveshare-esp32s3-touch-lcd-4.3c"
+#else
+  #define MIRA_SYS_PLATFORM_LABEL "WT32-SC01 Plus"
+  #define MIRA_SYS_PLATFORM_ID "wt32-sc01-plus"
+#endif
+
 const char Page_Sys[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html lang="fr">
@@ -20,7 +31,9 @@ main{max-width:940px;margin:28px auto;padding:0 18px 42px}.hero{margin-bottom:16
 <main>
   <div class="hero"><h1>Système</h1><p>Maintenance, informations et mises à jour de Mira Panel.</p></div>
   <div class="grid">
-    <section class="card"><h2>Informations</h2><p class="hint">État général du panneau.</p><div class="kv"><span>Firmware</span><strong>%VERSION%</strong></div><div class="kv"><span>Adresse IP</span><strong>%LOCALIP%</strong></div><div class="kv"><span>Plateforme</span><strong>WT32-SC01 Plus</strong></div></section>
+    <section class="card"><h2>Informations</h2><p class="hint">État général du panneau.</p><div class="kv"><span>Firmware</span><strong>%VERSION%</strong></div><div class="kv"><span>Adresse IP</span><strong>%LOCALIP%</strong></div><div class="kv"><span>Plateforme</span><strong>)rawliteral"
+MIRA_SYS_PLATFORM_LABEL
+R"rawliteral(</strong></div></section>
     <section class="card"><h2>Maintenance</h2><p class="hint">Actions locales sur le panneau.</p><div class="buttons"><button class="btn secondary" onclick="window.location.href='/load?nav=reboot'">Redémarrer</button><button class="btn" onclick="window.location.href='/load?nav=rst'">Gestion des données</button></div></section>
 
     <section class="card full">
@@ -57,10 +70,16 @@ main{max-width:940px;margin:28px auto;padding:0 18px 42px}.hero{margin-bottom:16
 (function(){
   var VERSION_URL='https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/version.json';
   var VERSION_API='https://api.github.com/repos/Arokh76/Mira-panel/contents/firmware/version.json?ref=main';
-  var BIN_API='https://api.github.com/repos/Arokh76/Mira-panel/contents/firmware/Mira_Panel.bin?ref=main';
+  var TARGETS_URL='https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/targets.json';
+  // Embedded by the C++ hardware profile in this firmware build.
+  var HARDWARE_PROFILE=')rawliteral"
+MIRA_SYS_PLATFORM_ID
+R"rawliteral(';
   var CURRENT='%VERSION%';
   var remoteBin='';
   var remoteVer='';
+  var remoteSize=0;
+  var remoteSha='';
 
   var checkBtn=document.getElementById('checkUpdate');
   var statusBox=document.getElementById('updateStatus');
@@ -99,6 +118,34 @@ main{max-width:940px;margin:28px auto;padding:0 18px 42px}.hero{margin-bottom:16
   }
 
   async function fetchManifest(){
+    // One release number, a typed OTA per hardware. Never allow the
+    // Waveshare to fall back to the legacy WT32-only binary.
+    var res,targetsError='';
+    try {
+      res=await fetch(TARGETS_URL+'?ts='+Date.now(),{cache:'no-store'});
+      if(res.ok){
+        var bundle=await res.json();
+        var target=bundle.targets && bundle.targets[HARDWARE_PROFILE];
+        if(bundle.project!=='Mira Panel'||!bundle.version||!target||!target.ota){
+          throw new Error('Aucun firmware OTA publié pour '+HARDWARE_PROFILE);
+        }
+        if(String(target.ota).indexOf('https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/releases/')!==0){
+          throw new Error('Adresse OTA multi-écrans inattendue');
+        }
+        return {project:'Mira Panel',version:bundle.version,bin:target.ota,
+          sha256:target.otaSha256||'',size:target.otaBytes||0};
+      }
+      if(res.status!==404) throw new Error('GitHub cible : HTTP '+res.status);
+    }catch(e){
+      // A real manifest error is never silently ignored for multi-hardware OTA.
+      targetsError=e&&e.message?e.message:String(e);
+      if(res&&res.ok)throw e;
+    }
+
+    if(HARDWARE_PROFILE!=='wt32-sc01-plus'){
+      throw new Error('Aucune publication Waveshare compatible. '+targetsError);
+    }
+    // Historical, WT32-only fallback while migrating existing deployments.
     var urls=[VERSION_URL+'?ts='+Date.now(),VERSION_API+'&ts='+Date.now()];
     var lastError='';
     for(var i=0;i<urls.length;i++){
@@ -108,7 +155,7 @@ main{max-width:940px;margin:28px auto;padding:0 18px 42px}.hero{margin-bottom:16
         var r=await fetch(urls[i],opt);
         if(!r.ok)throw new Error('HTTP '+r.status);
         var j=await r.json();
-        if(j.project!=='Mira Panel'||!j.version)throw new Error('manifest invalide');
+        if(j.project!=='Mira Panel'||!j.version||!j.bin)throw new Error('manifeste WT32 invalide');
         return j;
       }catch(e){lastError=e&&e.message?e.message:String(e);}
     }
@@ -119,12 +166,14 @@ main{max-width:940px;margin:28px auto;padding:0 18px 42px}.hero{margin-bottom:16
     checkBtn.disabled=true;
     checkBtn.textContent='Vérification…';
     installRow.classList.remove('show');
-    remoteBin='';remoteVer='';
+    remoteBin='';remoteVer='';remoteSize=0;remoteSha='';
     setStatus('','Recherche d’une mise à jour…','Vérification effectuée par ton navigateur, pas par l’ESP.');
     try{
       var data=await fetchManifest();
       remoteVer=String(data.version||'');
-      remoteBin=String(data.bin||'https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/Mira_Panel.bin');
+      remoteBin=String(data.bin||'');
+      remoteSize=Number(data.size||0);
+      remoteSha=String(data.sha256||'').toLowerCase();
       if(remoteBin.indexOf('https://raw.githubusercontent.com/Arokh76/Mira-panel/')!==0){
         throw new Error('adresse du firmware inattendue');
       }
@@ -143,19 +192,42 @@ main{max-width:940px;margin:28px auto;padding:0 18px 42px}.hero{margin-bottom:16
     checkBtn.disabled=false;
   });
 
+  async function validateDownloadedFirmware(blob){
+    if(blob.size<500000)throw new Error('firmware trop petit');
+    if(remoteSize && blob.size!==remoteSize){
+      throw new Error('Taille du firmware différente du manifeste');
+    }
+    var bytes=new Uint8Array(await blob.arrayBuffer());
+    var expected=new TextEncoder().encode(remoteVer);
+    var hasVersion=false;
+    outer:for(var i=0;i<=bytes.length-expected.length;i++){
+      for(var j=0;j<expected.length;j++)if(bytes[i+j]!==expected[j])continue outer;
+      hasVersion=true;break;
+    }
+    if(!hasVersion)throw new Error('Version annoncée absente du firmware téléchargé');
+    // WebCrypto is available only in secure browser contexts. Mira normally
+    // serves its own Web UI over HTTP, so the release size and version checks
+    // remain mandatory even if SHA-256 cannot be calculated by the browser.
+    if(remoteSha && window.crypto && crypto.subtle){
+      var digest=new Uint8Array(await crypto.subtle.digest('SHA-256',bytes));
+      var hex=Array.from(digest).map(function(x){return x.toString(16).padStart(2,'0');}).join('');
+      if(hex!==remoteSha)throw new Error('Empreinte SHA-256 invalide');
+    }
+  }
+
   async function fetchFirmware(){
-    var candidates=[{url:remoteBin,opt:{cache:'no-store'}},{url:BIN_API+'&ts='+Date.now(),opt:{cache:'no-store',headers:{'Accept':'application/vnd.github.raw+json'}}}];
+    var candidates=[{url:remoteBin,opt:{cache:'no-store'}}];
     var lastError='';
     for(var i=0;i<candidates.length;i++){
       try{
-        setProgress(0,i===0?'Téléchargement du firmware depuis GitHub…':'Nouvel essai via l’API GitHub…','Mise à jour '+remoteVer);
+        setProgress(0,'Téléchargement du firmware compatible avec '+HARDWARE_PROFILE+'…','Mise à jour '+remoteVer);
         var r=await fetch(candidates[i].url+(candidates[i].url.indexOf('?')>=0?'&':'?')+'ts='+Date.now(),candidates[i].opt);
         if(!r.ok)throw new Error('HTTP '+r.status);
         var total=parseInt(r.headers.get('content-length')||'0',10);
         if(!r.body||!r.body.getReader){
           var blob=await r.blob();
-          if(blob.size<500000)throw new Error('firmware trop petit');
-          setProgress(45,'Firmware téléchargé. Préparation de l’envoi local…','Mise à jour '+remoteVer);
+          await validateDownloadedFirmware(blob);
+          setProgress(45,'Firmware vérifié. Préparation de l’envoi local…','Mise à jour '+remoteVer);
           return blob;
         }
         var reader=r.body.getReader(),chunks=[],loaded=0;
@@ -167,8 +239,8 @@ main{max-width:940px;margin:28px auto;padding:0 18px 42px}.hero{margin-bottom:16
           setProgress(pct,'Téléchargement depuis GitHub…','Mise à jour '+remoteVer);
         }
         var b=new Blob(chunks,{type:'application/octet-stream'});
-        if(b.size<500000)throw new Error('firmware trop petit');
-        setProgress(45,'Firmware téléchargé. Préparation de l’envoi local…','Mise à jour '+remoteVer);
+        await validateDownloadedFirmware(b);
+        setProgress(45,'Firmware vérifié. Préparation de l’envoi local…','Mise à jour '+remoteVer);
         return b;
       }catch(e){lastError=e&&e.message?e.message:String(e);}
     }

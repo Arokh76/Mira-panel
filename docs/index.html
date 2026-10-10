@@ -36,6 +36,13 @@
     .steps{display:grid;gap:12px;margin:0 0 28px;padding:0;list-style:none}.steps li{display:flex;align-items:center;gap:14px;padding:15px 16px;background:var(--panel2);border:1px solid #17314c;border-radius:15px}.num{flex:0 0 32px;height:32px;border-radius:50%;display:grid;place-items:center;background:#102f49;color:#67ddff;font-weight:800}.steps b{display:block;font-size:15px}.steps span:not(.num){display:block;color:var(--muted);font-size:13px;margin-top:2px}
     .installBox{text-align:center;padding:24px 18px;border-radius:18px;background:linear-gradient(180deg,rgba(25,67,96,.34),rgba(10,28,45,.38));border:1px solid #1a4664}
     esp-web-install-button{display:block}
+    .devicePicker{display:grid;gap:8px;max-width:520px;margin:0 auto 20px;text-align:left}
+    .devicePicker label{font-size:14px;color:#d8ebf7;font-weight:700}
+    .devicePicker select{width:100%;background:#0b1728;color:var(--text);border:1px solid #31627d;border-radius:12px;padding:13px 14px;font-size:16px}
+    .deviceHelp{min-height:33px;color:#b9cbda;font-size:13px;line-height:1.5}
+    .deviceHelp.warning{color:#ffd39b}
+    #installerSlot[data-ready="false"] esp-web-install-button{display:none}
+    #installerSlot[data-ready="true"] .selectFirst{display:none}
     .installBtn{appearance:none;border:0;cursor:pointer;min-width:min(100%,360px);padding:16px 25px;border-radius:14px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#04121e;font-size:17px;font-weight:800;box-shadow:0 12px 35px rgba(34,199,255,.23);transition:transform .15s ease,filter .15s ease}.installBtn:hover{transform:translateY(-1px);filter:brightness(1.06)}
     .boxTitle{font-weight:800;font-size:16px;margin:0 0 8px}.boxText{color:var(--muted);font-size:13px;line-height:1.5;margin:0 0 16px}
     .unsupported{display:inline-block;max-width:520px;color:#ffd39b;line-height:1.5;font-size:14px}
@@ -55,7 +62,7 @@
     <section class="card">
       <h1>Installer Mira Panel</h1>
       <p class="lead">Branchez votre écran en USB et installez le firmware directement depuis votre navigateur. Aucun logiciel ni Arduino IDE n'est nécessaire.</p>
-      <div class="version"><span class="badge"><span class="dot"></span>Version stable <span id="version">…</span></span></div>
+      <div class="version"><span class="badge"><span class="dot"></span>Version du firmware <span id="version">…</span></span></div>
 
       <ol class="steps">
         <li><span class="num">1</span><div><b>Branchez l'écran en USB</b><span>Utilisez le port USB de l'écran relié directement à votre ordinateur.</span></div></li>
@@ -65,12 +72,27 @@
 
       <div class="installBox">
         <p class="boxTitle">Première installation / restauration complète</p>
-        <p class="boxText">Flashe l'image complète Mira Panel. À utiliser sur un écran neuf ou pour restaurer un écran qui ne démarre plus.</p>
-        <esp-web-install-button manifest="manifest.json">
+        <p class="boxText">Choisissez votre modèle pour installer uniquement son firmware. La détection USB d'un ESP32-S3 ne permet pas toujours d'identifier la carte exacte.</p>
+        <div class="devicePicker">
+          <label for="hardware">Modèle de l'écran</label>
+          <select id="hardware" required>
+            <option value="">Choisir le modèle…</option>
+            <option value="wt32-sc01-plus">WT32-SC01 Plus — 320 × 480</option>
+            <option value="waveshare-esp32s3-touch-lcd-4.3c">Waveshare Touch LCD 4.3C — 800 × 480</option>
+            <option value="opennextion-onx2432g028" disabled>Open Nextion 2,8″ — bientôt disponible</option>
+          </select>
+          <div id="deviceHelp" class="deviceHelp warning">Sélectionnez le modèle indiqué sur votre carte avant de flasher.</div>
+        </div>
+        <div id="installerSlot" data-ready="false">
+          <div class="selectFirst">Le bouton d'installation apparaît dès qu'un firmware compatible est disponible.</div>
+          <template id="installerTemplate">
+          <esp-web-install-button>
           <button slot="activate" class="installBtn">Installer Mira Panel</button>
           <span slot="unsupported" class="unsupported">Ce navigateur ne permet pas l'installation USB. Ouvrez cette page avec Google Chrome ou Microsoft Edge sur un ordinateur.</span>
           <span slot="not-allowed" class="unsupported">L'accès au port USB est bloqué par le navigateur. Rechargez la page en HTTPS puis réessayez.</span>
-        </esp-web-install-button>
+          </esp-web-install-button>
+          </template>
+        </div>
         <p class="note"><strong>Attention :</strong> l'installation USB complète efface la configuration présente sur l'écran. Pour une mise à jour normale d'un Mira Panel fonctionnel, utilisez uniquement l'OTA depuis son interface.</p>
       </div>
 
@@ -80,10 +102,84 @@
   </main>
 
   <script>
-    fetch('manifest.json', {cache:'no-store'})
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then(m => { document.getElementById('version').textContent = m.version || ''; })
-      .catch(() => { document.getElementById('version').textContent = ''; });
+    (() => {
+      const select = document.getElementById('hardware');
+      const slot = document.getElementById('installerSlot');
+      const template = document.getElementById('installerTemplate');
+      let activeInstaller = null;
+      const help = document.getElementById('deviceHelp');
+      const version = document.getElementById('version');
+      // The allowed filenames are fixed. Never construct a manifest URL from
+      // arbitrary query-string input.
+      const supported = {
+        'wt32-sc01-plus': {
+          manifest: 'manifest-wt32.json',
+          factory: 'firmware/Mira_Panel_WT32_SC01_Plus_FACTORY.bin',
+          legacyFactory: 'firmware/Mira_Panel_Factory.bin'
+        },
+        'waveshare-esp32s3-touch-lcd-4.3c': {
+          manifest: 'manifest-waveshare.json',
+          factory: 'firmware/Mira_Panel_Waveshare_4.3C_FACTORY.bin'
+        }
+      };
+      let requestToken = 0;
+
+      async function updateDevice() {
+        const token = ++requestToken;
+        slot.dataset.ready = 'false';
+        // Never reuse a Web Serial element initialized for another board.
+        if (activeInstaller) { activeInstaller.remove(); activeInstaller = null; }
+        help.className = 'deviceHelp warning';
+        const id = select.value;
+        if (!Object.hasOwn(supported, id)) {
+          help.textContent = 'Sélectionnez un modèle pris en charge.';
+          return;
+        }
+        try {
+          const profile = supported[id];
+          const path = profile.manifest;
+          const response = await fetch(path + '?t=' + Date.now(), {cache:'no-store'});
+          if (!response.ok) throw new Error('image non publiée');
+          const manifest = await response.json();
+          if (!manifest.version || !Array.isArray(manifest.builds) ||
+              manifest.builds.length !== 1 ||
+              manifest.builds[0].chipFamily !== 'ESP32-S3' ||
+              !Array.isArray(manifest.builds[0].parts) ||
+              manifest.builds[0].parts.length !== 1 ||
+              manifest.builds[0].parts[0].offset !== 0 ||
+              (manifest.builds[0].parts[0].path !== profile.factory &&
+               manifest.builds[0].parts[0].path !== profile.legacyFactory))
+            throw new Error('manifeste incompatible avec le modèle sélectionné');
+          if (token !== requestToken) return;
+          const installer = template.content.firstElementChild.cloneNode(true);
+          installer.setAttribute('manifest', path);
+          slot.appendChild(installer);
+          activeInstaller = installer;
+          slot.dataset.ready = 'true';
+          help.className = 'deviceHelp';
+          help.textContent = 'Image ' + manifest.version + ' prête pour ' +
+            select.options[select.selectedIndex].text + '. Vérifiez le modèle avant de lancer le flash USB.';
+          version.textContent = manifest.version;
+        } catch (_) {
+          if (token !== requestToken) return;
+          help.textContent = 'Pas encore de firmware usine publié pour ce modèle. Aucune écriture ne sera lancée.';
+          version.textContent = '—';
+        }
+      }
+      select.addEventListener('change', updateDevice);
+      const preset = new URLSearchParams(location.search).get('model');
+      // A caller like Jeedom may preselect, but never bypass the visible
+      // hardware confirmation and never infer the board from ESP32-S3 alone.
+      if (preset && Object.hasOwn(supported, preset)) {
+        select.value = preset;
+        updateDevice();
+      } else {
+        fetch('manifest.json', {cache:'no-store'})
+          .then(r => r.ok ? r.json() : Promise.reject())
+          .then(m => { version.textContent = m.version || '—'; })
+          .catch(() => { version.textContent = '—'; });
+      }
+    })();
   </script>
 </body>
 </html>
