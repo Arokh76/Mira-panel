@@ -96,7 +96,7 @@ def improveInfo(q):
     lv_obj_set_style_text_align(b.valueLabel, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(b.valueLabel, colorAccent(), 0);
     lv_obj_set_style_text_font(b.valueLabel,
-      adaptive ? (tileW >= 250 ? &lv_font_montserrat_32 : &lv_font_montserrat_28) : &lv_font_montserrat_20, 0);
+      adaptive ? &lv_font_montserrat_28 : &lv_font_montserrat_20, 0);
     lv_obj_align(b.valueLabel, LV_ALIGN_TOP_MID, 0, adaptive ? 48 : 7);""",
     "larger info values")
     q = once(q, """    lv_obj_set_width(name, MIRA_LABEL_TILE);
