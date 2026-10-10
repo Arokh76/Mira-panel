@@ -1,0 +1,101 @@
+name: Publish Mira Panel - one release, multiple hardware targets
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version produced by build-mira-0638.yml (example 0.6.38)"
+        required: true
+        default: "0.6.38"
+        type: string
+      run_id:
+        description: "Successful build-mira-0638.yml run ID on main, same commit"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: mira-multitarget-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Test release packaging
+        run: python3 -m unittest discover -s tests -p 'test_publish_multi.py' -v
+
+      - name: Verify successful build on this exact main commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ inputs.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]] || { echo 'Invalid run ID'; exit 1; }
+          gh api "repos/$REPOSITORY/actions/runs/$RUN_ID" > /tmp/mira-build.json
+          COMMIT="$(git rev-parse HEAD)"
+          jq -e --arg commit "$COMMIT" '
+            .conclusion == "success"
+            and .head_branch == "main"
+            and .event == "push"
+            and .head_sha == $commit
+            and .path == ".github/workflows/build-mira-0638.yml"
+          ' /tmp/mira-build.json
+          echo "Verified build #$RUN_ID of main commit $COMMIT"
+
+      - name: Download the two hardware artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/mira-release-inputs/wt32 /tmp/mira-release-inputs/waveshare
+          gh run download "$RUN_ID" \
+            --name Mira_Panel_WT32_SC01_Plus_0.6.38_preview \
+            --dir /tmp/mira-release-inputs/wt32
+          gh run download "$RUN_ID" \
+            --name Mira_Panel_Waveshare_4.3C_0.6.38_preview \
+            --dir /tmp/mira-release-inputs/waveshare
+
+      - name: Prepare all target files and manifests atomically
+        env:
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 firmware/scripts/publish_multi.py \
+            --inputs /tmp/mira-release-inputs \
+            --repo . \
+            --version "$VERSION"
+          cat firmware/targets.json
+          test -f docs/manifest-wt32.json
+          test -f docs/manifest-waveshare.json
+          test -s docs/firmware/Mira_Panel_WT32_SC01_Plus_FACTORY.bin
+          test -s docs/firmware/Mira_Panel_Waveshare_4.3C_FACTORY.bin
+
+      - name: Publish both hardware profiles in one commit
+        env:
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add firmware/targets.json "firmware/releases/$VERSION" \
+            docs/manifest-wt32.json docs/manifest-waveshare.json \
+            docs/firmware/Mira_Panel_WT32_SC01_Plus_FACTORY.bin \
+            docs/firmware/Mira_Panel_Waveshare_4.3C_FACTORY.bin
+          git diff --cached --quiet && { echo 'Already published'; exit 0; }
+          git commit -m "Release Mira Panel $VERSION for WT32 and Waveshare"
+          git push origin HEAD:main
