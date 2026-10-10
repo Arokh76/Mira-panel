@@ -26,6 +26,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Test release manifest generation
+        run: python3 -m unittest discover -s tests -p 'test_publish_multi.py' -v
+
       - name: Checkout official Waveshare sources
         uses: actions/checkout@v4
         with:
@@ -92,12 +95,27 @@ jobs:
           set -euo pipefail
           mkdir -p package-wt32
           cp build-wt32/MIRA_PANEL.ino.bin package-wt32/Mira_Panel_WT32_SC01_Plus_0.6.38.bin
+          # WT32 USB factory image uses the existing 8 MB partition table.
+          test -s build-wt32/MIRA_PANEL.ino.bootloader.bin
+          test -s build-wt32/MIRA_PANEL.ino.partitions.bin
+          BOOTAPP="$(find "$HOME/.arduino15/packages/esp32" -name boot_app0.bin -type f | head -n1)"
+          test -s "$BOOTAPP"
+          python3 -m pip install --quiet esptool
+          python3 -m esptool --chip esp32s3 merge-bin \
+            -o package-wt32/Mira_Panel_WT32_SC01_Plus_0.6.38_FACTORY.bin \
+            --flash-mode dio --flash-freq 80m --flash-size 8MB \
+            0x0000 build-wt32/MIRA_PANEL.ino.bootloader.bin \
+            0x8000 build-wt32/MIRA_PANEL.ino.partitions.bin \
+            0xE000 "$BOOTAPP" \
+            0x10000 package-wt32/Mira_Panel_WT32_SC01_Plus_0.6.38.bin
+          test -s package-wt32/Mira_Panel_WT32_SC01_Plus_0.6.38_FACTORY.bin
           cat > package-wt32/README.txt <<'EOF'
           Mira Panel 0.6.38 - WT32-SC01 Plus ESP32-S3 / 8 MB FLASH
           OTA application firmware: Mira_Panel_WT32_SC01_Plus_0.6.38.bin
           Compiled using Arduino-ESP32 2.0.17, LVGL 8.3.11.
           WARNING: WT32-specific firmware. Never flash to Waveshare 4.3C.
           This is a preview for hardware testing, not a stable release.
+          USB factory firmware: Mira_Panel_WT32_SC01_Plus_0.6.38_FACTORY.bin
           EOF
           test -s package-wt32/Mira_Panel_WT32_SC01_Plus_0.6.38.bin
           strings package-wt32/Mira_Panel_WT32_SC01_Plus_0.6.38.bin | grep -Fxq '0.6.38'
