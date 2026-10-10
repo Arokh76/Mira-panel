@@ -48,3 +48,7 @@ Voir [MAINTENANCE.md](MAINTENANCE.md) pour le nettoyage réversible, les mises �
 - `mira/<nom_ecran>/States/<topic>`
 
 Client ID : `mira-panel-XXXXXX`.
+
+## Compatibilité OTA des anciens WT32
+
+Les anciens workflows WT32 `build-firmware.yml`, `publish-firmware.yml` et `sync-web-installer.yml` ont été archivés, sans suppression des sources. Le workflow multi-cibles publie également le binaire historique **WT32 uniquement** sous `firmware/Mira_Panel.bin` ainsi que `firmware/version.json` pour préserver la mise à jour OTA des anciens firmwares Mira 0.6.5. Le Web Installer instancie un bouton neuf pour chaque modèle sélectionné afin d'éviter un manifeste USB périmé.

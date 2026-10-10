@@ -51,3 +51,7 @@ Le workflow `build-mira.yml` doit désormais produire la préversion 0.6.39 en p
 2. Construire la **publication multi-profils** : un seul numéro de version, un seul workflow de publication, plusieurs fichiers ciblés, un seul manifeste, auto-détection avant installation quand elle est fiable.
 3. Étudier le portage de l'Open Nextion ONX2432G028 2,8 pouces, avec son pilote ST7789 et son tactile CST826.
 4. Consolider les sources et, dans une révision distincte, corriger le pourcentage de luminosité sans modifier le RGB Waveshare.
+
+## Passage à une seule publication
+
+Les trois workflows historiques WT32 ont été déplacés dans `.github/archive/workflows/` pour supprimer les conflits de publication avec le nouveau pipeline multi-cibles. Ils sont récupérables par Git mais ne s'exécutent plus. Le nouveau workflow maintient le chemin `Mira_Panel.bin` réservé au WT32 pour la compatibilité des installations 0.6.5.

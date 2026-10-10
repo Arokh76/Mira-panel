@@ -7,11 +7,6 @@ on:
     paths:
       - 'docs/**'
       - '.github/workflows/pages.yml'
-  workflow_run:
-    workflows:
-      - 'Sync Mira Panel Web Installer'
-    types:
-      - completed
   workflow_dispatch:
 
 permissions:

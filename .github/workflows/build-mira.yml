@@ -264,6 +264,10 @@ jobs:
           data = json.loads(p.read_text())
           assert data['version'] == '0.6.39'
           assert len(data['targets']) == 2
+          legacy = json.loads(Path('/tmp/mira-release-check/output/firmware/version.json').read_text())
+          assert legacy['version'] == '0.6.39'
+          assert Path('/tmp/mira-release-check/output/firmware/Mira_Panel.bin').is_file()
+          assert Path('/tmp/mira-release-check/output/docs/manifest.json').is_file()
           for profile, spec in data['targets'].items():
               assert len(spec['otaSha256']) == 64
               assert len(spec['factorySha256']) == 64
