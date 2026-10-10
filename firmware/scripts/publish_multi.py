@@ -53,7 +53,7 @@ def prepare(inputs: Path, root: Path, version: str) -> dict:
             if not path.is_file():
                 raise FileNotFoundError(f"Missing {profile} {kind}: {path}")
             raw = path.read_bytes()
-            if not 500_000 < len(raw) < spec["flash_mb"] * 1024 * 1024:
+            if not 500_000 < len(raw) <= spec["flash_mb"] * 1024 * 1024:
                 raise ValueError(f"Unexpected {profile} {kind} size: {len(raw)}")
             if kind == "ota" and version.encode("ascii") not in raw:
                 raise ValueError(f"Incorrect version in {profile} OTA")
