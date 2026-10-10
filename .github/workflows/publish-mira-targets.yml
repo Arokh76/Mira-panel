@@ -57,15 +57,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ inputs.run_id }}
+          VERSION: ${{ inputs.version }}
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p /tmp/mira-release-inputs/wt32 /tmp/mira-release-inputs/waveshare
           gh run download "$RUN_ID" \
-            --name Mira_Panel_WT32_SC01_Plus_0.6.38_preview \
+            --name "Mira_Panel_WT32_SC01_Plus_${VERSION}_preview" \
             --dir /tmp/mira-release-inputs/wt32
           gh run download "$RUN_ID" \
-            --name Mira_Panel_Waveshare_4.3C_0.6.38_preview \
+            --name "Mira_Panel_Waveshare_4.3C_${VERSION}_preview" \
             --dir /tmp/mira-release-inputs/waveshare
 
       - name: Prepare all target files and manifests atomically
