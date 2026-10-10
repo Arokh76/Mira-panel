@@ -7,6 +7,13 @@ sys_h = root / 'HTML' / 'HTML_Sys.h'
 
 def replace_once(path: Path, old: str, new: str, label: str):
     text = path.read_text(encoding='utf-8')
+    if label in ('manifest dual-source freshness check',
+                 'firmware freshness and version verification') and (
+            'var TARGETS_URL=' in text and 'var HARDWARE_PROFILE=' in text):
+        # A newer board-aware OTA page was supplied by final-overrides.
+        # Never overwrite its per-target download safety with WT32-only logic.
+        print('Mira profile-aware OTA override preserved: ' + label)
+        return
     count = text.count(old)
     if count != 1:
         raise SystemExit(f'{label}: expected exactly 1 match in {path}, got {count}')
