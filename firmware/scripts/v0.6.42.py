@@ -70,28 +70,28 @@ s = once(s, "  _dateSubLabel = nullptr;\n", """  _dateSubLabel = nullptr;
 def improveInfo(q):
     old = """  if (autoDashboardTile || forcedTile) {
     b.card = makeCard(page, MIRA_DISPLAY_WIDTH >= 800 ? 78 : 66);
-    lv_obj_set_width(b.card, MIRA_UI_TILE_WIDTH);"""
+    lv_obj_set_width(b.card, MIRA_CARD_TILE);"""
     new = """  if (autoDashboardTile || forcedTile) {
     const bool adaptive = MIRA_DISPLAY_WIDTH >= 800 && autoDashboardTile;
-    lv_coord_t tileW = MIRA_UI_TILE_WIDTH;
+    lv_coord_t tileW = MIRA_CARD_TILE;
     if (adaptive) {
       const uint8_t total = _homeStandardInfoTotal;
       const uint8_t lastRow = total % 4 ? total % 4 : 4;
       const bool finalRow = _homeStandardInfoCreated > total - lastRow;
       uint8_t columns = finalRow ? lastRow : 4;
       if (columns < 2) columns = 2; // one tile is 390px, not 786px
-      tileW = (MIRA_UI_FULL_WIDTH - (columns - 1) * 6) / columns;
+      tileW = (MIRA_CARD_FULL - (columns - 1) * 6) / columns;
     }
     b.card = makeCard(page, adaptive ? 142 : (MIRA_DISPLAY_WIDTH >= 800 ? 78 : 66));
     lv_obj_set_width(b.card, tileW);"""
     q = once(q, old, new, "responsive info width")
-    q = once(q, """    lv_obj_set_width(b.valueLabel, MIRA_UI_TILE_LABEL);
+    q = once(q, """    lv_obj_set_width(b.valueLabel, MIRA_LABEL_TILE);
     lv_label_set_long_mode(b.valueLabel, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_align(b.valueLabel, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(b.valueLabel, colorAccent(), 0);
     lv_obj_set_style_text_font(b.valueLabel, &lv_font_montserrat_20, 0);
     lv_obj_align(b.valueLabel, LV_ALIGN_TOP_MID, 0, 7);""",
-    """    lv_obj_set_width(b.valueLabel, adaptive ? tileW - 14 : MIRA_UI_TILE_LABEL);
+    """    lv_obj_set_width(b.valueLabel, adaptive ? tileW - 14 : MIRA_LABEL_TILE);
     lv_label_set_long_mode(b.valueLabel, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_align(b.valueLabel, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(b.valueLabel, colorAccent(), 0);
@@ -99,13 +99,13 @@ def improveInfo(q):
       adaptive ? (tileW >= 250 ? &lv_font_montserrat_32 : &lv_font_montserrat_28) : &lv_font_montserrat_20, 0);
     lv_obj_align(b.valueLabel, LV_ALIGN_TOP_MID, 0, adaptive ? 48 : 7);""",
     "larger info values")
-    q = once(q, """    lv_obj_set_width(name, MIRA_UI_TILE_LABEL);
+    q = once(q, """    lv_obj_set_width(name, MIRA_LABEL_TILE);
     lv_label_set_long_mode(name, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(name, COL_MUTED, 0);
     lv_obj_set_style_text_font(name, &mira_font_fr_12, 0);
     lv_obj_align(name, LV_ALIGN_BOTTOM_MID, 0, -6);
-    return;""", """    lv_obj_set_width(name, adaptive ? tileW - 18 : MIRA_UI_TILE_LABEL);
+    return;""", """    lv_obj_set_width(name, adaptive ? tileW - 18 : MIRA_LABEL_TILE);
     lv_label_set_long_mode(name, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(name, COL_MUTED, 0);
