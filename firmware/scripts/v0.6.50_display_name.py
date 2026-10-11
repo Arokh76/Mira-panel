@@ -71,7 +71,7 @@ render = "(b.displayName.length() ? b.displayName : b.name)"
 sites = [
     ("  String displayName = b.name;", "  String displayName = " + render + ";", 1),
     ("makeNameLabel(b.card, b.name);", "makeNameLabel(b.card, " + render + ");", 1),
-    ("makeNameLabel(top, b.name);", "makeNameLabel(top, " + render + ");", 1),
+    # Range on the current firmware has no makeNameLabel(top,...) call.
 ]
 for before, after, count in sites:
     got = code.count(before)
