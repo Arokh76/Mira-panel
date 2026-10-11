@@ -882,6 +882,62 @@ void MiraPanelUI::buildFromMiraJson() {
   }
 
   for (JsonObject obj : arr) registerAndCreate(obj);
+
+#if defined(MIRA_TARGET_WAVESHARE_43C)
+  // Secondary pages did not inherit HOME's adaptive presentation. On 800x480,
+  // keep two 390px columns, but never leave an orphan full-size control in a
+  // half-width final row. Honor all explicit designer layouts unchanged.
+  // No change to HOME, WT32, MQTT, widget events or saved JSON.
+  for (uint8_t page = 1; page <= 2; ++page) {
+    uint8_t pageWidgets[MAX_BINDINGS];
+    uint8_t count = 0;
+    bool explicitLayout = false;
+    for (uint8_t i = 0; i < _bindingCount; ++i) {
+      Binding& b = _bindings[i];
+      if (!b.card || pageIndex(b.location) != page) continue;
+      if (b.layout != "auto") {
+        explicitLayout = true;
+        break;
+      }
+      pageWidgets[count++] = i;
+    }
+    if (explicitLayout) continue;
+
+    // Typical heating page: large setpoint dial + tiny Mode dropdown.
+    // Give both cards the same visual height. Place the mode caption at the
+    // top and center its actual selector vertically in the free space.
+    if (count == 2) {
+      Binding* dial = nullptr;
+      Binding* mode = nullptr;
+      for (uint8_t j = 0; j < count; ++j) {
+        Binding& b = _bindings[pageWidgets[j]];
+        if (b.type == W_ROUNDRANGE) dial = &b;
+        if (b.type == W_LIST && b.control) mode = &b;
+      }
+      if (dial && mode) {
+        lv_obj_set_height(mode->card, lv_obj_get_height(dial->card));
+        if (lv_obj_get_child_cnt(mode->card) >= 1) {
+          lv_obj_t* modeTitle = lv_obj_get_child(mode->card, 0);
+          lv_obj_add_flag(modeTitle, LV_OBJ_FLAG_IGNORE_LAYOUT);
+          lv_obj_align(modeTitle, LV_ALIGN_TOP_MID, 0, 14);
+        }
+        lv_obj_add_flag(mode->control, LV_OBJ_FLAG_IGNORE_LAYOUT);
+        lv_obj_align(mode->control, LV_ALIGN_CENTER, 0, 8);
+      }
+    }
+
+    // Typical lighting page: two toggles in row 1 and a lone brightness
+    // slider in row 2. Promote that final slider to the full page width,
+    // including its usable touch track. Works for any odd number of rows.
+    if (count >= 3 && (count & 1U)) {
+      Binding& last = _bindings[pageWidgets[count - 1]];
+      if (last.card && last.type == W_RANGE && last.control) {
+        lv_obj_set_width(last.card, MIRA_CARD_FULL);
+        lv_obj_set_width(last.control, MIRA_CARD_FULL - 48);
+      }
+    }
+  }
+#endif
 }
 
 void MiraPanelUI::registerAndCreate(JsonObject obj) {
