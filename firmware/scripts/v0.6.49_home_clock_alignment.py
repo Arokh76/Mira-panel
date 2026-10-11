@@ -40,11 +40,11 @@ block=one(block, """    lv_obj_set_style_text_align(_dateTimeLabel, LV_TEXT_ALIG
 
 # Native WT32 clock stays the same 40px font and position, but receives
 # its original white text rather than the cyan theme accent.
-anchor="    lv_obj_set_style_text_font(b.valueLabel, &lv_font_montserrat_40, 0);"
+anchor="lv_obj_set_style_text_font(b.valueLabel, &lv_font_montserrat_40, 0);"
 if block.count(anchor)!=1:
     # Fail closed rather than accidentally modifying a sensor tile.
     raise SystemExit(f"0.6.49 WT32 clock font anchor count: {block.count(anchor)}")
-block=one(block,anchor,anchor+"\n    lv_obj_set_style_text_color(b.valueLabel, lv_color_white(), 0);",
+block=one(block,anchor,anchor+"\n  lv_obj_set_style_text_color(b.valueLabel, lv_color_white(), 0);",
           "WT32 clock white")
 s=s[:start]+block+s[end:]
 ui.write_text(s,encoding="utf-8")
