@@ -63,7 +63,7 @@ jobs:
           # Info value labels to top-left to avoid placeholders leaking upward.
           grep -Fq 'lv_obj_set_align(b.valueLabel, LV_ALIGN_TOP_LEFT)' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -Fq 'lv_obj_get_y_aligned(icon)' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -Fq 'lv_obj_set_pos(label, lv_obj_get_x_aligned(label)' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -Fq 'lv_obj_set_pos(label, startX + iconW + gap,' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -Fq 'lv_obj_get_style_text_letter_space(label, LV_PART_MAIN)' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
 
           # Regression: value labels cannot spill beyond their parent tile.
