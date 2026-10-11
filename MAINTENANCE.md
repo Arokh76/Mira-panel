@@ -1,57 +1,38 @@
-# Maintenance / stabilité
+# Maintenance Mira Panel — référence 0.6.52
 
-## Matériels
+## Matériels supportés
 
-| Cible | Flash | Propriété |
-| --- | ---: | --- |
-| WT32-SC01 Plus | 8 Mo | Firmware 0.6.38 installé et confirmé fonctionnel sur matériel ; OTA et Web Installer publiés encore en 0.6.5 |
-| Waveshare Touch LCD 4.3C | 16 Mo | Firmware d'essai 0.6.38 ; RGB 800×480 ; LVGL 8.4 et triple-buffer |
-| Open Nextion ONX2432G028 | 16 Mo | Future cible 2,8 pouces ; ESP32-S3R8, LVGL, ST7789 240×320 et CST826 ; firmware à porter |
+| Profil | Flash | Bibliothèque d'interface | État |
+| --- | ---: | --- | --- |
+| WT32-SC01 Plus | 8 Mo | LVGL 8.3.11, objets alloués en PSRAM | 0.6.52 validée sur matériel, synchro Jeedom et 123 navigations sans plantage |
+| Waveshare ESP32-S3 Touch LCD 4.3C | 16 Mo | LVGL 8.4 du fournisseur, triple-buffer RGB 12 MHz | 0.6.49 validée sur matériel ; 0.6.52 compilée et en validation |
+| Open Nextion ONX2432G028 | 16 Mo | Portage futur | Aucun firmware Mira |
 
-Ne jamais publier un firmware Waveshare ou Nextion sous un chemin OTA générique WT32. À terme, publier **un seul manifeste de version Mira comportant une entrée par matériel** ; le système d'installation choisira le fichier correspondant au profil détecté, avec vérification du modèle avant flash.
+Les binaires ne sont **jamais interchangeables**. Utiliser uniquement l'OTA de la cible correspondante. Les images FACTORY sont réservées à l'installation/à la restauration USB et peuvent écraser les données.
 
-## Point de récupération Waveshare
+## Correctif de stabilité WT32 (0.6.52)
 
-- Build testé : **0.6.38**, commit [e1b89c9](https://github.com/Arokh76/Mira-panel/commit/e1b89c912f651d6a0adb557a4395077b15a7b40d).
-- Job GitHub Actions [#38003987693](https://github.com/Arokh76/Mira-panel/actions/runs/38003987693) : compilation WT32 et Waveshare réussie.
-- Le ZIP d'artefact contient `Mira_Panel_Waveshare_4.3C_0.6.38.bin` (OTA) et `Mira_Panel_Waveshare_4.3C_0.6.38_FACTORY.bin` (image fusionnée).
-- **Via l'interface web OTA de Mira : utiliser uniquement le binaire OTA**, pas le fichier FACTORY.
-- Le fichier FACTORY sert aux procédures de flashage USB compatibles avec le partitionnement 16 Mo.
-- Si des artefacts RGB reviennent, comparer ce build avec la 0.6.37, qui utilisait la même configuration sauf **PCLK 16 MHz**.
-- Le correctif du libellé initial de luminosité (valeur brute telle que 220 avant affichage en %) reste à faire séparément, sans toucher au pilote RGB.
+La 0.6.51 a mesuré 24 Ko de RAM interne libre après démarrage, et moins de 10 Ko dans certains pics. La 0.6.52 utilise les allocateurs personnalisés LVGL en **PSRAM** sur WT32, au lieu du pool statique de 96 Ko en DRAM interne. La DRAM libre mesurée est montée à environ 123 Ko après synchronisation Jeedom. Le serveur web a résisté à 123 changements d'onglets et les commandes physiques sont restées fonctionnelles.
 
-### Paramètres vidéo conservés en 0.6.38
+Le port Waveshare **ne reçoit pas cette configuration LVGL WT32** : sa compilation remplace le fichier `lv_conf.h` par la configuration LVGL Waveshare et conserve les tampons DMA/RGB spécifiques.
 
-- `EXAMPLE_LCD_PIXEL_CLOCK_HZ = 12 * 1000 * 1000`
-- `LVGL_PORT_AVOID_TEAR_MODE = 2` : triple-buffer + full refresh.
-- `EXAMPLE_LCD_RGB_BUFFER_NUMS = 3`.
-- Bounce buffer : `EXAMPLE_LCD_H_RES * 10` pixels, VSYNC et PWM inchangés.
+`/mira-health` expose les compteurs de navigation et l'état de la mémoire. Il s'agit d'un outil de diagnostic, non d'un watchdog ni d'un mécanisme de réparation.
 
-## Pourquoi conserver les scripts historiques ?
+## Construction et diffusion
 
-Le build reconstruit un sketch à partir du ZIP de référence 0.4.3, puis rejoue **dans l'ordre** les patches et scripts jusque `v0.6.38.py`. La suppression des scripts 0.4.x–0.6.37 **rendrait la 0.6.38 impossible à reconstruire**.
+- Source commune : `firmware/source/Mira_Panel_Source_V0.4.3.zip` + `firmware/patches/` + `firmware/overrides/` + `firmware/final-overrides/` + scripts successifs `firmware/scripts/v0.*.py`.
+- `.github/workflows/build-mira.yml` : compile les deux profils, fabrique OTA et FACTORY, vérifie les binaires et teste la préparation de la publication.
+- `.github/workflows/publish-mira-targets.yml` : après un build réussi sur le commit exact de `main`, publie **les deux cibles ensemble** ; en cas d'échec d'une cible, la publication est bloquée.
+- `firmware/targets.json` : version commune et chemins/empreintes SHA-256 propres à chaque matériel.
+- `firmware/version.json` et `firmware/Mira_Panel.bin` : **compatibilité WT32 uniquement** avec les premières versions Mira.
+- `docs/manifest-wt32.json`, `docs/manifest-waveshare.json` : Web Installer USB. `docs/manifest.json` : alias historique WT32.
+- `pages.yml` : déploiement Web Installer.
 
-Avant de les archiver, effectuer un export consolidé des sources 0.6.38, le committer dans un dossier source versionné et obtenir une nouvelle compilation réussie pour les deux matériels. Cette consolidation n'a **pas** été réalisée pendant le nettoyage des workflows.
+Les anciens workflows sont archivés sous `.github/archive/workflows/`. **Conserver les scripts historiques** : ils restent indispensables à la reconstruction jusqu'à l'export d'une source consolidée qui produit exactement les deux firmwares.
 
-## Workflows et archivage
+## Retour arrière et précautions
 
-Le workflow **`.github/workflows/build-mira.yml`** génère deux archives séparées : `Mira_Panel_WT32_SC01_Plus_0.6.38_preview` (OTA ESP32-S3 8 Mo avec LVGL 8.3.11) et `Mira_Panel_Waveshare_4.3C_0.6.38_preview` (OTA + FACTORY 16 Mo avec LVGL 8.4, triple-buffer, RGB 12 MHz). Les deux partagent les mêmes scripts Mira, mais **pas les paramètres du pilote ni le partitionnement**. Le WT32 et le Waveshare 0.6.38 ont été validés par l'utilisateur sur matériel ; le Nextion attend son portage et ses tests.
-
-Les workflows GitHub Actions exécutables vivent exclusivement dans `.github/workflows/`. Les workflows de diagnostic et de versions dépassées sont archivés en `.github/archive/workflows/`, avec contenu identique et historique conservé. Si un ancien workflow est utile, il suffit de le restaurer dans `.github/workflows/` dans une branche de travail.
-
-Les workflows de publication du WT32 restent actifs : `build-firmware.yml`, `publish-firmware.yml`, `sync-web-installer.yml`, `pages.yml`. Le workflow Waveshare officiel de référence reste disponible. **Ne pas relier le workflow 0.6.38 à la publication générique WT32.**
-
-## Aperçu multi-écrans 0.6.39
-
-Le workflow `build-mira.yml` doit désormais produire la préversion 0.6.39 en parallèle pour WT32 et Waveshare, tandis que les 0.6.38 restent les points de restauration validés. La publication doit rester désactivée en attendant les tests de la préversion sur les deux modèles.
-
-## Prochaines étapes proposées
-
-1. Compléter les tests longue durée des deux 0.6.38 existantes et corriger les libellés de plateforme.
-2. Construire la **publication multi-profils** : un seul numéro de version, un seul workflow de publication, plusieurs fichiers ciblés, un seul manifeste, auto-détection avant installation quand elle est fiable.
-3. Étudier le portage de l'Open Nextion ONX2432G028 2,8 pouces, avec son pilote ST7789 et son tactile CST826.
-4. Consolider les sources et, dans une révision distincte, corriger le pourcentage de luminosité sans modifier le RGB Waveshare.
-
-## Passage à une seule publication
-
-Les trois workflows historiques WT32 ont été déplacés dans `.github/archive/workflows/` pour supprimer les conflits de publication avec le nouveau pipeline multi-cibles. Ils sont récupérables par Git mais ne s'exécutent plus. Le nouveau workflow maintient le chemin `Mira_Panel.bin` réservé au WT32 pour la compatibilité des installations 0.6.5.
+- Garder les fichiers OTA de la dernière version fonctionnelle pour chaque profil : WT32 0.6.52 (testée) et Waveshare 0.6.49 (testée) avant toute nouvelle installation.
+- Tester les modifications touchant Wi-Fi, LVGL ou le serveur web **séparément sur les deux écrans** avant de les considérer validées.
+- Ne pas déclencher de commandes d'action Jeedom pendant l'initialisation ou la resynchronisation des états.
+- Préserver la configuration SPIFFS : les mises à jour normales se font via le **binaire OTA**, jamais via FACTORY depuis la page de mise à jour.
