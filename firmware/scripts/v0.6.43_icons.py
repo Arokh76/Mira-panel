@@ -10,7 +10,7 @@ root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("firmware/source/work/MI
 ino = root / "MIRA_PANEL.ino"
 ui = root / "MiraPanelUI.cpp"
 hdr = root / "MiraPanelUI.h"
-spiffs = root / "MiraPanelSPIFFS.cpp"
+spiffs = root / "SPIFFS_Process.h"
 server = root / "MiraPanelServer.cpp"
 
 def one(src, old, new, label, count=1):
