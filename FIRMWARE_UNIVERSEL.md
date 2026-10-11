@@ -1,83 +1,44 @@
-# Mira Panel : architecture universelle côté utilisateur
+# Mira Panel : un projet, plusieurs matériels
 
-## Décision produit (10 octobre 2026)
+## Principe
 
-**Un seul projet à maintenir, un seul numéro de version et une seule action de publication, avec un binaire OTA par matériel si nécessaire.**
+Une seule base applicative **Mira Panel 0.6.52**, avec **un binaire spécifique à chaque cible**, compilé et publié ensemble. Il serait dangereux de rendre les images binaires interchangeables entre le WT32, le Waveshare et un futur Nextion, car les interfaces graphiques, le partitionnement et les pilotes ne sont pas les mêmes.
 
-La priorité n'est donc plus d'obtenir un fichier binaire identique malgré des périphériques incompatibles. L'utilisateur doit voir une seule version de Mira Panel, et **le bon firmware doit être sélectionné automatiquement lorsque l'identification du modèle est fiable**. En cas d'incertitude, l'installateur propose le choix du modèle avant écriture, plutôt que de risquer un mauvais flash.
+| Profil | Matériel | Flash | Particularités | Validation |
+| --- | --- | ---: | --- | --- |
+| `wt32-sc01-plus` | WT32-SC01 Plus, 320×480 | 8 Mo | LVGL 8.3.11, allocations LVGL en PSRAM | 0.6.52 testée |
+| `waveshare-esp32s3-touch-lcd-4.3c` | Waveshare 4.3C, RGB 800×480 | 16 Mo | LVGL 8.4 fournisseur, triple-buffer et 12 MHz RGB | 0.6.52 compilée, validation matérielle en cours |
+| `opennextion-onx2432g028` | Open Nextion 2,8 pouces, 240×320 | 16 Mo | Pilote ST7789, tactile CST826 | Projet futur, non publié |
 
-Le plugin Jeedom conserve le bouton « Installer Mira Panel » et le parcours « Programmer un écran ESP32 » pour les équipements et widgets. L'objectif est de rendre l'installation simple sans dupliquer les fonctionnalités Jeedom.
+## Publication unique
 
-## Profils matériels (cible)
+1. `.github/workflows/build-mira.yml` reconstruit le code commun et compile séparément les cibles officiellement supportées.
+2. Les artefacts GitHub Actions de chaque cible comprennent OTA et FACTORY.
+3. Le workflow de publication vérifie que les deux artefacts proviennent d'un build **réussi sur le même commit de `main`**.
+4. `firmware/scripts/publish_multi.py` prépare une nouvelle version atomique : il valide tous les binaires avant de modifier les manifestes du dépôt.
+5. `firmware/targets.json` publie les chemins OTA/FACTORY, tailles et SHA-256 pour les deux profils ; le Web Installer expose des manifestes séparés.
 
-| Identifiant de profil | Matériel | Écran / tactile | Flash / PSRAM | État Mira |
-| --- | --- | --- | --- | --- |
-| `wt32-sc01-plus` | WT32-SC01 Plus | 320×480 / LovyanGFX et tactile WT32 | 8 Mo / PSRAM module WT32 à vérifier | Mira 0.6.38 installée et fonctionnelle ; LVGL 8.3.11 dans le build actuel |
-| `waveshare-esp32s3-touch-lcd-4.3c` | Waveshare 4.3C | RGB 800×480 / GT911 | 16 Mo / 8 Mo | Mira 0.6.38 fonctionnelle, LVGL 8.4, RGB 12 MHz, triple-buffer |
-| `opennextion-onx2432g028` | Open Nextion 2,8 pouces ONX2432G028 | ST7789 240×320 / CST826 | 16 Mo / 8 Mo (ESP32-S3R8) | Portage futur, aucune version Mira publiée |
+Si l'un des firmwares manque ou échoue à la validation, **aucune publication partielle**.
 
-**Ne jamais flasher un binaire destiné à un autre matériel**, même lorsque le numéro de version Mira est identique. Le choix multi-binaire préserve les configurations PSRAM, le partitionnement, les options d'outils et les pilotes stables de chaque carte. Passer le WT32 en LVGL 8.4 reste un objectif éventuel de maintenance, **pas une condition préalable au service d'installation multi-profils**.
+## Installation et identification du matériel
 
-## Une seule action de publication
+**Mise à jour OTA :** conserver la configuration SPIFFS et envoyer uniquement le binaire OTA correspondant au profil réel de l'écran. Un firmware Waveshare ne doit jamais être envoyé au WT32, et réciproquement.
 
-1. GitHub Actions reconstruit la même révision des sources applicatives Mira.
-2. Le workflow compile le profil WT32, le profil Waveshare et, lorsqu'il sera prêt, le profil Open Nextion.
-3. Si l'un des profils officiellement pris en charge échoue, **ne pas publier de version partielle**.
-4. Après validation, une seule opération publie les artefacts distincts, leurs sommes SHA-256 et un manifeste de version unique.
-5. Le plugin Jeedom et le Web Installer utilisent ce manifeste pour choisir le bon fichier. Aucun URL générique non typé comme `firmware/Mira_Panel.bin` ne doit être utilisé pour mettre à jour les trois cartes.
+**Flash USB usine :** le navigateur utilise [Web Installer](https://arokh76.github.io/Mira-panel/) et un choix explicite de modèle. L'identification du processeur ESP32-S3, de la flash ou de la PSRAM ne permet pas à elle seule de déduire le modèle de la carte. Les images FACTORY peuvent effacer l'installation présente.
 
-Un exemple conceptuel des champs du manifeste (pas encore implémenté) :
+Les anciennes URL `firmware/version.json`, `firmware/Mira_Panel.bin` et `docs/manifest.json` sont conservées **uniquement pour la rétrocompatibilité WT32**.
 
-```json
-{
-  "project": "Mira Panel",
-  "version": "0.6.39",
-  "targets": {
-    "wt32-sc01-plus": {"ota": "URL_WT32", "factory": "URL_FACTORY_WT32", "sha256": "SHA256_WT32"},
-    "waveshare-esp32s3-touch-lcd-4.3c": {"ota": "URL_WAVESHARE", "factory": "URL_FACTORY_WAVESHARE", "sha256": "SHA256_WAVESHARE"},
-    "opennextion-onx2432g028": {"ota": "URL_NEXTION", "factory": "URL_FACTORY_NEXTION", "sha256": "SHA256_NEXTION"}
-  }
-}
-```
+L'auto-détection certaine du matériel et les mises à jour orchestrées par Jeedom restent des évolutions à réaliser, pas des fonctions déjà garanties.
 
-Ces chaînes sont des **emplacements de conception**, pas de vraies URL de téléchargement. Ne pas publier d'entrée Nextion tant que le portage et les tests matériels ne sont pas terminés.
+## Choix techniques à conserver
 
-## Installation : deux cas différents
+- WT32 : ne pas réintroduire le pool statique LVGL de 96 Ko en DRAM interne ; l'allocation des objets LVGL en PSRAM résout le problème de marge mémoire observé sur l'écran réel en 0.6.52.
+- Waveshare : garder le port RGB fournisseur 800×480, LVGL 8.4, pixel clock 12 MHz, triple-buffer, les buffers DMA et son partitionnement 16 Mo.
+- Jeedom : les retours d'état et la restauration après démarrage ne doivent **jamais** exécuter une commande physique à la place de l'utilisateur.
+- Build : ne pas supprimer les scripts de reconstruction historiques tant qu'un snapshot consolidé n'a pas produit et validé les deux firmwares.
 
-### Écran déjà équipé de Mira
+## Prochaines évolutions
 
-- Depuis Jeedom ou la page Web du panneau, lire le profil exposé par l'écran (`/displayinfo` ou un futur endpoint d'identité sans ambiguïté).
-- Comparer la version installée à la version publiée et choisir l'OTA de la **même cible** dans le manifeste.
-- Vérifier la taille, SHA-256 et la destination avant envoi ; prévoir un refus côté ESP si l'identité du fichier ne correspond pas.
-- Une nouvelle version publiée une seule fois devient disponible pour tous les appareils. Les appareils devront toujours effectuer leur installation OTA, éventuellement orchestrée par Jeedom ; plusieurs firmwares publiés ne signifient pas plusieurs mises à jour manuelles côté développeur.
+Les évolutions suivantes repartent de la **0.6.52 commune**. Le port Open Nextion n'entrera dans les manifests publiés qu'après son build et les essais matériels. La rationalisation ultérieure des sources se fera séparément pour ne pas casser la chaîne de build actuellement reproductible.
 
-### Premier flashage USB depuis navigateur
-
-- Le Web Installer proposé par le plugin Jeedom utilise Web Serial / esptool-js pour lire les caractéristiques du composant avant d'écrire la Flash.
-- Ces informations (famille ESP32-S3, taille Flash, champs eFuse) **n'identifient pas systématiquement le modèle exact de carte**. Ne pas déduire « Waveshare » de « ESP32-S3 / 16 Mo » : Nextion peut présenter le même couple.
-- OpenNextion indique stocker son identifiant produit ONX2432G028 dans `EFUSE_BLK9` : piste à vérifier techniquement sur la lecture Web Serial. Sur écran déjà équipé de Mira, le profil stocké dans le firmware est plus fiable.
-- Si une empreinte fabricant/matériel sûre est reconnue, proposer automatiquement l'image correcte.
-- Sinon afficher un sélecteur WT32 / Waveshare / Open Nextion et demander de confirmer le modèle. **Ne jamais lancer un flash automatique sur un profil deviné.**
-- Garder l'image usine (FACTORY) séparée de l'OTA applicative, en respectant les partitions et offsets propres au modèle.
-
-## Mesures de sécurité
-
-- Les builds doivent porter leur profil dans une métadonnée vérifiable, sans dépendre seulement du nom du fichier.
-- Garder une stratégie de récupération USB (sauvegarde d'une image fonctionnelle) et vérifier les tailles de partitions.
-- Ne pas modifier les réglages du pilote RGB stable Waveshare 0.6.38 (12 MHz et triple-buffer) pour la seule gestion de version.
-- Ne pas activer l'ancien endpoint GitHub de publication WT32 pour les autres profils : `firmware/version.json` et `docs/manifest.json` publient actuellement une ancienne version générique WT32 0.6.5.
-- Préparer la distribution multi-profils en branche jusqu'à validation avec les modèles effectivement disponibles.
-
-## Prochaines étapes
-
-1. Stabiliser la publication multi-cibles de la 0.6.38 **sans changement de firmware matériel**.
-2. Ajouter un manifeste ciblé, un endpoint d'identité (propre à chaque écran) et une sélection par profil, en tests.
-3. Adapter le Web Installer et le bouton « Installer Mira Panel » pour l'installation initiale et l'OTA.
-4. Porter l'Open Nextion 2,8 pouces ; ajouter ses binaires uniquement après compilation et essai sur carte réelle.
-5. Consolider les sources historiques et rationaliser les workflows.
-
-## Références matériel
-
-- Open Nextion 2,8 pouces officiel : https://open-nextion-app-store.nextion.tech/devices/onx2432g028/
-- OpenNextion GitHub : https://github.com/OpenNextion/OpenNextion-SKU-ONX2432G028
-- Espressif esptool-js Web Serial : https://github.com/espressif/esptool-js
+Références : [Open Nextion officiel](https://open-nextion-app-store.nextion.tech/devices/onx2432g028/), [projet Open Nextion](https://github.com/OpenNextion/OpenNextion-SKU-ONX2432G028), [esptool-js](https://github.com/espressif/esptool-js).
