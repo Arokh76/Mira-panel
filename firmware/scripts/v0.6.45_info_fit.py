@@ -70,6 +70,11 @@ static void miraFitInfoValue(lv_obj_t* label, lv_obj_t* icon) {
        (lv_obj_get_height(icon) - lv_font_get_line_height(selected)) / 2);
 }
 '''
+# Jeedom/MQTT update handlers occur above decorateInfo in MiraPanelUI.cpp.
+# Declare the helper before they reference it; definition stays by the renderer.
+src=once(src, "static void miraMarkInfoArrival(",
+         "static void miraFitInfoValue(lv_obj_t* label, lv_obj_t* icon);\n"
+         "static void miraMarkInfoArrival(", "forward declaration")
 src=once(src, "void MiraPanelUI::decorateInfo(uint8_t idx) {",
          helper+"\nvoid MiraPanelUI::decorateInfo(uint8_t idx) {",
          "insert fitter")
