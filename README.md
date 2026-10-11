@@ -34,7 +34,7 @@ La version conserve les améliorations jusqu'à 0.6.50 (dont le champ `displayNa
 
 ### Sources et maintenance
 
-La chaîne de build reconstruit toujours le projet depuis `firmware/source/Mira_Panel_Source_V0.4.3.zip`, les correctifs `firmware/patches/`, les surcharges HTML et les scripts successifs `firmware/scripts/`. **Ces scripts historiques ne doivent pas être supprimés** tant que nous n'avons pas reconstruit et validé un snapshot consolidé des sources pour les deux appareils.
+**Le build utilise maintenant la source consolidée 0.6.52** dans [`firmware/source/consolidated/MIRA_PANEL/`](firmware/source/consolidated/MIRA_PANEL/), polices générées incluses. Il ne rejoue plus les scripts historiques à chaque compilation et ne télécharge plus les polices. La compilation des profils WT32 et Waveshare à partir de ce snapshot a été validée sur GitHub Actions. Les archives, patchs et scripts historiques sont **conservés** pour audit/retour arrière. La procédure ponctuelle de consolidation est archivée sous `.github/archive/workflows/consolidate-source-0652.yml`.
 
 Les workflows expérimentaux anciens sont conservés sous `.github/archive/workflows/` (non exécutés). Voir [MAINTENANCE.md](MAINTENANCE.md) et [FIRMWARE_UNIVERSEL.md](FIRMWARE_UNIVERSEL.md) pour les détails.
 
