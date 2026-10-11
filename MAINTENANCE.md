@@ -20,7 +20,7 @@ Le port Waveshare **ne reçoit pas cette configuration LVGL WT32** : sa compilat
 
 ## Construction et diffusion
 
-- Source commune : `firmware/source/Mira_Panel_Source_V0.4.3.zip` + `firmware/patches/` + `firmware/overrides/` + `firmware/final-overrides/` + scripts successifs `firmware/scripts/v0.*.py`.
+- Source commune compilée : [`firmware/source/consolidated/MIRA_PANEL/`](firmware/source/consolidated/MIRA_PANEL/) (snapshot complet 0.6.52, 58 fichiers dont deux polices générées). La reconstruction historique depuis le ZIP 0.4.3, les correctifs et scripts successifs reste archivée pour audit et retour arrière.
 - `.github/workflows/build-mira.yml` : compile les deux profils, fabrique OTA et FACTORY, vérifie les binaires et teste la préparation de la publication.
 - `.github/workflows/publish-mira-targets.yml` : après un build réussi sur le commit exact de `main`, publie **les deux cibles ensemble** ; en cas d'échec d'une cible, la publication est bloquée.
 - `firmware/targets.json` : version commune et chemins/empreintes SHA-256 propres à chaque matériel.
@@ -28,7 +28,7 @@ Le port Waveshare **ne reçoit pas cette configuration LVGL WT32** : sa compilat
 - `docs/manifest-wt32.json`, `docs/manifest-waveshare.json` : Web Installer USB. `docs/manifest.json` : alias historique WT32.
 - `pages.yml` : déploiement Web Installer.
 
-Les anciens workflows sont archivés sous `.github/archive/workflows/`. **Conserver les scripts historiques** : ils restent indispensables à la reconstruction jusqu'à l'export d'une source consolidée qui produit exactement les deux firmwares.
+Les anciens workflows sont archivés sous `.github/archive/workflows/`. **Conserver les scripts historiques** : ils permettent de régénérer le snapshot de référence, même si la compilation usuelle utilise dorénavant le répertoire consolidé.
 
 ## Retour arrière et précautions
 
