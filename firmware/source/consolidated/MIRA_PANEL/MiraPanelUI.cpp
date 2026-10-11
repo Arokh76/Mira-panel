@@ -882,6 +882,138 @@ void MiraPanelUI::buildFromMiraJson() {
   }
 
   for (JsonObject obj : arr) registerAndCreate(obj);
+
+#if defined(MIRA_TARGET_WAVESHARE_43C)
+  // Secondary pages did not inherit HOME's adaptive presentation. On 800x480,
+  // keep two 390px columns, but never leave an orphan full-size control in a
+  // half-width final row. Honor all explicit designer layouts unchanged.
+  // No change to HOME, WT32, MQTT, widget events or saved JSON.
+  for (uint8_t page = 1; page <= 2; ++page) {
+    uint8_t pageWidgets[MAX_BINDINGS];
+    uint8_t count = 0;
+    bool explicitLayout = false;
+    for (uint8_t i = 0; i < _bindingCount; ++i) {
+      Binding& b = _bindings[i];
+      if (!b.card || pageIndex(b.location) != page) continue;
+      if (b.layout != "auto") {
+        explicitLayout = true;
+        break;
+      }
+      pageWidgets[count++] = i;
+    }
+    if (explicitLayout) continue;
+
+    // Waveshare: thermostat-like UI with the EXISTING RoundRange, Info and
+    // List widgets. The former absolute-position approach used IGNORE_LAYOUT
+    // on flex children, so their position/scroll area became unreliable:
+    // controls could vanish and the dial was pushed under the navigation bar.
+    // LVGL GRID owns these three cards and computes all their positions.
+    if (page == 2 && count == 3) {
+      Binding* setpoint = nullptr;
+      Binding* actual = nullptr;
+      Binding* mode = nullptr;
+      for (uint8_t j = 0; j < count; ++j) {
+        Binding& b = _bindings[pageWidgets[j]];
+        if (b.type == W_ROUNDRANGE) setpoint = &b;
+        else if (b.type == W_INFO) actual = &b;
+        else if (b.type == W_LIST) mode = &b;
+      }
+      if (setpoint && actual && mode &&
+          setpoint->card && actual->card && mode->card &&
+          actual->infoNameLabel && actual->valueLabel && mode->control &&
+          setpoint->style == "standard" &&
+          actual->style == "standard" && mode->style == "standard" &&
+          (actual->labelMode == "auto" || actual->labelMode == "text")) {
+        // Content area = 788 px on the Waveshare (6 px padding each side).
+        // 390 + 6 gap + 390 = 786 px. Each half-row is 116 px; together with
+        // the existing 6 px row gap this matches the 238 px setpoint dial.
+        static const lv_coord_t columns[] = {
+            MIRA_CARD_AUTO, MIRA_CARD_AUTO, LV_GRID_TEMPLATE_LAST};
+        static const lv_coord_t rows[] = {116, 116, LV_GRID_TEMPLATE_LAST};
+        lv_obj_set_grid_dsc_array(_pages[page], columns, rows);
+        lv_obj_set_grid_align(_pages[page],
+                              LV_GRID_ALIGN_CENTER, LV_GRID_ALIGN_CENTER);
+        lv_obj_set_grid_cell(setpoint->card,
+                             LV_GRID_ALIGN_STRETCH, 0, 1,
+                             LV_GRID_ALIGN_STRETCH, 0, 2);
+        lv_obj_set_grid_cell(actual->card,
+                             LV_GRID_ALIGN_STRETCH, 1, 1,
+                             LV_GRID_ALIGN_STRETCH, 0, 1);
+        lv_obj_set_grid_cell(mode->card,
+                             LV_GRID_ALIGN_STRETCH, 1, 1,
+                             LV_GRID_ALIGN_STRETCH, 1, 1);
+
+        // Current temperature: readable heading and large live numeric value.
+        // INFO retains its original Jeedom/MQTT binding and values.
+        if (actual->infoIconRoot) {
+          lv_obj_add_flag(actual->infoIconRoot, LV_OBJ_FLAG_HIDDEN);
+          actual->infoIconRoot = nullptr;
+        }
+        lv_obj_add_flag(actual->infoNameLabel, LV_OBJ_FLAG_IGNORE_LAYOUT);
+        lv_obj_set_width(actual->infoNameLabel, MIRA_CARD_AUTO - 28);
+        lv_obj_set_style_text_font(actual->infoNameLabel, &mira_font_fr_16, 0);
+        lv_obj_set_style_text_color(actual->infoNameLabel, COL_MUTED, 0);
+        lv_obj_set_style_text_align(actual->infoNameLabel, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_align(actual->infoNameLabel, LV_ALIGN_TOP_MID, 0, 12);
+
+        lv_obj_add_flag(actual->valueLabel, LV_OBJ_FLAG_IGNORE_LAYOUT);
+        lv_obj_set_width(actual->valueLabel, MIRA_CARD_AUTO - 30);
+        lv_obj_set_style_text_font(actual->valueLabel, &lv_font_montserrat_40, 0);
+        lv_obj_set_style_text_align(actual->valueLabel, LV_TEXT_ALIGN_CENTER, 0);
+        lv_label_set_long_mode(actual->valueLabel, LV_LABEL_LONG_CLIP);
+        lv_obj_align(actual->valueLabel, LV_ALIGN_CENTER, 0, 15);
+
+        // Existing LIST widget remains touch-controlled and keeps its modes.
+        lv_obj_t* modeTitle = lv_obj_get_child(mode->card, 0);
+        if (modeTitle) {
+          lv_obj_add_flag(modeTitle, LV_OBJ_FLAG_IGNORE_LAYOUT);
+          lv_obj_align(modeTitle, LV_ALIGN_TOP_MID, 0, 12);
+        }
+        lv_obj_add_flag(mode->control, LV_OBJ_FLAG_IGNORE_LAYOUT);
+        lv_obj_align(mode->control, LV_ALIGN_CENTER, 0, 16);
+
+        // Refresh before resetting scroll: no card must end up behind NAV.
+        lv_obj_update_layout(_pages[page]);
+        lv_obj_scroll_to_y(_pages[page], 0, LV_ANIM_OFF);
+        continue;
+      }
+    }
+
+    // Typical heating page: large setpoint dial + tiny Mode dropdown.
+    // Give both cards the same visual height. Place the mode caption at the
+    // top and center its actual selector vertically in the free space.
+    if (count == 2) {
+      Binding* dial = nullptr;
+      Binding* mode = nullptr;
+      for (uint8_t j = 0; j < count; ++j) {
+        Binding& b = _bindings[pageWidgets[j]];
+        if (b.type == W_ROUNDRANGE) dial = &b;
+        if (b.type == W_LIST && b.control) mode = &b;
+      }
+      if (dial && mode) {
+        lv_obj_set_height(mode->card, lv_obj_get_height(dial->card));
+        if (lv_obj_get_child_cnt(mode->card) >= 1) {
+          lv_obj_t* modeTitle = lv_obj_get_child(mode->card, 0);
+          lv_obj_add_flag(modeTitle, LV_OBJ_FLAG_IGNORE_LAYOUT);
+          lv_obj_align(modeTitle, LV_ALIGN_TOP_MID, 0, 14);
+        }
+        lv_obj_add_flag(mode->control, LV_OBJ_FLAG_IGNORE_LAYOUT);
+        lv_obj_align(mode->control, LV_ALIGN_CENTER, 0, 8);
+      }
+    }
+
+    // Typical lighting page: two toggles in row 1 and a lone brightness
+    // slider in row 2. Promote that final slider to the full page width,
+    // including its usable touch track. Works for any odd number of rows.
+    if (count >= 3 && (count & 1U)) {
+      Binding& last = _bindings[pageWidgets[count - 1]];
+      if (last.card && last.type == W_RANGE && last.control) {
+        lv_obj_set_width(last.card, MIRA_CARD_FULL);
+        lv_obj_set_width(last.control, MIRA_CARD_FULL - 48);
+      }
+    }
+  }
+#endif
 }
 
 void MiraPanelUI::registerAndCreate(JsonObject obj) {
