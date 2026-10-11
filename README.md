@@ -1,54 +1,41 @@
 # Mira Panel
 
-Écran domotique pour Jeedom : **WT32-SC01 Plus**, **Waveshare ESP32-S3 Touch LCD 4.3C** et, à terme, **Open Nextion ONX2432G028 (2,8 pouces)**.
+Firmware domotique **Jeedom / MQTT** pour **WT32-SC01 Plus** (320 × 480, flash 8 Mo) et **Waveshare ESP32-S3 Touch LCD 4.3C** (800 × 480, flash 16 Mo).
 
-Le dépôt contient les sources, les correctifs successifs et les automatisations de compilation des deux matériels.
+## Version de référence : 0.6.52
 
-**Objectif du projet : un seul code source Mira, une seule version et une seule publication, avec des binaires adaptés à chaque matériel et choisis automatiquement par l'installateur.** Les fichiers propres aux cartes ne sont pas interchangeables. L'installation automatique multi-matériel n'est pas encore développée ; l'architecture cible compte aussi le futur Open Nextion 2,8 pouces.
+**Une seule version fonctionnelle, deux binaires spécifiques au matériel.** Ne jamais échanger les binaires des deux modèles.
 
-Voir [FIRMWARE_UNIVERSEL.md](FIRMWARE_UNIVERSEL.md) pour la stratégie de build, de détection avant flash USB, de publication unique et d'OTA par profil.
+| Cible | Version | Validation |
+| --- | --- | --- |
+| WT32-SC01 Plus | **0.6.52** | Testé sur écran réel : synchronisation Jeedom, commandes physiques et 123 navigations web sans plantage |
+| Waveshare 4.3C | **0.6.52** | Compilation CI validée ; 0.6.49 stable sur écran réel, validation matérielle 0.6.52 en cours |
+| Open Nextion ONX2432G028 | Portage futur | Non pris en charge pour le moment |
 
-## Versions conservées
+### Correctif de stabilité WT32
 
-| Cible | Version | État | Source de build |
-| --- | --- | --- | --- |
-| WT32-SC01 Plus (8 Mo) | 0.6.38 testée, 0.6.5 publiée | Mise à jour 0.6.38 installée et validée sur appareil par l'utilisateur | `.github/workflows/build-mira.yml` (preview) et `build-firmware.yml` (publication actuelle) |
-| Waveshare 4.3C (16 Mo, 800×480) | 0.6.38 | Testée sur écran réel ; stabilité encourageante, validation longue durée en cours | `.github/workflows/build-mira.yml` |
-| Open Nextion ONX2432G028 (16 Mo, 240×320) | Portage prévu | Matériel non encore porté dans Mira | À intégrer au même workflow |
+La version 0.6.52 déplace les allocations mémoire des objets **LVGL** du WT32 vers la **PSRAM** plutôt que de réserver 96 Ko de DRAM interne. Après synchronisation Jeedom, la RAM interne disponible est passée d'environ 24 Ko à 123 Ko, et 123 changements d'onglets ont réussi sans plantage. La configuration LVGL native du Waveshare reste spécifique à sa carte.
 
-**Waveshare 0.6.38** : port LVGL 8.4 Waveshare, trois buffers RGB, rafraîchissement complet et pixel clock réduit de **16 MHz à 12 MHz**. Cette seule modification de la 0.6.37 a supprimé les artefacts observés pendant les premiers essais. Il reste à confirmer la stabilité sur la durée.
+La version conserve les améliorations jusqu'à 0.6.50 (dont le champ `displayName` séparé de l'identifiant technique) ainsi que le diagnostic `/mira-health` introduit en 0.6.51.
 
-Le premier build Waveshare 0.6.38 validé par GitHub Actions est consultable ici :
-[Build 0.6.38](https://github.com/Arokh76/Mira-panel/actions/runs/38003987693).
-L'artefact `Mira_Panel_Waveshare_4.3C_0.6.38_preview` contient un binaire **OTA** ainsi qu'une image **FACTORY** ; l'archive GitHub Actions a une durée de rétention limitée.
+### Mise à jour et installation
 
-**Version 0.6.39 en préparation** : nouveau Web Installer par matériel et OTA ciblée. Les appareils installés en 0.6.38 ne sont pas mis à jour automatiquement tant que cette version n'est pas publiée et validée.
+- **OTA (configuration conservée)** : depuis l'interface web de l'écran, utiliser le binaire `ota.bin` de **son propre profil** dans [firmware/releases/0.6.52](firmware/releases/0.6.52).
+- **Installation USB / restauration** : [Web Installer](https://arokh76.github.io/Mira-panel/), puis choisir explicitement WT32 ou Waveshare. L'installation usine peut effacer la configuration.
+- **Découverte de la version et des binaires** : [firmware/targets.json](firmware/targets.json), utilisé pour distinguer les profils ; [firmware/version.json](firmware/version.json) reste réservé à la compatibilité historique WT32.
+- `firmware/Mira_Panel.bin` demeure un alias **WT32 exclusivement** pour les anciens mécanismes OTA. Ne jamais l'utiliser sur Waveshare.
 
-**Important** : la 0.6.38 est une **base de code commune**, compilée avec un profil par matériel. Les deux appareils existants ont été testés sur matériel. Les artefacts CI sont deux ZIP indépendants avec des `.bin` OTA explicitement nommés. `firmware/version.json`, `firmware/Mira_Panel.bin` et l'installateur `docs/` publient pour l'instant **WT32 0.6.5** : la publication multi-profils 0.6.38 et l'auto-détection initiale ne sont pas encore actives.
+### Construire / publier
 
-## Workflows actifs
+- `.github/workflows/build-mira.yml` reconstruit Mira et compile les **deux profils** avec leurs dépendances et configurations matérielles respectives.
+- `.github/workflows/publish-mira-targets.yml` publie les **deux binaires OTA et FACTORY**, les manifestes, les empreintes SHA-256 et l'alias historique WT32, uniquement après un build réussi sur `main` correspondant au même commit.
+- `.github/workflows/pages.yml` sert à publier le Web Installer.
+- `.github/workflows/build-waveshare-official-reference.yml` conserve la compilation de référence du constructeur pour les diagnostics.
 
-- `build-mira.yml` : compile et génère **deux firmwares OTA distincts de version 0.6.38** : WT32-SC01 Plus (8 Mo) et Waveshare 4.3C (16 Mo).
-- `build-firmware.yml` : build de publication WT32 0.6.5.
-- `publish-firmware.yml` et `sync-web-installer.yml` : publication WT32 ; ne pas utiliser pour le Waveshare.
-- `pages.yml` : déploiement de l'installateur web.
-- `build-waveshare-official-reference.yml` : firmware Waveshare d'origine, outil de diagnostic indépendant de Mira.
+### Sources et maintenance
 
-Les **17 anciens workflows d'essai** sont archivés sous `.github/archive/workflows/` : ils restent lisibles dans Git, mais ne s'exécutent plus depuis GitHub Actions.
+La chaîne de build reconstruit toujours le projet depuis `firmware/source/Mira_Panel_Source_V0.4.3.zip`, les correctifs `firmware/patches/`, les surcharges HTML et les scripts successifs `firmware/scripts/`. **Ces scripts historiques ne doivent pas être supprimés** tant que nous n'avons pas reconstruit et validé un snapshot consolidé des sources pour les deux appareils.
 
-## Sources et maintenance
+Les workflows expérimentaux anciens sont conservés sous `.github/archive/workflows/` (non exécutés). Voir [MAINTENANCE.md](MAINTENANCE.md) et [FIRMWARE_UNIVERSEL.md](FIRMWARE_UNIVERSEL.md) pour les détails.
 
-La compilation reconstruit actuellement les sources depuis `firmware/source/Mira_Panel_Source_V0.4.3.zip`, les `firmware/patches/`, les surcharges HTML et **tous les scripts successifs** de `firmware/scripts/`. Il ne faut pas supprimer ces scripts ou réécrire la chaîne sans reconstruire un snapshot source consolidé puis vérifier les deux cibles.
-
-Voir [MAINTENANCE.md](MAINTENANCE.md) pour le nettoyage réversible, les mises à jour OTA et la procédure de retour arrière.
-
-## MQTT
-
-- `mira/<nom_ecran>/Actions/<topic>`
-- `mira/<nom_ecran>/States/<topic>`
-
-Client ID : `mira-panel-XXXXXX`.
-
-## Compatibilité OTA des anciens WT32
-
-Les anciens workflows WT32 `build-firmware.yml`, `publish-firmware.yml` et `sync-web-installer.yml` ont été archivés, sans suppression des sources. Le workflow multi-cibles publie également le binaire historique **WT32 uniquement** sous `firmware/Mira_Panel.bin` ainsi que `firmware/version.json` pour préserver la mise à jour OTA des anciens firmwares Mira 0.6.5. Le Web Installer instancie un bouton neuf pour chaque modèle sélectionné afin d'éviter un manifeste USB périmé.
+**MQTT** : `mira/<nom_ecran>/Actions/<topic>` et `mira/<nom_ecran>/States/<topic>` ; identifiant client `mira-panel-XXXXXX`.
