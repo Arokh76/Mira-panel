@@ -31,7 +31,7 @@ Les formes sont tracées avec les primitives natives LVGL et changent de taille 
 
 ## Horloge de veille
 
-Le WT32 conserve son horloge et sa police Montserrat 48. Sur Waveshare 800×480, la même police est rendue dans un petit canvas LVGL, puis agrandie 2,5× selon le ratio de largeur 800/320, sans ajout de police lourde. Le déplacement anti-marquage reste actif. Si le canvas n'est pas allouable, le code conserve l'horloge originale en fallback.
+Le WT32 conserve son horloge de veille et sa police Montserrat 48. Sur Waveshare 800×480, la veille utilise désormais une **police Montserrat native 120 px**, dont seuls les 12 caractères nécessaires (`0-9`, `:`, `-`) sont intégrés. Les glyphes sont tracés à leur résolution finale, sans canvas zoomé ni flou de redimensionnement. La génération est automatisée et reproductible dans GitHub Actions depuis Montserrat (SIL OFL 1.1, source Google Fonts épinglée). Le déplacement anti-marquage reste actif. Le rendu final doit encore être validé sur matériel.
 
 ## Compatibilité et tests
 
