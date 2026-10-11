@@ -64,6 +64,21 @@ code, changed = pattern.subn(
     code)
 if changed < 1:
     raise SystemExit("0.6.50: no LVGL name label usage found; inspect rendering before release")
+
+# Some widget titles use makeNameLabel rather than direct lv_label_set_text.
+# The Info card constructs a temporary displayName string locally, too.
+render = "(b.displayName.length() ? b.displayName : b.name)"
+sites = [
+    ("  String displayName = b.name;", "  String displayName = " + render + ";", 1),
+    ("makeNameLabel(b.card, b.name);", "makeNameLabel(b.card, " + render + ");", 2),
+    ("makeNameLabel(top, b.name);", "makeNameLabel(top, " + render + ");", 1),
+]
+for before, after, count in sites:
+    got = code.count(before)
+    if got != count:
+        raise SystemExit(f"0.6.50 title anchor: expected {count}, found {got}: {before}")
+    code = code.replace(before, after)
+print(f"0.6.50: additional {sum(n for _, _, n in sites)} title sites")
 ui.write_text(code, encoding="utf-8")
 print(f"0.6.50: updated {changed} LVGL name label(s); technical identities preserved")
 
