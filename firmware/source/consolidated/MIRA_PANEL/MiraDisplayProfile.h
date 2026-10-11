@@ -1,0 +1,29 @@
+#pragma once
+
+// Mira hardware profile. UI/business logic must never depend on one panel.
+#if defined(MIRA_TARGET_WAVESHARE_43C)
+  #define MIRA_DISPLAY_PROFILE_ID "waveshare-esp32s3-touch-lcd-4.3c"
+  #define MIRA_HARDWARE_NAME "WAVESHARE-ESP32-S3-TOUCH-LCD-4.3C"
+  #define MIRA_DISPLAY_WIDTH 800
+  #define MIRA_DISPLAY_HEIGHT 480
+  #define MIRA_NAV_HEIGHT 50
+  #define MIRA_CONTENT_HEIGHT (MIRA_DISPLAY_HEIGHT - MIRA_NAV_HEIGHT)
+  #define MIRA_DISPLAY_ROTATION 0
+  // First conservative RGB-panel bring-up: 2 x 800 x 10 x RGB565 = 32 KB.
+  #define MIRA_DRAW_BUFFER_LINES 10
+  #define MIRA_RGB_DIRECT_FRAMEBUFFER 1
+#else
+  #define MIRA_DISPLAY_PROFILE_ID "wt32-sc01-plus"
+  #define MIRA_HARDWARE_NAME "WT32-SC01-PLUS"
+  #define MIRA_DISPLAY_WIDTH 320
+  #define MIRA_DISPLAY_HEIGHT 480
+  #define MIRA_NAV_HEIGHT 46
+  #define MIRA_CONTENT_HEIGHT (MIRA_DISPLAY_HEIGHT - MIRA_NAV_HEIGHT)
+  #define MIRA_DISPLAY_ROTATION 0
+  // Hardware validated on WT32: 32 lines causes Wi-Fi instability; keep 20.
+  #define MIRA_DRAW_BUFFER_LINES 20
+  #define MIRA_RGB_DIRECT_FRAMEBUFFER 0
+#endif
+
+#define MIRA_LAYOUT_LOGICAL_WIDTH 1000
+#define MIRA_LAYOUT_LOGICAL_HEIGHT 1000
