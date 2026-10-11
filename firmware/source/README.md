@@ -1,9 +1,22 @@
 # Sources du firmware Mira Panel
 
-Le workflow de compilation utilise actuellement l'archive `Mira_Panel_Source_V0.4.3.zip` placée dans ce dossier.
+## Base consolidée 0.6.52
 
-L'archive contient le dossier de sketch Arduino `MIRA_PANEL/`, avec le fichier principal `MIRA_PANEL.ino`, les sources C/C++, les pages HTML embarquées, `lv_conf.h` et les fichiers auxiliaires nécessaires à la compilation.
+Le code complet utilisé par les deux écrans est sous
+[`consolidated/MIRA_PANEL/`](consolidated/MIRA_PANEL/).
 
-La version 0.4.3 contient notamment le remaniement de l'interface Web, le nettoyage des traces série et la base MQTT Mira validée sur l'écran.
+Il s'agit d'un export du code **Mira 0.6.52 déjà publié**, comprenant
+les polices Montserrat d'accueil et de veille.
 
-Cette organisation temporaire permet de compiler le firmware sur GitHub Actions tout en gardant le dépôt léger et simple à maintenir. Les sources pourront être décompressées dans le dépôt plus tard si besoin.
+`.github/workflows/build-mira.yml` compile maintenant ce dossier
+directement, avec des réglages par matériel :
+- WT32 : LVGL 8.3.11, allocations LVGL en PSRAM, flash 8 Mo ;
+- Waveshare : LVGL du fabricant 8.4, RGB 12 MHz, triple-buffer, flash 16 Mo.
+
+L'ancien `Mira_Panel_Source_V0.4.3.zip` ainsi que les correctifs,
+surcharges HTML et scripts historiques restent disponibles pour un retour
+arrière. Le workflow d'export ponctuel est archivé sous
+`.github/archive/workflows/consolidate-source-0652.yml`.
+
+Les prochains travaux doivent modifier la source consolidée et **faire
+compiler les deux profils** avant toute fusion.
