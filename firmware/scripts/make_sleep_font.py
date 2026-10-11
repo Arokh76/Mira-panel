@@ -14,7 +14,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 
-def produce(font_path: Path, output: Path, size: int) -> None:
+def produce(font_path: Path, output: Path, size: int, symbol_prefix: str = 'mira_sleep_montserrat') -> None:
     if not font_path.is_file():
         raise FileNotFoundError(font_path)
     font = ImageFont.truetype(str(font_path), size)
@@ -103,7 +103,7 @@ static const lv_font_fmt_txt_dsc_t font_dsc = {{
     .cmap_num=1, .bpp=4, .kern_classes=0, .bitmap_format=0,
     .cache=&cache
 }};
-extern const lv_font_t mira_sleep_montserrat_{size} = {{
+extern const lv_font_t {symbol_prefix}_{size} = {{
     .get_glyph_dsc=lv_font_get_glyph_dsc_fmt_txt,
     .get_glyph_bitmap=lv_font_get_bitmap_fmt_txt,
     .line_height={gap_height}, .base_line={descent},
@@ -124,5 +124,6 @@ if __name__ == "__main__":
     p.add_argument("--font", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--size", type=int, default=120)
+    p.add_argument("--symbol-prefix", default="mira_sleep_montserrat")
     args = p.parse_args()
-    produce(args.font, args.output, args.size)
+    produce(args.font, args.output, args.size, args.symbol_prefix)
