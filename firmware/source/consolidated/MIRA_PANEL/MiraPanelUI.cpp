@@ -903,10 +903,11 @@ void MiraPanelUI::buildFromMiraJson() {
     }
     if (explicitLayout) continue;
 
-    // Climate-like presentation using EXISTING widgets only. The thermostat
-    // is not a new widget or a new Jeedom command: it is the usual roundrange
-    // setpoint, info readout and list mode, placed as a balanced 2-column
-    // dashboard. HOME, WT32, free/manual layout and other pages are untouched.
+    // Waveshare: thermostat-like UI with the EXISTING RoundRange, Info and
+    // List widgets. The former absolute-position approach used IGNORE_LAYOUT
+    // on flex children, so their position/scroll area became unreliable:
+    // controls could vanish and the dial was pushed under the navigation bar.
+    // LVGL GRID owns these three cards and computes all their positions.
     if (page == 2 && count == 3) {
       Binding* setpoint = nullptr;
       Binding* actual = nullptr;
@@ -917,58 +918,52 @@ void MiraPanelUI::buildFromMiraJson() {
         else if (b.type == W_INFO) actual = &b;
         else if (b.type == W_LIST) mode = &b;
       }
-      if (setpoint && actual && mode && actual->infoNameLabel &&
-          actual->valueLabel && mode->control &&
-          setpoint->style == "standard" && actual->style == "standard" &&
-          mode->style == "standard" &&
+      if (setpoint && actual && mode &&
+          setpoint->card && actual->card && mode->card &&
+          actual->infoNameLabel && actual->valueLabel && mode->control &&
+          setpoint->style == "standard" &&
+          actual->style == "standard" && mode->style == "standard" &&
           (actual->labelMode == "auto" || actual->labelMode == "text")) {
-        const lv_coord_t gap = 6;
-        const lv_coord_t dialH = lv_obj_get_height(setpoint->card);
-        const lv_coord_t halfH = (dialH - gap) / 2;
-        const lv_coord_t colW = MIRA_CARD_AUTO;
-        const lv_coord_t rightX = colW + gap;
-        const lv_coord_t top = (MIRA_CONTENT_HEIGHT > dialH + 32)
-            ? (MIRA_CONTENT_HEIGHT - dialH) / 2 - 8 : 0;
-
-        // Absolute positions on these three cards prevent flex row wrapping.
-        // Positions are relative to the page's padded content box.
-        lv_obj_t* cards[] = {setpoint->card, actual->card, mode->card};
-        for (lv_obj_t* card : cards) {
-          lv_obj_add_flag(card, LV_OBJ_FLAG_IGNORE_LAYOUT);
-          lv_obj_set_align(card, LV_ALIGN_TOP_LEFT);
-          lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
-          lv_obj_set_width(card, colW);
-        }
-        lv_obj_set_pos(setpoint->card, 0, top);
-        lv_obj_set_pos(actual->card, rightX, top);
-        lv_obj_set_pos(mode->card, rightX, top + halfH + gap);
-        lv_obj_set_height(actual->card, halfH);
-        lv_obj_set_height(mode->card, dialH - halfH - gap);
+        // Content area = 788 px on the Waveshare (6 px padding each side).
+        // 390 + 6 gap + 390 = 786 px. Each half-row is 116 px; together with
+        // the existing 6 px row gap this matches the 238 px setpoint dial.
+        static const lv_coord_t columns[] = {
+            MIRA_CARD_AUTO, MIRA_CARD_AUTO, LV_GRID_TEMPLATE_LAST};
+        static const lv_coord_t rows[] = {116, 116, LV_GRID_TEMPLATE_LAST};
+        lv_obj_set_grid_dsc_array(_pages[page], columns, rows);
+        lv_obj_set_grid_align(_pages[page],
+                              LV_GRID_ALIGN_CENTER, LV_GRID_ALIGN_CENTER);
+        lv_obj_set_grid_cell(setpoint->card,
+                             LV_GRID_ALIGN_STRETCH, 0, 1,
+                             LV_GRID_ALIGN_STRETCH, 0, 2);
+        lv_obj_set_grid_cell(actual->card,
+                             LV_GRID_ALIGN_STRETCH, 1, 1,
+                             LV_GRID_ALIGN_STRETCH, 0, 1);
+        lv_obj_set_grid_cell(mode->card,
+                             LV_GRID_ALIGN_STRETCH, 1, 1,
+                             LV_GRID_ALIGN_STRETCH, 1, 1);
 
         // Current temperature: readable heading and large live numeric value.
-        // The original INFO binding remains fully synchronized with Jeedom.
-        // Stop the decorative icon reflow (which otherwise repositions the
-        // value on every state update) only for this automatic composition.
+        // INFO retains its original Jeedom/MQTT binding and values.
         if (actual->infoIconRoot) {
           lv_obj_add_flag(actual->infoIconRoot, LV_OBJ_FLAG_HIDDEN);
           actual->infoIconRoot = nullptr;
         }
         lv_obj_add_flag(actual->infoNameLabel, LV_OBJ_FLAG_IGNORE_LAYOUT);
-        lv_obj_set_width(actual->infoNameLabel, colW - 28);
+        lv_obj_set_width(actual->infoNameLabel, MIRA_CARD_AUTO - 28);
         lv_obj_set_style_text_font(actual->infoNameLabel, &mira_font_fr_16, 0);
         lv_obj_set_style_text_color(actual->infoNameLabel, COL_MUTED, 0);
         lv_obj_set_style_text_align(actual->infoNameLabel, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_align(actual->infoNameLabel, LV_ALIGN_TOP_MID, 0, 12);
 
         lv_obj_add_flag(actual->valueLabel, LV_OBJ_FLAG_IGNORE_LAYOUT);
-        lv_obj_set_width(actual->valueLabel, colW - 30);
+        lv_obj_set_width(actual->valueLabel, MIRA_CARD_AUTO - 30);
         lv_obj_set_style_text_font(actual->valueLabel, &lv_font_montserrat_40, 0);
         lv_obj_set_style_text_align(actual->valueLabel, LV_TEXT_ALIGN_CENTER, 0);
         lv_label_set_long_mode(actual->valueLabel, LV_LABEL_LONG_CLIP);
         lv_obj_align(actual->valueLabel, LV_ALIGN_CENTER, 0, 15);
 
-        // Existing LIST widget stays interactive and keeps all its Jeedom
-        // modes; we only center it in the lower-right card.
+        // Existing LIST widget remains touch-controlled and keeps its modes.
         lv_obj_t* modeTitle = lv_obj_get_child(mode->card, 0);
         if (modeTitle) {
           lv_obj_add_flag(modeTitle, LV_OBJ_FLAG_IGNORE_LAYOUT);
@@ -976,6 +971,10 @@ void MiraPanelUI::buildFromMiraJson() {
         }
         lv_obj_add_flag(mode->control, LV_OBJ_FLAG_IGNORE_LAYOUT);
         lv_obj_align(mode->control, LV_ALIGN_CENTER, 0, 16);
+
+        // Refresh before resetting scroll: no card must end up behind NAV.
+        lv_obj_update_layout(_pages[page]);
+        lv_obj_scroll_to_y(_pages[page], 0, LV_ANIM_OFF);
         continue;
       }
     }
