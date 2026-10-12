@@ -1975,6 +1975,137 @@ void MiraPanelUI::createUnsupported(uint8_t idx, const String& originalType) {
   lv_obj_center(lbl);
 }
 
+
+void MiraPanelUI::buildEnergyPreviewPage() {
+  // The fifth page is navigation-only. Never register actions or emit
+  // placeholder readings to Jeedom; the next iteration can add real widgets.
+  lv_obj_t* page = _pages[4];
+  lv_obj_clean(page);
+  lv_obj_t* card = lv_obj_create(page);
+  const bool wide = MIRA_DISPLAY_WIDTH >= 800;
+  lv_obj_set_size(card, wide ? 650 : 304, wide ? 318 : 340);
+  lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_bg_color(card, colorPanel(), 0);
+  lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_color(card, colorBorder(), 0);
+  lv_obj_set_style_border_width(card, 1, 0);
+  lv_obj_set_style_radius(card, 14, 0);
+  lv_obj_set_style_pad_all(card, 0, 0);
+
+  lv_obj_t* title = lv_label_create(card);
+  lv_label_set_text(title, "Énergie");
+  lv_obj_set_style_text_color(title, COL_TEXT, 0);
+  lv_obj_set_style_text_font(title, &mira_font_fr_16, 0);
+  lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 24);
+
+  lv_obj_t* notice = lv_label_create(card);
+  lv_label_set_text(notice, "PAGE DE DÉMONSTRATION");
+  lv_obj_set_style_text_color(notice, colorAccent(), 0);
+  lv_obj_set_style_text_font(notice, &mira_font_fr_12, 0);
+  lv_obj_align(notice, LV_ALIGN_TOP_MID, 0, 56);
+
+  lv_obj_t* explanation = lv_label_create(card);
+  lv_label_set_width(explanation, wide ? 570 : 256);
+  lv_label_set_long_mode(explanation, LV_LABEL_LONG_WRAP);
+  lv_label_set_text(explanation,
+      "Une quatrième catégorie à tester, sans commandes Jeedom.\n"
+      "Pour revenir, utilise la barre du bas ou le menu Pages.");
+  lv_obj_set_style_text_font(explanation, &mira_font_fr_14, 0);
+  lv_obj_set_style_text_color(explanation, COL_MUTED, 0);
+  lv_obj_set_style_text_align(explanation, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_align(explanation, LV_ALIGN_TOP_MID, 0, 91);
+
+  lv_obj_t* divider = lv_obj_create(card);
+  lv_obj_set_size(divider, wide ? 480 : 245, 1);
+  lv_obj_set_style_bg_color(divider, colorBorder(), 0);
+  lv_obj_set_style_bg_opa(divider, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(divider, 0, 0);
+  lv_obj_clear_flag(divider, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_align(divider, LV_ALIGN_TOP_MID, 0, wide ? 166 : 187);
+
+  const char* future[3] = {"Production solaire", "Consommation", "Batteries"};
+  for (uint8_t i = 0; i < 3; ++i) {
+    lv_obj_t* item = lv_label_create(card);
+    lv_label_set_text(item, future[i]);
+    lv_obj_set_width(item, wide ? 500 : 256);
+    lv_obj_set_style_text_color(item, COL_MUTED, 0);
+    lv_obj_set_style_text_font(item, &mira_font_fr_14, 0);
+    lv_obj_set_style_text_align(item, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(item, LV_ALIGN_TOP_MID, 0, (wide ? 190 : 212) + i * 31);
+  }
+}
+
+void MiraPanelUI::buildPagePicker() {
+  // Full-size content overlay, beneath the always-visible nav and sleep layer.
+  // It does not change the geometry or LVGL tree of the existing widgets.
+  _pagePicker = lv_obj_create(_screen);
+  lv_obj_set_size(_pagePicker, MIRA_DISPLAY_WIDTH, MIRA_CONTENT_HEIGHT);
+  lv_obj_set_pos(_pagePicker, 0, 0);
+  lv_obj_set_style_pad_all(_pagePicker, 0, 0);
+  lv_obj_set_style_border_width(_pagePicker, 0, 0);
+  lv_obj_set_style_radius(_pagePicker, 0, 0);
+  lv_obj_set_style_bg_color(_pagePicker, colorBg(), 0);
+  lv_obj_set_style_bg_opa(_pagePicker, LV_OPA_90, 0);
+  lv_obj_clear_flag(_pagePicker, LV_OBJ_FLAG_SCROLLABLE);
+
+  _pagePickerCard = lv_obj_create(_pagePicker);
+  const bool wide = MIRA_DISPLAY_WIDTH >= 800;
+  lv_obj_set_size(_pagePickerCard, wide ? 460 : 298, 348);
+  lv_obj_set_style_radius(_pagePickerCard, 16, 0);
+  lv_obj_set_style_bg_color(_pagePickerCard, colorPanel2(), 0);
+  lv_obj_set_style_bg_opa(_pagePickerCard, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_color(_pagePickerCard, colorBorder(), 0);
+  lv_obj_set_style_border_width(_pagePickerCard, 1, 0);
+  lv_obj_set_style_pad_all(_pagePickerCard, 0, 0);
+  lv_obj_clear_flag(_pagePickerCard, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_center(_pagePickerCard);
+
+  lv_obj_t* heading = lv_label_create(_pagePickerCard);
+  lv_label_set_text(heading, "Toutes les pages");
+  lv_obj_set_style_text_color(heading, COL_TEXT, 0);
+  lv_obj_set_style_text_font(heading, &mira_font_fr_16, 0);
+  lv_obj_align(heading, LV_ALIGN_TOP_MID, 0, 13);
+
+  const char* names[PAGE_COUNT] = {
+    "Accueil", "Lumières", "Températures", "Paramètres", "Énergie (test)"
+  };
+  const uint8_t order[PAGE_COUNT] = {0, 1, 2, 4, 3};
+  for (uint8_t row = 0; row < PAGE_COUNT; ++row) {
+    uint8_t page = order[row];
+    lv_obj_t* btn = lv_btn_create(_pagePickerCard);
+    _pagePickerButtons[page] = btn;
+    lv_obj_set_size(btn, wide ? 420 : 268, 47);
+    lv_obj_set_pos(btn, wide ? 20 : 15, 46 + row * 58);
+    lv_obj_set_style_radius(btn, 9, 0);
+    lv_obj_set_style_bg_color(btn, colorPanel(), 0);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(btn, 1, 0);
+    lv_obj_set_style_border_color(btn, colorBorder(), 0);
+    lv_obj_set_style_shadow_width(btn, 0, 0);
+    lv_obj_add_event_cb(btn, onPagePick, LV_EVENT_CLICKED,
+                        (void*)(uintptr_t)page);
+
+    lv_obj_t* label = lv_label_create(btn);
+    lv_label_set_text(label, names[page]);
+    lv_obj_set_style_text_color(label, COL_TEXT, 0);
+    lv_obj_set_style_text_font(label, &mira_font_fr_16, 0);
+    lv_obj_center(label);
+  }
+  lv_obj_add_flag(_pagePicker, LV_OBJ_FLAG_HIDDEN);
+}
+
+void MiraPanelUI::setPagePickerVisible(bool visible) {
+  if (!_pagePicker) return;
+  if (visible) lv_obj_clear_flag(_pagePicker, LV_OBJ_FLAG_HIDDEN);
+  else lv_obj_add_flag(_pagePicker, LV_OBJ_FLAG_HIDDEN);
+  if (_navPagesButton) {
+    lv_obj_set_style_bg_color(_navPagesButton, colorAccent2(), 0);
+    lv_obj_set_style_bg_opa(_navPagesButton,
+                           visible ? LV_OPA_70 : LV_OPA_TRANSP, 0);
+  }
+  noteActivity();
+}
+
 void MiraPanelUI::buildSettingsPage() {
   lv_obj_clean(_pages[3]);
 
