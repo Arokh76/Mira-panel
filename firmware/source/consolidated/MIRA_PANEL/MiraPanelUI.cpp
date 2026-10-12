@@ -982,6 +982,43 @@ void MiraPanelUI::registerAndCreate(JsonObject obj) {
     }
     createList(idx, b.type == W_LISTBUTTON);
   }
+  else if (type == "thermostat") {
+    b.type = W_THERMOSTAT;
+    b.unit = "°C";
+    b.minValue = sMin.length() ? sMin.toInt() : 5;
+    b.maxValue = sMax.length() ? sMax.toInt() : 30;
+    b.minValue = clampInt(b.minValue, -20, 60);
+    b.maxValue = clampInt(b.maxValue, b.minValue + 1, 80);
+    b.thermostatSetpoint = sValue.length() ? sValue.toFloat() : 20.0f;
+    b.thermostatSetpoint = roundf(b.thermostatSetpoint * 2.0f) * 0.5f;
+    if (b.thermostatSetpoint < b.minValue) b.thermostatSetpoint = b.minValue;
+    if (b.thermostatSetpoint > b.maxValue) b.thermostatSetpoint = b.maxValue;
+    // Three native Mira IDs, but only ONE card/widget. The legacy Jeedom
+    // /getindex machinery can reuse its info/range/list command mapping.
+    b.thermostatTempId = _server.IndexAddInfo(name + "__temperature", "°C");
+    b.id = _server.IndexAddRange(name + "__consigne", b.minValue, b.maxValue,
+                                 (int)roundf(b.thermostatSetpoint));
+    String options = String((const char*)(obj["modes"] | "Confort|Éco|Hors gel|Arrêt"));
+    options.replace("\\n", "|");
+    int start = 0;
+    while (start <= options.length() && b.listCount < MAX_LIST_ITEMS) {
+      const int sep = options.indexOf('|', start);
+      String item = (sep < 0) ? options.substring(start) : options.substring(start, sep);
+      item.trim();
+      if (item.length()) {
+        b.listIds[b.listCount] = _server.IndexAddList(name + "__mode", item, item);
+        b.listLabels[b.listCount++] = item;
+      }
+      if (sep < 0) break;
+      start = sep + 1;
+    }
+    if (b.listCount == 0) {
+      b.listIds[0] = _server.IndexAddList(name + "__mode", "Confort", "Confort");
+      b.listLabels[0] = "Confort";
+      b.listCount = 1;
+    }
+    createThermostat(idx);
+  }
   else if (type == "datetime") {
     b.type = W_DATETIME;
     createDateTime(idx);
