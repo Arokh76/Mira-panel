@@ -2062,7 +2062,13 @@ void MiraPanelUI::buildPagePicker() {
   lv_label_set_text(heading, "Toutes les pages");
   lv_obj_set_style_text_color(heading, COL_TEXT, 0);
   lv_obj_set_style_text_font(heading, &mira_font_fr_16, 0);
-  lv_obj_align(heading, LV_ALIGN_TOP_MID, 0, 13);
+  lv_obj_align(heading, LV_ALIGN_TOP_MID, 0, 6);
+
+  _pagePickerFavoriteCount = lv_label_create(_pagePickerCard);
+  lv_label_set_text(_pagePickerFavoriteCount, "Favoris : 3/3");
+  lv_obj_set_style_text_color(_pagePickerFavoriteCount, COL_MUTED, 0);
+  lv_obj_set_style_text_font(_pagePickerFavoriteCount, &mira_font_fr_12, 0);
+  lv_obj_align(_pagePickerFavoriteCount, LV_ALIGN_TOP_MID, 0, 27);
 
   const char* names[PAGE_COUNT] = {
     "Accueil", "Lumières", "Températures", "Paramètres", "Énergie (test)"
@@ -2072,8 +2078,8 @@ void MiraPanelUI::buildPagePicker() {
     uint8_t page = order[row];
     lv_obj_t* btn = lv_btn_create(_pagePickerCard);
     _pagePickerButtons[page] = btn;
-    lv_obj_set_size(btn, wide ? 420 : 268, 47);
-    lv_obj_set_pos(btn, wide ? 20 : 15, 46 + row * 58);
+    lv_obj_set_size(btn, wide ? 352 : 197, 47);
+    lv_obj_set_pos(btn, wide ? 20 : 15, 53 + row * 56);
     lv_obj_set_style_radius(btn, 9, 0);
     lv_obj_set_style_bg_color(btn, colorPanel(), 0);
     lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
@@ -2087,7 +2093,39 @@ void MiraPanelUI::buildPagePicker() {
     lv_label_set_text(label, names[page]);
     lv_obj_set_style_text_color(label, COL_TEXT, 0);
     lv_obj_set_style_text_font(label, &mira_font_fr_16, 0);
+    lv_obj_set_width(label, wide ? 335 : 181);
+    lv_label_set_long_mode(label, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_center(label);
+
+    // Separate touch target for the favorite star: selecting a favorite
+    // must NOT also navigate to the page beneath it.
+    lv_obj_t* star = lv_btn_create(_pagePickerCard);
+    _pagePickerStars[page] = star;
+    lv_obj_set_size(star, wide ? 56 : 60, 47);
+    lv_obj_set_pos(star, wide ? 384 : 223, 53 + row * 56);
+    lv_obj_set_style_radius(star, 9, 0);
+    lv_obj_set_style_border_width(star, 1, 0);
+    lv_obj_set_style_border_color(star, colorBorder(), 0);
+    lv_obj_set_style_shadow_width(star, 0, 0);
+    lv_obj_set_style_pad_all(star, 0, 0);
+    lv_obj_add_event_cb(star, onFavoriteToggle, LV_EVENT_CLICKED,
+                        (void*)(uintptr_t)page);
+
+    // Outline star drawn with LVGL lines, not glyphs: all fonts and
+    // touch targets work identically on WT32 and Waveshare.
+    static const lv_point_t STAR[11] = {
+      {10, 0}, {13, 7}, {20, 7}, {15, 12}, {17, 20},
+      {10, 16}, {3, 20}, {5, 12}, {0, 7}, {7, 7}, {10, 0}
+    };
+    lv_obj_t* starIcon = lv_line_create(star);
+    _pagePickerStarIcons[page] = starIcon;
+    lv_line_set_points(starIcon, STAR, 11);
+    lv_obj_set_size(starIcon, 21, 21);
+    lv_obj_set_style_line_width(starIcon, 2, LV_PART_MAIN);
+    lv_obj_set_style_line_rounded(starIcon, true, LV_PART_MAIN);
+    lv_obj_clear_flag(starIcon, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_center(starIcon);
   }
   lv_obj_add_flag(_pagePicker, LV_OBJ_FLAG_HIDDEN);
 }
