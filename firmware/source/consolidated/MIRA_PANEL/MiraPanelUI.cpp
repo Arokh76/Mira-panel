@@ -2336,10 +2336,42 @@ void MiraPanelUI::loadFavorites() {
   }
 }
 
+void MiraPanelUI::pollFavorites() {
+  // Jeedom persists the three favorite slots through /navfavorites.
+  // Reload them once a second, on the LVGL-owning thread; no cross-task
+  // modifications of UI objects, and no effect on widget programmation.
+  if ((uint32_t)(millis() - _lastFavoritesPollMs) < 1000UL) return;
+  _lastFavoritesPollMs = millis();
+  uint8_t incoming[FAVORITE_SLOTS];
+  bool valid = true;
+  for (uint8_t slot = 0; slot < FAVORITE_SLOTS; ++slot) {
+    char key[8];
+    snprintf(key, sizeof(key), "fav%u", slot);
+    incoming[slot] = _prefs.getUChar(key, slot);
+    if (incoming[slot] != NO_FAVORITE && incoming[slot] >= PAGE_COUNT)
+      valid = false;
+    for (uint8_t other = 0; other < slot; ++other)
+      if (incoming[slot] != NO_FAVORITE && incoming[slot] == incoming[other])
+        valid = false;
+  }
+  if (!valid) return;
+  bool changed = false;
+  for (uint8_t slot = 0; slot < FAVORITE_SLOTS; ++slot) {
+    if (_favoritePages[slot] != incoming[slot]) {
+      _favoritePages[slot] = incoming[slot];
+      changed = true;
+    }
+  }
+  if (changed) {
+    refreshFavoriteNav();
+    setNavActive(_currentPage);
+    Serial.println("[MIRA][NAV] Favoris Jeedom actualises sans redemarrage");
+  }
+}
+
 void MiraPanelUI::refreshFavoriteNav() {
-  const char* names[PAGE_COUNT] = {
-    "Accueil", "Lumières", "Climat", "Réglages", "Énergie"
-  };
+  // Icons-only strip, centered vertically; the last button (Pages) is fixed.
+  // All changes happen on the UI thread after polling the persisted settings.
   for (uint8_t slot = 0; slot < FAVORITE_SLOTS; ++slot) {
     lv_obj_t* btn = _favoriteButtons[slot];
     if (!btn) continue;
@@ -2348,29 +2380,32 @@ void MiraPanelUI::refreshFavoriteNav() {
     if (page == 1 || page == 2) {
       if (page == 1) makeBulbIcon(btn);
       else makeThermometerIcon(btn);
-      // Existing drawn icons were centered for the old bar; move upward
-      // to accommodate a compact caption on the 46px WT32 navigation.
-      lv_obj_t* root = lv_obj_get_child(btn, 0);
-      if (root) lv_obj_align(root, LV_ALIGN_CENTER, 0, -9);
-    } else {
-      lv_obj_t* symbol = lv_label_create(btn);
-      const char* glyph = page == 0 ? LV_SYMBOL_HOME :
-                          page == 3 ? LV_SYMBOL_SETTINGS :
-                          page == 4 ? "W" : LV_SYMBOL_PLUS;
-      lv_label_set_text(symbol, glyph);
-      lv_obj_set_style_text_font(symbol, &lv_font_montserrat_20, 0);
-      lv_obj_set_style_text_color(symbol, colorAccent(), 0);
-      lv_obj_align(symbol, LV_ALIGN_CENTER, 0, -9);
+      continue; // the original pictograms are already centered
+    }
+    if (page == 4) {
+      // A small lightning bolt instead of the temporary "W" character.
+      static const lv_point_t BOLT[7] = {
+        {13, 1}, {4, 15}, {11, 15}, {7, 28},
+        {23, 10}, {15, 10}, {17, 1}
+      };
+      lv_obj_t* bolt = lv_line_create(btn);
+      lv_line_set_points(bolt, BOLT, 7);
+      lv_obj_set_size(bolt, 24, 29);
+      lv_obj_set_style_line_color(bolt, colorAccent(), LV_PART_MAIN);
+      lv_obj_set_style_line_width(bolt, 3, LV_PART_MAIN);
+      lv_obj_set_style_line_rounded(bolt, true, LV_PART_MAIN);
+      lv_obj_clear_flag(bolt, LV_OBJ_FLAG_CLICKABLE);
+      lv_obj_center(bolt);
+      continue;
     }
 
-    lv_obj_t* caption = lv_label_create(btn);
-    lv_label_set_text(caption, page < PAGE_COUNT ? names[page] : "Libre");
-    lv_obj_set_style_text_font(caption, &mira_font_fr_12, 0);
-    lv_obj_set_style_text_color(caption, page < PAGE_COUNT ? COL_TEXT : COL_MUTED, 0);
-    lv_obj_set_width(caption, (MIRA_DISPLAY_WIDTH / NAV_BUTTON_COUNT) - 4);
-    lv_label_set_long_mode(caption, LV_LABEL_LONG_CLIP);
-    lv_obj_set_style_text_align(caption, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(caption, LV_ALIGN_BOTTOM_MID, 0, -1);
+    lv_obj_t* glyph = lv_label_create(btn);
+    lv_label_set_text(glyph, page == 0 ? LV_SYMBOL_HOME :
+                          page == 3 ? LV_SYMBOL_SETTINGS : LV_SYMBOL_PLUS);
+    lv_obj_set_style_text_font(glyph, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_color(glyph,
+        page == NO_FAVORITE ? COL_MUTED : colorAccent(), 0);
+    lv_obj_center(glyph);
   }
 }
 
@@ -3207,6 +3242,7 @@ void MiraPanelUI::loop() {
   if (!_display.miraLvglLock(20)) return;
 #endif
 
+  pollFavorites();
   if (_pendingNavPage >= 0) {
     uint8_t page = (uint8_t)_pendingNavPage;
     _pendingNavPage = -1;
