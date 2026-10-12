@@ -1607,7 +1607,7 @@ void MiraPanelUI::createThermostat(uint8_t idx) {
   // other thermostat controls (temperature, mode, navigation, Jeedom).
   // RoundRange reference (normal): plate=196, arc=182, center=104;
   // main arc=15 and pressed arc=18.
-  const lv_coord_t arcSize = wide ? 296 : 234;
+  const lv_coord_t arcSize = wide ? 296 : 214;
   const lv_coord_t arcX = wide ? 27 : (cardW - arcSize) / 2;
   const lv_coord_t arcY = wide ? 63 : 41;
   const lv_coord_t plateSize = (arcSize * 196 + 91) / 182;
