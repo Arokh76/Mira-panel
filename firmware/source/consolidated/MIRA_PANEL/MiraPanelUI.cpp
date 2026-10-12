@@ -1514,6 +1514,138 @@ void MiraPanelUI::createRoundRange(uint8_t idx) {
   EventContext* ctx = makeContext(idx);
   lv_obj_add_event_cb(b.control, onRoundRange, LV_EVENT_ALL, ctx);
 }
+// One native thermostat card, regardless of page. The three controls inside
+// are NOT three flex children: they are grouped inside this single card.
+// Horizontal on Waveshare 4.3C, vertical on WT32 SC01 Plus.
+void MiraPanelUI::createThermostat(uint8_t idx) {
+  Binding& b = _bindings[idx];
+  const bool wide = MIRA_DISPLAY_WIDTH >= 800;
+  const lv_coord_t cardW = MIRA_CARD_FULL;
+  const lv_coord_t cardH = wide ? 310 : 405;
+  b.card = makeCard(pageIndex(b.location), cardH);
+  lv_obj_set_width(b.card, cardW);
+  lv_obj_set_layout(b.card, LV_LAYOUT_NONE);
+  lv_obj_clear_flag(b.card, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_pad_all(b.card, 0, 0);
+
+  // Header: configured display name + last known heating mode.
+  lv_obj_t* header = lv_label_create(b.card);
+  String title = b.displayName.length() ? b.displayName : b.name;
+  lv_label_set_text(header, title.c_str());
+  lv_obj_set_style_text_color(header, COL_TEXT, 0);
+  lv_obj_set_style_text_font(header, &mira_font_fr_16, 0);
+  lv_obj_set_width(header, wide ? 300 : cardW - 22);
+  lv_obj_set_style_text_align(header, LV_TEXT_ALIGN_LEFT, 0);
+  lv_obj_set_pos(header, 14, 12);
+
+  if (wide) {
+    b.thermostatModeBadge = lv_label_create(b.card);
+    lv_label_set_text(b.thermostatModeBadge, b.listLabels[0].c_str());
+    lv_obj_set_style_text_color(b.thermostatModeBadge, colorAccent(), 0);
+    lv_obj_set_style_text_font(b.thermostatModeBadge, &mira_font_fr_14, 0);
+    lv_obj_set_width(b.thermostatModeBadge, 170);
+    lv_obj_set_style_text_align(b.thermostatModeBadge, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_pos(b.thermostatModeBadge, cardW - 185, 13);
+  }
+
+  // Existing LVGL arc semantics, 0.5°C step (range units are half-degrees).
+  const lv_coord_t arcSize = wide ? 246 : 234;
+  const lv_coord_t arcX = wide ? 42 : (cardW - arcSize) / 2;
+  const lv_coord_t arcY = wide ? 42 : 41;
+  b.control = lv_arc_create(b.card);
+  lv_obj_set_size(b.control, arcSize, arcSize);
+  lv_obj_set_pos(b.control, arcX, arcY);
+  lv_arc_set_range(b.control, b.minValue * 2, b.maxValue * 2);
+  lv_arc_set_value(b.control, (int)roundf(b.thermostatSetpoint * 2.0f));
+  lv_arc_set_bg_angles(b.control, 135, 45);
+  lv_obj_set_style_arc_width(b.control, wide ? 18 : 16, LV_PART_MAIN);
+  lv_obj_set_style_arc_width(b.control, wide ? 18 : 16, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_color(b.control, colorPanel2(), LV_PART_MAIN);
+  lv_obj_set_style_arc_color(b.control, colorAccent(), LV_PART_INDICATOR);
+  lv_obj_set_style_bg_opa(b.control, LV_OPA_TRANSP, LV_PART_KNOB);
+  lv_obj_set_style_border_width(b.control, 0, LV_PART_KNOB);
+  lv_obj_set_style_pad_all(b.control, 0, LV_PART_KNOB);
+  lv_obj_set_ext_click_area(b.control, 10);
+
+  b.valueLabel = lv_label_create(b.card);
+  String setpoint = String(b.thermostatSetpoint, 1) + "°";
+  lv_label_set_text(b.valueLabel, setpoint.c_str());
+  lv_obj_set_width(b.valueLabel, arcSize - 34);
+  lv_obj_set_style_text_align(b.valueLabel, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_style_text_color(b.valueLabel, COL_TEXT, 0);
+  lv_obj_set_style_text_font(b.valueLabel,
+      wide ? &lv_font_montserrat_40 : &lv_font_montserrat_28, 0);
+  lv_obj_set_pos(b.valueLabel, arcX + 17, arcY + (wide ? 101 : 98));
+
+  lv_obj_t* hint = lv_label_create(b.card);
+  lv_label_set_text(hint, "CONSIGNE");
+  lv_obj_set_width(hint, arcSize - 30);
+  lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_style_text_color(hint, COL_MUTED, 0);
+  lv_obj_set_style_text_font(hint, &mira_font_fr_14, 0);
+  lv_obj_set_pos(hint, arcX + 15, arcY + (wide ? 154 : 145));
+  EventContext* rangeCtx = makeContext(idx);
+  lv_obj_add_event_cb(b.control, onThermostatRange, LV_EVENT_ALL, rangeCtx);
+
+  // Current temperature: read-only. Jeedom /updatenr writes the Info ID;
+  // it must NEVER send a new heating command.
+  lv_obj_t* tempHeading = lv_label_create(b.card);
+  lv_label_set_text(tempHeading, "Température actuelle");
+  lv_obj_set_style_text_color(tempHeading, COL_MUTED, 0);
+  lv_obj_set_style_text_font(tempHeading, &mira_font_fr_14, 0);
+  lv_obj_set_width(tempHeading, wide ? 360 : cardW - 24);
+  lv_obj_set_style_text_align(tempHeading, wide ? LV_TEXT_ALIGN_LEFT : LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_pos(tempHeading, wide ? 379 : 12, wide ? 86 : 282);
+
+  b.thermostatTemperatureLabel = lv_label_create(b.card);
+  lv_label_set_text(b.thermostatTemperatureLabel, "-- °C");
+  lv_obj_set_style_text_color(b.thermostatTemperatureLabel, COL_TEXT, 0);
+  lv_obj_set_style_text_font(b.thermostatTemperatureLabel,
+                            wide ? &lv_font_montserrat_40 : &lv_font_montserrat_28, 0);
+  lv_obj_set_width(b.thermostatTemperatureLabel, wide ? 350 : cardW - 24);
+  lv_obj_set_style_text_align(b.thermostatTemperatureLabel,
+                              wide ? LV_TEXT_ALIGN_LEFT : LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_pos(b.thermostatTemperatureLabel, wide ? 379 : 12, wide ? 120 : 299);
+
+  if (wide) {
+    lv_obj_t* separator = lv_obj_create(b.card);
+    lv_obj_set_size(separator, cardW - 408, 1);
+    lv_obj_set_pos(separator, 376, 193);
+    lv_obj_set_style_bg_color(separator, colorBorder(), 0);
+    lv_obj_set_style_bg_opa(separator, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(separator, 0, 0);
+    lv_obj_clear_flag(separator, LV_OBJ_FLAG_CLICKABLE);
+  }
+
+  lv_obj_t* modeHeading = lv_label_create(b.card);
+  lv_label_set_text(modeHeading, "Mode");
+  lv_obj_set_style_text_color(modeHeading, COL_MUTED, 0);
+  lv_obj_set_style_text_font(modeHeading, &mira_font_fr_14, 0);
+  lv_obj_set_width(modeHeading, wide ? 360 : cardW - 24);
+  lv_obj_set_style_text_align(modeHeading, wide ? LV_TEXT_ALIGN_LEFT : LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_pos(modeHeading, wide ? 379 : 12, wide ? 210 : 340);
+
+  b.thermostatModeControl = lv_dropdown_create(b.card);
+  String modes;
+  for (uint8_t i = 0; i < b.listCount; ++i) {
+    if (i) modes += "\n";
+    modes += b.listLabels[i];
+  }
+  lv_dropdown_set_options(b.thermostatModeControl, modes.c_str());
+  lv_dropdown_set_selected(b.thermostatModeControl, 0);
+  lv_obj_set_size(b.thermostatModeControl, wide ? cardW - 407 : cardW - 28, 43);
+  lv_obj_set_pos(b.thermostatModeControl, wide ? 377 : 14, wide ? 237 : 359);
+  lv_obj_set_style_bg_color(b.thermostatModeControl, colorPanel2(), 0);
+  lv_obj_set_style_text_color(b.thermostatModeControl, COL_TEXT, 0);
+  lv_obj_set_style_text_font(b.thermostatModeControl, &mira_font_fr_16, 0);
+  lv_obj_set_style_border_width(b.thermostatModeControl, 1, 0);
+  lv_obj_set_style_border_color(b.thermostatModeControl, colorBorder(), 0);
+  lv_obj_set_style_radius(b.thermostatModeControl, 9, 0);
+  EventContext* modeCtx = makeContext(idx);
+  lv_obj_add_event_cb(b.thermostatModeControl, onThermostatMode,
+                      LV_EVENT_VALUE_CHANGED, modeCtx);
+}
+
 void MiraPanelUI::createList(uint8_t idx, bool asButtons) {
   Binding& b = _bindings[idx];
   const bool compact = b.style == "compact";
