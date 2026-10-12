@@ -740,17 +740,12 @@ void MiraPanelUI::begin() {
     lv_obj_align(square, LV_ALIGN_CENTER,
                  (dot % 2) * 10 - 8, (dot / 2) * 10 - 15);
   }
-  lv_obj_t* pagesCaption = lv_label_create(_navPagesButton);
-  lv_label_set_text(pagesCaption, "Pages");
-  lv_obj_set_style_text_font(pagesCaption, &mira_font_fr_12, 0);
-  lv_obj_set_style_text_color(pagesCaption, COL_TEXT, 0);
-  lv_obj_align(pagesCaption, LV_ALIGN_BOTTOM_MID, 0, -1);
+
 
   buildSettingsPage();
   buildEnergyPreviewPage();
   buildPagePicker();
   refreshFavoriteNav();
-  refreshFavoritePicker();
 
   _sleepOverlay = lv_obj_create(_screen);
   lv_obj_set_pos(_sleepOverlay, 0, 0);
@@ -2062,13 +2057,7 @@ void MiraPanelUI::buildPagePicker() {
   lv_label_set_text(heading, "Toutes les pages");
   lv_obj_set_style_text_color(heading, COL_TEXT, 0);
   lv_obj_set_style_text_font(heading, &mira_font_fr_16, 0);
-  lv_obj_align(heading, LV_ALIGN_TOP_MID, 0, 6);
-
-  _pagePickerFavoriteCount = lv_label_create(_pagePickerCard);
-  lv_label_set_text(_pagePickerFavoriteCount, "Favoris : 3/3");
-  lv_obj_set_style_text_color(_pagePickerFavoriteCount, COL_MUTED, 0);
-  lv_obj_set_style_text_font(_pagePickerFavoriteCount, &mira_font_fr_12, 0);
-  lv_obj_align(_pagePickerFavoriteCount, LV_ALIGN_TOP_MID, 0, 27);
+  lv_obj_align(heading, LV_ALIGN_TOP_MID, 0, 13);
 
   const char* names[PAGE_COUNT] = {
     "Accueil", "Lumières", "Températures", "Paramètres", "Énergie (test)"
@@ -2078,8 +2067,8 @@ void MiraPanelUI::buildPagePicker() {
     uint8_t page = order[row];
     lv_obj_t* btn = lv_btn_create(_pagePickerCard);
     _pagePickerButtons[page] = btn;
-    lv_obj_set_size(btn, wide ? 352 : 197, 47);
-    lv_obj_set_pos(btn, wide ? 20 : 15, 53 + row * 56);
+    lv_obj_set_size(btn, wide ? 420 : 268, 47);
+    lv_obj_set_pos(btn, wide ? 20 : 15, 46 + row * 58);
     lv_obj_set_style_radius(btn, 9, 0);
     lv_obj_set_style_bg_color(btn, colorPanel(), 0);
     lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
@@ -2098,34 +2087,7 @@ void MiraPanelUI::buildPagePicker() {
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_center(label);
 
-    // Separate touch target for the favorite star: selecting a favorite
-    // must NOT also navigate to the page beneath it.
-    lv_obj_t* star = lv_btn_create(_pagePickerCard);
-    _pagePickerStars[page] = star;
-    lv_obj_set_size(star, wide ? 56 : 60, 47);
-    lv_obj_set_pos(star, wide ? 384 : 223, 53 + row * 56);
-    lv_obj_set_style_radius(star, 9, 0);
-    lv_obj_set_style_border_width(star, 1, 0);
-    lv_obj_set_style_border_color(star, colorBorder(), 0);
-    lv_obj_set_style_shadow_width(star, 0, 0);
-    lv_obj_set_style_pad_all(star, 0, 0);
-    lv_obj_add_event_cb(star, onFavoriteToggle, LV_EVENT_CLICKED,
-                        (void*)(uintptr_t)page);
 
-    // Outline star drawn with LVGL lines, not glyphs: all fonts and
-    // touch targets work identically on WT32 and Waveshare.
-    static const lv_point_t STAR[11] = {
-      {10, 0}, {13, 7}, {20, 7}, {15, 12}, {17, 20},
-      {10, 16}, {3, 20}, {5, 12}, {0, 7}, {7, 7}, {10, 0}
-    };
-    lv_obj_t* starIcon = lv_line_create(star);
-    _pagePickerStarIcons[page] = starIcon;
-    lv_line_set_points(starIcon, STAR, 11);
-    lv_obj_set_size(starIcon, 21, 21);
-    lv_obj_set_style_line_width(starIcon, 2, LV_PART_MAIN);
-    lv_obj_set_style_line_rounded(starIcon, true, LV_PART_MAIN);
-    lv_obj_clear_flag(starIcon, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_center(starIcon);
   }
   lv_obj_add_flag(_pagePicker, LV_OBJ_FLAG_HIDDEN);
 }
@@ -2352,7 +2314,6 @@ void MiraPanelUI::applyTheme() {
     lv_obj_set_style_border_color(_themeDropdown, colorBorder(), 0);
   }
 
-  refreshFavoritePicker();
   setNavActive(_currentPage);
 }
 void MiraPanelUI::loadFavorites() {
@@ -2373,30 +2334,6 @@ void MiraPanelUI::loadFavorites() {
     }
     _favoritePages[slot] = page;
   }
-}
-
-void MiraPanelUI::toggleFavorite(uint8_t page) {
-  if (page >= PAGE_COUNT) return;
-  int8_t found = -1;
-  int8_t empty = -1;
-  for (uint8_t slot = 0; slot < FAVORITE_SLOTS; ++slot) {
-    if (_favoritePages[slot] == page) found = slot;
-    if (_favoritePages[slot] == NO_FAVORITE && empty < 0) empty = slot;
-  }
-  int8_t selectedSlot = found >= 0 ? found : empty;
-  if (selectedSlot < 0) {
-    // Three occupied slots: show the limit without moving existing favorites.
-    refreshFavoritePicker();
-    return;
-  }
-  _favoritePages[selectedSlot] = found >= 0 ? NO_FAVORITE : page;
-  char key[8];
-  snprintf(key, sizeof(key), "fav%u", (unsigned)selectedSlot);
-  _prefs.putUChar(key, _favoritePages[selectedSlot]);
-  refreshFavoriteNav();
-  refreshFavoritePicker();
-  setNavActive(_currentPage);
-  noteActivity();
 }
 
 void MiraPanelUI::refreshFavoriteNav() {
@@ -2434,30 +2371,6 @@ void MiraPanelUI::refreshFavoriteNav() {
     lv_label_set_long_mode(caption, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_align(caption, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(caption, LV_ALIGN_BOTTOM_MID, 0, -1);
-  }
-}
-
-void MiraPanelUI::refreshFavoritePicker() {
-  uint8_t count = 0;
-  for (uint8_t slot = 0; slot < FAVORITE_SLOTS; ++slot)
-    if (_favoritePages[slot] < PAGE_COUNT) ++count;
-  if (_pagePickerFavoriteCount) {
-    lv_label_set_text_fmt(_pagePickerFavoriteCount, "Favoris : %u/3 (étoiles)",
-                          (unsigned)count);
-  }
-  for (uint8_t page = 0; page < PAGE_COUNT; ++page) {
-    lv_obj_t* star = _pagePickerStars[page];
-    if (!star) continue;
-    bool selected = false;
-    for (uint8_t slot = 0; slot < FAVORITE_SLOTS; ++slot)
-      if (_favoritePages[slot] == page) selected = true;
-    const lv_color_t chosenColor = lv_color_hex(0xF1C85B);
-    lv_obj_set_style_bg_color(star, selected ? colorAccent2() : colorPanel(), 0);
-    lv_obj_set_style_bg_opa(star, selected ? LV_OPA_COVER : LV_OPA_70, 0);
-    if (_pagePickerStarIcons[page]) {
-      lv_obj_set_style_line_color(_pagePickerStarIcons[page],
-                                 selected ? chosenColor : COL_MUTED, LV_PART_MAIN);
-    }
   }
 }
 
@@ -2505,12 +2418,6 @@ void MiraPanelUI::onNav(lv_event_t* e) {
   if (slot >= FAVORITE_SLOTS) return;
   uint8_t page = _uiForLvgl->_favoritePages[slot];
   if (page < PAGE_COUNT) _uiForLvgl->showPage(page);
-}
-
-void MiraPanelUI::onFavoriteToggle(lv_event_t* e) {
-  if (!_uiForLvgl) return;
-  uint8_t page = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
-  _uiForLvgl->toggleFavorite(page);
 }
 
 void MiraPanelUI::onPagePick(lv_event_t* e) {
