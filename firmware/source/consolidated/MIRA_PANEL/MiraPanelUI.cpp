@@ -1570,7 +1570,7 @@ void MiraPanelUI::createThermostat(uint8_t idx) {
   const lv_coord_t cardH = wide ? 310 : 405;
   b.card = makeCard(pageIndex(b.location), cardH);
   lv_obj_set_width(b.card, cardW);
-  lv_obj_set_layout(b.card, LV_LAYOUT_NONE);
+  lv_obj_set_layout(b.card, 0);  // No child layout; supported by both LVGL 8 targets
   lv_obj_clear_flag(b.card, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_set_style_pad_all(b.card, 0, 0);
 
