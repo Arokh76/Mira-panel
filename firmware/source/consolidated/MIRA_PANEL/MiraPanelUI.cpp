@@ -2012,7 +2012,7 @@ void MiraPanelUI::buildEnergyPreviewPage() {
   lv_obj_align(notice, LV_ALIGN_TOP_MID, 0, 56);
 
   lv_obj_t* explanation = lv_label_create(card);
-  lv_label_set_width(explanation, wide ? 570 : 256);
+  lv_obj_set_width(explanation, wide ? 570 : 256);
   lv_label_set_long_mode(explanation, LV_LABEL_LONG_WRAP);
   lv_label_set_text(explanation,
       "Une quatrième catégorie à tester, sans commandes Jeedom.\n"
