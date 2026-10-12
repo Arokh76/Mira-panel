@@ -352,6 +352,16 @@ void MiraPanelUI::touchRead(lv_indev_drv_t* indev, lv_indev_data_t* data) {
     // directement afin qu'aucun widget/page scrollable ne puisse intercepter
     // le toucher. Un seul changement est genere par appui.
     if (_uiForLvgl && y >= MIRA_CONTENT_HEIGHT) {
+      // Navigation is handled here before LVGL hit testing. Never route
+      // an open thermostat dropdown's last selection to the nav bar.
+      for (uint8_t i = 0; i < _uiForLvgl->_bindingCount; ++i) {
+        Binding& b = _uiForLvgl->_bindings[i];
+        if (b.type == W_THERMOSTAT && b.thermostatModeControl &&
+            lv_dropdown_get_list(b.thermostatModeControl)) {
+          _uiForLvgl->_navTouchLatched = false;
+          return;
+        }
+      }
       if (!_uiForLvgl->_navTouchLatched) {
         _uiForLvgl->_navTouchLatched = true;
         static const uint8_t navOrder[PAGE_COUNT][3] = {
@@ -2329,6 +2339,34 @@ void MiraPanelUI::onThermostatRange(lv_event_t* e) {
     if (ui._mqtt && ui._mqtt->enabled())
       ui._mqtt->publishAction(b.name + "__consigne", String(value, 1));
   }
+}
+
+// LVGL renders the opened list separately from the closed dropdown.
+// Apply the French font and Mira palette to the actual popup every time.
+void MiraPanelUI::onThermostatDropdownOpen(lv_event_t* e) {
+  EventContext* ctx = static_cast<EventContext*>(lv_event_get_user_data(e));
+  if (!ctx || !ctx->ui) return;
+  MiraPanelUI& ui = *ctx->ui;
+  if (ctx->bindingIndex >= ui._bindingCount) return;
+  Binding& b = ui._bindings[ctx->bindingIndex];
+  if (!b.thermostatModeControl) return;
+  lv_obj_t* popup = lv_dropdown_get_list(b.thermostatModeControl);
+  if (!popup) return;
+  lv_obj_set_style_bg_opa(popup, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(popup, ui.colorPanel2(), LV_PART_MAIN);
+  lv_obj_set_style_text_font(popup, &mira_font_fr_16, LV_PART_MAIN);
+  lv_obj_set_style_text_color(popup, COL_TEXT, LV_PART_MAIN);
+  lv_obj_set_style_border_color(popup, ui.colorBorder(), LV_PART_MAIN);
+  lv_obj_set_style_border_width(popup, 1, LV_PART_MAIN);
+  lv_obj_set_style_radius(popup, 9, LV_PART_MAIN);
+  lv_obj_set_style_shadow_color(popup, ui.colorAccent(), LV_PART_MAIN);
+  lv_obj_set_style_shadow_opa(popup, LV_OPA_20, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(popup, ui.colorAccent2(), LV_PART_SELECTED);
+  lv_obj_set_style_text_color(popup, COL_TEXT, LV_PART_SELECTED);
+  lv_obj_set_style_bg_color(popup, ui.colorAccent(), LV_PART_SELECTED | LV_STATE_CHECKED);
+  lv_obj_set_style_text_color(popup, lv_color_hex(0xFFFFFF), LV_PART_SELECTED | LV_STATE_CHECKED);
+  lv_obj_set_style_pad_top(popup, 5, LV_PART_MAIN);
+  lv_obj_set_style_pad_bottom(popup, 5, LV_PART_MAIN);
 }
 
 void MiraPanelUI::onThermostatMode(lv_event_t* e) {
