@@ -2211,6 +2211,62 @@ void MiraPanelUI::onRoundRange(lv_event_t* e) {
   }
 }
 
+// Only direct touch gestures produce Jeedom actions. Incoming Info/States
+// update the controls without passing through this callback.
+void MiraPanelUI::onThermostatRange(lv_event_t* e) {
+  EventContext* ctx = static_cast<EventContext*>(lv_event_get_user_data(e));
+  if (!ctx || !ctx->ui) return;
+  MiraPanelUI& ui = *ctx->ui;
+  if (ctx->bindingIndex >= ui._bindingCount) return;
+  Binding& b = ui._bindings[ctx->bindingIndex];
+  const lv_event_code_t code = lv_event_get_code(e);
+  if (code != LV_EVENT_VALUE_CHANGED && code != LV_EVENT_RELEASED) return;
+  if (ui._suppressEvents) return;
+  const int halfDegrees = lv_arc_get_value(b.control);
+  const float value = halfDegrees * 0.5f;
+  b.thermostatSetpoint = value;
+  b.currentValue = (int)roundf(value);
+  if (b.valueLabel) {
+    String displayed = String(value, 1) + "°";
+    lv_label_set_text(b.valueLabel, displayed.c_str());
+  }
+  ui.noteActivity();
+  const uint32_t now = millis();
+  const bool finalSend = code == LV_EVENT_RELEASED;
+  b.localInputUntilMs = now + (finalSend ? 350 : 250);
+  // Cap network traffic while dragging; always send the final release.
+  const bool changed = halfDegrees != b.lastLiveValue;
+  const bool liveSend = code == LV_EVENT_VALUE_CHANGED && changed &&
+                        (b.lastLiveSendMs == 0 ||
+                         (uint32_t)(now - b.lastLiveSendMs) >= 130U);
+  if (liveSend || finalSend) {
+    b.lastLiveSendMs = now;
+    b.lastLiveValue = halfDegrees;
+    ui._server.IndexSetRange(b.id, value);
+    ui._server.IndexSetEvent(b.id);
+    if (ui._mqtt && ui._mqtt->enabled())
+      ui._mqtt->publishAction(b.name + "__consigne", String(value, 1));
+  }
+}
+
+void MiraPanelUI::onThermostatMode(lv_event_t* e) {
+  EventContext* ctx = static_cast<EventContext*>(lv_event_get_user_data(e));
+  if (!ctx || !ctx->ui) return;
+  MiraPanelUI& ui = *ctx->ui;
+  if (ui._suppressEvents || ctx->bindingIndex >= ui._bindingCount) return;
+  Binding& b = ui._bindings[ctx->bindingIndex];
+  const uint16_t selection = lv_dropdown_get_selected(b.thermostatModeControl);
+  if (selection >= b.listCount) return;
+  b.selectedIndex = (int8_t)selection;
+  ui.noteActivity();
+  ui._server.IndexSetList(b.listIds[selection]);
+  ui._server.IndexSetEvent(b.listIds[selection]);
+  if (b.thermostatModeBadge)
+    lv_label_set_text(b.thermostatModeBadge, b.listLabels[selection].c_str());
+  if (ui._mqtt && ui._mqtt->enabled())
+    ui._mqtt->publishAction(b.name + "__mode", b.listLabels[selection]);
+}
+
 void MiraPanelUI::onList(lv_event_t* e) {
   EventContext* ctx = static_cast<EventContext*>(lv_event_get_user_data(e));
   if (!ctx || !ctx->ui) return;
