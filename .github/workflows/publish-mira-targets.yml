@@ -3,14 +3,14 @@ name: Publish Mira Panel - one release, multiple hardware targets
 on:
   workflow_run:
     workflows:
-      - 'Build Mira Panel 0.6.58 - WT32 SC01 Plus et Waveshare 4.3C'
+      - 'Build Mira Panel 0.6.59 - WT32 SC01 Plus et Waveshare 4.3C'
     types: [completed]
   workflow_dispatch:
     inputs:
       version:
-        description: "Version produced by build-mira.yml (example 0.6.58)"
+        description: "Version produced by build-mira.yml (example 0.6.59)"
         required: true
-        default: "0.6.58"
+        default: "0.6.59"
         type: string
       run_id:
         description: "Successful build-mira.yml run ID on main, same commit"
@@ -34,7 +34,7 @@ jobs:
        github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     env:
-      RELEASE_VERSION: ${{ github.event_name == 'workflow_run' && '0.6.58' || inputs.version }}
+      RELEASE_VERSION: ${{ github.event_name == 'workflow_run' && '0.6.59' || inputs.version }}
       RELEASE_RUN_ID: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || inputs.run_id }}
     steps:
       - name: Checkout current main
