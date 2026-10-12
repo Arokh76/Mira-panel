@@ -45,7 +45,7 @@ void setup() {
   Serveur.SetupModule(
     "Mira Panel",
     MIRA_HARDWARE_NAME,
-    "0.6.56",
+    "0.6.57",
     "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/",
     "LVGL"
   );
@@ -62,7 +62,7 @@ void setup() {
   }
 
   Serial.println();
-  Serial.println("[MIRA] Firmware 0.6.56 initialise");
+  Serial.println("[MIRA] Firmware 0.6.57 initialise");
   Serial.printf("[MIRA][HW] Flash : %.1f MB\n", ESP.getFlashChipSize() / 1048576.0f);
   Serial.printf("[MIRA][HW] PSRAM : %.1f MB\n", ESP.getPsramSize() / 1048576.0f);
   Serial.println("[MIRA] Interface HTTP, LVGL et MQTT pretes");
