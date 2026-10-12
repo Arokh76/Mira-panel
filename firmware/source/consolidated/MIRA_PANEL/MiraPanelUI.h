@@ -202,6 +202,7 @@ private:
   static void onRoundRange(lv_event_t* e);
   static void onThermostatRange(lv_event_t* e);
   static void onThermostatMode(lv_event_t* e);
+  static void onThermostatDropdownOpen(lv_event_t* e);
   static void onList(lv_event_t* e);
   static void onListButton(lv_event_t* e);
   static void onColor(lv_event_t* e);
