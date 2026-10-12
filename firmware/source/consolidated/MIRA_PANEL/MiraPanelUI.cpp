@@ -358,19 +358,16 @@ void MiraPanelUI::touchRead(lv_indev_drv_t* indev, lv_indev_data_t* data) {
       // so lv_dropdown_get_list() cannot be used as an open-state check.
       if (!_uiForLvgl->_navTouchLatched) {
         _uiForLvgl->_navTouchLatched = true;
-        // Navigation lab: the three contextual shortcuts stay in the same
-        // order; slot four opens a separate page picker, with no Jeedom action.
-        static const uint8_t navOrder[PAGE_COUNT][3] = {
-          {1, 3, 2}, {2, 0, 3}, {1, 0, 3},
-          {1, 0, 2}, {1, 0, 3}  // Energy demo -> lights/home/settings
-        };
-        uint8_t current = _uiForLvgl->_currentPage < PAGE_COUNT ? _uiForLvgl->_currentPage : 0;
+        // Direct hardware touch routing for the three fixed favorite slots
+        // and the always-present Pages button. Do not let a dropdown or
+        // scrollable widget intercept the bottom strip.
         uint8_t slot = ((uint32_t)x * NAV_BUTTON_COUNT) / MIRA_DISPLAY_WIDTH;
         if (slot >= NAV_BUTTON_COUNT) slot = NAV_BUTTON_COUNT - 1;
-        if (slot == NAV_BUTTON_COUNT - 1) {
+        if (slot == FAVORITE_SLOTS) {
           _uiForLvgl->_pendingTogglePagePicker = true;
-        } else {
-          _uiForLvgl->_pendingNavPage = (int8_t)navOrder[current][slot];
+        } else if (_uiForLvgl->_favoritePages[slot] < PAGE_COUNT) {
+          _uiForLvgl->_pendingNavPage =
+              (int8_t)_uiForLvgl->_favoritePages[slot];
         }
       }
       return;
@@ -610,6 +607,7 @@ void MiraPanelUI::begin() {
   if (savedTheme == 0xFF) savedTheme = _prefs.getBool("dark", false) ? THEME_DARK : THEME_MIRA;
   _theme = savedTheme <= THEME_GLASS ? savedTheme : THEME_DARK;
   _returnHomeEnabled = _prefs.getBool("home", true);
+  loadFavorites();
   _sleepEnabled = _prefs.getBool("sleep", true);
   _clockInSleep = _prefs.getBool("clock", true);
 
@@ -697,33 +695,24 @@ void MiraPanelUI::begin() {
   lv_obj_set_style_radius(_nav, 0, 0);
   lv_obj_set_style_pad_all(_nav, 0, 0);
 
-  // Four equal touch targets: safe 80px width on WT32, 200px on Waveshare.
-  const char* icons[NAV_BUTTON_COUNT] = {LV_SYMBOL_HOME, "", "", LV_SYMBOL_SETTINGS};
-  for (uint8_t i = 0; i < NAV_BUTTON_COUNT; ++i) {
-    _navButtons[i] = lv_btn_create(_nav);
-    lv_obj_set_size(_navButtons[i], MIRA_DISPLAY_WIDTH / NAV_BUTTON_COUNT, MIRA_NAV_HEIGHT - 2);
-    lv_obj_add_flag(_navButtons[i], LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_ext_click_area(_navButtons[i], 2);
-    lv_obj_set_style_bg_opa(_navButtons[i], LV_OPA_TRANSP, 0);
-    lv_obj_set_style_bg_opa(_navButtons[i], LV_OPA_30, LV_STATE_PRESSED);
-    lv_obj_set_style_bg_color(_navButtons[i], colorAccent(), LV_STATE_PRESSED);
-    lv_obj_set_style_radius(_navButtons[i], 10, 0);
-    lv_obj_set_style_border_width(_navButtons[i], 0, 0);
-    lv_obj_set_style_shadow_width(_navButtons[i], 0, 0);
-    lv_obj_set_style_transform_zoom(_navButtons[i], 246, LV_STATE_PRESSED);
-    lv_obj_set_style_anim_time(_navButtons[i], 100, LV_STATE_DEFAULT);
-    lv_obj_add_event_cb(_navButtons[i], onNav, LV_EVENT_CLICKED, (void*)(uintptr_t)i);
-    if (i == 1) {
-      makeBulbIcon(_navButtons[i]);
-    } else if (i == 2) {
-      makeThermometerIcon(_navButtons[i]);
-    } else {
-      lv_obj_t* lbl = lv_label_create(_navButtons[i]);
-      lv_label_set_text(lbl, icons[i]);
-      lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
-      lv_obj_set_style_text_color(lbl, lv_color_hex(0xDCEAF0), 0);
-      lv_obj_center(lbl);
-    }
+  // Three persistent favorites (empty slots allowed) plus the Pages menu.
+  // The slots remain in the same position on every page.
+  for (uint8_t slot = 0; slot < FAVORITE_SLOTS; ++slot) {
+    lv_obj_t* btn = lv_btn_create(_nav);
+    _favoriteButtons[slot] = btn;
+    lv_obj_set_size(btn, MIRA_DISPLAY_WIDTH / NAV_BUTTON_COUNT,
+                    MIRA_NAV_HEIGHT - 2);
+    lv_obj_set_pos(btn, 1 + slot * (MIRA_DISPLAY_WIDTH / NAV_BUTTON_COUNT), 1);
+    lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_ext_click_area(btn, 2);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_30, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(btn, colorAccent(), LV_STATE_PRESSED);
+    lv_obj_set_style_radius(btn, 10, 0);
+    lv_obj_set_style_border_width(btn, 0, 0);
+    lv_obj_set_style_shadow_width(btn, 0, 0);
+    lv_obj_set_style_pad_all(btn, 0, 0);
+    lv_obj_add_event_cb(btn, onNav, LV_EVENT_CLICKED, (void*)(uintptr_t)slot);
   }
 
   // The fourth nav SLOT is a separate button, not the Settings page icon.
@@ -760,6 +749,8 @@ void MiraPanelUI::begin() {
   buildSettingsPage();
   buildEnergyPreviewPage();
   buildPagePicker();
+  refreshFavoriteNav();
+  refreshFavoritePicker();
 
   _sleepOverlay = lv_obj_create(_screen);
   lv_obj_set_pos(_sleepOverlay, 0, 0);
