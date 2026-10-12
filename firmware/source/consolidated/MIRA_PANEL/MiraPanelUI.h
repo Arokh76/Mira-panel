@@ -131,7 +131,7 @@ private:
   lv_obj_t* _screen = nullptr;
   lv_obj_t* _nav = nullptr;
   lv_obj_t* _pages[PAGE_COUNT] = {nullptr};
-  lv_obj_t* _navButtons[NAV_BUTTON_COUNT] = {nullptr};
+  lv_obj_t* _navButtons[PAGE_COUNT] = {nullptr};  // 4 page icons; Energy is menu-only
   lv_obj_t* _navPagesButton = nullptr;
   lv_obj_t* _pagePicker = nullptr;
   lv_obj_t* _pagePickerCard = nullptr;
