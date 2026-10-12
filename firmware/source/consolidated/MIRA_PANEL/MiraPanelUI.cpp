@@ -2348,30 +2348,125 @@ void MiraPanelUI::applyTheme() {
 
   setNavActive(_currentPage);
 }
-void MiraPanelUI::setNavActive(uint8_t index) {
-  // Same contextual shortcut order as Mira 0.6, plus a permanent Pages slot.
-  static const uint8_t order[PAGE_COUNT][3] = {
-    {1, 3, 2}, {2, 0, 3}, {1, 0, 3},
-    {1, 0, 2}, {1, 0, 3}
-  };
-
-  if (index >= PAGE_COUNT) index = 0;
-
-  for (uint8_t i = 0; i < NAV_BUTTON_COUNT; ++i) {
-    if (_navButtons[i]) lv_obj_add_flag(_navButtons[i], LV_OBJ_FLAG_HIDDEN);
+void MiraPanelUI::loadFavorites() {
+  // Independent NVS slots: removing a favorite leaves its physical position
+  // empty until another page is assigned to it.
+  for (uint8_t slot = 0; slot < FAVORITE_SLOTS; ++slot) {
+    char key[8];
+    snprintf(key, sizeof(key), "fav%u", slot);
+    uint8_t page = _prefs.getUChar(key, slot);  // first install: Accueil, Lumières, Climat
+    if (page != NO_FAVORITE && page >= PAGE_COUNT) page = NO_FAVORITE;
+    if (page != NO_FAVORITE) {
+      for (uint8_t previous = 0; previous < slot; ++previous) {
+        if (_favoritePages[previous] == page) {
+          page = NO_FAVORITE;
+          break;
+        }
+      }
+    }
+    _favoritePages[slot] = page;
   }
+}
 
-  for (uint8_t slot = 0; slot < 3; ++slot) {
-    uint8_t page = order[index][slot];
-    lv_obj_t* btn = _navButtons[page];
+void MiraPanelUI::toggleFavorite(uint8_t page) {
+  if (page >= PAGE_COUNT) return;
+  int8_t found = -1;
+  int8_t empty = -1;
+  for (uint8_t slot = 0; slot < FAVORITE_SLOTS; ++slot) {
+    if (_favoritePages[slot] == page) found = slot;
+    if (_favoritePages[slot] == NO_FAVORITE && empty < 0) empty = slot;
+  }
+  int8_t selectedSlot = found >= 0 ? found : empty;
+  if (selectedSlot < 0) {
+    // Three occupied slots: show the limit without moving existing favorites.
+    refreshFavoritePicker();
+    return;
+  }
+  _favoritePages[selectedSlot] = found >= 0 ? NO_FAVORITE : page;
+  char key[8];
+  snprintf(key, sizeof(key), "fav%u", (unsigned)selectedSlot);
+  _prefs.putUChar(key, _favoritePages[selectedSlot]);
+  refreshFavoriteNav();
+  refreshFavoritePicker();
+  setNavActive(_currentPage);
+  noteActivity();
+}
+
+void MiraPanelUI::refreshFavoriteNav() {
+  const char* names[PAGE_COUNT] = {
+    "Accueil", "Lumières", "Climat", "Réglages", "Énergie"
+  };
+  for (uint8_t slot = 0; slot < FAVORITE_SLOTS; ++slot) {
+    lv_obj_t* btn = _favoriteButtons[slot];
     if (!btn) continue;
-    lv_obj_set_size(btn, MIRA_DISPLAY_WIDTH / NAV_BUTTON_COUNT, MIRA_NAV_HEIGHT - 2);
+    lv_obj_clean(btn);
+    const uint8_t page = _favoritePages[slot];
+    if (page == 1 || page == 2) {
+      if (page == 1) makeBulbIcon(btn);
+      else makeThermometerIcon(btn);
+      // Existing drawn icons were centered for the old bar; move upward
+      // to accommodate a compact caption on the 46px WT32 navigation.
+      lv_obj_t* root = lv_obj_get_child(btn, 0);
+      if (root) lv_obj_align(root, LV_ALIGN_CENTER, 0, -9);
+    } else {
+      lv_obj_t* symbol = lv_label_create(btn);
+      const char* glyph = page == 0 ? LV_SYMBOL_HOME :
+                          page == 3 ? LV_SYMBOL_SETTINGS :
+                          page == 4 ? "W" : LV_SYMBOL_PLUS;
+      lv_label_set_text(symbol, glyph);
+      lv_obj_set_style_text_font(symbol, &lv_font_montserrat_20, 0);
+      lv_obj_set_style_text_color(symbol, colorAccent(), 0);
+      lv_obj_align(symbol, LV_ALIGN_CENTER, 0, -9);
+    }
+
+    lv_obj_t* caption = lv_label_create(btn);
+    lv_label_set_text(caption, page < PAGE_COUNT ? names[page] : "Libre");
+    lv_obj_set_style_text_font(caption, &mira_font_fr_12, 0);
+    lv_obj_set_style_text_color(caption, page < PAGE_COUNT ? COL_TEXT : COL_MUTED, 0);
+    lv_obj_set_width(caption, (MIRA_DISPLAY_WIDTH / NAV_BUTTON_COUNT) - 4);
+    lv_label_set_long_mode(caption, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_align(caption, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(caption, LV_ALIGN_BOTTOM_MID, 0, -1);
+  }
+}
+
+void MiraPanelUI::refreshFavoritePicker() {
+  uint8_t count = 0;
+  for (uint8_t slot = 0; slot < FAVORITE_SLOTS; ++slot)
+    if (_favoritePages[slot] < PAGE_COUNT) ++count;
+  if (_pagePickerFavoriteCount) {
+    lv_label_set_text_fmt(_pagePickerFavoriteCount, "Favoris : %u/3 (étoiles)",
+                          (unsigned)count);
+  }
+  for (uint8_t page = 0; page < PAGE_COUNT; ++page) {
+    lv_obj_t* star = _pagePickerStars[page];
+    if (!star) continue;
+    bool selected = false;
+    for (uint8_t slot = 0; slot < FAVORITE_SLOTS; ++slot)
+      if (_favoritePages[slot] == page) selected = true;
+    const lv_color_t chosenColor = lv_color_hex(0xF1C85B);
+    lv_obj_set_style_bg_color(star, selected ? colorAccent2() : colorPanel(), 0);
+    lv_obj_set_style_bg_opa(star, selected ? LV_OPA_COVER : LV_OPA_70, 0);
+    if (_pagePickerStarIcons[page]) {
+      lv_obj_set_style_line_color(_pagePickerStarIcons[page],
+                                 selected ? chosenColor : COL_MUTED, LV_PART_MAIN);
+    }
+  }
+}
+
+void MiraPanelUI::setNavActive(uint8_t index) {
+  if (index >= PAGE_COUNT) index = 0;
+  for (uint8_t slot = 0; slot < FAVORITE_SLOTS; ++slot) {
+    lv_obj_t* btn = _favoriteButtons[slot];
+    if (!btn) continue;
     lv_obj_set_pos(btn, 1 + slot * (MIRA_DISPLAY_WIDTH / NAV_BUTTON_COUNT), 1);
-    lv_obj_clear_flag(btn, LV_OBJ_FLAG_HIDDEN);
+    bool active = _favoritePages[slot] == index;
+    lv_obj_set_style_bg_color(btn, colorAccent2(), 0);
+    lv_obj_set_style_bg_opa(btn, active ? LV_OPA_30 : LV_OPA_TRANSP, 0);
   }
   if (_navPagesButton) {
     lv_obj_set_pos(_navPagesButton,
-                   1 + 3 * (MIRA_DISPLAY_WIDTH / NAV_BUTTON_COUNT), 1);
+                   1 + FAVORITE_SLOTS * (MIRA_DISPLAY_WIDTH / NAV_BUTTON_COUNT), 1);
     lv_obj_clear_flag(_navPagesButton, LV_OBJ_FLAG_HIDDEN);
   }
   for (uint8_t i = 0; i < PAGE_COUNT; ++i) {
@@ -2399,8 +2494,16 @@ void MiraPanelUI::showPage(uint8_t index) {
 
 void MiraPanelUI::onNav(lv_event_t* e) {
   if (!_uiForLvgl) return;
-  uint8_t index = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
-  _uiForLvgl->showPage(index);
+  uint8_t slot = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
+  if (slot >= FAVORITE_SLOTS) return;
+  uint8_t page = _uiForLvgl->_favoritePages[slot];
+  if (page < PAGE_COUNT) _uiForLvgl->showPage(page);
+}
+
+void MiraPanelUI::onFavoriteToggle(lv_event_t* e) {
+  if (!_uiForLvgl) return;
+  uint8_t page = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
+  _uiForLvgl->toggleFavorite(page);
 }
 
 void MiraPanelUI::onPagePick(lv_event_t* e) {
