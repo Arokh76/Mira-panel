@@ -738,7 +738,7 @@ void MiraPanelUI::begin() {
     lv_obj_clear_flag(square, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(square, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_align(square, LV_ALIGN_CENTER,
-                 (dot % 2) * 10 - 8, (dot / 2) * 10 - 15);
+                 (dot % 2) * 10 - 8, (dot / 2) * 10 - 8);
   }
 
 
