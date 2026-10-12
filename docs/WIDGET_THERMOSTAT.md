@@ -33,9 +33,6 @@ sont optionnels. Les noms techniques restent stables, le nom affiché peut
       "displayName": "Salon",
       "emplacement": "temperatures",
       "layout": "auto",
-      "temperatureName": "Salon - Température",
-      "setpointName": "Salon - Consigne",
-      "modeName": "Salon - Mode",
       "min": "5",
       "max": "30",
       "value": "20.5",
@@ -45,6 +42,18 @@ sont optionnels. Les noms techniques restent stables, le nom affiché peut
   ]
 }
 ```
+
+### Trois canaux Jeedom (noms techniques générés)
+
+À partir du nom `Thermostat salon`, le firmware génère dans `/getindex`
+les commandes `Thermostat salon__temperature` (info),
+`Thermostat salon__consigne` (range) et
+`Thermostat salon__mode` (liste à options).
+
+Le plugin Jeedom 1.2.19-dev reconnaît cette composition, peut la programmer
+et synchronise les trois entrées via les commandes historiques. Les liaisons
+vers les commandes **réelles** Jeedom se renseignent ensuite dans la fiche
+équipement Mira par les champs de calcul/mapping existants.
 
 ### Trois canaux Jeedom
 
@@ -75,10 +84,12 @@ comme sur tous les autres widgets.
 
 ## Sources du plugin Jeedom
 
-Le dépôt GitHub connecté contient uniquement le **firmware**. Les sources
-PHP/JS de l'éditeur de widgets du plugin Jeedom ne sont pas disponibles
-dans ce dépôt ; il faudra les récupérer pour ajouter le formulaire
-Thermostat et les liaisons vers les commandes réelles.
+Le dépôt GitHub connecté contient uniquement le **firmware**. Les sources PHP/JS du plugin Jeedom **1.2.18** ont été fournies séparément.
+Une préversion locale **1.2.19-dev** est préparée avec type Thermostat,
+configuration des modes, sauvegarde/relecture des données et contrôle de
+synchronisation des trois actions. Elle doit être installée conjointement au
+firmware 0.6.55 preview, puis testée sur Jeedom réel. Le ZIP du plugin est
+livré comme artefact séparé et n'est pas encore publié dans le dépôt GitHub.
 
 Ce document est le point de départ de l'intégration, et **non** une
 confirmation de publication de la fonctionnalité.
