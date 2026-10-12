@@ -139,9 +139,7 @@ private:
   lv_obj_t* _pagePicker = nullptr;
   lv_obj_t* _pagePickerCard = nullptr;
   lv_obj_t* _pagePickerButtons[PAGE_COUNT] = {nullptr};
-  lv_obj_t* _pagePickerStars[PAGE_COUNT] = {nullptr};
-  lv_obj_t* _pagePickerStarIcons[PAGE_COUNT] = {nullptr};
-  lv_obj_t* _pagePickerFavoriteCount = nullptr;
+  uint32_t _lastFavoritesPollMs = 0;
   lv_obj_t* _dateTimeLabel = nullptr;
   lv_obj_t* _dateSubLabel = nullptr;
   lv_obj_t* _clockStatusLabel = nullptr;
@@ -209,7 +207,6 @@ private:
 
   static void onNav(lv_event_t* e);
   static void onPagePick(lv_event_t* e);
-  static void onFavoriteToggle(lv_event_t* e);
   static void onButton(lv_event_t* e);
   static void onToggle(lv_event_t* e);
   static void onRange(lv_event_t* e);
@@ -238,9 +235,8 @@ private:
   void showPage(uint8_t index);
   void setNavActive(uint8_t index);
   void loadFavorites();
-  void toggleFavorite(uint8_t page);
   void refreshFavoriteNav();
-  void refreshFavoritePicker();
+  void pollFavorites();
   void setPagePickerVisible(bool visible);
   void buildPagePicker();
   void buildEnergyPreviewPage();
