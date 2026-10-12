@@ -1602,15 +1602,24 @@ void MiraPanelUI::createThermostat(uint8_t idx) {
     lv_obj_set_pos(b.thermostatModeBadge, cardW - (wide ? 185 : 115), 13);
   }
 
-  // Existing LVGL arc semantics, 0.5°C step (range units are half-degrees).
+  // Reuse the EXACT RoundRange base design, scaled proportionally to the
+  // existing thermostat dial sizes. No changes to the card geometry or the
+  // other thermostat controls (temperature, mode, navigation, Jeedom).
+  // RoundRange reference (normal): plate=196, arc=182, center=104;
+  // main arc=15 and pressed arc=18.
   const lv_coord_t arcSize = wide ? 296 : 234;
   const lv_coord_t arcX = wide ? 27 : (cardW - arcSize) / 2;
   const lv_coord_t arcY = wide ? 63 : 41;
-  // Reuse the visual language of Mira's original RoundRange:
-  // filled circular plate behind the arc, plus the dark central medallion.
+  const lv_coord_t plateSize = (arcSize * 196 + 91) / 182;
+  const lv_coord_t innerSize = (arcSize * 104 + 91) / 182;
+  const lv_coord_t arcWidth = (arcSize * 15 + 91) / 182;
+  const lv_coord_t pressedWidth = (arcSize * 18 + 91) / 182;
+
   lv_obj_t* dialPlate = lv_obj_create(b.card);
-  lv_obj_set_size(dialPlate, arcSize + 14, arcSize + 14);
-  lv_obj_set_pos(dialPlate, arcX - 7, arcY - 7);
+  lv_obj_set_size(dialPlate, plateSize, plateSize);
+  lv_obj_set_pos(dialPlate,
+                 arcX - (plateSize - arcSize) / 2,
+                 arcY - (plateSize - arcSize) / 2);
   lv_obj_set_style_radius(dialPlate, LV_RADIUS_CIRCLE, 0);
   lv_obj_set_style_bg_color(dialPlate, colorPanel2(), 0);
   lv_obj_set_style_bg_opa(dialPlate, LV_OPA_COVER, 0);
@@ -1619,14 +1628,16 @@ void MiraPanelUI::createThermostat(uint8_t idx) {
   lv_obj_set_style_pad_all(dialPlate, 0, 0);
   lv_obj_clear_flag(dialPlate, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_clear_flag(dialPlate, LV_OBJ_FLAG_CLICKABLE);
+
   b.control = lv_arc_create(b.card);
   lv_obj_set_size(b.control, arcSize, arcSize);
   lv_obj_set_pos(b.control, arcX, arcY);
   lv_arc_set_range(b.control, b.minValue * 2, b.maxValue * 2);
   lv_arc_set_value(b.control, (int)roundf(b.thermostatSetpoint * 2.0f));
   lv_arc_set_bg_angles(b.control, 135, 45);
-  lv_obj_set_style_arc_width(b.control, wide ? 18 : 16, LV_PART_MAIN);
-  lv_obj_set_style_arc_width(b.control, wide ? 18 : 16, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_width(b.control, arcWidth, LV_PART_MAIN);
+  lv_obj_set_style_arc_width(b.control, arcWidth, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_width(b.control, pressedWidth, LV_PART_INDICATOR | LV_STATE_PRESSED);
   lv_obj_set_style_arc_color(b.control, colorPanel2(), LV_PART_MAIN);
   lv_obj_set_style_arc_color(b.control, colorAccent(), LV_PART_INDICATOR);
   lv_obj_set_style_bg_opa(b.control, LV_OPA_TRANSP, LV_PART_KNOB);
@@ -1634,9 +1645,10 @@ void MiraPanelUI::createThermostat(uint8_t idx) {
   lv_obj_set_style_pad_all(b.control, 0, LV_PART_KNOB);
   lv_obj_set_ext_click_area(b.control, 10);
 
-  // Arc remains the interactive control. Central disc is decorative only.
+  // The RoundRange inner medallion MUST be proportional to the outer arc.
+  // Previous inner=132/116 made the large Waveshare/WT32 dials resemble a
+  // vinyl record; base RoundRange uses 104/182 of the arc diameter.
   lv_obj_t* inner = lv_obj_create(b.card);
-  const lv_coord_t innerSize = wide ? 132 : 116;
   lv_obj_set_size(inner, innerSize, innerSize);
   lv_obj_set_pos(inner, arcX + (arcSize - innerSize) / 2,
                  arcY + (arcSize - innerSize) / 2);
@@ -1649,23 +1661,24 @@ void MiraPanelUI::createThermostat(uint8_t idx) {
   lv_obj_clear_flag(inner, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_clear_flag(inner, LV_OBJ_FLAG_CLICKABLE);
 
-  b.valueLabel = lv_label_create(b.card);
-  String setpoint = String(b.thermostatSetpoint, 1) + "°";
-  lv_label_set_text(b.valueLabel, setpoint.c_str());
-  lv_obj_set_width(b.valueLabel, arcSize - 34);
+  // Labels belong to the actual RoundRange center, not the whole card;
+  // unlike the previous implementation the caption cannot cross the rim.
+  b.valueLabel = lv_label_create(inner);
+  lv_label_set_text(b.valueLabel, (String(b.thermostatSetpoint, 1) + "°").c_str());
+  lv_obj_set_width(b.valueLabel, innerSize - 12);
   lv_obj_set_style_text_align(b.valueLabel, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_set_style_text_color(b.valueLabel, COL_TEXT, 0);
   lv_obj_set_style_text_font(b.valueLabel,
-      wide ? &lv_font_montserrat_40 : &lv_font_montserrat_28, 0);
-  lv_obj_set_pos(b.valueLabel, arcX + 17, arcY + (wide ? 121 : 98));
+                            wide ? &lv_font_montserrat_40 : &lv_font_montserrat_28, 0);
+  lv_obj_align(b.valueLabel, LV_ALIGN_CENTER, 0, -16);
 
-  lv_obj_t* hint = lv_label_create(b.card);
+  lv_obj_t* hint = lv_label_create(inner);
   lv_label_set_text(hint, "CONSIGNE");
-  lv_obj_set_width(hint, arcSize - 30);
+  lv_obj_set_width(hint, innerSize - 12);
   lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_set_style_text_color(hint, COL_MUTED, 0);
   lv_obj_set_style_text_font(hint, &mira_font_fr_14, 0);
-  lv_obj_set_pos(hint, arcX + 15, arcY + (wide ? 175 : 145));
+  lv_obj_align(hint, LV_ALIGN_CENTER, 0, 26);
   EventContext* rangeCtx = makeContext(idx);
   lv_obj_add_event_cb(b.control, onThermostatRange, LV_EVENT_ALL, rangeCtx);
 
