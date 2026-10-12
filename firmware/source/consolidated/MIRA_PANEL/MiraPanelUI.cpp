@@ -437,6 +437,52 @@ void MiraPanelUI::publishMqttAction(const Binding& b, const String& payload) {
 }
 
 void MiraPanelUI::handleMqttState(const String& topic, const String& rawPayload) {
+  // Thermostat exposes 3 independent state topics. Always display-only.
+  // Example: mira/<screen>/States/Thermostat salon__temperature
+  for (uint8_t t = 0; t < _bindingCount; ++t) {
+    Binding& th = _bindings[t];
+    if (th.type != W_THERMOSTAT) continue;
+    const String temp = th.name + "__temperature";
+    const String setpoint = th.name + "__consigne";
+    const String mode = th.name + "__mode";
+    const String key = normalizeMqttTopicName(topic);
+    if (key != normalizeMqttTopicName(temp) &&
+        key != normalizeMqttTopicName(setpoint) &&
+        key != normalizeMqttTopicName(mode)) continue;
+    String value = mqttPayloadValue(rawPayload);
+    value.trim();
+    _suppressEvents = true;
+    if (key == normalizeMqttTopicName(temp)) {
+      _server.IndexSetInfo(th.thermostatTempId, value);
+      String displayed = value.length() ? value : "--";
+      if (displayed.indexOf("°") < 0) displayed += " °C";
+      if (th.thermostatTemperatureLabel)
+        lv_label_set_text(th.thermostatTemperatureLabel, displayed.c_str());
+    } else if (key == normalizeMqttTopicName(setpoint)) {
+      if (value.length()) {
+        float n = roundf(value.toFloat() * 2.0f) * 0.5f;
+        if (n < th.minValue) n = th.minValue;
+        if (n > th.maxValue) n = th.maxValue;
+        th.thermostatSetpoint = n;
+        _server.IndexSetRange(th.id, n);
+        if (th.control) lv_arc_set_value(th.control, (int)roundf(n * 2.0f));
+        if (th.valueLabel)
+          lv_label_set_text(th.valueLabel, (String(n, 1) + "°").c_str());
+      }
+    } else {
+      for (uint8_t i = 0; i < th.listCount; ++i) {
+        if (th.listLabels[i].equalsIgnoreCase(value) || value == String(i)) {
+          th.selectedIndex = i;
+          _server.IndexSetList(th.listIds[i]);
+          if (th.thermostatModeControl) lv_dropdown_set_selected(th.thermostatModeControl, i);
+          if (th.thermostatModeBadge) lv_label_set_text(th.thermostatModeBadge, th.listLabels[i].c_str());
+          break;
+        }
+      }
+    }
+    _suppressEvents = false;
+    return;
+  }
   int idx = findBindingByMqttTopic(topic);
   if (idx < 0 || idx >= _bindingCount) {
     Serial.println("[MIRA][MQTT] State ignore, widget inconnu : " + topic);
