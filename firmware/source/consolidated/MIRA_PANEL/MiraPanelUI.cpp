@@ -352,16 +352,10 @@ void MiraPanelUI::touchRead(lv_indev_drv_t* indev, lv_indev_data_t* data) {
     // directement afin qu'aucun widget/page scrollable ne puisse intercepter
     // le toucher. Un seul changement est genere par appui.
     if (_uiForLvgl && y >= MIRA_CONTENT_HEIGHT) {
-      // Navigation is handled here before LVGL hit testing. Never route
-      // an open thermostat dropdown's last selection to the nav bar.
-      for (uint8_t i = 0; i < _uiForLvgl->_bindingCount; ++i) {
-        Binding& b = _uiForLvgl->_bindings[i];
-        if (b.type == W_THERMOSTAT && b.thermostatModeControl &&
-            lv_dropdown_get_list(b.thermostatModeControl)) {
-          _uiForLvgl->_navTouchLatched = false;
-          return;
-        }
-      }
+      // Keep navigation usable at all times, including after opening
+      // or closing a thermostat dropdown. The popup opens UPWARDS and
+      // stays in the content region. Its LVGL object may outlive closure,
+      // so lv_dropdown_get_list() cannot be used as an open-state check.
       if (!_uiForLvgl->_navTouchLatched) {
         _uiForLvgl->_navTouchLatched = true;
         static const uint8_t navOrder[PAGE_COUNT][3] = {
