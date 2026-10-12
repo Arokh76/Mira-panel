@@ -2268,9 +2268,15 @@ void MiraPanelUI::applyTheme() {
       lv_obj_set_style_bg_grad_color(_pages[i], grad, 0);
       lv_obj_set_style_bg_grad_dir(_pages[i], LV_GRAD_DIR_VER, 0);
     }
-    if (i < NAV_BUTTON_COUNT && _navButtons[i]) {
-      lv_obj_set_style_bg_color(_navButtons[i], colorAccent(), LV_STATE_PRESSED);
+  }
+
+  for (uint8_t slot = 0; slot < FAVORITE_SLOTS; ++slot) {
+    if (_favoriteButtons[slot]) {
+      lv_obj_set_style_bg_color(_favoriteButtons[slot], colorAccent(), LV_STATE_PRESSED);
     }
+  }
+  if (_navPagesButton) {
+    lv_obj_set_style_bg_color(_navPagesButton, colorAccent(), LV_STATE_PRESSED);
   }
 
   for (uint8_t i = 0; i < _bindingCount; ++i) {
@@ -2346,6 +2352,7 @@ void MiraPanelUI::applyTheme() {
     lv_obj_set_style_border_color(_themeDropdown, colorBorder(), 0);
   }
 
+  refreshFavoritePicker();
   setNavActive(_currentPage);
 }
 void MiraPanelUI::loadFavorites() {
