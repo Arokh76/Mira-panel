@@ -58,6 +58,7 @@ private:
     W_LISTBUTTON,
     W_COLOR,
     W_DATETIME,
+    W_THERMOSTAT,
     W_UNSUPPORTED
   };
 
@@ -83,6 +84,11 @@ private:
     int id = -1;
     int idOff = -1;
     int idOn = -1;
+    int thermostatTempId = -1;
+    float thermostatSetpoint = 20.0f;
+    lv_obj_t* thermostatTemperatureLabel = nullptr;
+    lv_obj_t* thermostatModeControl = nullptr;
+    lv_obj_t* thermostatModeBadge = nullptr;
 
     int minValue = 0;
     int maxValue = 100;
@@ -194,6 +200,8 @@ private:
   static void onToggle(lv_event_t* e);
   static void onRange(lv_event_t* e);
   static void onRoundRange(lv_event_t* e);
+  static void onThermostatRange(lv_event_t* e);
+  static void onThermostatMode(lv_event_t* e);
   static void onList(lv_event_t* e);
   static void onListButton(lv_event_t* e);
   static void onColor(lv_event_t* e);
@@ -226,6 +234,7 @@ private:
   void createToggle(uint8_t idx);
   void createRange(uint8_t idx);
   void createRoundRange(uint8_t idx);
+  void createThermostat(uint8_t idx);
   void createList(uint8_t idx, bool asButtons);
   void createColor(uint8_t idx);
   void createDateTime(uint8_t idx);
