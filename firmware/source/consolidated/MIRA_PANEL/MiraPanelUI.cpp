@@ -712,32 +712,8 @@ void MiraPanelUI::begin() {
     lv_obj_set_style_shadow_width(_navButtons[i], 0, 0);
     lv_obj_set_style_transform_zoom(_navButtons[i], 246, LV_STATE_PRESSED);
     lv_obj_set_style_anim_time(_navButtons[i], 100, LV_STATE_DEFAULT);
-    if (i < 3) {
-      lv_obj_add_event_cb(_navButtons[i], onNav, LV_EVENT_CLICKED, (void*)(uintptr_t)i);
-    }
-
-    if (i == 3) {
-      _navPagesButton = _navButtons[i];
-      // No dependency on missing font symbols: draw a small four-square grid.
-      for (uint8_t dot = 0; dot < 4; ++dot) {
-        lv_obj_t* square = lv_obj_create(_navPagesButton);
-        lv_obj_set_size(square, 7, 7);
-        lv_obj_set_style_radius(square, 2, 0);
-        lv_obj_set_style_pad_all(square, 0, 0);
-        lv_obj_set_style_border_width(square, 0, 0);
-        lv_obj_set_style_bg_color(square, colorAccent(), 0);
-        lv_obj_set_style_bg_opa(square, LV_OPA_COVER, 0);
-        lv_obj_clear_flag(square, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_clear_flag(square, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_align(square, LV_ALIGN_CENTER,
-                     (dot % 2) * 10 - 8, (dot / 2) * 10 - 15);
-      }
-      lv_obj_t* caption = lv_label_create(_navPagesButton);
-      lv_label_set_text(caption, "Pages");
-      lv_obj_set_style_text_font(caption, &mira_font_fr_12, 0);
-      lv_obj_set_style_text_color(caption, COL_TEXT, 0);
-      lv_obj_align(caption, LV_ALIGN_BOTTOM_MID, 0, -1);
-    } else if (i == 1) {
+    lv_obj_add_event_cb(_navButtons[i], onNav, LV_EVENT_CLICKED, (void*)(uintptr_t)i);
+    if (i == 1) {
       makeBulbIcon(_navButtons[i]);
     } else if (i == 2) {
       makeThermometerIcon(_navButtons[i]);
@@ -749,6 +725,37 @@ void MiraPanelUI::begin() {
       lv_obj_center(lbl);
     }
   }
+
+  // The fourth nav SLOT is a separate button, not the Settings page icon.
+  _navPagesButton = lv_btn_create(_nav);
+  lv_obj_set_size(_navPagesButton, MIRA_DISPLAY_WIDTH / NAV_BUTTON_COUNT,
+                  MIRA_NAV_HEIGHT - 2);
+  lv_obj_set_style_bg_opa(_navPagesButton, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_bg_opa(_navPagesButton, LV_OPA_30, LV_STATE_PRESSED);
+  lv_obj_set_style_bg_color(_navPagesButton, colorAccent(), LV_STATE_PRESSED);
+  lv_obj_set_style_radius(_navPagesButton, 10, 0);
+  lv_obj_set_style_border_width(_navPagesButton, 0, 0);
+  lv_obj_set_style_shadow_width(_navPagesButton, 0, 0);
+  lv_obj_set_style_pad_all(_navPagesButton, 0, 0);
+  // Draw a clear 2x2 grid; no font icon dependencies on WT32.
+  for (uint8_t dot = 0; dot < 4; ++dot) {
+    lv_obj_t* square = lv_obj_create(_navPagesButton);
+    lv_obj_set_size(square, 7, 7);
+    lv_obj_set_style_radius(square, 2, 0);
+    lv_obj_set_style_pad_all(square, 0, 0);
+    lv_obj_set_style_border_width(square, 0, 0);
+    lv_obj_set_style_bg_color(square, colorAccent(), 0);
+    lv_obj_set_style_bg_opa(square, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(square, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(square, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_align(square, LV_ALIGN_CENTER,
+                 (dot % 2) * 10 - 8, (dot / 2) * 10 - 15);
+  }
+  lv_obj_t* pagesCaption = lv_label_create(_navPagesButton);
+  lv_label_set_text(pagesCaption, "Pages");
+  lv_obj_set_style_text_font(pagesCaption, &mira_font_fr_12, 0);
+  lv_obj_set_style_text_color(pagesCaption, COL_TEXT, 0);
+  lv_obj_align(pagesCaption, LV_ALIGN_BOTTOM_MID, 0, -1);
 
   buildSettingsPage();
   buildEnergyPreviewPage();
