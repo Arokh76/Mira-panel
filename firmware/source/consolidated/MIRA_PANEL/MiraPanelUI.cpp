@@ -2435,6 +2435,39 @@ void MiraPanelUI::updateBindingFromServer(uint8_t idx, int eventId) {
 
   Binding& b = _bindings[idx];
 
+  if (b.type == W_THERMOSTAT) {
+    _suppressEvents = true;
+    if (eventId == b.thermostatTempId) {
+      String value = _server.IndexGetInfo(b.thermostatTempId);
+      value.trim();
+      if (value.isEmpty()) value = "--";
+      if (value.indexOf("°") < 0) value += " °C";
+      if (b.thermostatTemperatureLabel)
+        lv_label_set_text(b.thermostatTemperatureLabel, value.c_str());
+    } else if (eventId == b.id) {
+      float value = _server.IndexGetRange(b.id);
+      if (value < b.minValue) value = b.minValue;
+      if (value > b.maxValue) value = b.maxValue;
+      value = roundf(value * 2.0f) * 0.5f;
+      b.thermostatSetpoint = value;
+      b.currentValue = (int)roundf(value);
+      if (b.control) lv_arc_set_value(b.control, (int)roundf(value * 2.0f));
+      if (b.valueLabel)
+        lv_label_set_text(b.valueLabel, (String(value, 1) + "°").c_str());
+    } else {
+      for (uint8_t i = 0; i < b.listCount; ++i) {
+        if (eventId == b.listIds[i]) {
+          b.selectedIndex = (int8_t)i;
+          if (b.thermostatModeControl) lv_dropdown_set_selected(b.thermostatModeControl, i);
+          if (b.thermostatModeBadge) lv_label_set_text(b.thermostatModeBadge, b.listLabels[i].c_str());
+          break;
+        }
+      }
+    }
+    _suppressEvents = false;
+    return;
+  }
+
   if (b.type == W_INFO && eventId == b.id) {
     String value = _server.IndexGetInfo(b.id);
     String txt = value + (b.unit.length() ? " " + b.unit : "");
