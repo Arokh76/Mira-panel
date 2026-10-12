@@ -358,16 +358,20 @@ void MiraPanelUI::touchRead(lv_indev_drv_t* indev, lv_indev_data_t* data) {
       // so lv_dropdown_get_list() cannot be used as an open-state check.
       if (!_uiForLvgl->_navTouchLatched) {
         _uiForLvgl->_navTouchLatched = true;
+        // Navigation lab: the three contextual shortcuts stay in the same
+        // order; slot four opens a separate page picker, with no Jeedom action.
         static const uint8_t navOrder[PAGE_COUNT][3] = {
-          {1, 3, 2},
-          {2, 0, 3},
-          {1, 0, 3},
-          {1, 0, 2}
+          {1, 3, 2}, {2, 0, 3}, {1, 0, 3},
+          {1, 0, 2}, {1, 0, 3}  // Energy demo -> lights/home/settings
         };
         uint8_t current = _uiForLvgl->_currentPage < PAGE_COUNT ? _uiForLvgl->_currentPage : 0;
-        uint8_t slot = ((uint32_t)x * 3U) / MIRA_DISPLAY_WIDTH;
-        if (slot > 2) slot = 2;
-        _uiForLvgl->_pendingNavPage = (int8_t)navOrder[current][slot];
+        uint8_t slot = ((uint32_t)x * NAV_BUTTON_COUNT) / MIRA_DISPLAY_WIDTH;
+        if (slot >= NAV_BUTTON_COUNT) slot = NAV_BUTTON_COUNT - 1;
+        if (slot == NAV_BUTTON_COUNT - 1) {
+          _uiForLvgl->_pendingTogglePagePicker = true;
+        } else {
+          _uiForLvgl->_pendingNavPage = (int8_t)navOrder[current][slot];
+        }
       }
       return;
     }
@@ -681,8 +685,8 @@ void MiraPanelUI::begin() {
     if (i != 0) lv_obj_add_flag(_pages[i], LV_OBJ_FLAG_HIDDEN);
   }
 
-  // Navigation inspirée du firmware visible dans la vidéo Mira :
-  // bandeau noir, trois icônes seulement, la page courante n'est pas affichée.
+  // Experimental navigation: original three contextual destinations plus
+  // a fourth, always visible "Pages" entry. Existing page content is untouched.
   _nav = lv_obj_create(_screen);
   lv_obj_set_pos(_nav, 0, MIRA_CONTENT_HEIGHT);
   lv_obj_set_size(_nav, MIRA_DISPLAY_WIDTH, MIRA_NAV_HEIGHT);
@@ -693,12 +697,11 @@ void MiraPanelUI::begin() {
   lv_obj_set_style_radius(_nav, 0, 0);
   lv_obj_set_style_pad_all(_nav, 0, 0);
 
-  // L'original utilise 3 destinations par page, avec un ordre qui change
-  // selon l'ecran courant. Les boutons sont donc places manuellement.
-  const char* icons[PAGE_COUNT] = {LV_SYMBOL_HOME, "", "", LV_SYMBOL_SETTINGS};
-  for (uint8_t i = 0; i < PAGE_COUNT; ++i) {
+  // Four equal touch targets: safe 80px width on WT32, 200px on Waveshare.
+  const char* icons[NAV_BUTTON_COUNT] = {LV_SYMBOL_HOME, "", "", LV_SYMBOL_SETTINGS};
+  for (uint8_t i = 0; i < NAV_BUTTON_COUNT; ++i) {
     _navButtons[i] = lv_btn_create(_nav);
-    lv_obj_set_size(_navButtons[i], MIRA_DISPLAY_WIDTH / 3, MIRA_NAV_HEIGHT - 2);
+    lv_obj_set_size(_navButtons[i], MIRA_DISPLAY_WIDTH / NAV_BUTTON_COUNT, MIRA_NAV_HEIGHT - 2);
     lv_obj_add_flag(_navButtons[i], LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_ext_click_area(_navButtons[i], 2);
     lv_obj_set_style_bg_opa(_navButtons[i], LV_OPA_TRANSP, 0);
@@ -709,9 +712,32 @@ void MiraPanelUI::begin() {
     lv_obj_set_style_shadow_width(_navButtons[i], 0, 0);
     lv_obj_set_style_transform_zoom(_navButtons[i], 246, LV_STATE_PRESSED);
     lv_obj_set_style_anim_time(_navButtons[i], 100, LV_STATE_DEFAULT);
-    lv_obj_add_event_cb(_navButtons[i], onNav, LV_EVENT_CLICKED, (void*)(uintptr_t)i);
+    if (i < 3) {
+      lv_obj_add_event_cb(_navButtons[i], onNav, LV_EVENT_CLICKED, (void*)(uintptr_t)i);
+    }
 
-    if (i == 1) {
+    if (i == 3) {
+      _navPagesButton = _navButtons[i];
+      // No dependency on missing font symbols: draw a small four-square grid.
+      for (uint8_t dot = 0; dot < 4; ++dot) {
+        lv_obj_t* square = lv_obj_create(_navPagesButton);
+        lv_obj_set_size(square, 7, 7);
+        lv_obj_set_style_radius(square, 2, 0);
+        lv_obj_set_style_pad_all(square, 0, 0);
+        lv_obj_set_style_border_width(square, 0, 0);
+        lv_obj_set_style_bg_color(square, colorAccent(), 0);
+        lv_obj_set_style_bg_opa(square, LV_OPA_COVER, 0);
+        lv_obj_clear_flag(square, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_clear_flag(square, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_align(square, LV_ALIGN_CENTER,
+                     (dot % 2) * 10 - 8, (dot / 2) * 10 - 15);
+      }
+      lv_obj_t* caption = lv_label_create(_navPagesButton);
+      lv_label_set_text(caption, "Pages");
+      lv_obj_set_style_text_font(caption, &mira_font_fr_12, 0);
+      lv_obj_set_style_text_color(caption, COL_TEXT, 0);
+      lv_obj_align(caption, LV_ALIGN_BOTTOM_MID, 0, -1);
+    } else if (i == 1) {
       makeBulbIcon(_navButtons[i]);
     } else if (i == 2) {
       makeThermometerIcon(_navButtons[i]);
@@ -725,6 +751,8 @@ void MiraPanelUI::begin() {
   }
 
   buildSettingsPage();
+  buildEnergyPreviewPage();
+  buildPagePicker();
 
   _sleepOverlay = lv_obj_create(_screen);
   lv_obj_set_pos(_sleepOverlay, 0, 0);
@@ -2073,7 +2101,7 @@ void MiraPanelUI::applyTheme() {
       lv_obj_set_style_bg_grad_color(_pages[i], grad, 0);
       lv_obj_set_style_bg_grad_dir(_pages[i], LV_GRAD_DIR_VER, 0);
     }
-    if (_navButtons[i]) {
+    if (i < NAV_BUTTON_COUNT && _navButtons[i]) {
       lv_obj_set_style_bg_color(_navButtons[i], colorAccent(), LV_STATE_PRESSED);
     }
   }
@@ -2154,21 +2182,15 @@ void MiraPanelUI::applyTheme() {
   setNavActive(_currentPage);
 }
 void MiraPanelUI::setNavActive(uint8_t index) {
-  // Ordres releves sur les captures officielles :
-  // Accueil      -> Lumiere | Parametres | Temperature
-  // Lumieres     -> Temperature | Accueil | Parametres
-  // Temperatures -> Lumiere | Accueil | Parametres
-  // Parametres   -> Lumiere | Accueil | Temperature
+  // Same contextual shortcut order as Mira 0.6, plus a permanent Pages slot.
   static const uint8_t order[PAGE_COUNT][3] = {
-    {1, 3, 2},
-    {2, 0, 3},
-    {1, 0, 3},
-    {1, 0, 2}
+    {1, 3, 2}, {2, 0, 3}, {1, 0, 3},
+    {1, 0, 2}, {1, 0, 3}
   };
 
   if (index >= PAGE_COUNT) index = 0;
 
-  for (uint8_t i = 0; i < PAGE_COUNT; ++i) {
+  for (uint8_t i = 0; i < NAV_BUTTON_COUNT; ++i) {
     if (_navButtons[i]) lv_obj_add_flag(_navButtons[i], LV_OBJ_FLAG_HIDDEN);
   }
 
@@ -2176,8 +2198,20 @@ void MiraPanelUI::setNavActive(uint8_t index) {
     uint8_t page = order[index][slot];
     lv_obj_t* btn = _navButtons[page];
     if (!btn) continue;
-    lv_obj_set_pos(btn, 1 + slot * (MIRA_DISPLAY_WIDTH / 3), 1);
+    lv_obj_set_size(btn, MIRA_DISPLAY_WIDTH / NAV_BUTTON_COUNT, MIRA_NAV_HEIGHT - 2);
+    lv_obj_set_pos(btn, 1 + slot * (MIRA_DISPLAY_WIDTH / NAV_BUTTON_COUNT), 1);
     lv_obj_clear_flag(btn, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (_navPagesButton) {
+    lv_obj_set_pos(_navPagesButton,
+                   1 + 3 * (MIRA_DISPLAY_WIDTH / NAV_BUTTON_COUNT), 1);
+    lv_obj_clear_flag(_navPagesButton, LV_OBJ_FLAG_HIDDEN);
+  }
+  for (uint8_t i = 0; i < PAGE_COUNT; ++i) {
+    if (_pagePickerButtons[i]) {
+      lv_obj_set_style_bg_color(_pagePickerButtons[i],
+        i == index ? colorAccent2() : colorPanel(), 0);
+    }
   }
 }
 
@@ -2191,6 +2225,7 @@ void MiraPanelUI::showPage(uint8_t index) {
     }
   }
   _currentPage = index;
+  setPagePickerVisible(false);
   setNavActive(index);
   noteActivity();
 }
@@ -2199,6 +2234,12 @@ void MiraPanelUI::onNav(lv_event_t* e) {
   if (!_uiForLvgl) return;
   uint8_t index = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
   _uiForLvgl->showPage(index);
+}
+
+void MiraPanelUI::onPagePick(lv_event_t* e) {
+  if (!_uiForLvgl) return;
+  uint8_t destination = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
+  _uiForLvgl->showPage(destination);
 }
 
 void MiraPanelUI::onButton(lv_event_t* e) {
@@ -2986,6 +3027,11 @@ void MiraPanelUI::loop() {
     uint8_t page = (uint8_t)_pendingNavPage;
     _pendingNavPage = -1;
     showPage(page);
+  }
+  if (_pendingTogglePagePicker) {
+    _pendingTogglePagePicker = false;
+    setPagePickerVisible(_pagePicker &&
+                         lv_obj_has_flag(_pagePicker, LV_OBJ_FLAG_HIDDEN));
   }
 
   startNtpIfPossible();
