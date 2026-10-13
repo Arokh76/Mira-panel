@@ -159,7 +159,8 @@ private:
 
   // Snapshot-only cache for non-interactive INFO cards. The interactive
   // LVGL widgets continue to receive touch events and render normally.
-  // RGB565 + alpha buffers live in PSRAM and are capped globally.
+  // Permanent RGB565 opaque images live in PSRAM (1.5 MB max); temporary
+  // RGB565+alpha snapshots are freed immediately after flattening.
   static constexpr uint32_t SCROLL_CACHE_MAX_BYTES = 1536UL * 1024UL;
   struct ScrollTile {
     lv_obj_t* card = nullptr;
