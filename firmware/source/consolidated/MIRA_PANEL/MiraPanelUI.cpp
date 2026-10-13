@@ -2567,6 +2567,7 @@ void MiraPanelUI::setScrollCacheActive(bool active) {
       lv_obj_add_flag(tile.image, LV_OBJ_FLAG_HIDDEN);
     }
   }
+  if (active) _scrollCachedOnGesture = visualCount;
   if (active && !visualCount) _scrollCacheActive = false;
 }
 
@@ -2587,6 +2588,7 @@ void MiraPanelUI::resetScrollCache() {
   _scrollCacheUsedBytes = 0;
   _scrollCacheLastBuildMs = 0;
   _scrollCacheLastMoveMs = 0;
+  _scrollCachedOnGesture = 0;
 }
 
 void MiraPanelUI::invalidateScrollCache(uint8_t idx) {
@@ -2822,7 +2824,7 @@ void MiraPanelUI::onNavigationTimer(lv_timer_t* timer) {
         lv_label_set_text_fmt(ui->_scrollPerfLabel,
             "SCROLL %lu pas / %lu ms | %lu images (~%lu/s) | ecart max %lu ms\n"
             "Cycle LVGL %lu ms   Dessin %lu ms   Ecran/VSYNC %lu ms   Autre %lu ms\n"
-            "Max dessin %lu ms   Max ecran %lu ms   Appels ecran %lu",
+            "Max dessin %lu ms   Max ecran %lu ms   Cache %lu cartes (%lu Ko)",
             (unsigned long)steps, (unsigned long)movingMs,
             (unsigned long)frames, (unsigned long)fps,
             (unsigned long)ui->_scrollPerfGapMaxMs,
@@ -2830,7 +2832,8 @@ void MiraPanelUI::onNavigationTimer(lv_timer_t* timer) {
             (unsigned long)avgFlush, (unsigned long)avgOther,
             (unsigned long)(ui->_scrollDrawMaxUs / 1000UL),
             (unsigned long)(ui->_scrollFlushMaxUs / 1000UL),
-            (unsigned long)ui->_scrollFlushCalls);
+            (unsigned long)ui->_scrollCachedOnGesture,
+            (unsigned long)(ui->_scrollCacheUsedBytes / 1024UL));
       } else {
         lv_label_set_text_fmt(ui->_scrollPerfLabel,
             "SCROLL %lu pas / %lu ms (~%lu/s) - sans rafraichissement mesure",
