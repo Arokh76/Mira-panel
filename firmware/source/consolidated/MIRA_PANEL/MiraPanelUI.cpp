@@ -691,8 +691,9 @@ void MiraPanelUI::begin() {
     lv_obj_set_scrollbar_mode(_pages[i], LV_SCROLLBAR_MODE_OFF);
     if (i != 0) lv_obj_add_flag(_pages[i], LV_OBJ_FLAG_HIDDEN);
 #if defined(MIRA_TARGET_WAVESHARE_43C)
-    lv_obj_add_event_cb(_pages[i], onScrollPerfEvent, LV_EVENT_SCROLL_BEGIN, this);
-    lv_obj_add_event_cb(_pages[i], onScrollPerfEvent, LV_EVENT_SCROLL_END, this);
+    // Track every real movement: LVGL's BEGIN/END can occur within one
+    // touch sample, before the following paint is scheduled.
+    lv_obj_add_event_cb(_pages[i], onScrollPerfEvent, LV_EVENT_SCROLL, this);
 #endif
   }
 
@@ -767,7 +768,7 @@ void MiraPanelUI::begin() {
   // is hidden while moving; it never intercepts touches or covers the
   // navigation row. A photograph after scrolling captures the measurements.
   _scrollPerfPanel = lv_obj_create(_screen);
-  lv_obj_set_size(_scrollPerfPanel, 700, 48);
+  lv_obj_set_size(_scrollPerfPanel, 748, 72);
   lv_obj_align(_scrollPerfPanel, LV_ALIGN_TOP_MID, 0, 6);
   lv_obj_clear_flag(_scrollPerfPanel, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_clear_flag(_scrollPerfPanel, LV_OBJ_FLAG_SCROLLABLE);
@@ -780,7 +781,7 @@ void MiraPanelUI::begin() {
   _scrollPerfLabel = lv_label_create(_scrollPerfPanel);
   lv_obj_set_style_text_color(_scrollPerfLabel, lv_color_white(), 0);
   lv_obj_set_style_text_font(_scrollPerfLabel, &mira_font_fr_14, 0);
-  lv_label_set_text(_scrollPerfLabel, "Scroll diagnostic : faites defiler cette page");
+  lv_label_set_text(_scrollPerfLabel, "Diagnostic de defilement : faites glisser la page");
   lv_obj_center(_scrollPerfLabel);
   lv_obj_add_flag(_scrollPerfPanel, LV_OBJ_FLAG_HIDDEN);
   lv_disp_t* diagnosticDisplay = lv_disp_get_default();
@@ -2505,8 +2506,8 @@ void MiraPanelUI::showPage(uint8_t index) {
 }
 
 #if defined(MIRA_TARGET_WAVESHARE_43C)
-// The display monitor is called once after each real LVGL refresh.
-// No String, logs, drawing or allocation while the page is scrolling.
+// LVGL monitor callback: tracks real LVGL drawing work. Do not manipulate
+// LVGL objects, allocate, or log from this callback.
 void MiraPanelUI::onDisplayPerfMonitor(lv_disp_drv_t* disp, uint32_t ms, uint32_t pixels) {
   (void)disp;
   MiraPanelUI* ui = _uiForLvgl;
@@ -2523,44 +2524,34 @@ void MiraPanelUI::onDisplayPerfMonitor(lv_disp_drv_t* disp, uint32_t ms, uint32_
   if (ms > ui->_scrollPerfRenderMaxMs) ui->_scrollPerfRenderMaxMs = ms;
 }
 
+// SCROLL_BEGIN/SCROLL_END are not useful for continuous touch scroll here:
+// LVGL 8 emits them around a single synchronous move. SCROLL events instead
+// fire for every actual position update and give us a reliable source for
+// movement cadence, independent of the display driver monitor callback.
 void MiraPanelUI::onScrollPerfEvent(lv_event_t* e) {
   MiraPanelUI* ui = static_cast<MiraPanelUI*>(lv_event_get_user_data(e));
-  if (!ui) return;
-  const lv_event_code_t event = lv_event_get_code(e);
+  if (!ui || lv_event_get_code(e) != LV_EVENT_SCROLL) return;
   const uint32_t now = millis();
-  if (event == LV_EVENT_SCROLL_BEGIN) {
+  if (!ui->_scrollPerfActive) {
     ui->_scrollPerfActive = true;
     ui->_scrollPerfStartedAt = now;
+    ui->_scrollPerfLastMovementAt = now;
     ui->_scrollPerfLastFrameAt = 0;
+    ui->_scrollPerfSteps = 0;
+    ui->_scrollPerfStepsMaxGapMs = 0;
     ui->_scrollPerfFrames = 0;
     ui->_scrollPerfRenderSumMs = 0;
     ui->_scrollPerfRenderMaxMs = 0;
     ui->_scrollPerfGapMaxMs = 0;
     ui->_scrollPerfPixelSum = 0;
     if (ui->_scrollPerfPanel) lv_obj_add_flag(ui->_scrollPerfPanel, LV_OBJ_FLAG_HIDDEN);
-  } else if (event == LV_EVENT_SCROLL_END && ui->_scrollPerfActive) {
-    ui->_scrollPerfActive = false;
-    const uint32_t duration = now - ui->_scrollPerfStartedAt;
-    const uint32_t frames = ui->_scrollPerfFrames;
-    const uint32_t fps = duration ? (frames * 1000UL) / duration : 0;
-    const uint32_t averageRender = frames ? ui->_scrollPerfRenderSumMs / frames : 0;
-    const uint32_t averagePixels = frames ? ui->_scrollPerfPixelSum / frames : 0;
-    if (ui->_scrollPerfLabel && ui->_scrollPerfPanel) {
-      lv_label_set_text_fmt(ui->_scrollPerfLabel,
-          "Scroll: %lu FPS (%lu images / %lu ms)\n"
-          "Rendu %lu ms moy / %lu ms max   Intervalle max %lu ms   Surface %lu%%",
-          (unsigned long)fps, (unsigned long)frames, (unsigned long)duration,
-          (unsigned long)averageRender, (unsigned long)ui->_scrollPerfRenderMaxMs,
-          (unsigned long)ui->_scrollPerfGapMaxMs,
-          (unsigned long)((averagePixels * 100UL) / (MIRA_DISPLAY_WIDTH * MIRA_DISPLAY_HEIGHT)));
-      lv_obj_center(ui->_scrollPerfLabel);
-      lv_obj_clear_flag(ui->_scrollPerfPanel, LV_OBJ_FLAG_HIDDEN);
-    }
-    Serial.printf("[MIRA][SCROLL] fps=%lu frames=%lu duration_ms=%lu avg_render_ms=%lu max_render_ms=%lu max_frame_gap_ms=%lu avg_pixels=%lu\n",
-          (unsigned long)fps, (unsigned long)frames, (unsigned long)duration,
-          (unsigned long)averageRender, (unsigned long)ui->_scrollPerfRenderMaxMs,
-          (unsigned long)ui->_scrollPerfGapMaxMs, (unsigned long)averagePixels);
   }
+  if (ui->_scrollPerfSteps) {
+    const uint32_t gap = now - ui->_scrollPerfLastMovementAt;
+    if (gap > ui->_scrollPerfStepsMaxGapMs) ui->_scrollPerfStepsMaxGapMs = gap;
+  }
+  ui->_scrollPerfSteps++;
+  ui->_scrollPerfLastMovementAt = now;
 }
 #endif
 
@@ -2569,6 +2560,47 @@ void MiraPanelUI::onNavigationTimer(lv_timer_t* timer) {
   (void)timer;
   MiraPanelUI* ui = _uiForLvgl;
   if (!ui) return;
+#if defined(MIRA_TARGET_WAVESHARE_43C)
+  // Let queued LVGL paint/flush cycles finish AFTER the last movement.
+  // Delayed reporting avoids the 0 FPS bug from the old SCROLL_END callback.
+  if (ui->_scrollPerfActive &&
+      (uint32_t)(millis() - ui->_scrollPerfLastMovementAt) >= 550UL) {
+    ui->_scrollPerfActive = false;
+    const uint32_t movingMs = ui->_scrollPerfLastMovementAt - ui->_scrollPerfStartedAt;
+    const uint32_t duration = movingMs < 100 ? 100 : movingMs;
+    const uint32_t frames = ui->_scrollPerfFrames;
+    const uint32_t steps = ui->_scrollPerfSteps;
+    const uint32_t fps = (frames * 1000UL) / duration;
+    const uint32_t stepHz = (steps * 1000UL) / duration;
+    const uint32_t avgRender = frames ? ui->_scrollPerfRenderSumMs / frames : 0;
+    const uint32_t avgPixels = frames ? ui->_scrollPerfPixelSum / frames : 0;
+    if (ui->_scrollPerfLabel && ui->_scrollPerfPanel) {
+      if (frames) {
+        lv_label_set_text_fmt(ui->_scrollPerfLabel,
+            "SCROLL %lu pas / %lu ms (~%lu/s)   Intervalle pas max %lu ms\\n"
+            "LVGL %lu images (~%lu/s)   Rendu moy/max %lu/%lu ms   Ecart max %lu ms",
+            (unsigned long)steps, (unsigned long)movingMs,
+            (unsigned long)stepHz, (unsigned long)ui->_scrollPerfStepsMaxGapMs,
+            (unsigned long)frames, (unsigned long)fps,
+            (unsigned long)avgRender, (unsigned long)ui->_scrollPerfRenderMaxMs,
+            (unsigned long)ui->_scrollPerfGapMaxMs);
+      } else {
+        lv_label_set_text_fmt(ui->_scrollPerfLabel,
+            "SCROLL %lu pas / %lu ms (~%lu/s)   Intervalle pas max %lu ms\\n"
+            "LVGL aucun rafraichissement mesure (diagnostic du pilote a verifier)",
+            (unsigned long)steps, (unsigned long)movingMs,
+            (unsigned long)stepHz, (unsigned long)ui->_scrollPerfStepsMaxGapMs);
+      }
+      lv_obj_center(ui->_scrollPerfLabel);
+      lv_obj_clear_flag(ui->_scrollPerfPanel, LV_OBJ_FLAG_HIDDEN);
+    }
+    Serial.printf("[MIRA][SCROLL] steps=%lu moving_ms=%lu max_step_gap=%lu frames=%lu avg_render_ms=%lu max_render_ms=%lu max_frame_gap=%lu avg_pixels=%lu\\n",
+        (unsigned long)steps, (unsigned long)movingMs,
+        (unsigned long)ui->_scrollPerfStepsMaxGapMs, (unsigned long)frames,
+        (unsigned long)avgRender, (unsigned long)ui->_scrollPerfRenderMaxMs,
+        (unsigned long)ui->_scrollPerfGapMaxMs, (unsigned long)avgPixels);
+  }
+#endif
   if (ui->_pendingNavPage >= 0) {
     const uint8_t page = (uint8_t)ui->_pendingNavPage;
     ui->_pendingNavPage = -1;
