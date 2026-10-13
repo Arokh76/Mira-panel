@@ -13,6 +13,7 @@
 #include <Update.h>
 #include <esp_heap_caps.h>
 #include <WiFiClientSecure.h>
+#include <Preferences.h>  // persisted Jeedom-controlled navigation
 
 
 #include "MiraPanelServer.h"
@@ -2686,6 +2687,72 @@ void MiraPanelServer::ServeurStation() {
     if (NB_List_lvgl == 0) NB_List_lvgl = 1;
     SaveListLVGL();
     request->send(200, "text/plain", "OK");
+  });
+
+  // Dedicated authenticated navigation endpoint; no /programui/reboot.
+  server.on("/navfavorites", HTTP_POST, [](AsyncWebServerRequest* request) {
+    if (!request->hasParam("key", true) ||
+        request->getParam("key", true)->value() != Uncrypt_Pass) {
+      request->send(403, "text/plain", "Cle invalide"); return;
+    }
+    if (!request->hasParam("json", true)) {
+      request->send(400, "text/plain", "Favoris absents"); return;
+    }
+    DynamicJsonDocument doc(256);
+    if (deserializeJson(doc, request->getParam("json", true)->value()) ||
+        !doc["favorites"].is<JsonArray>() || doc["favorites"].size() != 3) {
+      request->send(400, "text/plain", "Format favoris invalide"); return;
+    }
+    uint8_t favorites[3];
+    JsonArray input = doc["favorites"].as<JsonArray>();
+    for (uint8_t i = 0; i < 3; ++i) {
+      JsonVariant v = input[i];
+      if (!v.is<int>() && !v.is<unsigned int>()) {
+        request->send(400, "text/plain", "Favori non numerique"); return;
+      }
+      int page = v.as<int>();
+      if (page != 255 && (page < 0 || page > 4)) {
+        request->send(400, "text/plain", "Page favorite invalide"); return;
+      }
+      for (uint8_t j = 0; j < i; ++j) {
+        if (page != 255 && page == favorites[j]) {
+          request->send(400, "text/plain", "Favoris dupliques"); return;
+        }
+      }
+      favorites[i] = (uint8_t)page;
+    }
+    Preferences prefs;
+    if (!prefs.begin("miraui", false)) {
+      request->send(503, "text/plain", "NVS indisponible"); return;
+    }
+    bool stored = true;
+    for (uint8_t i = 0; i < 3; ++i) {
+      char key[8]; snprintf(key, sizeof(key), "fav%u", i);
+      if (prefs.putUChar(key, favorites[i]) != 1) stored = false;
+    }
+    prefs.end();
+    request->send(stored ? 200 : 503, "text/plain",
+                  stored ? "OK" : "Ecriture favoris echouee");
+  });
+
+  server.on("/navfavorites", HTTP_GET, [](AsyncWebServerRequest* request) {
+    if (!request->hasParam("key") ||
+        request->getParam("key")->value() != Uncrypt_Pass) {
+      request->send(403, "text/plain", "Cle invalide"); return;
+    }
+    Preferences prefs;
+    if (!prefs.begin("miraui", true)) {
+      request->send(503, "text/plain", "NVS indisponible"); return;
+    }
+    DynamicJsonDocument response(128);
+    JsonArray favorites = response.createNestedArray("favorites");
+    for (uint8_t i = 0; i < 3; ++i) {
+      char key[8]; snprintf(key, sizeof(key), "fav%u", i);
+      favorites.add(prefs.getUChar(key, i));
+    }
+    prefs.end();
+    String body; serializeJson(response, body);
+    request->send(200, "application/json", body);
   });
 
   server.on("/displayinfo", HTTP_GET, [](AsyncWebServerRequest* request) {

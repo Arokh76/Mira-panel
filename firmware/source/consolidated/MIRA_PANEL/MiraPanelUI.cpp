@@ -20,6 +20,10 @@ lv_color_t MiraPanelUI::_buf2[MIRA_DISPLAY_WIDTH * MIRA_DRAW_BUFFER_LINES];
 #endif
 MiraDisplay* MiraPanelUI::_displayForLvgl = nullptr;
 MiraPanelUI* MiraPanelUI::_uiForLvgl = nullptr;
+#if defined(MIRA_TARGET_WAVESHARE_43C)
+void (*MiraPanelUI::_originalWsFlushCb)(lv_disp_drv_t*, const lv_area_t*, lv_color_t*) = nullptr;
+uint32_t MiraPanelUI::_wsFlushPhaseMicros = 0;
+#endif
 
 static const lv_color_t COL_TEXT    = lv_color_hex(0xF3F6F7);
 static const lv_color_t COL_MUTED   = lv_color_hex(0xA8B2B8);
@@ -159,7 +163,9 @@ static String roundRangeDisplayValue(int value, const String& unit) {
 
 static void makeBulbIcon(lv_obj_t* parent) {
   lv_obj_t* icon = lv_obj_create(parent);
-  lv_obj_set_size(icon, 24, 28);
+  // Navigation only: match the visual footprint of Home and Pages.
+  lv_obj_set_size(icon, MIRA_DISPLAY_WIDTH >= 800 ? 25 : 20,
+                  MIRA_DISPLAY_WIDTH >= 800 ? 28 : 25);
   lv_obj_clear_flag(icon, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_clear_flag(icon, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_bg_opa(icon, LV_OPA_TRANSP, 0);
@@ -168,8 +174,9 @@ static void makeBulbIcon(lv_obj_t* parent) {
   lv_obj_center(icon);
 
   lv_obj_t* head = lv_obj_create(icon);
-  lv_obj_set_size(head, 15, 15);
-  lv_obj_set_pos(head, 4, 1);
+  lv_obj_set_size(head, MIRA_DISPLAY_WIDTH >= 800 ? 16 : 14,
+                  MIRA_DISPLAY_WIDTH >= 800 ? 16 : 14);
+  lv_obj_set_pos(head, MIRA_DISPLAY_WIDTH >= 800 ? 5 : 3, 0);
   lv_obj_clear_flag(head, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_radius(head, LV_RADIUS_CIRCLE, 0);
   lv_obj_set_style_bg_color(head, lv_color_hex(0xDCEAF0), 0);
@@ -177,8 +184,9 @@ static void makeBulbIcon(lv_obj_t* parent) {
   lv_obj_set_style_border_width(head, 0, 0);
 
   lv_obj_t* neck = lv_obj_create(icon);
-  lv_obj_set_size(neck, 9, 4);
-  lv_obj_set_pos(neck, 7, 15);
+  lv_obj_set_size(neck, MIRA_DISPLAY_WIDTH >= 800 ? 10 : 8, 4);
+  lv_obj_set_pos(neck, MIRA_DISPLAY_WIDTH >= 800 ? 8 : 6,
+                 MIRA_DISPLAY_WIDTH >= 800 ? 17 : 15);
   lv_obj_clear_flag(neck, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_radius(neck, 2, 0);
   lv_obj_set_style_bg_color(neck, lv_color_hex(0xDCEAF0), 0);
@@ -186,8 +194,9 @@ static void makeBulbIcon(lv_obj_t* parent) {
   lv_obj_set_style_border_width(neck, 0, 0);
 
   lv_obj_t* base = lv_obj_create(icon);
-  lv_obj_set_size(base, 7, 4);
-  lv_obj_set_pos(base, 8, 20);
+  lv_obj_set_size(base, MIRA_DISPLAY_WIDTH >= 800 ? 9 : 8, 4);
+  lv_obj_set_pos(base, MIRA_DISPLAY_WIDTH >= 800 ? 8 : 6,
+                 MIRA_DISPLAY_WIDTH >= 800 ? 22 : 20);
   lv_obj_clear_flag(base, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_radius(base, 2, 0);
   lv_obj_set_style_bg_color(base, lv_color_hex(0xDCEAF0), 0);
@@ -197,7 +206,8 @@ static void makeBulbIcon(lv_obj_t* parent) {
 
 static void makeThermometerIcon(lv_obj_t* parent) {
   lv_obj_t* icon = lv_obj_create(parent);
-  lv_obj_set_size(icon, 22, 30);
+  lv_obj_set_size(icon, MIRA_DISPLAY_WIDTH >= 800 ? 23 : 19,
+                  MIRA_DISPLAY_WIDTH >= 800 ? 29 : 26);
   lv_obj_clear_flag(icon, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_clear_flag(icon, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_bg_opa(icon, LV_OPA_TRANSP, 0);
@@ -206,8 +216,9 @@ static void makeThermometerIcon(lv_obj_t* parent) {
   lv_obj_center(icon);
 
   lv_obj_t* stem = lv_obj_create(icon);
-  lv_obj_set_size(stem, 7, 20);
-  lv_obj_set_pos(stem, 7, 1);
+  lv_obj_set_size(stem, MIRA_DISPLAY_WIDTH >= 800 ? 7 : 6,
+                  MIRA_DISPLAY_WIDTH >= 800 ? 20 : 18);
+  lv_obj_set_pos(stem, MIRA_DISPLAY_WIDTH >= 800 ? 8 : 6, 2);
   lv_obj_clear_flag(stem, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_radius(stem, 4, 0);
   lv_obj_set_style_bg_opa(stem, LV_OPA_TRANSP, 0);
@@ -215,8 +226,10 @@ static void makeThermometerIcon(lv_obj_t* parent) {
   lv_obj_set_style_border_width(stem, 2, 0);
 
   lv_obj_t* bulb = lv_obj_create(icon);
-  lv_obj_set_size(bulb, 12, 12);
-  lv_obj_set_pos(bulb, 4, 17);
+  lv_obj_set_size(bulb, MIRA_DISPLAY_WIDTH >= 800 ? 13 : 11,
+                  MIRA_DISPLAY_WIDTH >= 800 ? 13 : 11);
+  lv_obj_set_pos(bulb, MIRA_DISPLAY_WIDTH >= 800 ? 5 : 4,
+                 MIRA_DISPLAY_WIDTH >= 800 ? 14 : 13);
   lv_obj_clear_flag(bulb, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_radius(bulb, LV_RADIUS_CIRCLE, 0);
   lv_obj_set_style_bg_color(bulb, lv_color_hex(0xDCEAF0), 0);
@@ -352,18 +365,23 @@ void MiraPanelUI::touchRead(lv_indev_drv_t* indev, lv_indev_data_t* data) {
     // directement afin qu'aucun widget/page scrollable ne puisse intercepter
     // le toucher. Un seul changement est genere par appui.
     if (_uiForLvgl && y >= MIRA_CONTENT_HEIGHT) {
+      // Keep navigation usable at all times, including after opening
+      // or closing a thermostat dropdown. The popup opens UPWARDS and
+      // stays in the content region. Its LVGL object may outlive closure,
+      // so lv_dropdown_get_list() cannot be used as an open-state check.
       if (!_uiForLvgl->_navTouchLatched) {
         _uiForLvgl->_navTouchLatched = true;
-        static const uint8_t navOrder[PAGE_COUNT][3] = {
-          {1, 3, 2},
-          {2, 0, 3},
-          {1, 0, 3},
-          {1, 0, 2}
-        };
-        uint8_t current = _uiForLvgl->_currentPage < PAGE_COUNT ? _uiForLvgl->_currentPage : 0;
-        uint8_t slot = ((uint32_t)x * 3U) / MIRA_DISPLAY_WIDTH;
-        if (slot > 2) slot = 2;
-        _uiForLvgl->_pendingNavPage = (int8_t)navOrder[current][slot];
+        // Direct hardware touch routing for the three fixed favorite slots
+        // and the always-present Pages button. Do not let a dropdown or
+        // scrollable widget intercept the bottom strip.
+        uint8_t slot = ((uint32_t)x * NAV_BUTTON_COUNT) / MIRA_DISPLAY_WIDTH;
+        if (slot >= NAV_BUTTON_COUNT) slot = NAV_BUTTON_COUNT - 1;
+        if (slot == FAVORITE_SLOTS) {
+          _uiForLvgl->_pendingTogglePagePicker = true;
+        } else if (_uiForLvgl->_favoritePages[slot] < PAGE_COUNT) {
+          _uiForLvgl->_pendingNavPage =
+              (int8_t)_uiForLvgl->_favoritePages[slot];
+        }
       }
       return;
     }
@@ -437,6 +455,52 @@ void MiraPanelUI::publishMqttAction(const Binding& b, const String& payload) {
 }
 
 void MiraPanelUI::handleMqttState(const String& topic, const String& rawPayload) {
+  // Thermostat exposes 3 independent state topics. Always display-only.
+  // Example: mira/<screen>/States/Thermostat salon__temperature
+  for (uint8_t t = 0; t < _bindingCount; ++t) {
+    Binding& th = _bindings[t];
+    if (th.type != W_THERMOSTAT) continue;
+    const String temp = th.name + "__temperature";
+    const String setpoint = th.name + "__consigne";
+    const String mode = th.name + "__mode";
+    const String key = normalizeMqttTopicName(topic);
+    if (key != normalizeMqttTopicName(temp) &&
+        key != normalizeMqttTopicName(setpoint) &&
+        key != normalizeMqttTopicName(mode)) continue;
+    String value = mqttPayloadValue(rawPayload);
+    value.trim();
+    _suppressEvents = true;
+    if (key == normalizeMqttTopicName(temp)) {
+      _server.IndexSetInfo(th.thermostatTempId, value);
+      String displayed = value.length() ? value : "--";
+      if (displayed.indexOf("°") < 0) displayed += " °C";
+      if (th.thermostatTemperatureLabel)
+        lv_label_set_text(th.thermostatTemperatureLabel, displayed.c_str());
+    } else if (key == normalizeMqttTopicName(setpoint)) {
+      if (value.length()) {
+        float n = roundf(value.toFloat() * 2.0f) * 0.5f;
+        if (n < th.minValue) n = th.minValue;
+        if (n > th.maxValue) n = th.maxValue;
+        th.thermostatSetpoint = n;
+        _server.IndexSetRange(th.id, n);
+        if (th.control) lv_arc_set_value(th.control, (int)roundf(n * 2.0f));
+        if (th.valueLabel)
+          lv_label_set_text(th.valueLabel, (String(n, 1) + "°").c_str());
+      }
+    } else {
+      for (uint8_t i = 0; i < th.listCount; ++i) {
+        if (th.listLabels[i].equalsIgnoreCase(value) || value == String(i)) {
+          th.selectedIndex = i;
+          _server.IndexSetList(th.listIds[i]);
+          if (th.thermostatModeControl) lv_dropdown_set_selected(th.thermostatModeControl, i);
+          if (th.thermostatModeBadge) lv_label_set_text(th.thermostatModeBadge, th.listLabels[i].c_str());
+          break;
+        }
+      }
+    }
+    _suppressEvents = false;
+    return;
+  }
   int idx = findBindingByMqttTopic(topic);
   if (idx < 0 || idx >= _bindingCount) {
     Serial.println("[MIRA][MQTT] State ignore, widget inconnu : " + topic);
@@ -556,6 +620,7 @@ void MiraPanelUI::begin() {
   if (savedTheme == 0xFF) savedTheme = _prefs.getBool("dark", false) ? THEME_DARK : THEME_MIRA;
   _theme = savedTheme <= THEME_GLASS ? savedTheme : THEME_DARK;
   _returnHomeEnabled = _prefs.getBool("home", true);
+  loadFavorites();
   _sleepEnabled = _prefs.getBool("sleep", true);
   _clockInSleep = _prefs.getBool("clock", true);
 
@@ -629,10 +694,15 @@ void MiraPanelUI::begin() {
     lv_obj_set_scroll_dir(_pages[i], LV_DIR_VER);
     lv_obj_set_scrollbar_mode(_pages[i], LV_SCROLLBAR_MODE_OFF);
     if (i != 0) lv_obj_add_flag(_pages[i], LV_OBJ_FLAG_HIDDEN);
+#if defined(MIRA_TARGET_WAVESHARE_43C)
+    // Track every real movement: LVGL's BEGIN/END can occur within one
+    // touch sample, before the following paint is scheduled.
+    lv_obj_add_event_cb(_pages[i], onScrollPerfEvent, LV_EVENT_SCROLL, this);
+#endif
   }
 
-  // Navigation inspirée du firmware visible dans la vidéo Mira :
-  // bandeau noir, trois icônes seulement, la page courante n'est pas affichée.
+  // Experimental navigation: original three contextual destinations plus
+  // a fourth, always visible "Pages" entry. Existing page content is untouched.
   _nav = lv_obj_create(_screen);
   lv_obj_set_pos(_nav, 0, MIRA_CONTENT_HEIGHT);
   lv_obj_set_size(_nav, MIRA_DISPLAY_WIDTH, MIRA_NAV_HEIGHT);
@@ -643,38 +713,92 @@ void MiraPanelUI::begin() {
   lv_obj_set_style_radius(_nav, 0, 0);
   lv_obj_set_style_pad_all(_nav, 0, 0);
 
-  // L'original utilise 3 destinations par page, avec un ordre qui change
-  // selon l'ecran courant. Les boutons sont donc places manuellement.
-  const char* icons[PAGE_COUNT] = {LV_SYMBOL_HOME, "", "", LV_SYMBOL_SETTINGS};
-  for (uint8_t i = 0; i < PAGE_COUNT; ++i) {
-    _navButtons[i] = lv_btn_create(_nav);
-    lv_obj_set_size(_navButtons[i], MIRA_DISPLAY_WIDTH / 3, MIRA_NAV_HEIGHT - 2);
-    lv_obj_add_flag(_navButtons[i], LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_ext_click_area(_navButtons[i], 2);
-    lv_obj_set_style_bg_opa(_navButtons[i], LV_OPA_TRANSP, 0);
-    lv_obj_set_style_bg_opa(_navButtons[i], LV_OPA_30, LV_STATE_PRESSED);
-    lv_obj_set_style_bg_color(_navButtons[i], colorAccent(), LV_STATE_PRESSED);
-    lv_obj_set_style_radius(_navButtons[i], 10, 0);
-    lv_obj_set_style_border_width(_navButtons[i], 0, 0);
-    lv_obj_set_style_shadow_width(_navButtons[i], 0, 0);
-    lv_obj_set_style_transform_zoom(_navButtons[i], 246, LV_STATE_PRESSED);
-    lv_obj_set_style_anim_time(_navButtons[i], 100, LV_STATE_DEFAULT);
-    lv_obj_add_event_cb(_navButtons[i], onNav, LV_EVENT_CLICKED, (void*)(uintptr_t)i);
-
-    if (i == 1) {
-      makeBulbIcon(_navButtons[i]);
-    } else if (i == 2) {
-      makeThermometerIcon(_navButtons[i]);
-    } else {
-      lv_obj_t* lbl = lv_label_create(_navButtons[i]);
-      lv_label_set_text(lbl, icons[i]);
-      lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
-      lv_obj_set_style_text_color(lbl, lv_color_hex(0xDCEAF0), 0);
-      lv_obj_center(lbl);
-    }
+  // Three persistent favorites (empty slots allowed) plus the Pages menu.
+  // The slots remain in the same position on every page.
+  for (uint8_t slot = 0; slot < FAVORITE_SLOTS; ++slot) {
+    lv_obj_t* btn = lv_btn_create(_nav);
+    _favoriteButtons[slot] = btn;
+    lv_obj_set_size(btn, MIRA_DISPLAY_WIDTH / NAV_BUTTON_COUNT,
+                    MIRA_NAV_HEIGHT - 2);
+    lv_obj_set_pos(btn, 1 + slot * (MIRA_DISPLAY_WIDTH / NAV_BUTTON_COUNT), 1);
+    lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_ext_click_area(btn, 2);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_30, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(btn, colorAccent(), LV_STATE_PRESSED);
+    lv_obj_set_style_radius(btn, 10, 0);
+    lv_obj_set_style_border_width(btn, 0, 0);
+    lv_obj_set_style_shadow_width(btn, 0, 0);
+    lv_obj_set_style_pad_all(btn, 0, 0);
+    lv_obj_add_event_cb(btn, onNav, LV_EVENT_CLICKED, (void*)(uintptr_t)slot);
   }
 
+  // The fourth nav SLOT is a separate button, not the Settings page icon.
+  _navPagesButton = lv_btn_create(_nav);
+  lv_obj_set_size(_navPagesButton, MIRA_DISPLAY_WIDTH / NAV_BUTTON_COUNT,
+                  MIRA_NAV_HEIGHT - 2);
+  lv_obj_set_style_bg_opa(_navPagesButton, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_bg_opa(_navPagesButton, LV_OPA_30, LV_STATE_PRESSED);
+  lv_obj_set_style_bg_color(_navPagesButton, colorAccent(), LV_STATE_PRESSED);
+  lv_obj_set_style_radius(_navPagesButton, 10, 0);
+  lv_obj_set_style_border_width(_navPagesButton, 0, 0);
+  lv_obj_set_style_shadow_width(_navPagesButton, 0, 0);
+  lv_obj_set_style_pad_all(_navPagesButton, 0, 0);
+  // Draw a clear 2x2 grid; no font icon dependencies on WT32.
+  for (uint8_t dot = 0; dot < 4; ++dot) {
+    lv_obj_t* square = lv_obj_create(_navPagesButton);
+    const bool wideIcon = MIRA_DISPLAY_WIDTH >= 800;
+    lv_obj_set_size(square, wideIcon ? 9 : 7, wideIcon ? 9 : 7);
+    lv_obj_set_style_radius(square, 2, 0);
+    lv_obj_set_style_pad_all(square, 0, 0);
+    lv_obj_set_style_border_width(square, 0, 0);
+    lv_obj_set_style_bg_color(square, colorAccent(), 0);
+    lv_obj_set_style_bg_opa(square, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(square, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(square, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_align(square, LV_ALIGN_CENTER,
+                 (dot % 2) * (wideIcon ? 14 : 11) - (wideIcon ? 7 : 5),
+                 (dot / 2) * (wideIcon ? 14 : 11) - (wideIcon ? 7 : 5));
+  }
+
+
   buildSettingsPage();
+  buildEnergyPreviewPage();
+  buildPagePicker();
+  refreshFavoriteNav();
+
+#if defined(MIRA_TARGET_WAVESHARE_43C)
+  // Temporary on-screen results after each scroll. The diagnostics overlay
+  // is hidden while moving; it never intercepts touches or covers the
+  // navigation row. A photograph after scrolling captures the measurements.
+  _scrollPerfPanel = lv_obj_create(_screen);
+  lv_obj_set_size(_scrollPerfPanel, 748, 72);
+  lv_obj_align(_scrollPerfPanel, LV_ALIGN_TOP_MID, 0, 6);
+  lv_obj_clear_flag(_scrollPerfPanel, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_clear_flag(_scrollPerfPanel, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_radius(_scrollPerfPanel, 8, 0);
+  lv_obj_set_style_border_width(_scrollPerfPanel, 1, 0);
+  lv_obj_set_style_border_color(_scrollPerfPanel, colorAccent(), 0);
+  lv_obj_set_style_bg_color(_scrollPerfPanel, lv_color_hex(0x071421), 0);
+  lv_obj_set_style_bg_opa(_scrollPerfPanel, LV_OPA_COVER, 0);
+  lv_obj_set_style_pad_all(_scrollPerfPanel, 2, 0);
+  _scrollPerfLabel = lv_label_create(_scrollPerfPanel);
+  lv_obj_set_style_text_color(_scrollPerfLabel, lv_color_white(), 0);
+  lv_obj_set_style_text_font(_scrollPerfLabel, &mira_font_fr_14, 0);
+  lv_label_set_text(_scrollPerfLabel, "Diagnostic de defilement : faites glisser la page");
+  lv_obj_center(_scrollPerfLabel);
+  lv_obj_add_flag(_scrollPerfPanel, LV_OBJ_FLAG_HIDDEN);
+  lv_disp_t* diagnosticDisplay = lv_disp_get_default();
+  if (diagnosticDisplay && diagnosticDisplay->driver) {
+    diagnosticDisplay->driver->monitor_cb = onDisplayPerfMonitor;
+    _originalWsFlushCb = diagnosticDisplay->driver->flush_cb;
+    diagnosticDisplay->driver->render_start_cb = onDisplayRenderStart;
+    diagnosticDisplay->driver->flush_cb = onDisplayFlushTimed;
+  }
+#endif
+
+  // Run touch navigation on LVGL's task, without waiting for Arduino's loop.
+  lv_timer_create(onNavigationTimer, 10, this);
 
   _sleepOverlay = lv_obj_create(_screen);
   lv_obj_set_pos(_sleepOverlay, 0, 0);
@@ -981,6 +1105,43 @@ void MiraPanelUI::registerAndCreate(JsonObject obj) {
       start = sep + 1;
     }
     createList(idx, b.type == W_LISTBUTTON);
+  }
+  else if (type == "thermostat") {
+    b.type = W_THERMOSTAT;
+    b.unit = "°C";
+    b.minValue = sMin.length() ? sMin.toInt() : 5;
+    b.maxValue = sMax.length() ? sMax.toInt() : 30;
+    b.minValue = clampInt(b.minValue, -20, 60);
+    b.maxValue = clampInt(b.maxValue, b.minValue + 1, 80);
+    b.thermostatSetpoint = sValue.length() ? sValue.toFloat() : 20.0f;
+    b.thermostatSetpoint = roundf(b.thermostatSetpoint * 2.0f) * 0.5f;
+    if (b.thermostatSetpoint < b.minValue) b.thermostatSetpoint = b.minValue;
+    if (b.thermostatSetpoint > b.maxValue) b.thermostatSetpoint = b.maxValue;
+    // Three native Mira IDs, but only ONE card/widget. The legacy Jeedom
+    // /getindex machinery can reuse its info/range/list command mapping.
+    b.thermostatTempId = _server.IndexAddInfo(name + "__temperature", "°C");
+    b.id = _server.IndexAddRange(name + "__consigne", b.minValue, b.maxValue,
+                                 (int)roundf(b.thermostatSetpoint));
+    String options = String((const char*)(obj["modes"] | "Confort|Éco|Hors gel|Arrêt"));
+    options.replace("\\n", "|");
+    int start = 0;
+    while (start <= options.length() && b.listCount < MAX_LIST_ITEMS) {
+      const int sep = options.indexOf('|', start);
+      String item = (sep < 0) ? options.substring(start) : options.substring(start, sep);
+      item.trim();
+      if (item.length()) {
+        b.listIds[b.listCount] = _server.IndexAddList(name + "__mode", item, item);
+        b.listLabels[b.listCount++] = item;
+      }
+      if (sep < 0) break;
+      start = sep + 1;
+    }
+    if (b.listCount == 0) {
+      b.listIds[0] = _server.IndexAddList(name + "__mode", "Confort", "Confort");
+      b.listLabels[0] = "Confort";
+      b.listCount = 1;
+    }
+    createThermostat(idx);
   }
   else if (type == "datetime") {
     b.type = W_DATETIME;
@@ -1477,6 +1638,187 @@ void MiraPanelUI::createRoundRange(uint8_t idx) {
   EventContext* ctx = makeContext(idx);
   lv_obj_add_event_cb(b.control, onRoundRange, LV_EVENT_ALL, ctx);
 }
+// One native thermostat card, regardless of page. The three controls inside
+// are NOT three flex children: they are grouped inside this single card.
+// Horizontal on Waveshare 4.3C, vertical on WT32 SC01 Plus.
+void MiraPanelUI::createThermostat(uint8_t idx) {
+  Binding& b = _bindings[idx];
+  const bool wide = MIRA_DISPLAY_WIDTH >= 800;
+  const lv_coord_t cardW = MIRA_CARD_FULL;
+  // Use the whole content viewport while leaving margin above Mira's nav.
+  const lv_coord_t cardH = MIRA_CONTENT_HEIGHT - 16;
+  b.card = makeCard(pageIndex(b.location), cardH);
+  lv_obj_set_width(b.card, cardW);
+  lv_obj_set_layout(b.card, 0);  // No child layout; supported by both LVGL 8 targets
+  lv_obj_clear_flag(b.card, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_pad_all(b.card, 0, 0);
+
+  // Header: configured display name + last known heating mode.
+  lv_obj_t* header = lv_label_create(b.card);
+  String title = b.displayName.length() ? b.displayName : b.name;
+  lv_label_set_text(header, title.c_str());
+  lv_obj_set_style_text_color(header, COL_TEXT, 0);
+  lv_obj_set_style_text_font(header, &mira_font_fr_16, 0);
+  lv_obj_set_width(header, wide ? 300 : cardW - 126);
+  lv_label_set_long_mode(header, LV_LABEL_LONG_CLIP);
+  lv_obj_set_style_text_align(header, LV_TEXT_ALIGN_LEFT, 0);
+  lv_obj_set_pos(header, 14, 12);
+
+  {
+    b.thermostatModeBadge = lv_label_create(b.card);
+    lv_label_set_text(b.thermostatModeBadge, b.listLabels[0].c_str());
+    lv_obj_set_style_text_color(b.thermostatModeBadge, colorAccent(), 0);
+    lv_obj_set_style_text_font(b.thermostatModeBadge,
+                               wide ? &mira_font_fr_14 : &mira_font_fr_12, 0);
+    lv_obj_set_width(b.thermostatModeBadge, wide ? 170 : 105);
+    lv_label_set_long_mode(b.thermostatModeBadge, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_align(b.thermostatModeBadge, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_pos(b.thermostatModeBadge, cardW - (wide ? 185 : 115), 13);
+  }
+
+  // Reuse the EXACT RoundRange base design, scaled proportionally to the
+  // existing thermostat dial sizes. No changes to the card geometry or the
+  // other thermostat controls (temperature, mode, navigation, Jeedom).
+  // RoundRange reference (normal): plate=196, arc=182, center=104;
+  // main arc=15 and pressed arc=18.
+  const lv_coord_t arcSize = wide ? 296 : 214;
+  const lv_coord_t arcX = wide ? 27 : (cardW - arcSize) / 2;
+  const lv_coord_t arcY = wide ? 63 : 41;
+  const lv_coord_t plateSize = (arcSize * 196 + 91) / 182;
+  const lv_coord_t innerSize = (arcSize * 104 + 91) / 182;
+  const lv_coord_t arcWidth = (arcSize * 15 + 91) / 182;
+  const lv_coord_t pressedWidth = (arcSize * 18 + 91) / 182;
+
+  lv_obj_t* dialPlate = lv_obj_create(b.card);
+  lv_obj_set_size(dialPlate, plateSize, plateSize);
+  lv_obj_set_pos(dialPlate,
+                 arcX - (plateSize - arcSize) / 2,
+                 arcY - (plateSize - arcSize) / 2);
+  lv_obj_set_style_radius(dialPlate, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_color(dialPlate, colorPanel2(), 0);
+  lv_obj_set_style_bg_opa(dialPlate, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_color(dialPlate, colorBorder(), 0);
+  lv_obj_set_style_border_width(dialPlate, 1, 0);
+  lv_obj_set_style_pad_all(dialPlate, 0, 0);
+  lv_obj_clear_flag(dialPlate, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_clear_flag(dialPlate, LV_OBJ_FLAG_CLICKABLE);
+
+  b.control = lv_arc_create(b.card);
+  lv_obj_set_size(b.control, arcSize, arcSize);
+  lv_obj_set_pos(b.control, arcX, arcY);
+  lv_arc_set_range(b.control, b.minValue * 2, b.maxValue * 2);
+  lv_arc_set_value(b.control, (int)roundf(b.thermostatSetpoint * 2.0f));
+  lv_arc_set_bg_angles(b.control, 135, 45);
+  lv_obj_set_style_arc_width(b.control, arcWidth, LV_PART_MAIN);
+  lv_obj_set_style_arc_width(b.control, arcWidth, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_width(b.control, pressedWidth, LV_PART_INDICATOR | LV_STATE_PRESSED);
+  lv_obj_set_style_arc_color(b.control, colorPanel2(), LV_PART_MAIN);
+  lv_obj_set_style_arc_color(b.control, colorAccent(), LV_PART_INDICATOR);
+  lv_obj_set_style_bg_opa(b.control, LV_OPA_TRANSP, LV_PART_KNOB);
+  lv_obj_set_style_border_width(b.control, 0, LV_PART_KNOB);
+  lv_obj_set_style_pad_all(b.control, 0, LV_PART_KNOB);
+  lv_obj_set_ext_click_area(b.control, 10);
+
+  // The RoundRange inner medallion MUST be proportional to the outer arc.
+  // Previous inner=132/116 made the large Waveshare/WT32 dials resemble a
+  // vinyl record; base RoundRange uses 104/182 of the arc diameter.
+  lv_obj_t* inner = lv_obj_create(b.card);
+  lv_obj_set_size(inner, innerSize, innerSize);
+  lv_obj_set_pos(inner, arcX + (arcSize - innerSize) / 2,
+                 arcY + (arcSize - innerSize) / 2);
+  lv_obj_set_style_radius(inner, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_color(inner, colorBg(), 0);
+  lv_obj_set_style_bg_opa(inner, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_color(inner, colorBorder(), 0);
+  lv_obj_set_style_border_width(inner, 2, 0);
+  lv_obj_set_style_pad_all(inner, 0, 0);
+  lv_obj_clear_flag(inner, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_clear_flag(inner, LV_OBJ_FLAG_CLICKABLE);
+
+  // Labels belong to the actual RoundRange center, not the whole card;
+  // unlike the previous implementation the caption cannot cross the rim.
+  b.valueLabel = lv_label_create(inner);
+  lv_label_set_text(b.valueLabel, (String(b.thermostatSetpoint, 1) + "°").c_str());
+  lv_obj_set_width(b.valueLabel, innerSize - 12);
+  lv_obj_set_style_text_align(b.valueLabel, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_style_text_color(b.valueLabel, COL_TEXT, 0);
+  lv_obj_set_style_text_font(b.valueLabel,
+                            wide ? &lv_font_montserrat_40 : &lv_font_montserrat_28, 0);
+  lv_obj_align(b.valueLabel, LV_ALIGN_CENTER, 0, -16);
+
+  lv_obj_t* hint = lv_label_create(inner);
+  lv_label_set_text(hint, "CONSIGNE");
+  lv_obj_set_width(hint, innerSize - 12);
+  lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_style_text_color(hint, COL_MUTED, 0);
+  lv_obj_set_style_text_font(hint, &mira_font_fr_14, 0);
+  lv_obj_align(hint, LV_ALIGN_CENTER, 0, 26);
+  EventContext* rangeCtx = makeContext(idx);
+  lv_obj_add_event_cb(b.control, onThermostatRange, LV_EVENT_ALL, rangeCtx);
+
+  // Current temperature: read-only. Jeedom /updatenr writes the Info ID;
+  // it must NEVER send a new heating command.
+  lv_obj_t* tempHeading = lv_label_create(b.card);
+  lv_label_set_text(tempHeading, "Température actuelle");
+  lv_obj_set_style_text_color(tempHeading, COL_MUTED, 0);
+  lv_obj_set_style_text_font(tempHeading, &mira_font_fr_14, 0);
+  lv_obj_set_width(tempHeading, wide ? 360 : cardW - 24);
+  lv_obj_set_style_text_align(tempHeading, wide ? LV_TEXT_ALIGN_LEFT : LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_pos(tempHeading, wide ? 389 : 12, wide ? 122 : 282);
+
+  b.thermostatTemperatureLabel = lv_label_create(b.card);
+  lv_label_set_text(b.thermostatTemperatureLabel, "-- °C");
+  lv_obj_set_style_text_color(b.thermostatTemperatureLabel, COL_TEXT, 0);
+  lv_obj_set_style_text_font(b.thermostatTemperatureLabel,
+                            wide ? &lv_font_montserrat_40 : &lv_font_montserrat_28, 0);
+  lv_obj_set_width(b.thermostatTemperatureLabel, wide ? 350 : cardW - 24);
+  lv_obj_set_style_text_align(b.thermostatTemperatureLabel,
+                              wide ? LV_TEXT_ALIGN_LEFT : LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_pos(b.thermostatTemperatureLabel, wide ? 389 : 12, wide ? 156 : 299);
+
+  if (wide) {
+    lv_obj_t* separator = lv_obj_create(b.card);
+    lv_obj_set_size(separator, cardW - 408, 1);
+    lv_obj_set_pos(separator, 386, 237);
+    lv_obj_set_style_bg_color(separator, colorBorder(), 0);
+    lv_obj_set_style_bg_opa(separator, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(separator, 0, 0);
+    lv_obj_clear_flag(separator, LV_OBJ_FLAG_CLICKABLE);
+  }
+
+  lv_obj_t* modeHeading = lv_label_create(b.card);
+  lv_label_set_text(modeHeading, "Mode");
+  lv_obj_set_style_text_color(modeHeading, COL_MUTED, 0);
+  lv_obj_set_style_text_font(modeHeading, &mira_font_fr_14, 0);
+  lv_obj_set_width(modeHeading, wide ? 360 : cardW - 24);
+  lv_obj_set_style_text_align(modeHeading, wide ? LV_TEXT_ALIGN_LEFT : LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_pos(modeHeading, wide ? 389 : 12, wide ? 265 : 337);
+
+  b.thermostatModeControl = lv_dropdown_create(b.card);
+  String modes;
+  for (uint8_t i = 0; i < b.listCount; ++i) {
+    if (i) modes += "\n";
+    modes += b.listLabels[i];
+  }
+  lv_dropdown_set_options(b.thermostatModeControl, modes.c_str());
+  lv_dropdown_set_selected(b.thermostatModeControl, 0);
+  lv_obj_set_size(b.thermostatModeControl, wide ? cardW - 407 : cardW - 28, 43);
+  lv_obj_set_pos(b.thermostatModeControl, wide ? 387 : 14, wide ? 294 : 356);
+  // Open the menu towards the card, not across the physical navigation bar.
+  lv_dropdown_set_dir(b.thermostatModeControl, LV_DIR_TOP);
+  lv_obj_set_style_bg_color(b.thermostatModeControl, colorPanel2(), 0);
+  lv_obj_set_style_text_color(b.thermostatModeControl, COL_TEXT, 0);
+  lv_obj_set_style_text_font(b.thermostatModeControl, &mira_font_fr_16, 0);
+  lv_obj_set_style_border_width(b.thermostatModeControl, 1, 0);
+  lv_obj_set_style_border_color(b.thermostatModeControl, colorBorder(), 0);
+  lv_obj_set_style_radius(b.thermostatModeControl, 9, 0);
+  EventContext* modeCtx = makeContext(idx);
+  lv_obj_add_event_cb(b.thermostatModeControl, onThermostatMode,
+                      LV_EVENT_VALUE_CHANGED, modeCtx);
+  lv_obj_add_event_cb(b.thermostatModeControl, onThermostatDropdownOpen,
+                      LV_EVENT_CLICKED, modeCtx);
+}
+
 void MiraPanelUI::createList(uint8_t idx, bool asButtons) {
   Binding& b = _bindings[idx];
   const bool compact = b.style == "compact";
@@ -1679,6 +2021,142 @@ void MiraPanelUI::createUnsupported(uint8_t idx, const String& originalType) {
   lv_obj_center(lbl);
 }
 
+
+void MiraPanelUI::buildEnergyPreviewPage() {
+  // The fifth page is navigation-only. Never register actions or emit
+  // placeholder readings to Jeedom; the next iteration can add real widgets.
+  lv_obj_t* page = _pages[4];
+  lv_obj_clean(page);
+  lv_obj_t* card = lv_obj_create(page);
+  const bool wide = MIRA_DISPLAY_WIDTH >= 800;
+  lv_obj_set_size(card, wide ? 650 : 304, wide ? 318 : 340);
+  lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_bg_color(card, colorPanel(), 0);
+  lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_color(card, colorBorder(), 0);
+  lv_obj_set_style_border_width(card, 1, 0);
+  lv_obj_set_style_radius(card, 14, 0);
+  lv_obj_set_style_pad_all(card, 0, 0);
+
+  lv_obj_t* title = lv_label_create(card);
+  lv_label_set_text(title, "Énergie");
+  lv_obj_set_style_text_color(title, COL_TEXT, 0);
+  lv_obj_set_style_text_font(title, &mira_font_fr_16, 0);
+  lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 24);
+
+  lv_obj_t* notice = lv_label_create(card);
+  lv_label_set_text(notice, "PAGE DE DÉMONSTRATION");
+  lv_obj_set_style_text_color(notice, colorAccent(), 0);
+  lv_obj_set_style_text_font(notice, &mira_font_fr_12, 0);
+  lv_obj_align(notice, LV_ALIGN_TOP_MID, 0, 56);
+
+  lv_obj_t* explanation = lv_label_create(card);
+  lv_obj_set_width(explanation, wide ? 570 : 256);
+  lv_label_set_long_mode(explanation, LV_LABEL_LONG_WRAP);
+  lv_label_set_text(explanation,
+      "Une quatrième catégorie à tester, sans commandes Jeedom.\n"
+      "Pour revenir, utilise la barre du bas ou le menu Pages.");
+  lv_obj_set_style_text_font(explanation, &mira_font_fr_14, 0);
+  lv_obj_set_style_text_color(explanation, COL_MUTED, 0);
+  lv_obj_set_style_text_align(explanation, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_align(explanation, LV_ALIGN_TOP_MID, 0, 91);
+
+  lv_obj_t* divider = lv_obj_create(card);
+  lv_obj_set_size(divider, wide ? 480 : 245, 1);
+  lv_obj_set_style_bg_color(divider, colorBorder(), 0);
+  lv_obj_set_style_bg_opa(divider, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(divider, 0, 0);
+  lv_obj_clear_flag(divider, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_align(divider, LV_ALIGN_TOP_MID, 0, wide ? 166 : 187);
+
+  const char* future[3] = {"Production solaire", "Consommation", "Batteries"};
+  for (uint8_t i = 0; i < 3; ++i) {
+    lv_obj_t* item = lv_label_create(card);
+    lv_label_set_text(item, future[i]);
+    lv_obj_set_width(item, wide ? 500 : 256);
+    lv_obj_set_style_text_color(item, COL_MUTED, 0);
+    lv_obj_set_style_text_font(item, &mira_font_fr_14, 0);
+    lv_obj_set_style_text_align(item, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(item, LV_ALIGN_TOP_MID, 0, (wide ? 190 : 212) + i * 31);
+  }
+}
+
+void MiraPanelUI::buildPagePicker() {
+  // Full-size content overlay, beneath the always-visible nav and sleep layer.
+  // It does not change the geometry or LVGL tree of the existing widgets.
+  _pagePicker = lv_obj_create(_screen);
+  lv_obj_set_size(_pagePicker, MIRA_DISPLAY_WIDTH, MIRA_CONTENT_HEIGHT);
+  lv_obj_set_pos(_pagePicker, 0, 0);
+  lv_obj_set_style_pad_all(_pagePicker, 0, 0);
+  lv_obj_set_style_border_width(_pagePicker, 0, 0);
+  lv_obj_set_style_radius(_pagePicker, 0, 0);
+  lv_obj_set_style_bg_color(_pagePicker, colorBg(), 0);
+  lv_obj_set_style_bg_opa(_pagePicker, LV_OPA_90, 0);
+  lv_obj_clear_flag(_pagePicker, LV_OBJ_FLAG_SCROLLABLE);
+
+  _pagePickerCard = lv_obj_create(_pagePicker);
+  const bool wide = MIRA_DISPLAY_WIDTH >= 800;
+  lv_obj_set_size(_pagePickerCard, wide ? 460 : 298, 348);
+  lv_obj_set_style_radius(_pagePickerCard, 16, 0);
+  lv_obj_set_style_bg_color(_pagePickerCard, colorPanel2(), 0);
+  lv_obj_set_style_bg_opa(_pagePickerCard, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_color(_pagePickerCard, colorBorder(), 0);
+  lv_obj_set_style_border_width(_pagePickerCard, 1, 0);
+  lv_obj_set_style_pad_all(_pagePickerCard, 0, 0);
+  lv_obj_clear_flag(_pagePickerCard, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_center(_pagePickerCard);
+
+  lv_obj_t* heading = lv_label_create(_pagePickerCard);
+  lv_label_set_text(heading, "Toutes les pages");
+  lv_obj_set_style_text_color(heading, COL_TEXT, 0);
+  lv_obj_set_style_text_font(heading, &mira_font_fr_16, 0);
+  lv_obj_align(heading, LV_ALIGN_TOP_MID, 0, 13);
+
+  const char* names[PAGE_COUNT] = {
+    "Accueil", "Lumières", "Températures", "Paramètres", "Énergie (test)"
+  };
+  const uint8_t order[PAGE_COUNT] = {0, 1, 2, 4, 3};
+  for (uint8_t row = 0; row < PAGE_COUNT; ++row) {
+    uint8_t page = order[row];
+    lv_obj_t* btn = lv_btn_create(_pagePickerCard);
+    _pagePickerButtons[page] = btn;
+    lv_obj_set_size(btn, wide ? 420 : 268, 47);
+    lv_obj_set_pos(btn, wide ? 20 : 15, 46 + row * 58);
+    lv_obj_set_style_radius(btn, 9, 0);
+    lv_obj_set_style_bg_color(btn, colorPanel(), 0);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(btn, 1, 0);
+    lv_obj_set_style_border_color(btn, colorBorder(), 0);
+    lv_obj_set_style_shadow_width(btn, 0, 0);
+    lv_obj_add_event_cb(btn, onPagePick, LV_EVENT_CLICKED,
+                        (void*)(uintptr_t)page);
+
+    lv_obj_t* label = lv_label_create(btn);
+    lv_label_set_text(label, names[page]);
+    lv_obj_set_style_text_color(label, COL_TEXT, 0);
+    lv_obj_set_style_text_font(label, &mira_font_fr_16, 0);
+    lv_obj_set_width(label, wide ? 335 : 181);
+    lv_label_set_long_mode(label, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_center(label);
+
+
+  }
+  lv_obj_add_flag(_pagePicker, LV_OBJ_FLAG_HIDDEN);
+}
+
+void MiraPanelUI::setPagePickerVisible(bool visible) {
+  if (!_pagePicker) return;
+  if (visible) lv_obj_clear_flag(_pagePicker, LV_OBJ_FLAG_HIDDEN);
+  else lv_obj_add_flag(_pagePicker, LV_OBJ_FLAG_HIDDEN);
+  if (_navPagesButton) {
+    lv_obj_set_style_bg_color(_navPagesButton, colorAccent2(), 0);
+    // Pages is always a blue navigation anchor, open or closed.
+    lv_obj_set_style_bg_opa(_navPagesButton, LV_OPA_70, 0);
+  }
+  noteActivity();
+}
+
 void MiraPanelUI::buildSettingsPage() {
   lv_obj_clean(_pages[3]);
 
@@ -1805,9 +2283,15 @@ void MiraPanelUI::applyTheme() {
       lv_obj_set_style_bg_grad_color(_pages[i], grad, 0);
       lv_obj_set_style_bg_grad_dir(_pages[i], LV_GRAD_DIR_VER, 0);
     }
-    if (_navButtons[i]) {
-      lv_obj_set_style_bg_color(_navButtons[i], colorAccent(), LV_STATE_PRESSED);
+  }
+
+  for (uint8_t slot = 0; slot < FAVORITE_SLOTS; ++slot) {
+    if (_favoriteButtons[slot]) {
+      lv_obj_set_style_bg_color(_favoriteButtons[slot], colorAccent(), LV_STATE_PRESSED);
     }
+  }
+  if (_navPagesButton) {
+    lv_obj_set_style_bg_color(_navPagesButton, colorAccent(), LV_STATE_PRESSED);
   }
 
   for (uint8_t i = 0; i < _bindingCount; ++i) {
@@ -1885,31 +2369,131 @@ void MiraPanelUI::applyTheme() {
 
   setNavActive(_currentPage);
 }
-void MiraPanelUI::setNavActive(uint8_t index) {
-  // Ordres releves sur les captures officielles :
-  // Accueil      -> Lumiere | Parametres | Temperature
-  // Lumieres     -> Temperature | Accueil | Parametres
-  // Temperatures -> Lumiere | Accueil | Parametres
-  // Parametres   -> Lumiere | Accueil | Temperature
-  static const uint8_t order[PAGE_COUNT][3] = {
-    {1, 3, 2},
-    {2, 0, 3},
-    {1, 0, 3},
-    {1, 0, 2}
-  };
-
-  if (index >= PAGE_COUNT) index = 0;
-
-  for (uint8_t i = 0; i < PAGE_COUNT; ++i) {
-    if (_navButtons[i]) lv_obj_add_flag(_navButtons[i], LV_OBJ_FLAG_HIDDEN);
+void MiraPanelUI::loadFavorites() {
+  // Independent NVS slots: removing a favorite leaves its physical position
+  // empty until another page is assigned to it.
+  for (uint8_t slot = 0; slot < FAVORITE_SLOTS; ++slot) {
+    char key[8];
+    snprintf(key, sizeof(key), "fav%u", slot);
+    uint8_t page = _prefs.getUChar(key, slot);  // first install: Accueil, Lumières, Climat
+    if (page != NO_FAVORITE && page >= PAGE_COUNT) page = NO_FAVORITE;
+    if (page != NO_FAVORITE) {
+      for (uint8_t previous = 0; previous < slot; ++previous) {
+        if (_favoritePages[previous] == page) {
+          page = NO_FAVORITE;
+          break;
+        }
+      }
+    }
+    _favoritePages[slot] = page;
   }
+}
 
-  for (uint8_t slot = 0; slot < 3; ++slot) {
-    uint8_t page = order[index][slot];
-    lv_obj_t* btn = _navButtons[page];
+void MiraPanelUI::pollFavorites() {
+  // Jeedom persists the three favorite slots through /navfavorites.
+  // Reload them once a second, on the LVGL-owning thread; no cross-task
+  // modifications of UI objects, and no effect on widget programmation.
+  if ((uint32_t)(millis() - _lastFavoritesPollMs) < 1000UL) return;
+  _lastFavoritesPollMs = millis();
+  uint8_t incoming[FAVORITE_SLOTS];
+  bool valid = true;
+  for (uint8_t slot = 0; slot < FAVORITE_SLOTS; ++slot) {
+    char key[8];
+    snprintf(key, sizeof(key), "fav%u", slot);
+    incoming[slot] = _prefs.getUChar(key, slot);
+    if (incoming[slot] != NO_FAVORITE && incoming[slot] >= PAGE_COUNT)
+      valid = false;
+    for (uint8_t other = 0; other < slot; ++other)
+      if (incoming[slot] != NO_FAVORITE && incoming[slot] == incoming[other])
+        valid = false;
+  }
+  if (!valid) return;
+  bool changed = false;
+  for (uint8_t slot = 0; slot < FAVORITE_SLOTS; ++slot) {
+    if (_favoritePages[slot] != incoming[slot]) {
+      _favoritePages[slot] = incoming[slot];
+      changed = true;
+    }
+  }
+  if (changed) {
+    refreshFavoriteNav();
+    setNavActive(_currentPage);
+    Serial.println("[MIRA][NAV] Favoris Jeedom actualises sans redemarrage");
+  }
+}
+
+void MiraPanelUI::refreshFavoriteNav() {
+  // Icons-only strip, centered vertically; the last button (Pages) is fixed.
+  // All changes happen on the UI thread after polling the persisted settings.
+  for (uint8_t slot = 0; slot < FAVORITE_SLOTS; ++slot) {
+    lv_obj_t* btn = _favoriteButtons[slot];
     if (!btn) continue;
-    lv_obj_set_pos(btn, 1 + slot * (MIRA_DISPLAY_WIDTH / 3), 1);
-    lv_obj_clear_flag(btn, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clean(btn);
+    const uint8_t page = _favoritePages[slot];
+    if (page == 1 || page == 2) {
+      if (page == 1) makeBulbIcon(btn);
+      else makeThermometerIcon(btn);
+      continue; // the original pictograms are already centered
+    }
+    if (page == 4) {
+      // Inset all stroke endpoints: 0.7.4 clipped those at the
+      // LVGL line object boundaries on both screen profiles.
+      static const lv_point_t BOLT_SMALL[7] = {
+        {10, 3}, {5, 13}, {10, 13}, {7, 22},
+        {16, 9}, {12, 9}, {13, 3}
+      };
+      static const lv_point_t BOLT_WIDE[7] = {
+        {13, 3}, {6, 15}, {12, 15}, {9, 27},
+        {22, 10}, {15, 10}, {17, 3}
+      };
+      const bool wideIcon = MIRA_DISPLAY_WIDTH >= 800;
+      lv_obj_t* bolt = lv_line_create(btn);
+      lv_line_set_points(bolt, wideIcon ? BOLT_WIDE : BOLT_SMALL, 7);
+      lv_obj_set_size(bolt, wideIcon ? 26 : 20, wideIcon ? 31 : 25);
+      lv_obj_set_style_line_color(bolt, colorAccent(), LV_PART_MAIN);
+      lv_obj_set_style_line_width(bolt, wideIcon ? 3 : 2, LV_PART_MAIN);
+      lv_obj_set_style_line_rounded(bolt, true, LV_PART_MAIN);
+      lv_obj_clear_flag(bolt, LV_OBJ_FLAG_CLICKABLE);
+      lv_obj_center(bolt);
+      continue;
+    }
+
+    lv_obj_t* glyph = lv_label_create(btn);
+    lv_label_set_text(glyph, page == 0 ? LV_SYMBOL_HOME :
+                          page == 3 ? LV_SYMBOL_SETTINGS : LV_SYMBOL_PLUS);
+    // Home glyph has a heavier visual weight than the custom nav pictograms.
+    lv_obj_set_style_text_font(glyph,
+        page == 0 ? &lv_font_montserrat_16 : &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(glyph,
+        page == NO_FAVORITE ? COL_MUTED : colorAccent(), 0);
+    lv_obj_center(glyph);
+  }
+}
+
+void MiraPanelUI::setNavActive(uint8_t index) {
+  if (index >= PAGE_COUNT) index = 0;
+  for (uint8_t slot = 0; slot < FAVORITE_SLOTS; ++slot) {
+    lv_obj_t* btn = _favoriteButtons[slot];
+    if (!btn) continue;
+    lv_obj_set_pos(btn, 1 + slot * (MIRA_DISPLAY_WIDTH / NAV_BUTTON_COUNT), 1);
+    // Only Accueil gets a blue capsule. Other favorite slots stay flat,
+    // even while their page is selected.
+    lv_obj_set_style_bg_color(btn, colorAccent2(), 0);
+    lv_obj_set_style_bg_opa(btn,
+        _favoritePages[slot] == 0 ? LV_OPA_70 : LV_OPA_TRANSP, 0);
+  }
+  if (_navPagesButton) {
+    lv_obj_set_pos(_navPagesButton,
+                   1 + FAVORITE_SLOTS * (MIRA_DISPLAY_WIDTH / NAV_BUTTON_COUNT), 1);
+    lv_obj_clear_flag(_navPagesButton, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_bg_color(_navPagesButton, colorAccent2(), 0);
+    lv_obj_set_style_bg_opa(_navPagesButton, LV_OPA_70, 0);
+  }
+  for (uint8_t i = 0; i < PAGE_COUNT; ++i) {
+    if (_pagePickerButtons[i]) {
+      lv_obj_set_style_bg_color(_pagePickerButtons[i],
+        i == index ? colorAccent2() : colorPanel(), 0);
+    }
   }
 }
 
@@ -1923,14 +2507,174 @@ void MiraPanelUI::showPage(uint8_t index) {
     }
   }
   _currentPage = index;
+  setPagePickerVisible(false);
   setNavActive(index);
   noteActivity();
 }
 
+#if defined(MIRA_TARGET_WAVESHARE_43C)
+// LVGL invokes render_start_cb after layout and double-buffer synchronization.
+// We start the clock here to isolate object rasterization from the RGB flush.
+void MiraPanelUI::onDisplayRenderStart(lv_disp_drv_t* disp) {
+  (void)disp;
+  _wsFlushPhaseMicros = micros();
+}
+
+// The official Waveshare flush callback does the RGB swap and waits for VSYNC
+// on its own LVGL task. Preserve it exactly; only time its execution.
+void MiraPanelUI::onDisplayFlushTimed(lv_disp_drv_t* disp,
+                                      const lv_area_t* area,
+                                      lv_color_t* color_p) {
+  const uint32_t before = micros();
+  MiraPanelUI* ui = _uiForLvgl;
+  if (ui && ui->_scrollPerfActive && _wsFlushPhaseMicros) {
+    const uint32_t drawUs = before - _wsFlushPhaseMicros;
+    ui->_scrollDrawTimeUs += drawUs;
+    if (drawUs > ui->_scrollDrawMaxUs) ui->_scrollDrawMaxUs = drawUs;
+  }
+  if (_originalWsFlushCb) _originalWsFlushCb(disp, area, color_p);
+  const uint32_t after = micros();
+  _wsFlushPhaseMicros = after;
+  if (ui && ui->_scrollPerfActive) {
+    const uint32_t flushUs = after - before;
+    ui->_scrollFlushTimeUs += flushUs;
+    ui->_scrollFlushCalls++;
+    if (flushUs > ui->_scrollFlushMaxUs) ui->_scrollFlushMaxUs = flushUs;
+  }
+}
+
+// LVGL monitor callback: total refresh duration also includes layout and
+// double-buffer sync work. Do not allocate or log during scroll.
+void MiraPanelUI::onDisplayPerfMonitor(lv_disp_drv_t* disp, uint32_t ms, uint32_t pixels) {
+  (void)disp;
+  MiraPanelUI* ui = _uiForLvgl;
+  if (!ui || !ui->_scrollPerfActive) return;
+  const uint32_t now = millis();
+  if (ui->_scrollPerfFrames && ui->_scrollPerfLastFrameAt) {
+    const uint32_t gap = now - ui->_scrollPerfLastFrameAt;
+    if (gap > ui->_scrollPerfGapMaxMs) ui->_scrollPerfGapMaxMs = gap;
+  }
+  ui->_scrollPerfLastFrameAt = now;
+  ui->_scrollPerfFrames++;
+  ui->_scrollPerfRenderSumMs += ms;
+  ui->_scrollPerfPixelSum += pixels;
+  if (ms > ui->_scrollPerfRenderMaxMs) ui->_scrollPerfRenderMaxMs = ms;
+}
+
+// SCROLL_BEGIN/SCROLL_END are not useful for continuous touch scroll here:
+// LVGL 8 emits them around a single synchronous move. SCROLL events instead
+// fire for every actual position update and give us a reliable source for
+// movement cadence, independent of the display driver monitor callback.
+void MiraPanelUI::onScrollPerfEvent(lv_event_t* e) {
+  MiraPanelUI* ui = static_cast<MiraPanelUI*>(lv_event_get_user_data(e));
+  if (!ui || lv_event_get_code(e) != LV_EVENT_SCROLL) return;
+  const uint32_t now = millis();
+  if (!ui->_scrollPerfActive) {
+    ui->_scrollPerfActive = true;
+    ui->_scrollPerfStartedAt = now;
+    ui->_scrollPerfLastMovementAt = now;
+    ui->_scrollPerfLastFrameAt = 0;
+    ui->_scrollPerfSteps = 0;
+    ui->_scrollPerfStepsMaxGapMs = 0;
+    ui->_scrollPerfFrames = 0;
+    ui->_scrollPerfRenderSumMs = 0;
+    ui->_scrollPerfRenderMaxMs = 0;
+    ui->_scrollPerfGapMaxMs = 0;
+    ui->_scrollPerfPixelSum = 0;
+    ui->_scrollDrawTimeUs = 0;
+    ui->_scrollFlushTimeUs = 0;
+    ui->_scrollFlushMaxUs = 0;
+    ui->_scrollDrawMaxUs = 0;
+    ui->_scrollFlushCalls = 0;
+    if (ui->_scrollPerfPanel) lv_obj_add_flag(ui->_scrollPerfPanel, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (ui->_scrollPerfSteps) {
+    const uint32_t gap = now - ui->_scrollPerfLastMovementAt;
+    if (gap > ui->_scrollPerfStepsMaxGapMs) ui->_scrollPerfStepsMaxGapMs = gap;
+  }
+  ui->_scrollPerfSteps++;
+  ui->_scrollPerfLastMovementAt = now;
+}
+#endif
+
+// LVGL's timer task handles the touch immediately on both display targets.
+void MiraPanelUI::onNavigationTimer(lv_timer_t* timer) {
+  (void)timer;
+  MiraPanelUI* ui = _uiForLvgl;
+  if (!ui) return;
+#if defined(MIRA_TARGET_WAVESHARE_43C)
+  // Let queued LVGL paint/flush cycles finish AFTER the last movement.
+  // Delayed reporting avoids the 0 FPS bug from the old SCROLL_END callback.
+  if (ui->_scrollPerfActive &&
+      (uint32_t)(millis() - ui->_scrollPerfLastMovementAt) >= 550UL) {
+    ui->_scrollPerfActive = false;
+    const uint32_t movingMs = ui->_scrollPerfLastMovementAt - ui->_scrollPerfStartedAt;
+    const uint32_t duration = movingMs < 100 ? 100 : movingMs;
+    const uint32_t frames = ui->_scrollPerfFrames;
+    const uint32_t steps = ui->_scrollPerfSteps;
+    const uint32_t fps = (frames * 1000UL) / duration;
+    const uint32_t stepHz = (steps * 1000UL) / duration;
+    const uint32_t avgRender = frames ? ui->_scrollPerfRenderSumMs / frames : 0;
+    const uint32_t avgDraw = frames ? ui->_scrollDrawTimeUs / (1000UL * frames) : 0;
+    const uint32_t avgFlush = frames ? ui->_scrollFlushTimeUs / (1000UL * frames) : 0;
+    const uint32_t accounted = avgDraw + avgFlush;
+    const uint32_t avgOther = avgRender > accounted ? avgRender - accounted : 0;
+    if (ui->_scrollPerfLabel && ui->_scrollPerfPanel) {
+      if (frames) {
+        lv_label_set_text_fmt(ui->_scrollPerfLabel,
+            "SCROLL %lu pas / %lu ms | %lu images (~%lu/s) | ecart max %lu ms\n"
+            "Cycle LVGL %lu ms   Dessin %lu ms   Ecran/VSYNC %lu ms   Autre %lu ms\n"
+            "Max dessin %lu ms   Max ecran %lu ms   Appels ecran %lu",
+            (unsigned long)steps, (unsigned long)movingMs,
+            (unsigned long)frames, (unsigned long)fps,
+            (unsigned long)ui->_scrollPerfGapMaxMs,
+            (unsigned long)avgRender, (unsigned long)avgDraw,
+            (unsigned long)avgFlush, (unsigned long)avgOther,
+            (unsigned long)(ui->_scrollDrawMaxUs / 1000UL),
+            (unsigned long)(ui->_scrollFlushMaxUs / 1000UL),
+            (unsigned long)ui->_scrollFlushCalls);
+      } else {
+        lv_label_set_text_fmt(ui->_scrollPerfLabel,
+            "SCROLL %lu pas / %lu ms (~%lu/s) - sans rafraichissement mesure",
+            (unsigned long)steps, (unsigned long)movingMs, (unsigned long)stepHz);
+      }
+      lv_obj_center(ui->_scrollPerfLabel);
+      lv_obj_clear_flag(ui->_scrollPerfPanel, LV_OBJ_FLAG_HIDDEN);
+    }
+    Serial.printf("[MIRA][SCROLL] steps=%lu move_ms=%lu frames=%lu fps=%lu avg_cycle_ms=%lu avg_draw_ms=%lu avg_flush_ms=%lu other_ms=%lu max_flush_ms=%lu max_draw_ms=%lu max_frame_gap_ms=%lu\n",
+        (unsigned long)steps, (unsigned long)movingMs,
+        (unsigned long)frames, (unsigned long)fps,
+        (unsigned long)avgRender, (unsigned long)avgDraw,
+        (unsigned long)avgFlush, (unsigned long)avgOther,
+        (unsigned long)(ui->_scrollFlushMaxUs / 1000UL),
+        (unsigned long)(ui->_scrollDrawMaxUs / 1000UL),
+        (unsigned long)ui->_scrollPerfGapMaxMs);
+  }
+#endif
+  if (ui->_pendingNavPage >= 0) {
+    const uint8_t page = (uint8_t)ui->_pendingNavPage;
+    ui->_pendingNavPage = -1;
+    ui->showPage(page);
+  }
+  if (ui->_pendingTogglePagePicker) {
+    ui->_pendingTogglePagePicker = false;
+    ui->setPagePickerVisible(ui->_pagePicker &&
+                            lv_obj_has_flag(ui->_pagePicker, LV_OBJ_FLAG_HIDDEN));
+  }
+}
+
 void MiraPanelUI::onNav(lv_event_t* e) {
   if (!_uiForLvgl) return;
-  uint8_t index = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
-  _uiForLvgl->showPage(index);
+  uint8_t slot = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
+  if (slot >= FAVORITE_SLOTS) return;
+  uint8_t page = _uiForLvgl->_favoritePages[slot];
+  if (page < PAGE_COUNT) _uiForLvgl->showPage(page);
+}
+
+void MiraPanelUI::onPagePick(lv_event_t* e) {
+  if (!_uiForLvgl) return;
+  uint8_t destination = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
+  _uiForLvgl->showPage(destination);
 }
 
 void MiraPanelUI::onButton(lv_event_t* e) {
@@ -2040,6 +2784,90 @@ void MiraPanelUI::onRoundRange(lv_event_t* e) {
     ui._server.IndexSetEvent(b.id);
     ui.publishMqttAction(b, setpointText);
   }
+}
+
+// Only direct touch gestures produce Jeedom actions. Incoming Info/States
+// update the controls without passing through this callback.
+void MiraPanelUI::onThermostatRange(lv_event_t* e) {
+  EventContext* ctx = static_cast<EventContext*>(lv_event_get_user_data(e));
+  if (!ctx || !ctx->ui) return;
+  MiraPanelUI& ui = *ctx->ui;
+  if (ctx->bindingIndex >= ui._bindingCount) return;
+  Binding& b = ui._bindings[ctx->bindingIndex];
+  const lv_event_code_t code = lv_event_get_code(e);
+  if (code != LV_EVENT_VALUE_CHANGED && code != LV_EVENT_RELEASED) return;
+  if (ui._suppressEvents) return;
+  const int halfDegrees = lv_arc_get_value(b.control);
+  const float value = halfDegrees * 0.5f;
+  b.thermostatSetpoint = value;
+  b.currentValue = (int)roundf(value);
+  if (b.valueLabel) {
+    String displayed = String(value, 1) + "°";
+    lv_label_set_text(b.valueLabel, displayed.c_str());
+  }
+  ui.noteActivity();
+  const uint32_t now = millis();
+  const bool finalSend = code == LV_EVENT_RELEASED;
+  b.localInputUntilMs = now + (finalSend ? 350 : 250);
+  // Cap network traffic while dragging; always send the final release.
+  const bool changed = halfDegrees != b.lastLiveValue;
+  const bool liveSend = code == LV_EVENT_VALUE_CHANGED && changed &&
+                        (b.lastLiveSendMs == 0 ||
+                         (uint32_t)(now - b.lastLiveSendMs) >= 130U);
+  if (liveSend || finalSend) {
+    b.lastLiveSendMs = now;
+    b.lastLiveValue = halfDegrees;
+    ui._server.IndexSetRange(b.id, value);
+    ui._server.IndexSetEvent(b.id);
+    if (ui._mqtt && ui._mqtt->enabled())
+      ui._mqtt->publishAction(b.name + "__consigne", String(value, 1));
+  }
+}
+
+// LVGL renders the opened list separately from the closed dropdown.
+// Apply the French font and Mira palette to the actual popup every time.
+void MiraPanelUI::onThermostatDropdownOpen(lv_event_t* e) {
+  EventContext* ctx = static_cast<EventContext*>(lv_event_get_user_data(e));
+  if (!ctx || !ctx->ui) return;
+  MiraPanelUI& ui = *ctx->ui;
+  if (ctx->bindingIndex >= ui._bindingCount) return;
+  Binding& b = ui._bindings[ctx->bindingIndex];
+  if (!b.thermostatModeControl) return;
+  lv_obj_t* popup = lv_dropdown_get_list(b.thermostatModeControl);
+  if (!popup) return;
+  lv_obj_set_style_bg_opa(popup, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(popup, ui.colorPanel2(), LV_PART_MAIN);
+  lv_obj_set_style_text_font(popup, &mira_font_fr_16, LV_PART_MAIN);
+  lv_obj_set_style_text_color(popup, COL_TEXT, LV_PART_MAIN);
+  lv_obj_set_style_border_color(popup, ui.colorBorder(), LV_PART_MAIN);
+  lv_obj_set_style_border_width(popup, 1, LV_PART_MAIN);
+  lv_obj_set_style_radius(popup, 9, LV_PART_MAIN);
+  lv_obj_set_style_shadow_color(popup, ui.colorAccent(), LV_PART_MAIN);
+  lv_obj_set_style_shadow_opa(popup, LV_OPA_20, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(popup, ui.colorAccent2(), LV_PART_SELECTED);
+  lv_obj_set_style_text_color(popup, COL_TEXT, LV_PART_SELECTED);
+  lv_obj_set_style_bg_color(popup, ui.colorAccent(), LV_PART_SELECTED | LV_STATE_CHECKED);
+  lv_obj_set_style_text_color(popup, lv_color_hex(0xFFFFFF), LV_PART_SELECTED | LV_STATE_CHECKED);
+  lv_obj_set_style_pad_top(popup, 5, LV_PART_MAIN);
+  lv_obj_set_style_pad_bottom(popup, 5, LV_PART_MAIN);
+}
+
+void MiraPanelUI::onThermostatMode(lv_event_t* e) {
+  EventContext* ctx = static_cast<EventContext*>(lv_event_get_user_data(e));
+  if (!ctx || !ctx->ui) return;
+  MiraPanelUI& ui = *ctx->ui;
+  if (ui._suppressEvents || ctx->bindingIndex >= ui._bindingCount) return;
+  Binding& b = ui._bindings[ctx->bindingIndex];
+  const uint16_t selection = lv_dropdown_get_selected(b.thermostatModeControl);
+  if (selection >= b.listCount) return;
+  b.selectedIndex = (int8_t)selection;
+  ui.noteActivity();
+  ui._server.IndexSetList(b.listIds[selection]);
+  ui._server.IndexSetEvent(b.listIds[selection]);
+  if (b.thermostatModeBadge)
+    lv_label_set_text(b.thermostatModeBadge, b.listLabels[selection].c_str());
+  if (ui._mqtt && ui._mqtt->enabled())
+    ui._mqtt->publishAction(b.name + "__mode", b.listLabels[selection]);
 }
 
 void MiraPanelUI::onList(lv_event_t* e) {
@@ -2209,6 +3037,39 @@ void MiraPanelUI::updateBindingFromServer(uint8_t idx, int eventId) {
   if (localBinding.localInputUntilMs != 0 && (int32_t)(millis() - localBinding.localInputUntilMs) < 0) return;
 
   Binding& b = _bindings[idx];
+
+  if (b.type == W_THERMOSTAT) {
+    _suppressEvents = true;
+    if (eventId == b.thermostatTempId) {
+      String value = _server.IndexGetInfo(b.thermostatTempId);
+      value.trim();
+      if (value.isEmpty()) value = "--";
+      if (value.indexOf("°") < 0) value += " °C";
+      if (b.thermostatTemperatureLabel)
+        lv_label_set_text(b.thermostatTemperatureLabel, value.c_str());
+    } else if (eventId == b.id) {
+      float value = _server.IndexGetRange(b.id);
+      if (value < b.minValue) value = b.minValue;
+      if (value > b.maxValue) value = b.maxValue;
+      value = roundf(value * 2.0f) * 0.5f;
+      b.thermostatSetpoint = value;
+      b.currentValue = (int)roundf(value);
+      if (b.control) lv_arc_set_value(b.control, (int)roundf(value * 2.0f));
+      if (b.valueLabel)
+        lv_label_set_text(b.valueLabel, (String(value, 1) + "°").c_str());
+    } else {
+      for (uint8_t i = 0; i < b.listCount; ++i) {
+        if (eventId == b.listIds[i]) {
+          b.selectedIndex = (int8_t)i;
+          if (b.thermostatModeControl) lv_dropdown_set_selected(b.thermostatModeControl, i);
+          if (b.thermostatModeBadge) lv_label_set_text(b.thermostatModeBadge, b.listLabels[i].c_str());
+          break;
+        }
+      }
+    }
+    _suppressEvents = false;
+    return;
+  }
 
   if (b.type == W_INFO && eventId == b.id) {
     String value = _server.IndexGetInfo(b.id);
@@ -2594,14 +3455,17 @@ void MiraPanelUI::updateSleepClock() {
 
 void MiraPanelUI::loop() {
 #if defined(MIRA_TARGET_WAVESHARE_43C)
-  if (!_display.miraLvglLock(20)) return;
+  // Lower lock contention with the dedicated Waveshare LVGL task.
+  // Clock/configuration maintenance does not need a 2 ms interval.
+  static uint32_t lastMaintenanceMs = 0;
+  const uint32_t now = millis();
+  if ((uint32_t)(now - lastMaintenanceMs) < 40UL) return;
+  if (!_display.miraLvglLock(5)) return;
+  lastMaintenanceMs = now;
 #endif
 
-  if (_pendingNavPage >= 0) {
-    uint8_t page = (uint8_t)_pendingNavPage;
-    _pendingNavPage = -1;
-    showPage(page);
-  }
+  pollFavorites();
+  // Navigation is serviced by LVGL's 10 ms onNavigationTimer.
 
   startNtpIfPossible();
   updateClock();
