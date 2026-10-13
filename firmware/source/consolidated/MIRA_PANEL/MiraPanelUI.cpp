@@ -2577,7 +2577,7 @@ void MiraPanelUI::onNavigationTimer(lv_timer_t* timer) {
     if (ui->_scrollPerfLabel && ui->_scrollPerfPanel) {
       if (frames) {
         lv_label_set_text_fmt(ui->_scrollPerfLabel,
-            "SCROLL %lu pas / %lu ms (~%lu/s)   Intervalle pas max %lu ms\\n"
+            "SCROLL %lu pas / %lu ms (~%lu/s)   Intervalle pas max %lu ms\n"
             "LVGL %lu images (~%lu/s)   Rendu moy/max %lu/%lu ms   Ecart max %lu ms",
             (unsigned long)steps, (unsigned long)movingMs,
             (unsigned long)stepHz, (unsigned long)ui->_scrollPerfStepsMaxGapMs,
@@ -2586,7 +2586,7 @@ void MiraPanelUI::onNavigationTimer(lv_timer_t* timer) {
             (unsigned long)ui->_scrollPerfGapMaxMs);
       } else {
         lv_label_set_text_fmt(ui->_scrollPerfLabel,
-            "SCROLL %lu pas / %lu ms (~%lu/s)   Intervalle pas max %lu ms\\n"
+            "SCROLL %lu pas / %lu ms (~%lu/s)   Intervalle pas max %lu ms\n"
             "LVGL aucun rafraichissement mesure (diagnostic du pilote a verifier)",
             (unsigned long)steps, (unsigned long)movingMs,
             (unsigned long)stepHz, (unsigned long)ui->_scrollPerfStepsMaxGapMs);
@@ -2594,7 +2594,7 @@ void MiraPanelUI::onNavigationTimer(lv_timer_t* timer) {
       lv_obj_center(ui->_scrollPerfLabel);
       lv_obj_clear_flag(ui->_scrollPerfPanel, LV_OBJ_FLAG_HIDDEN);
     }
-    Serial.printf("[MIRA][SCROLL] steps=%lu moving_ms=%lu max_step_gap=%lu frames=%lu avg_render_ms=%lu max_render_ms=%lu max_frame_gap=%lu avg_pixels=%lu\\n",
+    Serial.printf("[MIRA][SCROLL] steps=%lu moving_ms=%lu max_step_gap=%lu frames=%lu avg_render_ms=%lu max_render_ms=%lu max_frame_gap=%lu avg_pixels=%lu\n",
         (unsigned long)steps, (unsigned long)movingMs,
         (unsigned long)ui->_scrollPerfStepsMaxGapMs, (unsigned long)frames,
         (unsigned long)avgRender, (unsigned long)ui->_scrollPerfRenderMaxMs,
