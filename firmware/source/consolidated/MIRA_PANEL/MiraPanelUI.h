@@ -205,6 +205,7 @@ private:
   static void displayFlush(lv_disp_drv_t* disp, const lv_area_t* area, lv_color_t* color_p);
   static void touchRead(lv_indev_drv_t* indev, lv_indev_data_t* data);
 
+  static void onNavigationTimer(lv_timer_t* timer);
   static void onNav(lv_event_t* e);
   static void onPagePick(lv_event_t* e);
   static void onButton(lv_event_t* e);
