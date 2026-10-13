@@ -176,6 +176,7 @@ private:
   uint32_t _scrollCacheLastBuildMs = 0;
   uint32_t _scrollCacheLastMoveMs = 0;
   bool _scrollCacheActive = false;
+  uint8_t _scrollCachedOnGesture = 0;
 
   uint32_t _scrollDrawTimeUs = 0;
   uint32_t _scrollFlushTimeUs = 0;
