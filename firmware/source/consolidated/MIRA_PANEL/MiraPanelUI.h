@@ -227,7 +227,21 @@ private:
   uint8_t _brightness = 220;
   uint8_t _currentPage = 0;
   int8_t _pendingNavPage = -1;
-  bool _navTouchLatched = false;
+  // One physical gesture from DOWN to UP, shared by WT32 and Waveshare.
+  // Navigation is armed ONLY if DOWN started inside the bottom strip.
+  // Scrolls never activate commands encountered later along their path.
+  static constexpr int16_t TOUCH_MOVE_LIMIT = 12;
+  bool _touchDown = false;
+  bool _touchWakeLatch = false;
+  bool _touchStartedInNav = false;
+  bool _touchMoved = false;
+  bool _touchStartedOnAnalogControl = false;
+  uint16_t _touchStartX = 0;
+  uint16_t _touchStartY = 0;
+  uint16_t _touchLastX = 0;
+  uint16_t _touchLastY = 0;
+  uint8_t _touchNavSlot = 0xFF;
+  uint32_t _touchReleasedAt = 0;
   bool _pendingTogglePagePicker = false;
   uint32_t _lastClockUpdate = 0;
   uint32_t _lastSleepClockUpdate = 0;
@@ -249,6 +263,9 @@ private:
 
   static void displayFlush(lv_disp_drv_t* disp, const lv_area_t* area, lv_color_t* color_p);
   static void touchRead(lv_indev_drv_t* indev, lv_indev_data_t* data);
+  static void lockPressTargetTree(lv_obj_t* root);
+  bool touchStartedOnAnalogControl(uint16_t x, uint16_t y) const;
+  bool touchBlocksAction(bool analog = false) const;
 
   static void onNavigationTimer(lv_timer_t* timer);
 #if defined(MIRA_TARGET_WAVESHARE_43C)
