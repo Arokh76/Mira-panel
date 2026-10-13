@@ -40,7 +40,10 @@ private:
   static constexpr uint8_t MAX_BINDINGS = 40;
   static constexpr uint8_t MAX_LIST_ITEMS = 12;
   static constexpr uint8_t MAX_EVENT_CONTEXTS = 96;
-  static constexpr uint8_t PAGE_COUNT = 4;
+  static constexpr uint8_t PAGE_COUNT = 5;  // 4 existing pages + demo Énergie
+  static constexpr uint8_t FAVORITE_SLOTS = 3;
+  static constexpr uint8_t NAV_BUTTON_COUNT = FAVORITE_SLOTS + 1;  // + Pages
+  static constexpr uint8_t NO_FAVORITE = 0xFF;
 
   enum ThemeMode : uint8_t {
     THEME_MIRA = 0,
@@ -58,6 +61,7 @@ private:
     W_LISTBUTTON,
     W_COLOR,
     W_DATETIME,
+    W_THERMOSTAT,
     W_UNSUPPORTED
   };
 
@@ -83,6 +87,11 @@ private:
     int id = -1;
     int idOff = -1;
     int idOn = -1;
+    int thermostatTempId = -1;
+    float thermostatSetpoint = 20.0f;
+    lv_obj_t* thermostatTemperatureLabel = nullptr;
+    lv_obj_t* thermostatModeControl = nullptr;
+    lv_obj_t* thermostatModeBadge = nullptr;
 
     int minValue = 0;
     int maxValue = 100;
@@ -123,8 +132,28 @@ private:
 
   lv_obj_t* _screen = nullptr;
   lv_obj_t* _nav = nullptr;
-  lv_obj_t* _pages[PAGE_COUNT] = {nullptr, nullptr, nullptr, nullptr};
-  lv_obj_t* _navButtons[PAGE_COUNT] = {nullptr, nullptr, nullptr, nullptr};
+  lv_obj_t* _pages[PAGE_COUNT] = {nullptr};
+  uint8_t _favoritePages[FAVORITE_SLOTS] = {0, 1, 2};  // fixed slots, 0xFF = free
+  lv_obj_t* _favoriteButtons[FAVORITE_SLOTS] = {nullptr};
+  lv_obj_t* _navPagesButton = nullptr;
+  lv_obj_t* _pagePicker = nullptr;
+  lv_obj_t* _pagePickerCard = nullptr;
+  lv_obj_t* _pagePickerButtons[PAGE_COUNT] = {nullptr};
+  uint32_t _lastFavoritesPollMs = 0;
+#if defined(MIRA_TARGET_WAVESHARE_43C)
+  // Diagnostic counters used only during an active page scroll.
+  // Collect inside LVGL's own task; never poll or block the display.
+  lv_obj_t* _scrollPerfPanel = nullptr;
+  lv_obj_t* _scrollPerfLabel = nullptr;
+  bool _scrollPerfActive = false;
+  uint32_t _scrollPerfStartedAt = 0;
+  uint32_t _scrollPerfLastFrameAt = 0;
+  uint32_t _scrollPerfFrames = 0;
+  uint32_t _scrollPerfRenderSumMs = 0;
+  uint32_t _scrollPerfRenderMaxMs = 0;
+  uint32_t _scrollPerfGapMaxMs = 0;
+  uint32_t _scrollPerfPixelSum = 0;
+#endif
   lv_obj_t* _dateTimeLabel = nullptr;
   lv_obj_t* _dateSubLabel = nullptr;
   lv_obj_t* _clockStatusLabel = nullptr;
@@ -168,6 +197,7 @@ private:
   uint8_t _currentPage = 0;
   int8_t _pendingNavPage = -1;
   bool _navTouchLatched = false;
+  bool _pendingTogglePagePicker = false;
   uint32_t _lastClockUpdate = 0;
   uint32_t _lastSleepClockUpdate = 0;
   uint32_t _lastSleepClockMove = 0;
@@ -189,11 +219,20 @@ private:
   static void displayFlush(lv_disp_drv_t* disp, const lv_area_t* area, lv_color_t* color_p);
   static void touchRead(lv_indev_drv_t* indev, lv_indev_data_t* data);
 
+  static void onNavigationTimer(lv_timer_t* timer);
+#if defined(MIRA_TARGET_WAVESHARE_43C)
+  static void onScrollPerfEvent(lv_event_t* e);
+  static void onDisplayPerfMonitor(lv_disp_drv_t* disp, uint32_t ms, uint32_t pixels);
+#endif
   static void onNav(lv_event_t* e);
+  static void onPagePick(lv_event_t* e);
   static void onButton(lv_event_t* e);
   static void onToggle(lv_event_t* e);
   static void onRange(lv_event_t* e);
   static void onRoundRange(lv_event_t* e);
+  static void onThermostatRange(lv_event_t* e);
+  static void onThermostatMode(lv_event_t* e);
+  static void onThermostatDropdownOpen(lv_event_t* e);
   static void onList(lv_event_t* e);
   static void onListButton(lv_event_t* e);
   static void onColor(lv_event_t* e);
@@ -214,6 +253,12 @@ private:
   void makeNameLabel(lv_obj_t* parent, const String& text);
   void showPage(uint8_t index);
   void setNavActive(uint8_t index);
+  void loadFavorites();
+  void refreshFavoriteNav();
+  void pollFavorites();
+  void setPagePickerVisible(bool visible);
+  void buildPagePicker();
+  void buildEnergyPreviewPage();
   void applyTheme();
   void buildSettingsPage();
   void clearDynamicPages();
@@ -226,6 +271,7 @@ private:
   void createToggle(uint8_t idx);
   void createRange(uint8_t idx);
   void createRoundRange(uint8_t idx);
+  void createThermostat(uint8_t idx);
   void createList(uint8_t idx, bool asButtons);
   void createColor(uint8_t idx);
   void createDateTime(uint8_t idx);
