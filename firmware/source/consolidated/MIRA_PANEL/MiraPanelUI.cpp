@@ -6,7 +6,7 @@
 
 #if defined(MIRA_TARGET_WAVESHARE_43C)
   #include <esp_heap_caps.h>
-  #include <lvgl/src/extra/others/snapshot/lv_snapshot.h>
+  // lvgl.h includes LVGL 8.4's snapshot API via lv_extra.h.
   #if !LV_USE_SNAPSHOT
     #error "Mira Waveshare snapshot cache needs LV_USE_SNAPSHOT=1"
   #endif
