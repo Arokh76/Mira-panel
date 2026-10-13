@@ -140,6 +140,20 @@ private:
   lv_obj_t* _pagePickerCard = nullptr;
   lv_obj_t* _pagePickerButtons[PAGE_COUNT] = {nullptr};
   uint32_t _lastFavoritesPollMs = 0;
+#if defined(MIRA_TARGET_WAVESHARE_43C)
+  // Diagnostic counters used only during an active page scroll.
+  // Collect inside LVGL's own task; never poll or block the display.
+  lv_obj_t* _scrollPerfPanel = nullptr;
+  lv_obj_t* _scrollPerfLabel = nullptr;
+  bool _scrollPerfActive = false;
+  uint32_t _scrollPerfStartedAt = 0;
+  uint32_t _scrollPerfLastFrameAt = 0;
+  uint32_t _scrollPerfFrames = 0;
+  uint32_t _scrollPerfRenderSumMs = 0;
+  uint32_t _scrollPerfRenderMaxMs = 0;
+  uint32_t _scrollPerfGapMaxMs = 0;
+  uint32_t _scrollPerfPixelSum = 0;
+#endif
   lv_obj_t* _dateTimeLabel = nullptr;
   lv_obj_t* _dateSubLabel = nullptr;
   lv_obj_t* _clockStatusLabel = nullptr;
@@ -206,6 +220,10 @@ private:
   static void touchRead(lv_indev_drv_t* indev, lv_indev_data_t* data);
 
   static void onNavigationTimer(lv_timer_t* timer);
+#if defined(MIRA_TARGET_WAVESHARE_43C)
+  static void onScrollPerfEvent(lv_event_t* e);
+  static void onDisplayPerfMonitor(lv_disp_drv_t* disp, uint32_t ms, uint32_t pixels);
+#endif
   static void onNav(lv_event_t* e);
   static void onPagePick(lv_event_t* e);
   static void onButton(lv_event_t* e);
