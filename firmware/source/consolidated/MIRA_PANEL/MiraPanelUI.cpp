@@ -2471,7 +2471,8 @@ void MiraPanelUI::showPage(uint8_t index) {
 
 // LVGL's timer task handles the touch immediately on both display targets.
 void MiraPanelUI::onNavigationTimer(lv_timer_t* timer) {
-  MiraPanelUI* ui = static_cast<MiraPanelUI*>(lv_timer_get_user_data(timer));
+  (void)timer;
+  MiraPanelUI* ui = _uiForLvgl;
   if (!ui) return;
   if (ui->_pendingNavPage >= 0) {
     const uint8_t page = (uint8_t)ui->_pendingNavPage;
