@@ -156,6 +156,27 @@ private:
   uint32_t _scrollPerfRenderMaxMs = 0;
   uint32_t _scrollPerfGapMaxMs = 0;
   uint32_t _scrollPerfPixelSum = 0;
+
+  // Snapshot-only cache for non-interactive INFO cards. The interactive
+  // LVGL widgets continue to receive touch events and render normally.
+  // RGB565 + alpha buffers live in PSRAM and are capped globally.
+  static constexpr uint32_t SCROLL_CACHE_MAX_BYTES = 1536UL * 1024UL;
+  struct ScrollTile {
+    lv_obj_t* card = nullptr;
+    lv_obj_t* image = nullptr;
+    lv_img_dsc_t desc = {};
+    uint8_t* pixels = nullptr;
+    uint32_t bytes = 0;
+    bool dirty = true;
+    bool ready = false;
+    bool disabled = false;
+  };
+  ScrollTile _scrollCache[MAX_BINDINGS] = {};
+  uint32_t _scrollCacheUsedBytes = 0;
+  uint32_t _scrollCacheLastBuildMs = 0;
+  uint32_t _scrollCacheLastMoveMs = 0;
+  bool _scrollCacheActive = false;
+
   uint32_t _scrollDrawTimeUs = 0;
   uint32_t _scrollFlushTimeUs = 0;
   uint32_t _scrollFlushMaxUs = 0;
@@ -231,6 +252,13 @@ private:
 #if defined(MIRA_TARGET_WAVESHARE_43C)
   static void onScrollPerfEvent(lv_event_t* e);
   static void onDisplayPerfMonitor(lv_disp_drv_t* disp, uint32_t ms, uint32_t pixels);
+  void resetScrollCache();
+  void invalidateScrollCache(uint8_t idx);
+  void invalidateAllScrollCaches();
+  void setScrollCacheActive(bool active);
+  void serviceScrollCache();
+  void prepareScrollTile(uint8_t idx);
+  static void onScrollCacheMove(lv_event_t* e);
   static void onDisplayRenderStart(lv_disp_drv_t* disp);
   static void onDisplayFlushTimed(lv_disp_drv_t* disp, const lv_area_t* area, lv_color_t* color_p);
   static void (*_originalWsFlushCb)(lv_disp_drv_t*, const lv_area_t*, lv_color_t*);
