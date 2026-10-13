@@ -354,56 +354,137 @@ void MiraPanelUI::displayFlush(lv_disp_drv_t* disp, const lv_area_t* area, lv_co
   lv_disp_flush_ready(disp);
 }
 
+// LVGL 8.3/8.4 re-hit-tests the active object while the finger is down.
+// PRESS_LOCK keeps its ORIGINAL target through a swipe. The scrollable parent
+// still receives the gesture; sliding into an unrelated button/slider doesn't.
+void MiraPanelUI::lockPressTargetTree(lv_obj_t* root) {
+  if (!root) return;
+  if (lv_obj_has_flag(root, LV_OBJ_FLAG_CLICKABLE))
+    lv_obj_add_flag(root, LV_OBJ_FLAG_PRESS_LOCK);
+  const uint32_t children = lv_obj_get_child_cnt(root);
+  for (uint32_t i = 0; i < children; ++i)
+    lockPressTargetTree(lv_obj_get_child(root, (int32_t)i));
+}
+
+// Real deliberate dragging ON a slider/arc/color wheel remains possible.
+// Find the pressed object once, at touch-down (not on every moved sample).
+bool MiraPanelUI::touchStartedOnAnalogControl(uint16_t x, uint16_t y) const {
+  if (!_screen) return false;
+  lv_point_t p = {(lv_coord_t)x, (lv_coord_t)y};
+  lv_obj_t* target = lv_indev_search_obj(_screen, &p);
+  for (lv_obj_t* obj = target; obj; obj = lv_obj_get_parent(obj)) {
+    if (obj == _brightnessSlider) return true;
+    for (uint8_t i = 0; i < _bindingCount; ++i) {
+      const Binding& b = _bindings[i];
+      if (b.control != obj) continue;
+      if (b.type == W_RANGE || b.type == W_ROUNDRANGE ||
+          b.type == W_THERMOSTAT || b.type == W_COLOR) return true;
+    }
+  }
+  return false;
+}
+
+bool MiraPanelUI::touchBlocksAction(bool analog) const {
+  if (!_touchMoved) return false;
+  // LVGL emits CLICKED / VALUE_CHANGED during the release processing,
+  // AFTER our input driver has returned REL. Preserve the gesture state
+  // for that event batch, then stop suppressing remote/programmatic events.
+  if (!_touchDown && (uint32_t)(millis() - _touchReleasedAt) > 150UL)
+    return false;
+  if (analog && _touchStartedOnAnalogControl) return false;
+  return true;
+}
+
 void MiraPanelUI::touchRead(lv_indev_drv_t* indev, lv_indev_data_t* data) {
   (void)indev;
-  uint16_t x = 0, y = 0;
   data->state = LV_INDEV_STATE_REL;
+  MiraPanelUI* ui = _uiForLvgl;
+  uint16_t x = 0, y = 0;
+  const bool touching = _displayForLvgl && _displayForLvgl->miraGetTouch(&x, &y);
 
-  if (_displayForLvgl && _displayForLvgl->miraGetTouch(&x, &y)) {
-    bool wasSleeping = false;
-    if (_uiForLvgl) {
-      wasSleeping = _uiForLvgl->_sleeping;
-      _uiForLvgl->noteActivity();
+  if (!ui) {
+    if (touching) {
+      data->state = LV_INDEV_STATE_PR;
+      data->point.x = x;
+      data->point.y = y;
     }
-
-    // Le premier toucher sert uniquement a reveiller l'ecran.
-    if (wasSleeping) return;
-
-    // La barre basse est reservee a la navigation Mira. On la traite
-    // directement afin qu'aucun widget/page scrollable ne puisse intercepter
-    // le toucher. Un seul changement est genere par appui.
-    if (_uiForLvgl && y >= MIRA_CONTENT_HEIGHT) {
-      // Keep navigation usable at all times, including after opening
-      // or closing a thermostat dropdown. The popup opens UPWARDS and
-      // stays in the content region. Its LVGL object may outlive closure,
-      // so lv_dropdown_get_list() cannot be used as an open-state check.
-      if (!_uiForLvgl->_navTouchLatched) {
-        _uiForLvgl->_navTouchLatched = true;
-        // Direct hardware touch routing for the three fixed favorite slots
-        // and the always-present Pages button. Do not let a dropdown or
-        // scrollable widget intercept the bottom strip.
-        uint8_t slot = ((uint32_t)x * NAV_BUTTON_COUNT) / MIRA_DISPLAY_WIDTH;
-        if (slot >= NAV_BUTTON_COUNT) slot = NAV_BUTTON_COUNT - 1;
-        if (slot == FAVORITE_SLOTS) {
-          _uiForLvgl->_pendingTogglePagePicker = true;
-        } else if (_uiForLvgl->_favoritePages[slot] < PAGE_COUNT) {
-          _uiForLvgl->_pendingNavPage =
-              (int8_t)_uiForLvgl->_favoritePages[slot];
-        }
-      }
-      return;
-    }
-
-    if (_uiForLvgl) _uiForLvgl->_navTouchLatched = false;
-    data->state = LV_INDEV_STATE_PR;
-    data->point.x = x;
-    data->point.y = y;
     return;
   }
 
-  if (_uiForLvgl) _uiForLvgl->_navTouchLatched = false;
-}
+  // The first touch only wakes a sleeping screen, never executes an action.
+  // Do not treat the same held finger as a fresh gesture after wake-up.
+  if (ui->_touchWakeLatch) {
+    if (!touching) ui->_touchWakeLatch = false;
+    return;
+  }
+  if (touching) {
+    const bool wasSleeping = ui->_sleeping;
+    ui->noteActivity();
+    if (wasSleeping) {
+      ui->_touchWakeLatch = true;
+      ui->_touchDown = false;
+      return;
+    }
 
+    if (!ui->_touchDown) {
+      ui->_touchDown = true;
+      ui->_touchStartX = x;
+      ui->_touchStartY = y;
+      ui->_touchMoved = false;
+      ui->_touchStartedInNav = y >= MIRA_CONTENT_HEIGHT;
+      ui->_touchNavSlot = 0xFF;
+      ui->_touchStartedOnAnalogControl = !ui->_touchStartedInNav &&
+                                          ui->touchStartedOnAnalogControl(x, y);
+      if (ui->_touchStartedInNav) {
+        uint8_t slot = (uint32_t)x * NAV_BUTTON_COUNT / MIRA_DISPLAY_WIDTH;
+        if (slot >= NAV_BUTTON_COUNT) slot = NAV_BUTTON_COUNT - 1;
+        ui->_touchNavSlot = slot;
+      }
+    }
+
+    ui->_touchLastX = x;
+    ui->_touchLastY = y;
+    const int32_t dx = (int32_t)x - ui->_touchStartX;
+    const int32_t dy = (int32_t)y - ui->_touchStartY;
+    if (dx * dx + dy * dy >= (int32_t)TOUCH_MOVE_LIMIT * TOUCH_MOVE_LIMIT)
+      ui->_touchMoved = true;
+
+    if (ui->_touchStartedInNav) {
+      // Stay outside LVGL's hit-testing throughout a bottom-bar gesture.
+      // Navigation is queued on RELEASE only, if position/slot is unchanged.
+      return;
+    }
+
+    // A CONTENT-origin swipe may cross the bottom bar. Never reclassify it
+    // as navigation or allow LVGL to press a button in that strip.
+    data->state = LV_INDEV_STATE_PR;
+    data->point.x = x;
+    data->point.y = y >= MIRA_CONTENT_HEIGHT ?
+                       MIRA_CONTENT_HEIGHT - 1 : y;
+    return;
+  }
+
+  if (ui->_touchDown) {
+    // Strict tap: DOWN and UP in the SAME bottom slot, with no motion.
+    if (ui->_touchStartedInNav && !ui->_touchMoved &&
+        ui->_touchLastY >= MIRA_CONTENT_HEIGHT) {
+      uint8_t releasedSlot = (uint32_t)ui->_touchLastX *
+                             NAV_BUTTON_COUNT / MIRA_DISPLAY_WIDTH;
+      if (releasedSlot >= NAV_BUTTON_COUNT) releasedSlot = NAV_BUTTON_COUNT - 1;
+      if (releasedSlot == ui->_touchNavSlot) {
+        if (releasedSlot == FAVORITE_SLOTS)
+          ui->_pendingTogglePagePicker = true;
+        else if (ui->_favoritePages[releasedSlot] < PAGE_COUNT)
+          ui->_pendingNavPage = (int8_t)ui->_favoritePages[releasedSlot];
+      }
+    }
+    ui->_touchReleasedAt = millis();
+    ui->_touchDown = false;
+    ui->_touchNavSlot = 0xFF;
+    // _touchMoved intentionally survives this read: LVGL callbacks fired
+    // just after REL must still know this was a scrolling gesture.
+  }
+}
 
 void MiraPanelUI::setMqtt(MiraMqtt* mqtt) {
   _mqtt = mqtt;
@@ -1021,6 +1102,12 @@ void MiraPanelUI::buildFromMiraJson() {
   }
 
   for (JsonObject obj : arr) registerAndCreate(obj);
+  // Applies to the entire freshly programmed LVGL tree, including nested
+  // button content, sliders and thermostats, on WT32 AND Waveshare.
+  // This is repeated after hot reprogramming by buildFromMiraJson().
+  for (uint8_t i = 0; i < PAGE_COUNT; ++i) lockPressTargetTree(_pages[i]);
+  lockPressTargetTree(_nav);
+  lockPressTargetTree(_pagePicker);
 }
 
 void MiraPanelUI::registerAndCreate(JsonObject obj) {
