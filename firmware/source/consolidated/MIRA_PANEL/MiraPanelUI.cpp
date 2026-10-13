@@ -2602,24 +2602,34 @@ void MiraPanelUI::invalidateAllScrollCaches() {
   for (uint8_t i = 0; i < MAX_BINDINGS; ++i) _scrollCache[i].dirty = true;
 }
 
+// EXPERIMENT 0.7.12: cache the same non-interactive cards as RGB565 OPAQUE.
+//
+// The true-color-alpha snapshot is only a temporary working image. We flatten
+// it against the page's actual background gradient while the UI is idle,
+// then release that temporary alpha buffer. During scroll LVGL receives RGB565
+// with no alpha channel: lower PSRAM use and potentially faster pixel copying.
+// Colors outside rounded corners are approximated from the parent page
+// gradient at snapshot time (must be checked visually during moving pages).
 void MiraPanelUI::prepareScrollTile(uint8_t idx) {
   if (idx >= _bindingCount) return;
   Binding& b = _bindings[idx];
   if (b.type != W_INFO || !b.card || pageIndex(b.location) >= 3) return;
-
   ScrollTile& tile = _scrollCache[idx];
   if (tile.disabled || (tile.ready && !tile.dirty)) return;
 
-  const uint32_t needed =
+  const uint32_t alphaBytes =
       lv_snapshot_buf_size_needed(b.card, LV_IMG_CF_TRUE_COLOR_ALPHA);
-  if (!needed || needed > 320UL * 1024UL) {
+  const uint32_t opaqueBytes =
+      lv_snapshot_buf_size_needed(b.card, LV_IMG_CF_TRUE_COLOR);
+  if (!alphaBytes || !opaqueBytes || opaqueBytes > 320UL * 1024UL ||
+      alphaBytes > 480UL * 1024UL) {
     tile.disabled = true;
     return;
   }
 
-  if (tile.pixels && tile.bytes != needed) {
-    // Recreate only when dimensions changed. On an ordinary Jeedom value
-    // update we reuse the existing PSRAM block.
+  // If dimensions change, discard only this tile. Never leave an image
+  // referencing freed PSRAM.
+  if (tile.pixels && tile.bytes != opaqueBytes) {
     if (tile.image) {
       lv_obj_del(tile.image);
       tile.image = nullptr;
@@ -2630,31 +2640,93 @@ void MiraPanelUI::prepareScrollTile(uint8_t idx) {
     tile.bytes = 0;
     tile.ready = false;
   }
+
   if (!tile.pixels) {
-    if (_scrollCacheUsedBytes + needed > SCROLL_CACHE_MAX_BYTES ||
-        heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < needed + 256UL * 1024UL) {
+    // Reserve PSRAM for the two RGB framebuffers plus temporary alpha data.
+    if (_scrollCacheUsedBytes + opaqueBytes > SCROLL_CACHE_MAX_BYTES ||
+        heap_caps_get_free_size(MALLOC_CAP_SPIRAM) <
+            opaqueBytes + alphaBytes + 256UL * 1024UL) {
       tile.disabled = true;
-      return; // preserve free PSRAM for the RGB framebuffer and MQTT
+      return;
     }
     tile.pixels = static_cast<uint8_t*>(
-        heap_caps_malloc(needed, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        heap_caps_malloc(opaqueBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     if (!tile.pixels) {
       tile.disabled = true;
       return;
     }
-    tile.bytes = needed;
-    _scrollCacheUsedBytes += needed;
+    tile.bytes = opaqueBytes;
+    _scrollCacheUsedBytes += opaqueBytes;
   }
 
-  // Screenshot happens while the original card is visible and stationary.
-  // LVGL paints into an externally allocated PSRAM block; never use
-  // lv_snapshot_take(), which allocates in LVGL's small internal heap.
-  if (lv_snapshot_take_to_buf(b.card, LV_IMG_CF_TRUE_COLOR_ALPHA,
-                              &tile.desc, tile.pixels, tile.bytes) != LV_RES_OK) {
+  // Avoid large transient allocations in LVGL's small 96 KB object heap.
+  uint8_t* temporaryAlpha = static_cast<uint8_t*>(
+      heap_caps_malloc(alphaBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  if (!temporaryAlpha) {
+    tile.disabled = true;
+    return;
+  }
+  lv_img_dsc_t captured = {};
+  const lv_res_t result = lv_snapshot_take_to_buf(
+      b.card, LV_IMG_CF_TRUE_COLOR_ALPHA, &captured, temporaryAlpha, alphaBytes);
+
+  if (result != LV_RES_OK || captured.header.cf != LV_IMG_CF_TRUE_COLOR_ALPHA ||
+      captured.header.w <= 0 || captured.header.h <= 0 ||
+      (uint32_t)captured.header.w * (uint32_t)captured.header.h * 3UL > alphaBytes ||
+      (uint32_t)captured.header.w * (uint32_t)captured.header.h * 2UL > opaqueBytes) {
+    heap_caps_free(temporaryAlpha);
     tile.disabled = true;
     tile.ready = false;
     return;
   }
+
+  const uint8_t pageIndexOfTile = pageIndex(b.location);
+  lv_obj_t* page = _pages[pageIndexOfTile];
+  const lv_color_t bgTop = lv_obj_get_style_bg_color(page, LV_PART_MAIN);
+  const lv_color_t bgBottom = lv_obj_get_style_bg_grad_color(page, LV_PART_MAIN);
+  const bool verticalGradient =
+      lv_obj_get_style_bg_grad_dir(page, LV_PART_MAIN) == LV_GRAD_DIR_VER;
+  lv_area_t cardArea, pageArea;
+  lv_obj_get_coords(b.card, &cardArea);
+  lv_obj_get_coords(page, &pageArea);
+  const int16_t edge = (int16_t)((int32_t)captured.header.w -
+                                (int32_t)lv_obj_get_width(b.card)) / 2;
+  const int32_t topY = cardArea.y1 - edge;
+  const int32_t pageHeight = lv_obj_get_height(page);
+  const uint32_t width = captured.header.w;
+  const uint32_t height = captured.header.h;
+
+  for (uint32_t y = 0; y < height; ++y) {
+    // Match the background showing through the rounded corners/shadow,
+    // without storing an alpha mask in the permanent cache.
+    lv_color_t bg = bgTop;
+    if (verticalGradient && pageHeight > 1) {
+      int32_t atY = topY + (int32_t)y - pageArea.y1;
+      if (atY < 0) atY = 0;
+      if (atY >= pageHeight) atY = pageHeight - 1;
+      const lv_opa_t gradientRatio =
+          (lv_opa_t)((uint32_t)atY * 255UL / (uint32_t)(pageHeight - 1));
+      bg = lv_color_mix(bgBottom, bgTop, gradientRatio);
+    }
+    for (uint32_t x = 0; x < width; ++x) {
+      const uint32_t pixel = y * width + x;
+      const uint8_t* input = temporaryAlpha + 3UL * pixel;
+      lv_color_t fg;
+      fg.full = (uint16_t)(input[0] | (uint16_t)(input[1] << 8));
+      const uint8_t alpha = input[2];
+      lv_color_t out = alpha == 255 ? fg :
+                       alpha == 0 ? bg : lv_color_mix(fg, bg, alpha);
+      tile.pixels[pixel * 2UL] = (uint8_t)(out.full & 0xFF);
+      tile.pixels[pixel * 2UL + 1UL] = (uint8_t)(out.full >> 8);
+    }
+  }
+  heap_caps_free(temporaryAlpha);
+
+  // The fully opaque descriptor enables LVGL's fast RGB565 drawing path.
+  tile.desc = captured;
+  tile.desc.header.cf = LV_IMG_CF_TRUE_COLOR;
+  tile.desc.data = tile.pixels;
+  tile.desc.data_size = opaqueBytes;
   tile.card = b.card;
   lv_obj_t* parent = lv_obj_get_parent(b.card);
   if (!tile.image) {
@@ -2664,7 +2736,7 @@ void MiraPanelUI::prepareScrollTile(uint8_t idx) {
     lv_obj_clear_flag(tile.image, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(tile.image, LV_OBJ_FLAG_HIDDEN);
   }
-  // Revalidate the image after changing its backing bitmap.
+  lv_img_cache_invalidate_src(&tile.desc);
   lv_img_set_src(tile.image, &tile.desc);
   lv_coord_t margin = (lv_coord_t)((tile.desc.header.w -
                                     lv_obj_get_width(b.card)) / 2);
