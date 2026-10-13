@@ -203,7 +203,7 @@ static void makeBulbIcon(lv_obj_t* parent) {
 static void makeThermometerIcon(lv_obj_t* parent) {
   lv_obj_t* icon = lv_obj_create(parent);
   lv_obj_set_size(icon, MIRA_DISPLAY_WIDTH >= 800 ? 23 : 19,
-                  MIRA_DISPLAY_WIDTH >= 800 ? 28 : 25);
+                  MIRA_DISPLAY_WIDTH >= 800 ? 29 : 26);
   lv_obj_clear_flag(icon, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_clear_flag(icon, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_bg_opa(icon, LV_OPA_TRANSP, 0);
@@ -212,9 +212,9 @@ static void makeThermometerIcon(lv_obj_t* parent) {
   lv_obj_center(icon);
 
   lv_obj_t* stem = lv_obj_create(icon);
-  lv_obj_set_size(stem, MIRA_DISPLAY_WIDTH >= 800 ? 8 : 7,
-                  MIRA_DISPLAY_WIDTH >= 800 ? 19 : 17);
-  lv_obj_set_pos(stem, MIRA_DISPLAY_WIDTH >= 800 ? 8 : 6, 0);
+  lv_obj_set_size(stem, MIRA_DISPLAY_WIDTH >= 800 ? 7 : 6,
+                  MIRA_DISPLAY_WIDTH >= 800 ? 20 : 18);
+  lv_obj_set_pos(stem, MIRA_DISPLAY_WIDTH >= 800 ? 8 : 6, 2);
   lv_obj_clear_flag(stem, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_radius(stem, 4, 0);
   lv_obj_set_style_bg_opa(stem, LV_OPA_TRANSP, 0);
@@ -222,10 +222,10 @@ static void makeThermometerIcon(lv_obj_t* parent) {
   lv_obj_set_style_border_width(stem, 2, 0);
 
   lv_obj_t* bulb = lv_obj_create(icon);
-  lv_obj_set_size(bulb, MIRA_DISPLAY_WIDTH >= 800 ? 14 : 12,
-                  MIRA_DISPLAY_WIDTH >= 800 ? 14 : 12);
+  lv_obj_set_size(bulb, MIRA_DISPLAY_WIDTH >= 800 ? 13 : 11,
+                  MIRA_DISPLAY_WIDTH >= 800 ? 13 : 11);
   lv_obj_set_pos(bulb, MIRA_DISPLAY_WIDTH >= 800 ? 5 : 4,
-                 MIRA_DISPLAY_WIDTH >= 800 ? 15 : 13);
+                 MIRA_DISPLAY_WIDTH >= 800 ? 14 : 13);
   lv_obj_clear_flag(bulb, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_radius(bulb, LV_RADIUS_CIRCLE, 0);
   lv_obj_set_style_bg_color(bulb, lv_color_hex(0xDCEAF0), 0);
@@ -2397,18 +2397,20 @@ void MiraPanelUI::refreshFavoriteNav() {
       continue; // the original pictograms are already centered
     }
     if (page == 4) {
+      // Inset all stroke endpoints: 0.7.4 clipped those at the
+      // LVGL line object boundaries on both screen profiles.
       static const lv_point_t BOLT_SMALL[7] = {
-        {8, 1}, {3, 11}, {8, 11}, {5, 20},
-        {14, 7}, {10, 7}, {11, 1}
+        {10, 3}, {5, 13}, {10, 13}, {7, 22},
+        {16, 9}, {12, 9}, {13, 3}
       };
       static const lv_point_t BOLT_WIDE[7] = {
-        {11, 1}, {4, 13}, {10, 13}, {7, 25},
-        {20, 8}, {13, 8}, {15, 1}
+        {13, 3}, {6, 15}, {12, 15}, {9, 27},
+        {22, 10}, {15, 10}, {17, 3}
       };
       const bool wideIcon = MIRA_DISPLAY_WIDTH >= 800;
       lv_obj_t* bolt = lv_line_create(btn);
       lv_line_set_points(bolt, wideIcon ? BOLT_WIDE : BOLT_SMALL, 7);
-      lv_obj_set_size(bolt, wideIcon ? 21 : 15, wideIcon ? 26 : 21);
+      lv_obj_set_size(bolt, wideIcon ? 26 : 20, wideIcon ? 31 : 25);
       lv_obj_set_style_line_color(bolt, colorAccent(), LV_PART_MAIN);
       lv_obj_set_style_line_width(bolt, wideIcon ? 3 : 2, LV_PART_MAIN);
       lv_obj_set_style_line_rounded(bolt, true, LV_PART_MAIN);
@@ -2420,7 +2422,9 @@ void MiraPanelUI::refreshFavoriteNav() {
     lv_obj_t* glyph = lv_label_create(btn);
     lv_label_set_text(glyph, page == 0 ? LV_SYMBOL_HOME :
                           page == 3 ? LV_SYMBOL_SETTINGS : LV_SYMBOL_PLUS);
-    lv_obj_set_style_text_font(glyph, &lv_font_montserrat_20, 0);
+    // Home glyph has a heavier visual weight than the custom nav pictograms.
+    lv_obj_set_style_text_font(glyph,
+        page == 0 ? &lv_font_montserrat_16 : &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_color(glyph,
         page == NO_FAVORITE ? COL_MUTED : colorAccent(), 0);
     lv_obj_center(glyph);
