@@ -2535,6 +2535,175 @@ void MiraPanelUI::showPage(uint8_t index) {
 }
 
 #if defined(MIRA_TARGET_WAVESHARE_43C)
+// Keep the cache lifecycle entirely in the LVGL task. We snapshot ONLY static
+// information tiles, never switches, sliders, thermostats or date/time.
+// The source widgets are restored as soon as scrolling settles.
+void MiraPanelUI::setScrollCacheActive(bool active) {
+  if (_scrollCacheActive == active) return;
+  _scrollCacheActive = active;
+  uint8_t visualCount = 0;
+  for (uint8_t i = 0; i < _bindingCount; ++i) {
+    ScrollTile& tile = _scrollCache[i];
+    if (!tile.ready || !tile.card || !tile.image) continue;
+    if (pageIndex(_bindings[i].location) != _currentPage) {
+      // Never leave a card hidden after switching pages.
+      lv_obj_set_style_opa(tile.card, LV_OPA_COVER, 0);
+      lv_obj_add_flag(tile.image, LV_OBJ_FLAG_HIDDEN);
+      continue;
+    }
+    if (active) {
+      // IGNORE_LAYOUT keeps a snapshot sibling from affecting the flex grid.
+      // Re-align in case the user's content has moved due to layout changes.
+      lv_coord_t margin = (lv_coord_t)((tile.desc.header.w -
+                                 lv_obj_get_width(tile.card)) / 2);
+      lv_obj_set_pos(tile.image, lv_obj_get_x(tile.card) - margin,
+                    lv_obj_get_y(tile.card) - margin);
+      lv_obj_clear_flag(tile.image, LV_OBJ_FLAG_HIDDEN);
+      // The entire original card + its labels are now skipped during draw.
+      lv_obj_set_style_opa(tile.card, LV_OPA_TRANSP, 0);
+      ++visualCount;
+    } else {
+      lv_obj_set_style_opa(tile.card, LV_OPA_COVER, 0);
+      lv_obj_add_flag(tile.image, LV_OBJ_FLAG_HIDDEN);
+    }
+  }
+  if (active && !visualCount) _scrollCacheActive = false;
+}
+
+void MiraPanelUI::resetScrollCache() {
+  setScrollCacheActive(false);
+  for (uint8_t i = 0; i < MAX_BINDINGS; ++i) {
+    ScrollTile& tile = _scrollCache[i];
+    if (tile.image) {
+      lv_obj_del(tile.image);
+      tile.image = nullptr;
+    }
+    if (tile.pixels) {
+      heap_caps_free(tile.pixels);
+      tile.pixels = nullptr;
+    }
+    tile = ScrollTile();
+  }
+  _scrollCacheUsedBytes = 0;
+  _scrollCacheLastBuildMs = 0;
+  _scrollCacheLastMoveMs = 0;
+}
+
+void MiraPanelUI::invalidateScrollCache(uint8_t idx) {
+  if (idx >= MAX_BINDINGS) return;
+  _scrollCache[idx].dirty = true;
+  // No snapshot is rebuilt during a gesture. The original widgets receive
+  // their Jeedom/MQTT updates normally and reappear after scrolling.
+}
+
+void MiraPanelUI::invalidateAllScrollCaches() {
+  for (uint8_t i = 0; i < MAX_BINDINGS; ++i) _scrollCache[i].dirty = true;
+}
+
+void MiraPanelUI::prepareScrollTile(uint8_t idx) {
+  if (idx >= _bindingCount) return;
+  Binding& b = _bindings[idx];
+  if (b.type != W_INFO || !b.card || pageIndex(b.location) >= 3) return;
+
+  ScrollTile& tile = _scrollCache[idx];
+  if (tile.disabled || (tile.ready && !tile.dirty)) return;
+
+  const uint32_t needed =
+      lv_snapshot_buf_size_needed(b.card, LV_IMG_CF_TRUE_COLOR_ALPHA);
+  if (!needed || needed > 320UL * 1024UL) {
+    tile.disabled = true;
+    return;
+  }
+
+  if (tile.pixels && tile.bytes != needed) {
+    // Recreate only when dimensions changed. On an ordinary Jeedom value
+    // update we reuse the existing PSRAM block.
+    if (tile.image) {
+      lv_obj_del(tile.image);
+      tile.image = nullptr;
+    }
+    heap_caps_free(tile.pixels);
+    tile.pixels = nullptr;
+    _scrollCacheUsedBytes -= tile.bytes;
+    tile.bytes = 0;
+    tile.ready = false;
+  }
+  if (!tile.pixels) {
+    if (_scrollCacheUsedBytes + needed > SCROLL_CACHE_MAX_BYTES ||
+        heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < needed + 256UL * 1024UL) {
+      tile.disabled = true;
+      return; // preserve free PSRAM for the RGB framebuffer and MQTT
+    }
+    tile.pixels = static_cast<uint8_t*>(
+        heap_caps_malloc(needed, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!tile.pixels) {
+      tile.disabled = true;
+      return;
+    }
+    tile.bytes = needed;
+    _scrollCacheUsedBytes += needed;
+  }
+
+  // Screenshot happens while the original card is visible and stationary.
+  // LVGL paints into an externally allocated PSRAM block; never use
+  // lv_snapshot_take(), which allocates in LVGL's small internal heap.
+  if (lv_snapshot_take_to_buf(b.card, LV_IMG_CF_TRUE_COLOR_ALPHA,
+                              &tile.desc, tile.pixels, tile.bytes) != LV_RES_OK) {
+    tile.disabled = true;
+    tile.ready = false;
+    return;
+  }
+  tile.card = b.card;
+  lv_obj_t* parent = lv_obj_get_parent(b.card);
+  if (!tile.image) {
+    tile.image = lv_img_create(parent);
+    lv_obj_add_flag(tile.image, LV_OBJ_FLAG_IGNORE_LAYOUT);
+    lv_obj_clear_flag(tile.image, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(tile.image, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(tile.image, LV_OBJ_FLAG_HIDDEN);
+  }
+  // Revalidate the image after changing its backing bitmap.
+  lv_img_set_src(tile.image, &tile.desc);
+  lv_coord_t margin = (lv_coord_t)((tile.desc.header.w -
+                                    lv_obj_get_width(b.card)) / 2);
+  lv_obj_set_pos(tile.image, lv_obj_get_x(b.card) - margin,
+                 lv_obj_get_y(b.card) - margin);
+  tile.dirty = false;
+  tile.ready = true;
+}
+
+void MiraPanelUI::serviceScrollCache() {
+  if (!_screen || _scrollCacheActive || _scrollPerfActive || _sleeping) return;
+  const uint32_t now = millis();
+  // Never take snapshots on the hot path, during touch or while the
+  // display driver is processing successive scroll frames.
+  if ((uint32_t)(now - _lastActivity) < 1200UL ||
+      (_scrollCacheLastMoveMs &&
+       (uint32_t)(now - _scrollCacheLastMoveMs) < 850UL) ||
+      (uint32_t)(now - _scrollCacheLastBuildMs) < 150UL) return;
+  _scrollCacheLastBuildMs = now;
+
+  // Build at most one image per interval; avoid multi-second UI freezes.
+  for (uint8_t i = 0; i < _bindingCount; ++i) {
+    if (_bindings[i].type != W_INFO || !_bindings[i].card ||
+        pageIndex(_bindings[i].location) >= 3) continue;
+    ScrollTile& tile = _scrollCache[i];
+    if (!tile.disabled && (!tile.ready || tile.dirty)) {
+      prepareScrollTile(i);
+      break;
+    }
+  }
+}
+
+void MiraPanelUI::onScrollCacheMove(lv_event_t* e) {
+  MiraPanelUI* ui = static_cast<MiraPanelUI*>(lv_event_get_user_data(e));
+  if (!ui || lv_event_get_code(e) != LV_EVENT_SCROLL) return;
+  ui->_scrollCacheLastMoveMs = millis();
+  if (!ui->_scrollCacheActive) ui->setScrollCacheActive(true);
+}
+#endif
+
+#if defined(MIRA_TARGET_WAVESHARE_43C)
 // LVGL invokes render_start_cb after layout and double-buffer synchronization.
 // We start the clock here to isolate object rasterization from the RGB flush.
 void MiraPanelUI::onDisplayRenderStart(lv_disp_drv_t* disp) {
@@ -2625,6 +2794,13 @@ void MiraPanelUI::onNavigationTimer(lv_timer_t* timer) {
   MiraPanelUI* ui = _uiForLvgl;
   if (!ui) return;
 #if defined(MIRA_TARGET_WAVESHARE_43C)
+  // Restore the real widgets after the gesture/kinetic scroll settles.
+  // Snapshot preparation happens only when the panel has been idle.
+  if (ui->_scrollCacheActive &&
+      (uint32_t)(millis() - ui->_scrollCacheLastMoveMs) >= 380UL)
+    ui->setScrollCacheActive(false);
+  ui->serviceScrollCache();
+
   // Let queued LVGL paint/flush cycles finish AFTER the last movement.
   // Delayed reporting avoids the 0 FPS bug from the old SCROLL_END callback.
   if (ui->_scrollPerfActive &&
