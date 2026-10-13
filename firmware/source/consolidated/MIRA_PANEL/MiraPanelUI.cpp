@@ -3024,6 +3024,7 @@ void MiraPanelUI::onNavigationTimer(lv_timer_t* timer) {
 }
 
 void MiraPanelUI::onNav(lv_event_t* e) {
+  if (_uiForLvgl && _uiForLvgl->touchBlocksAction()) return;
   if (!_uiForLvgl) return;
   uint8_t slot = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
   if (slot >= FAVORITE_SLOTS) return;
@@ -3032,12 +3033,14 @@ void MiraPanelUI::onNav(lv_event_t* e) {
 }
 
 void MiraPanelUI::onPagePick(lv_event_t* e) {
+  if (_uiForLvgl && _uiForLvgl->touchBlocksAction()) return;
   if (!_uiForLvgl) return;
   uint8_t destination = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
   _uiForLvgl->showPage(destination);
 }
 
 void MiraPanelUI::onButton(lv_event_t* e) {
+  if (_uiForLvgl && _uiForLvgl->touchBlocksAction(false)) return;
   EventContext* ctx = static_cast<EventContext*>(lv_event_get_user_data(e));
   if (!ctx || !ctx->ui) return;
   MiraPanelUI& ui = *ctx->ui;
@@ -3049,6 +3052,7 @@ void MiraPanelUI::onButton(lv_event_t* e) {
 }
 
 void MiraPanelUI::onToggle(lv_event_t* e) {
+  if (_uiForLvgl && _uiForLvgl->touchBlocksAction(false)) return;
   EventContext* ctx = static_cast<EventContext*>(lv_event_get_user_data(e));
   if (!ctx || !ctx->ui) return;
   MiraPanelUI& ui = *ctx->ui;
@@ -3067,6 +3071,7 @@ void MiraPanelUI::onToggle(lv_event_t* e) {
 }
 
 void MiraPanelUI::onRange(lv_event_t* e) {
+  if (_uiForLvgl && _uiForLvgl->touchBlocksAction(true)) return;
   EventContext* ctx = static_cast<EventContext*>(lv_event_get_user_data(e));
   if (!ctx || !ctx->ui) return;
   MiraPanelUI& ui = *ctx->ui;
@@ -3104,6 +3109,7 @@ void MiraPanelUI::onRange(lv_event_t* e) {
 }
 
 void MiraPanelUI::onRoundRange(lv_event_t* e) {
+  if (_uiForLvgl && _uiForLvgl->touchBlocksAction(true)) return;
   EventContext* ctx = static_cast<EventContext*>(lv_event_get_user_data(e));
   if (!ctx || !ctx->ui) return;
   MiraPanelUI& ui = *ctx->ui;
@@ -3149,6 +3155,7 @@ void MiraPanelUI::onRoundRange(lv_event_t* e) {
 // Only direct touch gestures produce Jeedom actions. Incoming Info/States
 // update the controls without passing through this callback.
 void MiraPanelUI::onThermostatRange(lv_event_t* e) {
+  if (_uiForLvgl && _uiForLvgl->touchBlocksAction(true)) return;
   EventContext* ctx = static_cast<EventContext*>(lv_event_get_user_data(e));
   if (!ctx || !ctx->ui) return;
   MiraPanelUI& ui = *ctx->ui;
@@ -3187,6 +3194,7 @@ void MiraPanelUI::onThermostatRange(lv_event_t* e) {
 // LVGL renders the opened list separately from the closed dropdown.
 // Apply the French font and Mira palette to the actual popup every time.
 void MiraPanelUI::onThermostatDropdownOpen(lv_event_t* e) {
+  if (_uiForLvgl && _uiForLvgl->touchBlocksAction(false)) return;
   EventContext* ctx = static_cast<EventContext*>(lv_event_get_user_data(e));
   if (!ctx || !ctx->ui) return;
   MiraPanelUI& ui = *ctx->ui;
@@ -3213,6 +3221,7 @@ void MiraPanelUI::onThermostatDropdownOpen(lv_event_t* e) {
 }
 
 void MiraPanelUI::onThermostatMode(lv_event_t* e) {
+  if (_uiForLvgl && _uiForLvgl->touchBlocksAction(false)) return;
   EventContext* ctx = static_cast<EventContext*>(lv_event_get_user_data(e));
   if (!ctx || !ctx->ui) return;
   MiraPanelUI& ui = *ctx->ui;
@@ -3231,6 +3240,7 @@ void MiraPanelUI::onThermostatMode(lv_event_t* e) {
 }
 
 void MiraPanelUI::onList(lv_event_t* e) {
+  if (_uiForLvgl && _uiForLvgl->touchBlocksAction(false)) return;
   EventContext* ctx = static_cast<EventContext*>(lv_event_get_user_data(e));
   if (!ctx || !ctx->ui) return;
   MiraPanelUI& ui = *ctx->ui;
@@ -3247,6 +3257,7 @@ void MiraPanelUI::onList(lv_event_t* e) {
 }
 
 void MiraPanelUI::onListButton(lv_event_t* e) {
+  if (_uiForLvgl && _uiForLvgl->touchBlocksAction(false)) return;
   EventContext* ctx = static_cast<EventContext*>(lv_event_get_user_data(e));
   if (!ctx || !ctx->ui) return;
   MiraPanelUI& ui = *ctx->ui;
@@ -3263,6 +3274,7 @@ void MiraPanelUI::onListButton(lv_event_t* e) {
 }
 
 void MiraPanelUI::onColor(lv_event_t* e) {
+  if (_uiForLvgl && _uiForLvgl->touchBlocksAction(true)) return;
   EventContext* ctx = static_cast<EventContext*>(lv_event_get_user_data(e));
   if (!ctx || !ctx->ui) return;
   MiraPanelUI& ui = *ctx->ui;
@@ -3308,6 +3320,7 @@ void MiraPanelUI::onColor(lv_event_t* e) {
 }
 
 void MiraPanelUI::onBrightness(lv_event_t* e) {
+  if (_uiForLvgl && _uiForLvgl->touchBlocksAction(true)) return;
   MiraPanelUI* ui = static_cast<MiraPanelUI*>(lv_event_get_user_data(e));
   if (!ui) return;
   if (ui->_syncingDisplayControls) return;
@@ -3323,6 +3336,7 @@ void MiraPanelUI::onBrightness(lv_event_t* e) {
 }
 
 void MiraPanelUI::onTheme(lv_event_t* e) {
+  if (_uiForLvgl && _uiForLvgl->touchBlocksAction(false)) return;
   MiraPanelUI* ui = static_cast<MiraPanelUI*>(lv_event_get_user_data(e));
   if (!ui || ui->_suppressEvents) return;
   uint16_t selected = lv_dropdown_get_selected(lv_event_get_target(e));
@@ -3334,6 +3348,7 @@ void MiraPanelUI::onTheme(lv_event_t* e) {
 }
 
 void MiraPanelUI::onReturnHome(lv_event_t* e) {
+  if (_uiForLvgl && _uiForLvgl->touchBlocksAction(false)) return;
   MiraPanelUI* ui = static_cast<MiraPanelUI*>(lv_event_get_user_data(e));
   if (!ui) return;
   ui->_returnHomeEnabled = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
@@ -3342,6 +3357,7 @@ void MiraPanelUI::onReturnHome(lv_event_t* e) {
 }
 
 void MiraPanelUI::onSleepMode(lv_event_t* e) {
+  if (_uiForLvgl && _uiForLvgl->touchBlocksAction(false)) return;
   MiraPanelUI* ui = static_cast<MiraPanelUI*>(lv_event_get_user_data(e));
   if (!ui) return;
   ui->_sleepEnabled = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
@@ -3351,6 +3367,7 @@ void MiraPanelUI::onSleepMode(lv_event_t* e) {
 }
 
 void MiraPanelUI::onClockSleep(lv_event_t* e) {
+  if (_uiForLvgl && _uiForLvgl->touchBlocksAction(false)) return;
   MiraPanelUI* ui = static_cast<MiraPanelUI*>(lv_event_get_user_data(e));
   if (!ui) return;
   ui->_clockInSleep = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
