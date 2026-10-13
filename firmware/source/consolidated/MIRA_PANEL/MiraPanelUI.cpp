@@ -160,7 +160,8 @@ static String roundRangeDisplayValue(int value, const String& unit) {
 static void makeBulbIcon(lv_obj_t* parent) {
   lv_obj_t* icon = lv_obj_create(parent);
   // Navigation only: match the visual footprint of Home and Pages.
-  lv_obj_set_size(icon, 30, 34);
+  lv_obj_set_size(icon, MIRA_DISPLAY_WIDTH >= 800 ? 25 : 20,
+                  MIRA_DISPLAY_WIDTH >= 800 ? 28 : 25);
   lv_obj_clear_flag(icon, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_clear_flag(icon, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_bg_opa(icon, LV_OPA_TRANSP, 0);
@@ -169,8 +170,9 @@ static void makeBulbIcon(lv_obj_t* parent) {
   lv_obj_center(icon);
 
   lv_obj_t* head = lv_obj_create(icon);
-  lv_obj_set_size(head, 19, 19);
-  lv_obj_set_pos(head, 5, 0);
+  lv_obj_set_size(head, MIRA_DISPLAY_WIDTH >= 800 ? 16 : 14,
+                  MIRA_DISPLAY_WIDTH >= 800 ? 16 : 14);
+  lv_obj_set_pos(head, MIRA_DISPLAY_WIDTH >= 800 ? 5 : 3, 0);
   lv_obj_clear_flag(head, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_radius(head, LV_RADIUS_CIRCLE, 0);
   lv_obj_set_style_bg_color(head, lv_color_hex(0xDCEAF0), 0);
@@ -178,8 +180,9 @@ static void makeBulbIcon(lv_obj_t* parent) {
   lv_obj_set_style_border_width(head, 0, 0);
 
   lv_obj_t* neck = lv_obj_create(icon);
-  lv_obj_set_size(neck, 12, 5);
-  lv_obj_set_pos(neck, 9, 19);
+  lv_obj_set_size(neck, MIRA_DISPLAY_WIDTH >= 800 ? 10 : 8, 4);
+  lv_obj_set_pos(neck, MIRA_DISPLAY_WIDTH >= 800 ? 8 : 6,
+                 MIRA_DISPLAY_WIDTH >= 800 ? 17 : 15);
   lv_obj_clear_flag(neck, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_radius(neck, 2, 0);
   lv_obj_set_style_bg_color(neck, lv_color_hex(0xDCEAF0), 0);
@@ -187,8 +190,9 @@ static void makeBulbIcon(lv_obj_t* parent) {
   lv_obj_set_style_border_width(neck, 0, 0);
 
   lv_obj_t* base = lv_obj_create(icon);
-  lv_obj_set_size(base, 10, 5);
-  lv_obj_set_pos(base, 10, 25);
+  lv_obj_set_size(base, MIRA_DISPLAY_WIDTH >= 800 ? 9 : 8, 4);
+  lv_obj_set_pos(base, MIRA_DISPLAY_WIDTH >= 800 ? 8 : 6,
+                 MIRA_DISPLAY_WIDTH >= 800 ? 22 : 20);
   lv_obj_clear_flag(base, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_radius(base, 2, 0);
   lv_obj_set_style_bg_color(base, lv_color_hex(0xDCEAF0), 0);
@@ -198,7 +202,8 @@ static void makeBulbIcon(lv_obj_t* parent) {
 
 static void makeThermometerIcon(lv_obj_t* parent) {
   lv_obj_t* icon = lv_obj_create(parent);
-  lv_obj_set_size(icon, 28, 34);
+  lv_obj_set_size(icon, MIRA_DISPLAY_WIDTH >= 800 ? 23 : 19,
+                  MIRA_DISPLAY_WIDTH >= 800 ? 28 : 25);
   lv_obj_clear_flag(icon, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_clear_flag(icon, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_bg_opa(icon, LV_OPA_TRANSP, 0);
@@ -207,8 +212,9 @@ static void makeThermometerIcon(lv_obj_t* parent) {
   lv_obj_center(icon);
 
   lv_obj_t* stem = lv_obj_create(icon);
-  lv_obj_set_size(stem, 9, 23);
-  lv_obj_set_pos(stem, 10, 0);
+  lv_obj_set_size(stem, MIRA_DISPLAY_WIDTH >= 800 ? 8 : 7,
+                  MIRA_DISPLAY_WIDTH >= 800 ? 19 : 17);
+  lv_obj_set_pos(stem, MIRA_DISPLAY_WIDTH >= 800 ? 8 : 6, 0);
   lv_obj_clear_flag(stem, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_radius(stem, 4, 0);
   lv_obj_set_style_bg_opa(stem, LV_OPA_TRANSP, 0);
@@ -216,8 +222,10 @@ static void makeThermometerIcon(lv_obj_t* parent) {
   lv_obj_set_style_border_width(stem, 2, 0);
 
   lv_obj_t* bulb = lv_obj_create(icon);
-  lv_obj_set_size(bulb, 16, 16);
-  lv_obj_set_pos(bulb, 6, 18);
+  lv_obj_set_size(bulb, MIRA_DISPLAY_WIDTH >= 800 ? 14 : 12,
+                  MIRA_DISPLAY_WIDTH >= 800 ? 14 : 12);
+  lv_obj_set_pos(bulb, MIRA_DISPLAY_WIDTH >= 800 ? 5 : 4,
+                 MIRA_DISPLAY_WIDTH >= 800 ? 15 : 13);
   lv_obj_clear_flag(bulb, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_radius(bulb, LV_RADIUS_CIRCLE, 0);
   lv_obj_set_style_bg_color(bulb, lv_color_hex(0xDCEAF0), 0);
@@ -730,7 +738,8 @@ void MiraPanelUI::begin() {
   // Draw a clear 2x2 grid; no font icon dependencies on WT32.
   for (uint8_t dot = 0; dot < 4; ++dot) {
     lv_obj_t* square = lv_obj_create(_navPagesButton);
-    lv_obj_set_size(square, 10, 10);
+    const bool wideIcon = MIRA_DISPLAY_WIDTH >= 800;
+    lv_obj_set_size(square, wideIcon ? 9 : 7, wideIcon ? 9 : 7);
     lv_obj_set_style_radius(square, 2, 0);
     lv_obj_set_style_pad_all(square, 0, 0);
     lv_obj_set_style_border_width(square, 0, 0);
@@ -739,7 +748,8 @@ void MiraPanelUI::begin() {
     lv_obj_clear_flag(square, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(square, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_align(square, LV_ALIGN_CENTER,
-                 (dot % 2) * 16 - 8, (dot / 2) * 16 - 8);
+                 (dot % 2) * (wideIcon ? 14 : 11) - (wideIcon ? 7 : 5),
+                 (dot / 2) * (wideIcon ? 14 : 11) - (wideIcon ? 7 : 5));
   }
 
 
@@ -747,6 +757,9 @@ void MiraPanelUI::begin() {
   buildEnergyPreviewPage();
   buildPagePicker();
   refreshFavoriteNav();
+
+  // Run touch navigation on LVGL's task, without waiting for Arduino's loop.
+  lv_timer_create(onNavigationTimer, 10, this);
 
   _sleepOverlay = lv_obj_create(_screen);
   lv_obj_set_pos(_sleepOverlay, 0, 0);
@@ -2384,16 +2397,20 @@ void MiraPanelUI::refreshFavoriteNav() {
       continue; // the original pictograms are already centered
     }
     if (page == 4) {
-      // A small lightning bolt instead of the temporary "W" character.
-      static const lv_point_t BOLT[7] = {
-        {13, 1}, {4, 15}, {11, 15}, {7, 28},
-        {23, 10}, {15, 10}, {17, 1}
+      static const lv_point_t BOLT_SMALL[7] = {
+        {8, 1}, {3, 11}, {8, 11}, {5, 20},
+        {14, 7}, {10, 7}, {11, 1}
       };
+      static const lv_point_t BOLT_WIDE[7] = {
+        {11, 1}, {4, 13}, {10, 13}, {7, 25},
+        {20, 8}, {13, 8}, {15, 1}
+      };
+      const bool wideIcon = MIRA_DISPLAY_WIDTH >= 800;
       lv_obj_t* bolt = lv_line_create(btn);
-      lv_line_set_points(bolt, BOLT, 7);
-      lv_obj_set_size(bolt, 24, 29);
+      lv_line_set_points(bolt, wideIcon ? BOLT_WIDE : BOLT_SMALL, 7);
+      lv_obj_set_size(bolt, wideIcon ? 21 : 15, wideIcon ? 26 : 21);
       lv_obj_set_style_line_color(bolt, colorAccent(), LV_PART_MAIN);
-      lv_obj_set_style_line_width(bolt, 3, LV_PART_MAIN);
+      lv_obj_set_style_line_width(bolt, wideIcon ? 3 : 2, LV_PART_MAIN);
       lv_obj_set_style_line_rounded(bolt, true, LV_PART_MAIN);
       lv_obj_clear_flag(bolt, LV_OBJ_FLAG_CLICKABLE);
       lv_obj_center(bolt);
@@ -2403,7 +2420,7 @@ void MiraPanelUI::refreshFavoriteNav() {
     lv_obj_t* glyph = lv_label_create(btn);
     lv_label_set_text(glyph, page == 0 ? LV_SYMBOL_HOME :
                           page == 3 ? LV_SYMBOL_SETTINGS : LV_SYMBOL_PLUS);
-    lv_obj_set_style_text_font(glyph, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_font(glyph, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_color(glyph,
         page == NO_FAVORITE ? COL_MUTED : colorAccent(), 0);
     lv_obj_center(glyph);
@@ -2450,6 +2467,22 @@ void MiraPanelUI::showPage(uint8_t index) {
   setPagePickerVisible(false);
   setNavActive(index);
   noteActivity();
+}
+
+// LVGL's timer task handles the touch immediately on both display targets.
+void MiraPanelUI::onNavigationTimer(lv_timer_t* timer) {
+  MiraPanelUI* ui = static_cast<MiraPanelUI*>(lv_timer_get_user_data(timer));
+  if (!ui) return;
+  if (ui->_pendingNavPage >= 0) {
+    const uint8_t page = (uint8_t)ui->_pendingNavPage;
+    ui->_pendingNavPage = -1;
+    ui->showPage(page);
+  }
+  if (ui->_pendingTogglePagePicker) {
+    ui->_pendingTogglePagePicker = false;
+    ui->setPagePickerVisible(ui->_pagePicker &&
+                            lv_obj_has_flag(ui->_pagePicker, LV_OBJ_FLAG_HIDDEN));
+  }
 }
 
 void MiraPanelUI::onNav(lv_event_t* e) {
@@ -3244,20 +3277,17 @@ void MiraPanelUI::updateSleepClock() {
 
 void MiraPanelUI::loop() {
 #if defined(MIRA_TARGET_WAVESHARE_43C)
-  if (!_display.miraLvglLock(20)) return;
+  // Lower lock contention with the dedicated Waveshare LVGL task.
+  // Clock/configuration maintenance does not need a 2 ms interval.
+  static uint32_t lastMaintenanceMs = 0;
+  const uint32_t now = millis();
+  if ((uint32_t)(now - lastMaintenanceMs) < 40UL) return;
+  if (!_display.miraLvglLock(5)) return;
+  lastMaintenanceMs = now;
 #endif
 
   pollFavorites();
-  if (_pendingNavPage >= 0) {
-    uint8_t page = (uint8_t)_pendingNavPage;
-    _pendingNavPage = -1;
-    showPage(page);
-  }
-  if (_pendingTogglePagePicker) {
-    _pendingTogglePagePicker = false;
-    setPagePickerVisible(_pagePicker &&
-                         lv_obj_has_flag(_pagePicker, LV_OBJ_FLAG_HIDDEN));
-  }
+  // Navigation is serviced by LVGL's 10 ms onNavigationTimer.
 
   startNtpIfPossible();
   updateClock();
