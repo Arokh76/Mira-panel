@@ -20,6 +20,10 @@ lv_color_t MiraPanelUI::_buf2[MIRA_DISPLAY_WIDTH * MIRA_DRAW_BUFFER_LINES];
 #endif
 MiraDisplay* MiraPanelUI::_displayForLvgl = nullptr;
 MiraPanelUI* MiraPanelUI::_uiForLvgl = nullptr;
+#if defined(MIRA_TARGET_WAVESHARE_43C)
+void (*MiraPanelUI::_originalWsFlushCb)(lv_disp_drv_t*, const lv_area_t*, lv_color_t*) = nullptr;
+uint32_t MiraPanelUI::_wsFlushPhaseMicros = 0;
+#endif
 
 static const lv_color_t COL_TEXT    = lv_color_hex(0xF3F6F7);
 static const lv_color_t COL_MUTED   = lv_color_hex(0xA8B2B8);
@@ -787,6 +791,9 @@ void MiraPanelUI::begin() {
   lv_disp_t* diagnosticDisplay = lv_disp_get_default();
   if (diagnosticDisplay && diagnosticDisplay->driver) {
     diagnosticDisplay->driver->monitor_cb = onDisplayPerfMonitor;
+    _originalWsFlushCb = diagnosticDisplay->driver->flush_cb;
+    diagnosticDisplay->driver->render_start_cb = onDisplayRenderStart;
+    diagnosticDisplay->driver->flush_cb = onDisplayFlushTimed;
   }
 #endif
 
@@ -2506,8 +2513,38 @@ void MiraPanelUI::showPage(uint8_t index) {
 }
 
 #if defined(MIRA_TARGET_WAVESHARE_43C)
-// LVGL monitor callback: tracks real LVGL drawing work. Do not manipulate
-// LVGL objects, allocate, or log from this callback.
+// LVGL invokes render_start_cb after layout and double-buffer synchronization.
+// We start the clock here to isolate object rasterization from the RGB flush.
+void MiraPanelUI::onDisplayRenderStart(lv_disp_drv_t* disp) {
+  (void)disp;
+  _wsFlushPhaseMicros = micros();
+}
+
+// The official Waveshare flush callback does the RGB swap and waits for VSYNC
+// on its own LVGL task. Preserve it exactly; only time its execution.
+void MiraPanelUI::onDisplayFlushTimed(lv_disp_drv_t* disp,
+                                      const lv_area_t* area,
+                                      lv_color_t* color_p) {
+  const uint32_t before = micros();
+  MiraPanelUI* ui = _uiForLvgl;
+  if (ui && ui->_scrollPerfActive && _wsFlushPhaseMicros) {
+    const uint32_t drawUs = before - _wsFlushPhaseMicros;
+    ui->_scrollDrawTimeUs += drawUs;
+    if (drawUs > ui->_scrollDrawMaxUs) ui->_scrollDrawMaxUs = drawUs;
+  }
+  if (_originalWsFlushCb) _originalWsFlushCb(disp, area, color_p);
+  const uint32_t after = micros();
+  _wsFlushPhaseMicros = after;
+  if (ui && ui->_scrollPerfActive) {
+    const uint32_t flushUs = after - before;
+    ui->_scrollFlushTimeUs += flushUs;
+    ui->_scrollFlushCalls++;
+    if (flushUs > ui->_scrollFlushMaxUs) ui->_scrollFlushMaxUs = flushUs;
+  }
+}
+
+// LVGL monitor callback: total refresh duration also includes layout and
+// double-buffer sync work. Do not allocate or log during scroll.
 void MiraPanelUI::onDisplayPerfMonitor(lv_disp_drv_t* disp, uint32_t ms, uint32_t pixels) {
   (void)disp;
   MiraPanelUI* ui = _uiForLvgl;
@@ -2544,6 +2581,11 @@ void MiraPanelUI::onScrollPerfEvent(lv_event_t* e) {
     ui->_scrollPerfRenderMaxMs = 0;
     ui->_scrollPerfGapMaxMs = 0;
     ui->_scrollPerfPixelSum = 0;
+    ui->_scrollDrawTimeUs = 0;
+    ui->_scrollFlushTimeUs = 0;
+    ui->_scrollFlushMaxUs = 0;
+    ui->_scrollDrawMaxUs = 0;
+    ui->_scrollFlushCalls = 0;
     if (ui->_scrollPerfPanel) lv_obj_add_flag(ui->_scrollPerfPanel, LV_OBJ_FLAG_HIDDEN);
   }
   if (ui->_scrollPerfSteps) {
@@ -2573,32 +2615,40 @@ void MiraPanelUI::onNavigationTimer(lv_timer_t* timer) {
     const uint32_t fps = (frames * 1000UL) / duration;
     const uint32_t stepHz = (steps * 1000UL) / duration;
     const uint32_t avgRender = frames ? ui->_scrollPerfRenderSumMs / frames : 0;
-    const uint32_t avgPixels = frames ? ui->_scrollPerfPixelSum / frames : 0;
+    const uint32_t avgDraw = frames ? ui->_scrollDrawTimeUs / (1000UL * frames) : 0;
+    const uint32_t avgFlush = frames ? ui->_scrollFlushTimeUs / (1000UL * frames) : 0;
+    const uint32_t accounted = avgDraw + avgFlush;
+    const uint32_t avgOther = avgRender > accounted ? avgRender - accounted : 0;
     if (ui->_scrollPerfLabel && ui->_scrollPerfPanel) {
       if (frames) {
         lv_label_set_text_fmt(ui->_scrollPerfLabel,
-            "SCROLL %lu pas / %lu ms (~%lu/s)   Intervalle pas max %lu ms\n"
-            "LVGL %lu images (~%lu/s)   Rendu moy/max %lu/%lu ms   Ecart max %lu ms",
+            "SCROLL %lu pas / %lu ms | %lu images (~%lu/s) | ecart max %lu ms\n"
+            "Cycle LVGL %lu ms   Dessin %lu ms   Ecran/VSYNC %lu ms   Autre %lu ms\n"
+            "Max dessin %lu ms   Max ecran %lu ms   Appels ecran %lu",
             (unsigned long)steps, (unsigned long)movingMs,
-            (unsigned long)stepHz, (unsigned long)ui->_scrollPerfStepsMaxGapMs,
             (unsigned long)frames, (unsigned long)fps,
-            (unsigned long)avgRender, (unsigned long)ui->_scrollPerfRenderMaxMs,
-            (unsigned long)ui->_scrollPerfGapMaxMs);
+            (unsigned long)ui->_scrollPerfGapMaxMs,
+            (unsigned long)avgRender, (unsigned long)avgDraw,
+            (unsigned long)avgFlush, (unsigned long)avgOther,
+            (unsigned long)(ui->_scrollDrawMaxUs / 1000UL),
+            (unsigned long)(ui->_scrollFlushMaxUs / 1000UL),
+            (unsigned long)ui->_scrollFlushCalls);
       } else {
         lv_label_set_text_fmt(ui->_scrollPerfLabel,
-            "SCROLL %lu pas / %lu ms (~%lu/s)   Intervalle pas max %lu ms\n"
-            "LVGL aucun rafraichissement mesure (diagnostic du pilote a verifier)",
-            (unsigned long)steps, (unsigned long)movingMs,
-            (unsigned long)stepHz, (unsigned long)ui->_scrollPerfStepsMaxGapMs);
+            "SCROLL %lu pas / %lu ms (~%lu/s) - sans rafraichissement mesure",
+            (unsigned long)steps, (unsigned long)movingMs, (unsigned long)stepHz);
       }
       lv_obj_center(ui->_scrollPerfLabel);
       lv_obj_clear_flag(ui->_scrollPerfPanel, LV_OBJ_FLAG_HIDDEN);
     }
-    Serial.printf("[MIRA][SCROLL] steps=%lu moving_ms=%lu max_step_gap=%lu frames=%lu avg_render_ms=%lu max_render_ms=%lu max_frame_gap=%lu avg_pixels=%lu\n",
+    Serial.printf("[MIRA][SCROLL] steps=%lu move_ms=%lu frames=%lu fps=%lu avg_cycle_ms=%lu avg_draw_ms=%lu avg_flush_ms=%lu other_ms=%lu max_flush_ms=%lu max_draw_ms=%lu max_frame_gap_ms=%lu\n",
         (unsigned long)steps, (unsigned long)movingMs,
-        (unsigned long)ui->_scrollPerfStepsMaxGapMs, (unsigned long)frames,
-        (unsigned long)avgRender, (unsigned long)ui->_scrollPerfRenderMaxMs,
-        (unsigned long)ui->_scrollPerfGapMaxMs, (unsigned long)avgPixels);
+        (unsigned long)frames, (unsigned long)fps,
+        (unsigned long)avgRender, (unsigned long)avgDraw,
+        (unsigned long)avgFlush, (unsigned long)avgOther,
+        (unsigned long)(ui->_scrollFlushMaxUs / 1000UL),
+        (unsigned long)(ui->_scrollDrawMaxUs / 1000UL),
+        (unsigned long)ui->_scrollPerfGapMaxMs);
   }
 #endif
   if (ui->_pendingNavPage >= 0) {
