@@ -147,7 +147,10 @@ private:
   lv_obj_t* _scrollPerfLabel = nullptr;
   bool _scrollPerfActive = false;
   uint32_t _scrollPerfStartedAt = 0;
+  uint32_t _scrollPerfLastMovementAt = 0;
   uint32_t _scrollPerfLastFrameAt = 0;
+  uint32_t _scrollPerfSteps = 0;
+  uint32_t _scrollPerfStepsMaxGapMs = 0;
   uint32_t _scrollPerfFrames = 0;
   uint32_t _scrollPerfRenderSumMs = 0;
   uint32_t _scrollPerfRenderMaxMs = 0;
