@@ -1,4 +1,4 @@
-name: Build Mira Panel 0.6.52 - WT32 SC01 Plus et Waveshare 4.3C
+name: Build Mira Panel 0.7.11 - WT32 SC01 Plus et Waveshare 4.3C
 
 on:
   workflow_dispatch:
@@ -36,7 +36,7 @@ jobs:
           ref: 44e412f08c1e68c0da826bc5f51436f156a02eea
           path: waveshare-official
 
-      - name: Use committed consolidated 0.6.52 source snapshot
+      - name: Use committed consolidated 0.7.11 source snapshot
         shell: bash
         run: |
           set -euo pipefail
@@ -46,7 +46,7 @@ jobs:
           rm -rf firmware/source/work
           mkdir -p firmware/source/work/MIRA_PANEL
           cp -a firmware/source/consolidated/MIRA_PANEL/. firmware/source/work/MIRA_PANEL/
-          grep -q '"0.6.52"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
+          grep -q '"0.7.11"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
           # Both HOME clocks white; Waveshare uses the identical width/center
           # as its date. The WT32 Montserrat40 & both sleep clocks are intact.
           grep -Fq 'lv_obj_set_style_text_color(_dateTimeLabel, lv_color_white(), 0);' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
@@ -130,7 +130,7 @@ jobs:
           arduino-cli lib install "ArduinoJson@6.21.5"
           arduino-cli lib install "AsyncHTTPRequest_Generic@1.13.0"
 
-      - name: Build WT32-SC01 Plus 0.6.52 firmware
+      - name: Build WT32-SC01 Plus 0.7.11 firmware
         shell: bash
         run: |
           set -euo pipefail
@@ -143,15 +143,15 @@ jobs:
           rm -rf build-wt32 && mkdir build-wt32
           arduino-cli compile             --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,CPUFreq=240,FlashMode=qio,FlashSize=8M,PartitionScheme=default_8MB,PSRAM=enabled,UploadMode=default,USBMode=hwcdc"             --output-dir build-wt32             firmware/source/work/MIRA_PANEL
           test -s build-wt32/MIRA_PANEL.ino.bin
-          strings build-wt32/MIRA_PANEL.ino.bin | grep -Fxq '0.6.52'
+          strings build-wt32/MIRA_PANEL.ino.bin | grep -Fxq '0.7.11'
           strings build-wt32/MIRA_PANEL.ino.bin | grep -Fq 'WT32-SC01 Plus'
 
-      - name: Package WT32-SC01 Plus 0.6.52 OTA preview
+      - name: Package WT32-SC01 Plus 0.7.11 OTA preview
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p package-wt32
-          cp build-wt32/MIRA_PANEL.ino.bin package-wt32/Mira_Panel_WT32_SC01_Plus_0.6.52.bin
+          cp build-wt32/MIRA_PANEL.ino.bin package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.11.bin
           # WT32 USB factory image uses the existing 8 MB partition table.
           test -s build-wt32/MIRA_PANEL.ino.bootloader.bin
           test -s build-wt32/MIRA_PANEL.ino.partitions.bin
@@ -159,29 +159,29 @@ jobs:
           test -s "$BOOTAPP"
           python3 -m pip install --quiet esptool
           python3 -m esptool --chip esp32s3 merge-bin \
-            -o package-wt32/Mira_Panel_WT32_SC01_Plus_0.6.52_FACTORY.bin \
+            -o package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.11_FACTORY.bin \
             --flash-mode dio --flash-freq 80m --flash-size 8MB \
             0x0000 build-wt32/MIRA_PANEL.ino.bootloader.bin \
             0x8000 build-wt32/MIRA_PANEL.ino.partitions.bin \
             0xE000 "$BOOTAPP" \
-            0x10000 package-wt32/Mira_Panel_WT32_SC01_Plus_0.6.52.bin
-          test -s package-wt32/Mira_Panel_WT32_SC01_Plus_0.6.52_FACTORY.bin
+            0x10000 package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.11.bin
+          test -s package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.11_FACTORY.bin
           cat > package-wt32/README.txt <<'EOF'
-          Mira Panel 0.6.52 - WT32-SC01 Plus ESP32-S3 / 8 MB FLASH
-          OTA application firmware: Mira_Panel_WT32_SC01_Plus_0.6.52.bin
+          Mira Panel 0.7.11 - WT32-SC01 Plus ESP32-S3 / 8 MB FLASH
+          OTA application firmware: Mira_Panel_WT32_SC01_Plus_0.7.11.bin
           Compiled using Arduino-ESP32 2.0.17, LVGL 8.3.11.
           WARNING: WT32-specific firmware. Never flash to Waveshare 4.3C.
           This is a preview for hardware testing, not a stable release.
-          USB factory firmware: Mira_Panel_WT32_SC01_Plus_0.6.52_FACTORY.bin
+          USB factory firmware: Mira_Panel_WT32_SC01_Plus_0.7.11_FACTORY.bin
           EOF
-          test -s package-wt32/Mira_Panel_WT32_SC01_Plus_0.6.52.bin
-          strings package-wt32/Mira_Panel_WT32_SC01_Plus_0.6.52.bin | grep -Fxq '0.6.52'
-          sha256sum package-wt32/Mira_Panel_WT32_SC01_Plus_0.6.52.bin
+          test -s package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.11.bin
+          strings package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.11.bin | grep -Fxq '0.7.11'
+          sha256sum package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.11.bin
 
       - name: Upload WT32-SC01 Plus preview
         uses: actions/upload-artifact@v4
         with:
-          name: Mira_Panel_WT32_SC01_Plus_0.6.52_preview
+          name: Mira_Panel_WT32_SC01_Plus_0.7.11_preview
           path: package-wt32/
           if-no-files-found: error
           retention-days: 14
@@ -209,6 +209,11 @@ jobs:
           grep -q 'Configuration file for v8.4.0' "$WS_CONF"
           grep -q '#define LVGL_VERSION_MINOR 4' waveshare-official/examples/arduino/libraries/lvgl/lvgl.h
           sed -i 's/#define LV_MEM_SIZE (48U \* 1024U)/#define LV_MEM_SIZE (96U * 1024U)/' "$WS_CONF"
+          # LVGL 8.4 snapshot module: external PSRAM buffers, no dynamic
+          # allocations from LVGL's 96 KB object heap.
+          grep -Fq '#define LV_USE_SNAPSHOT 0' "$WS_CONF"
+          sed -i 's/#define LV_USE_SNAPSHOT 0/#define LV_USE_SNAPSHOT 1/' "$WS_CONF"
+          grep -Fq '#define LV_USE_SNAPSHOT 1' "$WS_CONF"
           sed -i 's/#define LV_FONT_MONTSERRAT_20 0/#define LV_FONT_MONTSERRAT_20 1/' "$WS_CONF"
           sed -i 's/#define LV_FONT_MONTSERRAT_28 0/#define LV_FONT_MONTSERRAT_28 1/' "$WS_CONF"
           sed -i 's/#define LV_FONT_MONTSERRAT_40 0/#define LV_FONT_MONTSERRAT_40 1/' "$WS_CONF"
@@ -224,19 +229,19 @@ jobs:
           test -f firmware/source/work/MIRA_PANEL/src/WaveshareOfficial/lvgl_port/lvgl_port.cpp
           test -f firmware/source/work/MIRA_PANEL/src/WaveshareOfficial/rgb_lcd_port/rgb_lcd_port.cpp
 
-          # Mira 0.6.52: use Waveshare's triple-buffer + full-refresh mode.
+          # 0.7.11 performance experiment, Waveshare ONLY:
+          # revert to the port's recommended double-buffer + direct-mode
+          # and refresh dirty areas instead of the complete 800x480 screen.
+          # Keep the 0.7.4 triple-buffer build for hardware A/B and rollback.
           WS_PORT_H="firmware/source/work/MIRA_PANEL/src/WaveshareOfficial/lvgl_port/lvgl_port.h"
           WS_RGB_H="firmware/source/work/MIRA_PANEL/src/WaveshareOfficial/rgb_lcd_port/rgb_lcd_port.h"
-          grep -q '#define LVGL_PORT_AVOID_TEAR_MODE       (3)' "$WS_PORT_H"
-          sed -i 's/#define LVGL_PORT_AVOID_TEAR_MODE       (3)/#define LVGL_PORT_AVOID_TEAR_MODE       (2)/' "$WS_PORT_H"
-          grep -q '#define LVGL_PORT_AVOID_TEAR_MODE       (2)' "$WS_PORT_H"
-          grep -q '#define EXAMPLE_LCD_RGB_BUFFER_NUMS     (2)' "$WS_RGB_H"
-          sed -i 's/#define EXAMPLE_LCD_RGB_BUFFER_NUMS     (2)/#define EXAMPLE_LCD_RGB_BUFFER_NUMS     (3)/' "$WS_RGB_H"
-          grep -q '#define EXAMPLE_LCD_RGB_BUFFER_NUMS     (3)' "$WS_RGB_H"
+          grep -Fq '#define LVGL_PORT_AVOID_TEAR_MODE       (3)' "$WS_PORT_H"
+          grep -Fq '#define EXAMPLE_LCD_RGB_BUFFER_NUMS     (2)' "$WS_RGB_H"
+          echo '[MIRA][WAVESHARE] Mode 3 direct, 2 FB: partial LVGL redraws'
 
           # Keep the 0.6.38 proven adjustment: change ONLY RGB PCLK
-          # from the official 16 MHz to 12 MHz. Preserve triple buffer,
-          # bounce buffer, VSYNC, LVGL, PSRAM, UI and backlight code.
+          # from the official 16 MHz to 12 MHz; do not change validated
+          # VSYNC, LVGL, PSRAM, bounce-buffer or backlight configurations.
           grep -Fq '#define EXAMPLE_LCD_PIXEL_CLOCK_HZ      (16 * 1000 * 1000)' "$WS_RGB_H"
           python3 -c "from pathlib import Path; p=Path('firmware/source/work/MIRA_PANEL/src/WaveshareOfficial/rgb_lcd_port/rgb_lcd_port.h'); s=p.read_text(); old='(16 * 1000 * 1000)'; assert s.count(old) == 1, 'expected one 16 MHz LCD clock macro'; p.write_text(s.replace(old, '(12 * 1000 * 1000)', 1))"
           grep -Fq '#define EXAMPLE_LCD_PIXEL_CLOCK_HZ      (12 * 1000 * 1000)' "$WS_RGB_H"
@@ -248,6 +253,8 @@ jobs:
           rm -f firmware/source/work/MIRA_PANEL/lv_conf.h
           test ! -f firmware/source/work/MIRA_PANEL/lv_conf.h
 
+      # Compare optimized software rasterization only, no display/VSYNC changes.
+      # -O2 is appended to core defaults (-Os) for C LVGL and C++ UI code.
       - name: Build Waveshare 4.3C with Mira SPIFFS map
         shell: bash
         run: |
@@ -258,11 +265,12 @@ jobs:
           arduino-cli compile \
             --fqbn "esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,CPUFreq=240,FlashMode=qio,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,PSRAM=opi,UploadMode=default,UploadSpeed=921600,LoopCore=1,EventsCore=1" \
             --libraries waveshare-official/examples/arduino/libraries \
-            --build-property "compiler.cpp.extra_flags=-DMIRA_TARGET_WAVESHARE_43C=1" \
+            --build-property "compiler.c.extra_flags=-O2" \
+            --build-property "compiler.cpp.extra_flags=-DMIRA_TARGET_WAVESHARE_43C=1 -O2" \
             --output-dir build-waveshare \
             firmware/source/work/MIRA_PANEL
           test -s build-waveshare/MIRA_PANEL.ino.bin
-          strings build-waveshare/MIRA_PANEL.ino.bin | grep -Fxq '0.6.52'
+          strings build-waveshare/MIRA_PANEL.ino.bin | grep -Fxq '0.7.11'
           strings build-waveshare/MIRA_PANEL.ino.bin | grep -Fq 'Waveshare ESP32-S3 Touch LCD 4.3C'
           strings build-waveshare/MIRA_PANEL.ino.bin | grep -Fq '[MIRA][WAVESHARE] Port LVGL Waveshare officiel actif'
           PARTTOOL="$(find "$HOME/.arduino15/packages/esp32" -name gen_esp32part.py -type f | head -n1)"
@@ -272,7 +280,7 @@ jobs:
           grep -q 'spiffs' /tmp/partitions-decoded.csv
           ! grep -q 'ffat' /tmp/partitions-decoded.csv
 
-          cp build-waveshare/MIRA_PANEL.ino.bin package-waveshare/Mira_Panel_Waveshare_4.3C_0.6.52.bin
+          cp build-waveshare/MIRA_PANEL.ino.bin package-waveshare/Mira_Panel_Waveshare_4.3C_0.7.11.bin
           cp build-waveshare/MIRA_PANEL.ino.bootloader.bin package-waveshare/bootloader.bin
           cp build-waveshare/MIRA_PANEL.ino.partitions.bin package-waveshare/partitions.bin
           BOOTAPP="$(find "$HOME/.arduino15/packages/esp32" -name boot_app0.bin -type f | head -n1)"
@@ -282,23 +290,23 @@ jobs:
           0x0000  bootloader.bin
           0x8000  partitions.bin
           0xE000  boot_app0.bin
-          0x10000 Mira_Panel_Waveshare_4.3C_0.6.52.bin
+          0x10000 Mira_Panel_Waveshare_4.3C_0.7.11.bin
           EOF
 
           MERGED="$(find build-waveshare -maxdepth 1 -name '*merged.bin' -type f | head -n1 || true)"
           if [ -n "$MERGED" ]; then
-            cp "$MERGED" package-waveshare/Mira_Panel_Waveshare_4.3C_0.6.52_FACTORY.bin
+            cp "$MERGED" package-waveshare/Mira_Panel_Waveshare_4.3C_0.7.11_FACTORY.bin
           else
             python3 -m pip install --quiet esptool
-            python3 -m esptool --chip esp32s3 merge-bin -o package-waveshare/Mira_Panel_Waveshare_4.3C_0.6.52_FACTORY.bin --flash-mode qio --flash-freq 80m --flash-size 16MB 0x0000 package-waveshare/bootloader.bin 0x8000 package-waveshare/partitions.bin 0xE000 package-waveshare/boot_app0.bin 0x10000 package-waveshare/Mira_Panel_Waveshare_4.3C_0.6.52.bin
+            python3 -m esptool --chip esp32s3 merge-bin -o package-waveshare/Mira_Panel_Waveshare_4.3C_0.7.11_FACTORY.bin --flash-mode qio --flash-freq 80m --flash-size 16MB 0x0000 package-waveshare/bootloader.bin 0x8000 package-waveshare/partitions.bin 0xE000 package-waveshare/boot_app0.bin 0x10000 package-waveshare/Mira_Panel_Waveshare_4.3C_0.7.11.bin
           fi
-          test -s package-waveshare/Mira_Panel_Waveshare_4.3C_0.6.52_FACTORY.bin
+          test -s package-waveshare/Mira_Panel_Waveshare_4.3C_0.7.11_FACTORY.bin
           ls -lh package-waveshare/
 
       - name: Upload Waveshare preview package
         uses: actions/upload-artifact@v4
         with:
-          name: Mira_Panel_Waveshare_4.3C_0.6.52_preview
+          name: Mira_Panel_Waveshare_4.3C_0.7.11_preview
           path: package-waveshare/
           if-no-files-found: error
           retention-days: 14
@@ -308,21 +316,21 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/mira-release-check/inputs/wt32 /tmp/mira-release-check/inputs/waveshare
-          cp package-wt32/Mira_Panel_WT32_SC01_Plus_0.6.52*.bin /tmp/mira-release-check/inputs/wt32/
-          cp package-waveshare/Mira_Panel_Waveshare_4.3C_0.6.52*.bin /tmp/mira-release-check/inputs/waveshare/
+          cp package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.11*.bin /tmp/mira-release-check/inputs/wt32/
+          cp package-waveshare/Mira_Panel_Waveshare_4.3C_0.7.11*.bin /tmp/mira-release-check/inputs/waveshare/
           python3 firmware/scripts/publish_multi.py \
             --inputs /tmp/mira-release-check/inputs \
             --repo /tmp/mira-release-check/output \
-            --version 0.6.52
+            --version 0.7.11
           python3 - <<'PY'
           from pathlib import Path
           import json
           p = Path('/tmp/mira-release-check/output/firmware/targets.json')
           data = json.loads(p.read_text())
-          assert data['version'] == '0.6.52'
+          assert data['version'] == '0.7.11'
           assert len(data['targets']) == 2
           legacy = json.loads(Path('/tmp/mira-release-check/output/firmware/version.json').read_text())
-          assert legacy['version'] == '0.6.52'
+          assert legacy['version'] == '0.7.11'
           assert Path('/tmp/mira-release-check/output/firmware/Mira_Panel.bin').is_file()
           assert Path('/tmp/mira-release-check/output/docs/manifest.json').is_file()
           for profile, spec in data['targets'].items():
