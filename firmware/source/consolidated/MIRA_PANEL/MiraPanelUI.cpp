@@ -690,6 +690,10 @@ void MiraPanelUI::begin() {
     lv_obj_set_scroll_dir(_pages[i], LV_DIR_VER);
     lv_obj_set_scrollbar_mode(_pages[i], LV_SCROLLBAR_MODE_OFF);
     if (i != 0) lv_obj_add_flag(_pages[i], LV_OBJ_FLAG_HIDDEN);
+#if defined(MIRA_TARGET_WAVESHARE_43C)
+    lv_obj_add_event_cb(_pages[i], onScrollPerfEvent, LV_EVENT_SCROLL_BEGIN, this);
+    lv_obj_add_event_cb(_pages[i], onScrollPerfEvent, LV_EVENT_SCROLL_END, this);
+#endif
   }
 
   // Experimental navigation: original three contextual destinations plus
@@ -757,6 +761,33 @@ void MiraPanelUI::begin() {
   buildEnergyPreviewPage();
   buildPagePicker();
   refreshFavoriteNav();
+
+#if defined(MIRA_TARGET_WAVESHARE_43C)
+  // Temporary on-screen results after each scroll. The diagnostics overlay
+  // is hidden while moving; it never intercepts touches or covers the
+  // navigation row. A photograph after scrolling captures the measurements.
+  _scrollPerfPanel = lv_obj_create(_screen);
+  lv_obj_set_size(_scrollPerfPanel, 700, 48);
+  lv_obj_align(_scrollPerfPanel, LV_ALIGN_TOP_MID, 0, 6);
+  lv_obj_clear_flag(_scrollPerfPanel, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_clear_flag(_scrollPerfPanel, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_radius(_scrollPerfPanel, 8, 0);
+  lv_obj_set_style_border_width(_scrollPerfPanel, 1, 0);
+  lv_obj_set_style_border_color(_scrollPerfPanel, colorAccent(), 0);
+  lv_obj_set_style_bg_color(_scrollPerfPanel, lv_color_hex(0x071421), 0);
+  lv_obj_set_style_bg_opa(_scrollPerfPanel, LV_OPA_COVER, 0);
+  lv_obj_set_style_pad_all(_scrollPerfPanel, 2, 0);
+  _scrollPerfLabel = lv_label_create(_scrollPerfPanel);
+  lv_obj_set_style_text_color(_scrollPerfLabel, lv_color_white(), 0);
+  lv_obj_set_style_text_font(_scrollPerfLabel, &mira_font_fr_14, 0);
+  lv_label_set_text(_scrollPerfLabel, "Scroll diagnostic : faites defiler cette page");
+  lv_obj_center(_scrollPerfLabel);
+  lv_obj_add_flag(_scrollPerfPanel, LV_OBJ_FLAG_HIDDEN);
+  lv_disp_t* diagnosticDisplay = lv_disp_get_default();
+  if (diagnosticDisplay && diagnosticDisplay->driver) {
+    diagnosticDisplay->driver->monitor_cb = onDisplayPerfMonitor;
+  }
+#endif
 
   // Run touch navigation on LVGL's task, without waiting for Arduino's loop.
   lv_timer_create(onNavigationTimer, 10, this);
@@ -2472,6 +2503,66 @@ void MiraPanelUI::showPage(uint8_t index) {
   setNavActive(index);
   noteActivity();
 }
+
+#if defined(MIRA_TARGET_WAVESHARE_43C)
+// The display monitor is called once after each real LVGL refresh.
+// No String, logs, drawing or allocation while the page is scrolling.
+void MiraPanelUI::onDisplayPerfMonitor(lv_disp_drv_t* disp, uint32_t ms, uint32_t pixels) {
+  (void)disp;
+  MiraPanelUI* ui = _uiForLvgl;
+  if (!ui || !ui->_scrollPerfActive) return;
+  const uint32_t now = millis();
+  if (ui->_scrollPerfFrames && ui->_scrollPerfLastFrameAt) {
+    const uint32_t gap = now - ui->_scrollPerfLastFrameAt;
+    if (gap > ui->_scrollPerfGapMaxMs) ui->_scrollPerfGapMaxMs = gap;
+  }
+  ui->_scrollPerfLastFrameAt = now;
+  ui->_scrollPerfFrames++;
+  ui->_scrollPerfRenderSumMs += ms;
+  ui->_scrollPerfPixelSum += pixels;
+  if (ms > ui->_scrollPerfRenderMaxMs) ui->_scrollPerfRenderMaxMs = ms;
+}
+
+void MiraPanelUI::onScrollPerfEvent(lv_event_t* e) {
+  MiraPanelUI* ui = static_cast<MiraPanelUI*>(lv_event_get_user_data(e));
+  if (!ui) return;
+  const lv_event_code_t event = lv_event_get_code(e);
+  const uint32_t now = millis();
+  if (event == LV_EVENT_SCROLL_BEGIN) {
+    ui->_scrollPerfActive = true;
+    ui->_scrollPerfStartedAt = now;
+    ui->_scrollPerfLastFrameAt = 0;
+    ui->_scrollPerfFrames = 0;
+    ui->_scrollPerfRenderSumMs = 0;
+    ui->_scrollPerfRenderMaxMs = 0;
+    ui->_scrollPerfGapMaxMs = 0;
+    ui->_scrollPerfPixelSum = 0;
+    if (ui->_scrollPerfPanel) lv_obj_add_flag(ui->_scrollPerfPanel, LV_OBJ_FLAG_HIDDEN);
+  } else if (event == LV_EVENT_SCROLL_END && ui->_scrollPerfActive) {
+    ui->_scrollPerfActive = false;
+    const uint32_t duration = now - ui->_scrollPerfStartedAt;
+    const uint32_t frames = ui->_scrollPerfFrames;
+    const uint32_t fps = duration ? (frames * 1000UL) / duration : 0;
+    const uint32_t averageRender = frames ? ui->_scrollPerfRenderSumMs / frames : 0;
+    const uint32_t averagePixels = frames ? ui->_scrollPerfPixelSum / frames : 0;
+    if (ui->_scrollPerfLabel && ui->_scrollPerfPanel) {
+      lv_label_set_text_fmt(ui->_scrollPerfLabel,
+          "Scroll: %lu FPS (%lu images / %lu ms)\n"
+          "Rendu %lu ms moy / %lu ms max   Intervalle max %lu ms   Surface %lu%%",
+          (unsigned long)fps, (unsigned long)frames, (unsigned long)duration,
+          (unsigned long)averageRender, (unsigned long)ui->_scrollPerfRenderMaxMs,
+          (unsigned long)ui->_scrollPerfGapMaxMs,
+          (unsigned long)((averagePixels * 100UL) / (MIRA_DISPLAY_WIDTH * MIRA_DISPLAY_HEIGHT)));
+      lv_obj_center(ui->_scrollPerfLabel);
+      lv_obj_clear_flag(ui->_scrollPerfPanel, LV_OBJ_FLAG_HIDDEN);
+    }
+    Serial.printf("[MIRA][SCROLL] fps=%lu frames=%lu duration_ms=%lu avg_render_ms=%lu max_render_ms=%lu max_frame_gap_ms=%lu avg_pixels=%lu\n",
+          (unsigned long)fps, (unsigned long)frames, (unsigned long)duration,
+          (unsigned long)averageRender, (unsigned long)ui->_scrollPerfRenderMaxMs,
+          (unsigned long)ui->_scrollPerfGapMaxMs, (unsigned long)averagePixels);
+  }
+}
+#endif
 
 // LVGL's timer task handles the touch immediately on both display targets.
 void MiraPanelUI::onNavigationTimer(lv_timer_t* timer) {
