@@ -296,10 +296,28 @@ void MiraPanelUI::styleMainCard(lv_obj_t* card, bool dateTime) {
   lv_obj_set_style_border_opa(card, _theme == THEME_MIRA ? LV_OPA_50 : LV_OPA_70, 0);
   lv_obj_set_style_radius(card, _theme == THEME_GLASS ? 16 : 14, 0);
 
+  // Waveshare scroll optimization: blur/shadow masks on every moving tile
+  // are expensive in software at 800x480. Keep all card colors, outlines,
+  // rounded corners and sizes; remove only shadows in scrollable content.
+#if defined(MIRA_TARGET_WAVESHARE_43C)
+  lv_obj_t* parent = lv_obj_get_parent(card);
+  const bool scrollingContent =
+      parent == _pages[0] || parent == _pages[1] || parent == _pages[2];
+  if (scrollingContent) {
+    lv_obj_set_style_shadow_width(card, 0, 0);
+    lv_obj_set_style_shadow_opa(card, LV_OPA_TRANSP, 0);
+  } else {
+    lv_obj_set_style_shadow_color(card, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_shadow_opa(card, LV_OPA_10, 0);
+    lv_obj_set_style_shadow_width(card, _theme == THEME_MIRA ? 4 : 3, 0);
+    lv_obj_set_style_shadow_ofs_y(card, 2, 0);
+  }
+#else
   lv_obj_set_style_shadow_color(card, lv_color_hex(0x000000), 0);
   lv_obj_set_style_shadow_opa(card, _theme == THEME_MIRA ? LV_OPA_10 : LV_OPA_10, 0);
   lv_obj_set_style_shadow_width(card, _theme == THEME_MIRA ? 4 : 3, 0);
   lv_obj_set_style_shadow_ofs_y(card, 2, 0);
+#endif
 
   if (dateTime) {
     lv_obj_set_style_border_color(card, colorAccent2(), 0);
@@ -2240,9 +2258,17 @@ void MiraPanelUI::applyTheme() {
 
   for (uint8_t i = 0; i < PAGE_COUNT; ++i) {
     if (_pages[i]) {
+      // Drawing a 430px-high gradient again for every scroll frame costs
+      // substantial CPU on ESP32-S3. Use a matching solid background on
+      // Waveshare's content pages only; header, tiles and nav stay intact.
+#if defined(MIRA_TARGET_WAVESHARE_43C)
+      lv_obj_set_style_bg_color(_pages[i], colorBg(), 0);
+      lv_obj_set_style_bg_grad_dir(_pages[i], LV_GRAD_DIR_NONE, 0);
+#else
       lv_obj_set_style_bg_color(_pages[i], colorBg(), 0);
       lv_obj_set_style_bg_grad_color(_pages[i], grad, 0);
       lv_obj_set_style_bg_grad_dir(_pages[i], LV_GRAD_DIR_VER, 0);
+#endif
     }
   }
 
