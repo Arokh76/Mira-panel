@@ -156,6 +156,11 @@ private:
   uint32_t _scrollPerfRenderMaxMs = 0;
   uint32_t _scrollPerfGapMaxMs = 0;
   uint32_t _scrollPerfPixelSum = 0;
+  uint32_t _scrollDrawTimeUs = 0;
+  uint32_t _scrollFlushTimeUs = 0;
+  uint32_t _scrollFlushMaxUs = 0;
+  uint32_t _scrollDrawMaxUs = 0;
+  uint32_t _scrollFlushCalls = 0;
 #endif
   lv_obj_t* _dateTimeLabel = nullptr;
   lv_obj_t* _dateSubLabel = nullptr;
@@ -226,6 +231,10 @@ private:
 #if defined(MIRA_TARGET_WAVESHARE_43C)
   static void onScrollPerfEvent(lv_event_t* e);
   static void onDisplayPerfMonitor(lv_disp_drv_t* disp, uint32_t ms, uint32_t pixels);
+  static void onDisplayRenderStart(lv_disp_drv_t* disp);
+  static void onDisplayFlushTimed(lv_disp_drv_t* disp, const lv_area_t* area, lv_color_t* color_p);
+  static void (*_originalWsFlushCb)(lv_disp_drv_t*, const lv_area_t*, lv_color_t*);
+  static uint32_t _wsFlushPhaseMicros;
 #endif
   static void onNav(lv_event_t* e);
   static void onPagePick(lv_event_t* e);
