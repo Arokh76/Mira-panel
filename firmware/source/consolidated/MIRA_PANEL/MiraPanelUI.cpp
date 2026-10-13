@@ -5,6 +5,14 @@
 #include <time.h>
 
 #if defined(MIRA_TARGET_WAVESHARE_43C)
+  #include <esp_heap_caps.h>
+  #include <lvgl/src/extra/others/snapshot/lv_snapshot.h>
+  #if !LV_USE_SNAPSHOT
+    #error "Mira Waveshare snapshot cache needs LV_USE_SNAPSHOT=1"
+  #endif
+#endif
+
+#if defined(MIRA_TARGET_WAVESHARE_43C)
   #if LVGL_VERSION_MAJOR != 8 || LVGL_VERSION_MINOR != 4
     #error "Mira Waveshare requires the official Waveshare LVGL 8.4 library"
   #endif
@@ -517,6 +525,9 @@ void MiraPanelUI::handleMqttState(const String& topic, const String& rawPayload)
   _suppressEvents = true;
 
   if (b.type == W_INFO) {
+#if defined(MIRA_TARGET_WAVESHARE_43C)
+    invalidateScrollCache((uint8_t)idx);
+#endif
     _server.IndexSetInfo(b.id, payload);
     String txt = payload + (b.unit.length() ? " " + b.unit : "");
     if (b.valueLabel) lv_label_set_text(b.valueLabel, txt.c_str());
@@ -698,6 +709,7 @@ void MiraPanelUI::begin() {
     // Track every real movement: LVGL's BEGIN/END can occur within one
     // touch sample, before the following paint is scheduled.
     lv_obj_add_event_cb(_pages[i], onScrollPerfEvent, LV_EVENT_SCROLL, this);
+    lv_obj_add_event_cb(_pages[i], onScrollCacheMove, LV_EVENT_SCROLL, this);
 #endif
   }
 
@@ -936,6 +948,9 @@ void MiraPanelUI::makeNameLabel(lv_obj_t* parent, const String& text) {
 }
 
 void MiraPanelUI::clearDynamicPages() {
+#if defined(MIRA_TARGET_WAVESHARE_43C)
+  resetScrollCache(); // release images and PSRAM BEFORE deleting cards
+#endif
   for (uint8_t i = 0; i < 3; ++i) lv_obj_clean(_pages[i]);
   _bindingCount = 0;
   _homeStandardInfoTotal = 0;
@@ -2261,6 +2276,10 @@ void MiraPanelUI::buildSettingsPage() {
 
 void MiraPanelUI::applyTheme() {
   if (!_screen) return;
+#if defined(MIRA_TARGET_WAVESHARE_43C)
+  setScrollCacheActive(false);
+  invalidateAllScrollCaches();
+#endif
 
   const lv_color_t grad = (_theme == THEME_MIRA) ? lv_color_hex(0x0A2134) :
                           (_theme == THEME_GLASS) ? lv_color_hex(0x0B293D) : colorBg();
@@ -2499,6 +2518,9 @@ void MiraPanelUI::setNavActive(uint8_t index) {
 
 void MiraPanelUI::showPage(uint8_t index) {
   if (index >= PAGE_COUNT) return;
+#if defined(MIRA_TARGET_WAVESHARE_43C)
+  setScrollCacheActive(false);
+#endif
   for (uint8_t i = 0; i < PAGE_COUNT; ++i) {
     if (i == index) {
       lv_obj_clear_flag(_pages[i], LV_OBJ_FLAG_HIDDEN);
@@ -3072,6 +3094,9 @@ void MiraPanelUI::updateBindingFromServer(uint8_t idx, int eventId) {
   }
 
   if (b.type == W_INFO && eventId == b.id) {
+#if defined(MIRA_TARGET_WAVESHARE_43C)
+    invalidateScrollCache(idx);
+#endif
     String value = _server.IndexGetInfo(b.id);
     String txt = value + (b.unit.length() ? " " + b.unit : "");
     if (b.valueLabel) lv_label_set_text(b.valueLabel, txt.c_str());
