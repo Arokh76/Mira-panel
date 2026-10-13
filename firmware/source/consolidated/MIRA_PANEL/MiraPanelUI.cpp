@@ -159,7 +159,8 @@ static String roundRangeDisplayValue(int value, const String& unit) {
 
 static void makeBulbIcon(lv_obj_t* parent) {
   lv_obj_t* icon = lv_obj_create(parent);
-  lv_obj_set_size(icon, 24, 28);
+  // Navigation only: match the visual footprint of Home and Pages.
+  lv_obj_set_size(icon, 30, 34);
   lv_obj_clear_flag(icon, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_clear_flag(icon, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_bg_opa(icon, LV_OPA_TRANSP, 0);
@@ -168,8 +169,8 @@ static void makeBulbIcon(lv_obj_t* parent) {
   lv_obj_center(icon);
 
   lv_obj_t* head = lv_obj_create(icon);
-  lv_obj_set_size(head, 15, 15);
-  lv_obj_set_pos(head, 4, 1);
+  lv_obj_set_size(head, 19, 19);
+  lv_obj_set_pos(head, 5, 0);
   lv_obj_clear_flag(head, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_radius(head, LV_RADIUS_CIRCLE, 0);
   lv_obj_set_style_bg_color(head, lv_color_hex(0xDCEAF0), 0);
@@ -177,8 +178,8 @@ static void makeBulbIcon(lv_obj_t* parent) {
   lv_obj_set_style_border_width(head, 0, 0);
 
   lv_obj_t* neck = lv_obj_create(icon);
-  lv_obj_set_size(neck, 9, 4);
-  lv_obj_set_pos(neck, 7, 15);
+  lv_obj_set_size(neck, 12, 5);
+  lv_obj_set_pos(neck, 9, 19);
   lv_obj_clear_flag(neck, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_radius(neck, 2, 0);
   lv_obj_set_style_bg_color(neck, lv_color_hex(0xDCEAF0), 0);
@@ -186,8 +187,8 @@ static void makeBulbIcon(lv_obj_t* parent) {
   lv_obj_set_style_border_width(neck, 0, 0);
 
   lv_obj_t* base = lv_obj_create(icon);
-  lv_obj_set_size(base, 7, 4);
-  lv_obj_set_pos(base, 8, 20);
+  lv_obj_set_size(base, 10, 5);
+  lv_obj_set_pos(base, 10, 25);
   lv_obj_clear_flag(base, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_radius(base, 2, 0);
   lv_obj_set_style_bg_color(base, lv_color_hex(0xDCEAF0), 0);
@@ -197,7 +198,7 @@ static void makeBulbIcon(lv_obj_t* parent) {
 
 static void makeThermometerIcon(lv_obj_t* parent) {
   lv_obj_t* icon = lv_obj_create(parent);
-  lv_obj_set_size(icon, 22, 30);
+  lv_obj_set_size(icon, 28, 34);
   lv_obj_clear_flag(icon, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_clear_flag(icon, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_bg_opa(icon, LV_OPA_TRANSP, 0);
@@ -206,8 +207,8 @@ static void makeThermometerIcon(lv_obj_t* parent) {
   lv_obj_center(icon);
 
   lv_obj_t* stem = lv_obj_create(icon);
-  lv_obj_set_size(stem, 7, 20);
-  lv_obj_set_pos(stem, 7, 1);
+  lv_obj_set_size(stem, 9, 23);
+  lv_obj_set_pos(stem, 10, 0);
   lv_obj_clear_flag(stem, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_radius(stem, 4, 0);
   lv_obj_set_style_bg_opa(stem, LV_OPA_TRANSP, 0);
@@ -215,8 +216,8 @@ static void makeThermometerIcon(lv_obj_t* parent) {
   lv_obj_set_style_border_width(stem, 2, 0);
 
   lv_obj_t* bulb = lv_obj_create(icon);
-  lv_obj_set_size(bulb, 12, 12);
-  lv_obj_set_pos(bulb, 4, 17);
+  lv_obj_set_size(bulb, 16, 16);
+  lv_obj_set_pos(bulb, 6, 18);
   lv_obj_clear_flag(bulb, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_radius(bulb, LV_RADIUS_CIRCLE, 0);
   lv_obj_set_style_bg_color(bulb, lv_color_hex(0xDCEAF0), 0);
@@ -729,7 +730,7 @@ void MiraPanelUI::begin() {
   // Draw a clear 2x2 grid; no font icon dependencies on WT32.
   for (uint8_t dot = 0; dot < 4; ++dot) {
     lv_obj_t* square = lv_obj_create(_navPagesButton);
-    lv_obj_set_size(square, 7, 7);
+    lv_obj_set_size(square, 10, 10);
     lv_obj_set_style_radius(square, 2, 0);
     lv_obj_set_style_pad_all(square, 0, 0);
     lv_obj_set_style_border_width(square, 0, 0);
@@ -738,7 +739,7 @@ void MiraPanelUI::begin() {
     lv_obj_clear_flag(square, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(square, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_align(square, LV_ALIGN_CENTER,
-                 (dot % 2) * 10 - 8, (dot / 2) * 10 - 8);
+                 (dot % 2) * 16 - 8, (dot / 2) * 16 - 8);
   }
 
 
@@ -2098,8 +2099,8 @@ void MiraPanelUI::setPagePickerVisible(bool visible) {
   else lv_obj_add_flag(_pagePicker, LV_OBJ_FLAG_HIDDEN);
   if (_navPagesButton) {
     lv_obj_set_style_bg_color(_navPagesButton, colorAccent2(), 0);
-    lv_obj_set_style_bg_opa(_navPagesButton,
-                           visible ? LV_OPA_70 : LV_OPA_TRANSP, 0);
+    // Pages is always a blue navigation anchor, open or closed.
+    lv_obj_set_style_bg_opa(_navPagesButton, LV_OPA_70, 0);
   }
   noteActivity();
 }
@@ -2415,14 +2416,18 @@ void MiraPanelUI::setNavActive(uint8_t index) {
     lv_obj_t* btn = _favoriteButtons[slot];
     if (!btn) continue;
     lv_obj_set_pos(btn, 1 + slot * (MIRA_DISPLAY_WIDTH / NAV_BUTTON_COUNT), 1);
-    bool active = _favoritePages[slot] == index;
+    // Only Accueil gets a blue capsule. Other favorite slots stay flat,
+    // even while their page is selected.
     lv_obj_set_style_bg_color(btn, colorAccent2(), 0);
-    lv_obj_set_style_bg_opa(btn, active ? LV_OPA_30 : LV_OPA_TRANSP, 0);
+    lv_obj_set_style_bg_opa(btn,
+        _favoritePages[slot] == 0 ? LV_OPA_70 : LV_OPA_TRANSP, 0);
   }
   if (_navPagesButton) {
     lv_obj_set_pos(_navPagesButton,
                    1 + FAVORITE_SLOTS * (MIRA_DISPLAY_WIDTH / NAV_BUTTON_COUNT), 1);
     lv_obj_clear_flag(_navPagesButton, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_bg_color(_navPagesButton, colorAccent2(), 0);
+    lv_obj_set_style_bg_opa(_navPagesButton, LV_OPA_70, 0);
   }
   for (uint8_t i = 0; i < PAGE_COUNT; ++i) {
     if (_pagePickerButtons[i]) {
