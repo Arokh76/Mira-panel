@@ -13,6 +13,7 @@
 #include <Update.h>
 #include <esp_heap_caps.h>
 #include <WiFiClientSecure.h>
+#include <Preferences.h>  // persisted Jeedom-controlled navigation
 
 
 #include "MiraPanelServer.h"
@@ -45,9 +46,8 @@ bool ConnexionPerdue = false;
 //Async
 AsyncWebSocketClient* globalClient = NULL;
 IPAddress localIP;
-IPAddress gateway(192, 168, 1, 1);
-IPAddress subnet(255, 255, 0, 0);
-IPAddress param_dns(8, 8, 8, 8);
+// DHCP and manual addresses are now stored per Wi-Fi network.
+static bool miraReadNetworkForm(AsyncWebServerRequest* req, String& err);
 AsyncWebServer server(80);
 AsyncEventSource events("/events");
 String ScanReseaux[10];
@@ -336,6 +336,10 @@ void MiraPanelServer::ServeurDNS() {
           if (p->name() == "pass") SPIFFS_Pass = p->value().c_str();
           if (p->name() == "ip") SPIFFS_IP = p->value().c_str();
         }
+      }
+      String networkError;
+      if (!miraReadNetworkForm(request,networkError)) {
+        request->send(400,"text/plain",networkError);return;
       }
       if (SPIFFS_EnregistrementReseau()) {
         if (ModeAP == false) {
@@ -1472,6 +1476,10 @@ void MiraPanelServer::ServeurStation() {
             if (p->name() == "ip") SPIFFS_IP = p->value().c_str();
           }
         }
+        String networkError;
+        if (!miraReadNetworkForm(request,networkError)) {
+          request->send(400,"text/plain",networkError);return;
+        }
         if (SPIFFS_EnregistrementReseau()) {
           if (ModeAP == false) {
             request->send_P(200, "text/html", Page_Index, RetourVariable);
@@ -1500,6 +1508,10 @@ void MiraPanelServer::ServeurStation() {
             if (p->name() == "pass") SPIFFS_Pass = p->value().c_str();
             if (p->name() == "ip") SPIFFS_IP = p->value().c_str();
           }
+        }
+        String networkError;
+        if (!miraReadNetworkForm(request,networkError)) {
+          request->send(400,"text/plain",networkError);return;
         }
         if (SPIFFS_UpdateReseau()) {
           request->send_P(200, "text/html", Page_ReseauxEnreg, RetourVariable);
@@ -2686,6 +2698,72 @@ void MiraPanelServer::ServeurStation() {
     if (NB_List_lvgl == 0) NB_List_lvgl = 1;
     SaveListLVGL();
     request->send(200, "text/plain", "OK");
+  });
+
+  // Dedicated authenticated navigation endpoint; no /programui/reboot.
+  server.on("/navfavorites", HTTP_POST, [](AsyncWebServerRequest* request) {
+    if (!request->hasParam("key", true) ||
+        request->getParam("key", true)->value() != Uncrypt_Pass) {
+      request->send(403, "text/plain", "Cle invalide"); return;
+    }
+    if (!request->hasParam("json", true)) {
+      request->send(400, "text/plain", "Favoris absents"); return;
+    }
+    DynamicJsonDocument doc(256);
+    if (deserializeJson(doc, request->getParam("json", true)->value()) ||
+        !doc["favorites"].is<JsonArray>() || doc["favorites"].size() != 3) {
+      request->send(400, "text/plain", "Format favoris invalide"); return;
+    }
+    uint8_t favorites[3];
+    JsonArray input = doc["favorites"].as<JsonArray>();
+    for (uint8_t i = 0; i < 3; ++i) {
+      JsonVariant v = input[i];
+      if (!v.is<int>() && !v.is<unsigned int>()) {
+        request->send(400, "text/plain", "Favori non numerique"); return;
+      }
+      int page = v.as<int>();
+      if (page != 255 && (page < 0 || page > 3)) {
+        request->send(400, "text/plain", "Page favorite invalide"); return;
+      }
+      for (uint8_t j = 0; j < i; ++j) {
+        if (page != 255 && page == favorites[j]) {
+          request->send(400, "text/plain", "Favoris dupliques"); return;
+        }
+      }
+      favorites[i] = (uint8_t)page;
+    }
+    Preferences prefs;
+    if (!prefs.begin("miraui", false)) {
+      request->send(503, "text/plain", "NVS indisponible"); return;
+    }
+    bool stored = true;
+    for (uint8_t i = 0; i < 3; ++i) {
+      char key[8]; snprintf(key, sizeof(key), "fav%u", i);
+      if (prefs.putUChar(key, favorites[i]) != 1) stored = false;
+    }
+    prefs.end();
+    request->send(stored ? 200 : 503, "text/plain",
+                  stored ? "OK" : "Ecriture favoris echouee");
+  });
+
+  server.on("/navfavorites", HTTP_GET, [](AsyncWebServerRequest* request) {
+    if (!request->hasParam("key") ||
+        request->getParam("key")->value() != Uncrypt_Pass) {
+      request->send(403, "text/plain", "Cle invalide"); return;
+    }
+    Preferences prefs;
+    if (!prefs.begin("miraui", true)) {
+      request->send(503, "text/plain", "NVS indisponible"); return;
+    }
+    DynamicJsonDocument response(128);
+    JsonArray favorites = response.createNestedArray("favorites");
+    for (uint8_t i = 0; i < 3; ++i) {
+      char key[8]; snprintf(key, sizeof(key), "fav%u", i);
+      favorites.add(prefs.getUChar(key, i));
+    }
+    prefs.end();
+    String body; serializeJson(response, body);
+    request->send(200, "application/json", body);
   });
 
   server.on("/displayinfo", HTTP_GET, [](AsyncWebServerRequest* request) {
@@ -3931,6 +4009,111 @@ bool MiraPanelServer::initPA() {
   return true;
 }
 
+
+static String miraFormValue(AsyncWebServerRequest* req, const char* key,
+                             const String& fallback = "") {
+  return req->hasParam(key, true) ? req->getParam(key, true)->value() : fallback;
+}
+static bool miraValidIP(const String& v) {
+  IPAddress a;
+  return a.fromString(v) && a[0] > 0 && a[0] < 224 && a[0] != 127;
+}
+static bool miraValidMask(const String& v) {
+  IPAddress a;
+  if (!a.fromString(v)) return false;
+  uint32_t n = ((uint32_t)a[0]<<24) | ((uint32_t)a[1]<<16) |
+               ((uint32_t)a[2]<<8) | a[3];
+  if (!n || n == 0xFFFFFFFFUL) return false;
+  uint32_t inv = ~n;
+  return (inv & (inv + 1U)) == 0;
+}
+static bool miraSameSubnet(const IPAddress& a,const IPAddress& b,const IPAddress& m) {
+  for (int i=0;i<4;i++) if ((a[i]&m[i])!=(b[i]&m[i])) return false;
+  return true;
+}
+static String miraWifiMode(JsonVariantConst cfg) {
+  String m = cfg["ip_mode"] | "";
+  if (m != "auto" && m != "fixed_auto" && m != "manual") {
+    String ip = cfg["ip"] | "";
+    m = (!ip.length() || ip == "Auto" || ip == "null") ? "auto" : "fixed_auto";
+  }
+  return m;
+}
+static bool miraReadNetworkForm(AsyncWebServerRequest* req, String& err) {
+  String ip = miraFormValue(req,"ip","Auto"); ip.trim();
+  String mode = miraFormValue(req,"ip_mode");
+  if (!mode.length()) mode=(!ip.length() || ip=="Auto") ? "auto":"fixed_auto";
+  if (mode!="auto" && mode!="fixed_auto" && mode!="manual") {
+    err="Mode IP invalide"; return false;
+  }
+  String mask=miraFormValue(req,"mask"),gw=miraFormValue(req,"gateway"),
+         dns=miraFormValue(req,"dns1"),dns2=miraFormValue(req,"dns2");
+  mask.trim();gw.trim();dns.trim();dns2.trim();
+  if (mode!="auto" && !miraValidIP(ip)) {
+    err="Adresse IPv4 invalide";return false;
+  }
+  if (mode=="manual") {
+    if(!miraValidMask(mask) || !miraValidIP(gw) || !miraValidIP(dns) ||
+       (dns2.length()&&!miraValidIP(dns2))) {
+      err="Masque, passerelle ou DNS invalide"; return false;
+    }
+    IPAddress ia,ga,ma;
+    ia.fromString(ip);ga.fromString(gw);ma.fromString(mask);
+    if (!miraSameSubnet(ia,ga,ma) || ia==ga) {
+      err="IP et passerelle doivent etre dans le meme reseau et differentes";
+      return false;
+    }
+  } else { mask="";gw="";dns="";dns2=""; }
+  SPIFFS_IP_Mode=mode;SPIFFS_IP=(mode=="auto")?"Auto":ip;
+  SPIFFS_Mask=mask;SPIFFS_Gateway=gw;SPIFFS_DNS1=dns;SPIFFS_DNS2=dns2;
+  return true;
+}
+static void miraUseDhcp() {
+  IPAddress z(0,0,0,0);
+  WiFi.config(z,z,z,z,z);
+}
+static void miraPrepareWifiProfile(JsonVariantConst cfg) {
+  WiFi.mode(WIFI_STA);
+  if (miraWifiMode(cfg)=="manual") {
+    String a=cfg["ip"]|"", g=cfg["gateway"]|"", m=cfg["mask"]|"",
+           d=cfg["dns1"]|"", d2=cfg["dns2"]|"";
+    if (miraValidIP(a)&&miraValidIP(g)&&miraValidMask(m)&&miraValidIP(d)) {
+      IPAddress ip,gw,mask,dns,dns2(0,0,0,0);
+      ip.fromString(a);gw.fromString(g);mask.fromString(m);dns.fromString(d);
+      if(miraValidIP(d2))dns2.fromString(d2);
+      if (miraSameSubnet(ip,gw,mask)&&ip!=gw&&
+          WiFi.config(ip,gw,mask,dns,dns2)) {
+        Serial.printf("[MIRA][WIFI] Statique : %s, DNS %s\n",
+                      ip.toString().c_str(), dns.toString().c_str());
+        return;
+      }
+    }
+    Serial.println("[MIRA][WIFI] Parametres statiques invalides, DHCP");
+  }
+  miraUseDhcp();
+}
+static void miraFinishWifiProfile(JsonVariantConst cfg) {
+  if(miraWifiMode(cfg)!="fixed_auto")return;
+  String raw=cfg["ip"]|"";
+  IPAddress chosen;
+  if(!miraValidIP(raw)||!chosen.fromString(raw))return;
+  IPAddress gateway=WiFi.gatewayIP(),mask=WiFi.subnetMask();
+  IPAddress dns1=WiFi.dnsIP(0),dns2=WiFi.dnsIP(1);
+  if(!miraValidMask(mask.toString())||
+     !miraSameSubnet(chosen,gateway,mask)||
+     !miraSameSubnet(chosen,WiFi.localIP(),mask)||chosen==gateway) {
+    Serial.println("[MIRA][WIFI] IP hors reseau DHCP : DHCP conserve");
+    return;
+  }
+  if(chosen==WiFi.localIP())return;
+  if(!WiFi.config(chosen,gateway,mask,dns1,dns2)) {
+    Serial.println("[MIRA][WIFI] Echec IP fixe : retour DHCP");
+    miraUseDhcp();return;
+  }
+  Serial.printf("[MIRA][WIFI] IP fixe %s, options DHCP conservees\n",
+                chosen.toString().c_str());
+}
+
 bool MiraPanelServer::initWiFi() {
   if (_Debug == true) Serial.println(F("[MIRA] Initialisation du Wi-Fi"));
 
@@ -3938,18 +4121,6 @@ bool MiraPanelServer::initWiFi() {
     return false;
   }
   WiFi.setTxPower(WIFI_POWER_19_5dBm);
-  if (SPIFFS_IP != "Auto") {
-    if (SPIFFS_IP != "" && SPIFFS_IP != "null") {
-      String StringIP = SPIFFS_IP;
-      IPAddress localIP;
-      WiFi.mode(WIFI_STA);
-      localIP.fromString(StringIP.c_str());
-      if (!WiFi.config(localIP, gateway, subnet, param_dns)) {
-        if (_Debug == true) Serial.println(F("[MIRA] Erreur de configuration Wi-Fi"));
-        return false;
-      }
-    }
-  }
 
 
   JsonArray reseaux = SPIFFS_Config_Reseau["reseau"];
@@ -3961,11 +4132,15 @@ bool MiraPanelServer::initWiFi() {
         if (SSIDpar == ScanReseaux[scan]) {
           String PASSpar = SPIFFS_Uncrypt(SPIFFS_Config_Reseau["reseau"][par]["pass"]);
 
+          miraPrepareWifiProfile(SPIFFS_Config_Reseau["reseau"][par]);
+
           WiFi.begin(SSIDpar.c_str(), PASSpar.c_str());
           if (_Debug == true) Serial.print(F("[MIRA] M2: Tentative de connexion a : "));
           if (_Debug == true) Serial.println(SSIDpar);
 
           if (WiFiConnect()) {
+
+            miraFinishWifiProfile(SPIFFS_Config_Reseau["reseau"][par]);
             if (_Debug == true) Serial.print(F("[MIRA] M2: Connexion reussie a : "));
             if (_Debug == true) Serial.println(SSIDpar);
             if (_Debug == true) Serial.print(F("[MIRA] M2: Adresse IP: "));
@@ -3989,11 +4164,15 @@ bool MiraPanelServer::initWiFi() {
     String SSID = SPIFFS_Config_Reseau["reseau"][i]["ssid"];
     String PASS = SPIFFS_Uncrypt(SPIFFS_Config_Reseau["reseau"][i]["pass"]);
 
+    miraPrepareWifiProfile(SPIFFS_Config_Reseau["reseau"][i]);
+
     WiFi.begin(SSID.c_str(), PASS.c_str());
     if (_Debug == true) Serial.print(F("[MIRA] Tentative de connexion a : "));
     if (_Debug == true) Serial.println(SSID);
 
     if (WiFiConnect()) {
+
+      miraFinishWifiProfile(SPIFFS_Config_Reseau["reseau"][i]);
       if (_Debug == true) Serial.print(F("[MIRA] Connexion reussie a : "));
       if (_Debug == true) Serial.println(SSID);
       if (_Debug == true) Serial.print(F("[MIRA] Adresse IP: "));
@@ -4021,17 +4200,6 @@ bool MiraPanelServer::ReInitWiFi() {
     return false;
   }
   WiFi.setTxPower(WIFI_POWER_19_5dBm);
-  if (SPIFFS_IP != "Auto") {
-    if (SPIFFS_IP != "" && SPIFFS_IP != "null") {
-      String StringIP = SPIFFS_IP;
-      IPAddress localIP;
-      localIP.fromString(StringIP.c_str());
-      if (!WiFi.config(localIP, gateway, subnet, param_dns)) {
-        if (_Debug == true) Serial.println(F("[MIRA] Erreur de configuration Wi-Fi"));
-        return false;
-      }
-    }
-  }
 
 
   JsonArray reseaux = SPIFFS_Config_Reseau["reseau"];
@@ -4043,11 +4211,15 @@ bool MiraPanelServer::ReInitWiFi() {
         if (SSIDpar == ScanReseaux[scan]) {
           String PASSpar = SPIFFS_Uncrypt(SPIFFS_Config_Reseau["reseau"][par]["pass"]);
 
+          miraPrepareWifiProfile(SPIFFS_Config_Reseau["reseau"][par]);
+
           WiFi.begin(SSIDpar.c_str(), PASSpar.c_str());
           if (_Debug == true) Serial.print(F("[MIRA] M2: Tentative de connexion a : "));
           if (_Debug == true) Serial.println(SSIDpar);
 
           if (WiFiConnect()) {
+
+            miraFinishWifiProfile(SPIFFS_Config_Reseau["reseau"][par]);
             if (_Debug == true) Serial.print(F("[MIRA] M2: Connexion reussie a : "));
             if (_Debug == true) Serial.println(SSIDpar);
             if (_Debug == true) Serial.print(F("[MIRA] M2: Adresse IP: "));
@@ -4071,11 +4243,15 @@ bool MiraPanelServer::ReInitWiFi() {
     String SSID = SPIFFS_Config_Reseau["reseau"][i]["ssid"];
     String PASS = SPIFFS_Uncrypt(SPIFFS_Config_Reseau["reseau"][i]["pass"]);
 
+    miraPrepareWifiProfile(SPIFFS_Config_Reseau["reseau"][i]);
+
     WiFi.begin(SSID.c_str(), PASS.c_str());
     if (_Debug == true) Serial.print(F("[MIRA] Tentative de connexion a : "));
     if (_Debug == true) Serial.println(SSID);
 
     if (WiFiConnect()) {
+
+      miraFinishWifiProfile(SPIFFS_Config_Reseau["reseau"][i]);
       if (_Debug == true) Serial.print(F("[MIRA] Connexion reussie a : "));
       if (_Debug == true) Serial.println(SSID);
       if (_Debug == true) Serial.print(F("[MIRA] Adresse IP: "));
@@ -4197,6 +4373,34 @@ String MiraPanelServer::RetourVariable(String var) {
         break;
       }
     }
+  }
+
+  // Network form placeholders (new profile and editing an existing SSID).
+  if (var == "IPMODE") return SPIFFS_IP_Mode.length() ? SPIFFS_IP_Mode : "auto";
+  if (var == "MASK") return SPIFFS_Mask;
+  if (var == "GATEWAY") return SPIFFS_Gateway;
+  if (var == "DNS1") return SPIFFS_DNS1;
+  if (var == "DNS2") return SPIFFS_DNS2;
+  if (var == "WIFIACTIVE") {
+    if (WiFi.status() != WL_CONNECTED) return "Wi-Fi non connecte";
+    return String("IP ") + WiFi.localIP().toString() +
+           " | Masque " + WiFi.subnetMask().toString() +
+           " | Passerelle " + WiFi.gatewayIP().toString() +
+           " | DNS " + WiFi.dnsIP(0).toString() +
+           " / " + WiFi.dnsIP(1).toString();
+  }
+  if (var == "IPMODEUPDATE" || var == "MASKUPDATE" ||
+      var == "GATEWAYUPDATE" || var == "DNS1UPDATE" || var == "DNS2UPDATE") {
+    JsonArray nets = SPIFFS_Config_Reseau["reseau"];
+    for (JsonVariant network : nets) {
+      if (network["id"].as<String>() != IDNetwork) continue;
+      if (var == "IPMODEUPDATE") return miraWifiMode(network);
+      String key = var == "MASKUPDATE" ? "mask" :
+                   var == "GATEWAYUPDATE" ? "gateway" :
+                   var == "DNS1UPDATE" ? "dns1" : "dns2";
+      return network[key] | "";
+    }
+    return var == "IPMODEUPDATE" ? "auto" : "";
   }
 
   if (var == "IPUPDATE") {
