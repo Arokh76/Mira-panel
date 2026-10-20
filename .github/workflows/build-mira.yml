@@ -21,6 +21,8 @@ permissions:
 
 jobs:
   build:
+    # Firmware sources/artifacts must not be exported from a public repository.
+    if: github.event.repository.private
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
