@@ -13,6 +13,14 @@ Le plugin Jeedom est publié automatiquement sur la branche indépendante **`bet
 
 Le workflow rejette les archives mal structurées ou dont l'identifiant est différent de `mira`. Il ne modifie ni les sources ni les manifestes du firmware.
 
+## Canal stable : publication uniquement après validation
+
+- `beta` : canal de test, alimenté automatiquement par le workflow lors des nouveaux ZIP.
+- `stable` : canal validé, **non alimenté automatiquement**. Ne pas utiliser comme source Jeedom avant la première publication d'une version validée.
+- Après validation par le testeur, promouvoir explicitement sur `stable` l'arborescence du **commit précis** testé sur `beta`. Ne pas modifier le plugin pendant cette promotion.
+- Pour une installation stable Jeedom, garder le même `ID logique : mira`, le dépôt `Arokh76/Mira-panel` et choisir `Branche : stable`.
+- Les testeurs qui utilisent `beta` ne basculent pas automatiquement sur `stable`.
+
 ## Installation sur Jeedom
 
 Activer la source GitHub dans `Réglages → Système → Configuration → Mises à jour/Market → Github`.
