@@ -28,10 +28,6 @@ lv_color_t MiraPanelUI::_buf2[MIRA_DISPLAY_WIDTH * MIRA_DRAW_BUFFER_LINES];
 #endif
 MiraDisplay* MiraPanelUI::_displayForLvgl = nullptr;
 MiraPanelUI* MiraPanelUI::_uiForLvgl = nullptr;
-#if defined(MIRA_TARGET_WAVESHARE_43C)
-void (*MiraPanelUI::_originalWsFlushCb)(lv_disp_drv_t*, const lv_area_t*, lv_color_t*) = nullptr;
-uint32_t MiraPanelUI::_wsFlushPhaseMicros = 0;
-#endif
 
 static const lv_color_t COL_TEXT    = lv_color_hex(0xF3F6F7);
 static const lv_color_t COL_MUTED   = lv_color_hex(0xA8B2B8);
@@ -789,7 +785,6 @@ void MiraPanelUI::begin() {
 #if defined(MIRA_TARGET_WAVESHARE_43C)
     // Track every real movement: LVGL's BEGIN/END can occur within one
     // touch sample, before the following paint is scheduled.
-    lv_obj_add_event_cb(_pages[i], onScrollPerfEvent, LV_EVENT_SCROLL, this);
     lv_obj_add_event_cb(_pages[i], onScrollCacheMove, LV_EVENT_SCROLL, this);
 #endif
   }
@@ -856,38 +851,10 @@ void MiraPanelUI::begin() {
 
 
   buildSettingsPage();
-  buildEnergyPreviewPage();
   buildPagePicker();
   refreshFavoriteNav();
 
 #if defined(MIRA_TARGET_WAVESHARE_43C)
-  // Temporary on-screen results after each scroll. The diagnostics overlay
-  // is hidden while moving; it never intercepts touches or covers the
-  // navigation row. A photograph after scrolling captures the measurements.
-  _scrollPerfPanel = lv_obj_create(_screen);
-  lv_obj_set_size(_scrollPerfPanel, 748, 72);
-  lv_obj_align(_scrollPerfPanel, LV_ALIGN_TOP_MID, 0, 6);
-  lv_obj_clear_flag(_scrollPerfPanel, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_clear_flag(_scrollPerfPanel, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_set_style_radius(_scrollPerfPanel, 8, 0);
-  lv_obj_set_style_border_width(_scrollPerfPanel, 1, 0);
-  lv_obj_set_style_border_color(_scrollPerfPanel, colorAccent(), 0);
-  lv_obj_set_style_bg_color(_scrollPerfPanel, lv_color_hex(0x071421), 0);
-  lv_obj_set_style_bg_opa(_scrollPerfPanel, LV_OPA_COVER, 0);
-  lv_obj_set_style_pad_all(_scrollPerfPanel, 2, 0);
-  _scrollPerfLabel = lv_label_create(_scrollPerfPanel);
-  lv_obj_set_style_text_color(_scrollPerfLabel, lv_color_white(), 0);
-  lv_obj_set_style_text_font(_scrollPerfLabel, &mira_font_fr_14, 0);
-  lv_label_set_text(_scrollPerfLabel, "Diagnostic de defilement : faites glisser la page");
-  lv_obj_center(_scrollPerfLabel);
-  lv_obj_add_flag(_scrollPerfPanel, LV_OBJ_FLAG_HIDDEN);
-  lv_disp_t* diagnosticDisplay = lv_disp_get_default();
-  if (diagnosticDisplay && diagnosticDisplay->driver) {
-    diagnosticDisplay->driver->monitor_cb = onDisplayPerfMonitor;
-    _originalWsFlushCb = diagnosticDisplay->driver->flush_cb;
-    diagnosticDisplay->driver->render_start_cb = onDisplayRenderStart;
-    diagnosticDisplay->driver->flush_cb = onDisplayFlushTimed;
-  }
 #endif
 
   // Run touch navigation on LVGL's task, without waiting for Arduino's loop.
@@ -2124,65 +2091,6 @@ void MiraPanelUI::createUnsupported(uint8_t idx, const String& originalType) {
 }
 
 
-void MiraPanelUI::buildEnergyPreviewPage() {
-  // The fifth page is navigation-only. Never register actions or emit
-  // placeholder readings to Jeedom; the next iteration can add real widgets.
-  lv_obj_t* page = _pages[4];
-  lv_obj_clean(page);
-  lv_obj_t* card = lv_obj_create(page);
-  const bool wide = MIRA_DISPLAY_WIDTH >= 800;
-  lv_obj_set_size(card, wide ? 650 : 304, wide ? 318 : 340);
-  lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_set_style_bg_color(card, colorPanel(), 0);
-  lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
-  lv_obj_set_style_border_color(card, colorBorder(), 0);
-  lv_obj_set_style_border_width(card, 1, 0);
-  lv_obj_set_style_radius(card, 14, 0);
-  lv_obj_set_style_pad_all(card, 0, 0);
-
-  lv_obj_t* title = lv_label_create(card);
-  lv_label_set_text(title, "Énergie");
-  lv_obj_set_style_text_color(title, COL_TEXT, 0);
-  lv_obj_set_style_text_font(title, &mira_font_fr_16, 0);
-  lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 24);
-
-  lv_obj_t* notice = lv_label_create(card);
-  lv_label_set_text(notice, "PAGE DE DÉMONSTRATION");
-  lv_obj_set_style_text_color(notice, colorAccent(), 0);
-  lv_obj_set_style_text_font(notice, &mira_font_fr_12, 0);
-  lv_obj_align(notice, LV_ALIGN_TOP_MID, 0, 56);
-
-  lv_obj_t* explanation = lv_label_create(card);
-  lv_obj_set_width(explanation, wide ? 570 : 256);
-  lv_label_set_long_mode(explanation, LV_LABEL_LONG_WRAP);
-  lv_label_set_text(explanation,
-      "Une quatrième catégorie à tester, sans commandes Jeedom.\n"
-      "Pour revenir, utilise la barre du bas ou le menu Pages.");
-  lv_obj_set_style_text_font(explanation, &mira_font_fr_14, 0);
-  lv_obj_set_style_text_color(explanation, COL_MUTED, 0);
-  lv_obj_set_style_text_align(explanation, LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_align(explanation, LV_ALIGN_TOP_MID, 0, 91);
-
-  lv_obj_t* divider = lv_obj_create(card);
-  lv_obj_set_size(divider, wide ? 480 : 245, 1);
-  lv_obj_set_style_bg_color(divider, colorBorder(), 0);
-  lv_obj_set_style_bg_opa(divider, LV_OPA_COVER, 0);
-  lv_obj_set_style_border_width(divider, 0, 0);
-  lv_obj_clear_flag(divider, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_align(divider, LV_ALIGN_TOP_MID, 0, wide ? 166 : 187);
-
-  const char* future[3] = {"Production solaire", "Consommation", "Batteries"};
-  for (uint8_t i = 0; i < 3; ++i) {
-    lv_obj_t* item = lv_label_create(card);
-    lv_label_set_text(item, future[i]);
-    lv_obj_set_width(item, wide ? 500 : 256);
-    lv_obj_set_style_text_color(item, COL_MUTED, 0);
-    lv_obj_set_style_text_font(item, &mira_font_fr_14, 0);
-    lv_obj_set_style_text_align(item, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(item, LV_ALIGN_TOP_MID, 0, (wide ? 190 : 212) + i * 31);
-  }
-}
-
 void MiraPanelUI::buildPagePicker() {
   // Full-size content overlay, beneath the always-visible nav and sleep layer.
   // It does not change the geometry or LVGL tree of the existing widgets.
@@ -2198,7 +2106,7 @@ void MiraPanelUI::buildPagePicker() {
 
   _pagePickerCard = lv_obj_create(_pagePicker);
   const bool wide = MIRA_DISPLAY_WIDTH >= 800;
-  lv_obj_set_size(_pagePickerCard, wide ? 460 : 298, 348);
+  lv_obj_set_size(_pagePickerCard, wide ? 460 : 298, 290);
   lv_obj_set_style_radius(_pagePickerCard, 16, 0);
   lv_obj_set_style_bg_color(_pagePickerCard, colorPanel2(), 0);
   lv_obj_set_style_bg_opa(_pagePickerCard, LV_OPA_COVER, 0);
@@ -2215,9 +2123,9 @@ void MiraPanelUI::buildPagePicker() {
   lv_obj_align(heading, LV_ALIGN_TOP_MID, 0, 13);
 
   const char* names[PAGE_COUNT] = {
-    "Accueil", "Lumières", "Températures", "Paramètres", "Énergie (test)"
+    "Accueil", "Lumières", "Températures", "Paramètres"
   };
-  const uint8_t order[PAGE_COUNT] = {0, 1, 2, 4, 3};
+  const uint8_t order[PAGE_COUNT] = {0, 1, 2, 3};
   for (uint8_t row = 0; row < PAGE_COUNT; ++row) {
     uint8_t page = order[row];
     lv_obj_t* btn = lv_btn_create(_pagePickerCard);
@@ -2654,7 +2562,6 @@ void MiraPanelUI::setScrollCacheActive(bool active) {
       lv_obj_add_flag(tile.image, LV_OBJ_FLAG_HIDDEN);
     }
   }
-  if (active) _scrollCachedOnGesture = visualCount;
   if (active && !visualCount) _scrollCacheActive = false;
 }
 
@@ -2675,7 +2582,6 @@ void MiraPanelUI::resetScrollCache() {
   _scrollCacheUsedBytes = 0;
   _scrollCacheLastBuildMs = 0;
   _scrollCacheLastMoveMs = 0;
-  _scrollCachedOnGesture = 0;
 }
 
 void MiraPanelUI::invalidateScrollCache(uint8_t idx) {
@@ -2834,7 +2740,7 @@ void MiraPanelUI::prepareScrollTile(uint8_t idx) {
 }
 
 void MiraPanelUI::serviceScrollCache() {
-  if (!_screen || _scrollCacheActive || _scrollPerfActive || _sleeping) return;
+  if (!_screen || _scrollCacheActive || _sleeping) return;
   const uint32_t now = millis();
   // Never take snapshots on the hot path, during touch or while the
   // display driver is processing successive scroll frames.
@@ -2864,91 +2770,6 @@ void MiraPanelUI::onScrollCacheMove(lv_event_t* e) {
 }
 #endif
 
-#if defined(MIRA_TARGET_WAVESHARE_43C)
-// LVGL invokes render_start_cb after layout and double-buffer synchronization.
-// We start the clock here to isolate object rasterization from the RGB flush.
-void MiraPanelUI::onDisplayRenderStart(lv_disp_drv_t* disp) {
-  (void)disp;
-  _wsFlushPhaseMicros = micros();
-}
-
-// The official Waveshare flush callback does the RGB swap and waits for VSYNC
-// on its own LVGL task. Preserve it exactly; only time its execution.
-void MiraPanelUI::onDisplayFlushTimed(lv_disp_drv_t* disp,
-                                      const lv_area_t* area,
-                                      lv_color_t* color_p) {
-  const uint32_t before = micros();
-  MiraPanelUI* ui = _uiForLvgl;
-  if (ui && ui->_scrollPerfActive && _wsFlushPhaseMicros) {
-    const uint32_t drawUs = before - _wsFlushPhaseMicros;
-    ui->_scrollDrawTimeUs += drawUs;
-    if (drawUs > ui->_scrollDrawMaxUs) ui->_scrollDrawMaxUs = drawUs;
-  }
-  if (_originalWsFlushCb) _originalWsFlushCb(disp, area, color_p);
-  const uint32_t after = micros();
-  _wsFlushPhaseMicros = after;
-  if (ui && ui->_scrollPerfActive) {
-    const uint32_t flushUs = after - before;
-    ui->_scrollFlushTimeUs += flushUs;
-    ui->_scrollFlushCalls++;
-    if (flushUs > ui->_scrollFlushMaxUs) ui->_scrollFlushMaxUs = flushUs;
-  }
-}
-
-// LVGL monitor callback: total refresh duration also includes layout and
-// double-buffer sync work. Do not allocate or log during scroll.
-void MiraPanelUI::onDisplayPerfMonitor(lv_disp_drv_t* disp, uint32_t ms, uint32_t pixels) {
-  (void)disp;
-  MiraPanelUI* ui = _uiForLvgl;
-  if (!ui || !ui->_scrollPerfActive) return;
-  const uint32_t now = millis();
-  if (ui->_scrollPerfFrames && ui->_scrollPerfLastFrameAt) {
-    const uint32_t gap = now - ui->_scrollPerfLastFrameAt;
-    if (gap > ui->_scrollPerfGapMaxMs) ui->_scrollPerfGapMaxMs = gap;
-  }
-  ui->_scrollPerfLastFrameAt = now;
-  ui->_scrollPerfFrames++;
-  ui->_scrollPerfRenderSumMs += ms;
-  ui->_scrollPerfPixelSum += pixels;
-  if (ms > ui->_scrollPerfRenderMaxMs) ui->_scrollPerfRenderMaxMs = ms;
-}
-
-// SCROLL_BEGIN/SCROLL_END are not useful for continuous touch scroll here:
-// LVGL 8 emits them around a single synchronous move. SCROLL events instead
-// fire for every actual position update and give us a reliable source for
-// movement cadence, independent of the display driver monitor callback.
-void MiraPanelUI::onScrollPerfEvent(lv_event_t* e) {
-  MiraPanelUI* ui = static_cast<MiraPanelUI*>(lv_event_get_user_data(e));
-  if (!ui || lv_event_get_code(e) != LV_EVENT_SCROLL) return;
-  const uint32_t now = millis();
-  if (!ui->_scrollPerfActive) {
-    ui->_scrollPerfActive = true;
-    ui->_scrollPerfStartedAt = now;
-    ui->_scrollPerfLastMovementAt = now;
-    ui->_scrollPerfLastFrameAt = 0;
-    ui->_scrollPerfSteps = 0;
-    ui->_scrollPerfStepsMaxGapMs = 0;
-    ui->_scrollPerfFrames = 0;
-    ui->_scrollPerfRenderSumMs = 0;
-    ui->_scrollPerfRenderMaxMs = 0;
-    ui->_scrollPerfGapMaxMs = 0;
-    ui->_scrollPerfPixelSum = 0;
-    ui->_scrollDrawTimeUs = 0;
-    ui->_scrollFlushTimeUs = 0;
-    ui->_scrollFlushMaxUs = 0;
-    ui->_scrollDrawMaxUs = 0;
-    ui->_scrollFlushCalls = 0;
-    if (ui->_scrollPerfPanel) lv_obj_add_flag(ui->_scrollPerfPanel, LV_OBJ_FLAG_HIDDEN);
-  }
-  if (ui->_scrollPerfSteps) {
-    const uint32_t gap = now - ui->_scrollPerfLastMovementAt;
-    if (gap > ui->_scrollPerfStepsMaxGapMs) ui->_scrollPerfStepsMaxGapMs = gap;
-  }
-  ui->_scrollPerfSteps++;
-  ui->_scrollPerfLastMovementAt = now;
-}
-#endif
-
 // LVGL's timer task handles the touch immediately on both display targets.
 void MiraPanelUI::onNavigationTimer(lv_timer_t* timer) {
   (void)timer;
@@ -2962,54 +2783,6 @@ void MiraPanelUI::onNavigationTimer(lv_timer_t* timer) {
     ui->setScrollCacheActive(false);
   ui->serviceScrollCache();
 
-  // Let queued LVGL paint/flush cycles finish AFTER the last movement.
-  // Delayed reporting avoids the 0 FPS bug from the old SCROLL_END callback.
-  if (ui->_scrollPerfActive &&
-      (uint32_t)(millis() - ui->_scrollPerfLastMovementAt) >= 550UL) {
-    ui->_scrollPerfActive = false;
-    const uint32_t movingMs = ui->_scrollPerfLastMovementAt - ui->_scrollPerfStartedAt;
-    const uint32_t duration = movingMs < 100 ? 100 : movingMs;
-    const uint32_t frames = ui->_scrollPerfFrames;
-    const uint32_t steps = ui->_scrollPerfSteps;
-    const uint32_t fps = (frames * 1000UL) / duration;
-    const uint32_t stepHz = (steps * 1000UL) / duration;
-    const uint32_t avgRender = frames ? ui->_scrollPerfRenderSumMs / frames : 0;
-    const uint32_t avgDraw = frames ? ui->_scrollDrawTimeUs / (1000UL * frames) : 0;
-    const uint32_t avgFlush = frames ? ui->_scrollFlushTimeUs / (1000UL * frames) : 0;
-    const uint32_t accounted = avgDraw + avgFlush;
-    const uint32_t avgOther = avgRender > accounted ? avgRender - accounted : 0;
-    if (ui->_scrollPerfLabel && ui->_scrollPerfPanel) {
-      if (frames) {
-        lv_label_set_text_fmt(ui->_scrollPerfLabel,
-            "SCROLL %lu pas / %lu ms | %lu images (~%lu/s) | ecart max %lu ms\n"
-            "Cycle LVGL %lu ms   Dessin %lu ms   Ecran/VSYNC %lu ms   Autre %lu ms\n"
-            "Max dessin %lu ms   Max ecran %lu ms   Cache %lu cartes (%lu Ko)",
-            (unsigned long)steps, (unsigned long)movingMs,
-            (unsigned long)frames, (unsigned long)fps,
-            (unsigned long)ui->_scrollPerfGapMaxMs,
-            (unsigned long)avgRender, (unsigned long)avgDraw,
-            (unsigned long)avgFlush, (unsigned long)avgOther,
-            (unsigned long)(ui->_scrollDrawMaxUs / 1000UL),
-            (unsigned long)(ui->_scrollFlushMaxUs / 1000UL),
-            (unsigned long)ui->_scrollCachedOnGesture,
-            (unsigned long)(ui->_scrollCacheUsedBytes / 1024UL));
-      } else {
-        lv_label_set_text_fmt(ui->_scrollPerfLabel,
-            "SCROLL %lu pas / %lu ms (~%lu/s) - sans rafraichissement mesure",
-            (unsigned long)steps, (unsigned long)movingMs, (unsigned long)stepHz);
-      }
-      lv_obj_center(ui->_scrollPerfLabel);
-      lv_obj_clear_flag(ui->_scrollPerfPanel, LV_OBJ_FLAG_HIDDEN);
-    }
-    Serial.printf("[MIRA][SCROLL] steps=%lu move_ms=%lu frames=%lu fps=%lu avg_cycle_ms=%lu avg_draw_ms=%lu avg_flush_ms=%lu other_ms=%lu max_flush_ms=%lu max_draw_ms=%lu max_frame_gap_ms=%lu\n",
-        (unsigned long)steps, (unsigned long)movingMs,
-        (unsigned long)frames, (unsigned long)fps,
-        (unsigned long)avgRender, (unsigned long)avgDraw,
-        (unsigned long)avgFlush, (unsigned long)avgOther,
-        (unsigned long)(ui->_scrollFlushMaxUs / 1000UL),
-        (unsigned long)(ui->_scrollDrawMaxUs / 1000UL),
-        (unsigned long)ui->_scrollPerfGapMaxMs);
-  }
 #endif
   if (ui->_pendingNavPage >= 0) {
     const uint8_t page = (uint8_t)ui->_pendingNavPage;
