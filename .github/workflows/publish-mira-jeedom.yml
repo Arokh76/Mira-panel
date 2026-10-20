@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: mira-jeedom-beta-publish
+  group: mira-beta-publish
   cancel-in-progress: false
 
 jobs:
@@ -83,11 +83,11 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          if git ls-remote --exit-code --heads origin jeedom-beta >/dev/null; then
-            git fetch origin jeedom-beta:refs/remotes/origin/jeedom-beta
-            git switch -C jeedom-beta origin/jeedom-beta
+          if git ls-remote --exit-code --heads origin beta >/dev/null; then
+            git fetch origin beta:refs/remotes/origin/beta
+            git switch -C beta origin/beta
           else
-            git switch --orphan jeedom-beta
+            git switch --orphan beta
           fi
 
           # Only plugin files belong at this branch's root.
@@ -99,8 +99,8 @@ jobs:
           test -f core/class/mira.class.php
           git add -A
           if git diff --cached --quiet; then
-            echo "No plugin changes; jeedom-beta already up to date"
+            echo "No plugin changes; beta already up to date"
             exit 0
           fi
           git commit -m "Jeedom Mira Panel ${PLUGIN_VERSION}"
-          git push origin HEAD:refs/heads/jeedom-beta
+          git push origin HEAD:refs/heads/beta
