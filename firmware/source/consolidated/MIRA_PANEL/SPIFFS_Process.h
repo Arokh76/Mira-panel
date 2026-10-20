@@ -2,7 +2,7 @@
 #define JSON_CONFIG_Params "/params.json"
 #define JSON_CONFIG_lvgl "/miralvgl.json"
 
-DynamicJsonDocument SPIFFS_Config_Reseau(1024);
+DynamicJsonDocument SPIFFS_Config_Reseau(4096);
 DynamicJsonDocument SPIFFS_Config_Params(32768);
 DynamicJsonDocument SPIFFS_Config_Module(512);
 DynamicJsonDocument SPIFFS_Config_Actions(16384);
@@ -32,6 +32,11 @@ String SPIFFS_ID = "null";
 String SPIFFS_SSID = "null";
 String SPIFFS_Pass = "null";
 String SPIFFS_IP = "null";
+String SPIFFS_IP_Mode = "auto";
+String SPIFFS_Mask = "";
+String SPIFFS_Gateway = "";
+String SPIFFS_DNS1 = "";
+String SPIFFS_DNS2 = "";
 
 String SPIFFS_ADD_Param = "";
 String SPIFFS_ADD_Value = "";
@@ -446,6 +451,12 @@ void SPIFFS_ChargementConfigurationReseau() {
       SPIFFS_SSID = SPIFFS_Config_Reseau["reseau"][DernierReseau]["ssid"].as<String>();
       SPIFFS_Pass = SPIFFS_Uncrypt(SPIFFS_Config_Reseau["reseau"][DernierReseau]["pass"].as<String>());
       SPIFFS_IP = SPIFFS_Config_Reseau["reseau"][DernierReseau]["ip"].as<String>();
+       SPIFFS_IP_Mode = SPIFFS_Config_Reseau["reseau"][DernierReseau]["ip_mode"] | "";
+       if (SPIFFS_IP_Mode.length() == 0) SPIFFS_IP_Mode = (SPIFFS_IP == "Auto" || SPIFFS_IP == "null" || SPIFFS_IP == "") ? "auto" : "fixed_auto";
+       SPIFFS_Mask = SPIFFS_Config_Reseau["reseau"][DernierReseau]["mask"] | "";
+       SPIFFS_Gateway = SPIFFS_Config_Reseau["reseau"][DernierReseau]["gateway"] | "";
+       SPIFFS_DNS1 = SPIFFS_Config_Reseau["reseau"][DernierReseau]["dns1"] | "";
+       SPIFFS_DNS2 = SPIFFS_Config_Reseau["reseau"][DernierReseau]["dns2"] | "";
       Uncrypt_Pass = SPIFFS_Uncrypt(SPIFFS_Config_Reseau["ap"][0]["passcrypt"].as<String>());      
       
     }
@@ -478,6 +489,11 @@ bool SPIFFS_EnregistrementReseau() {
   info["ssid"] = SPIFFS_SSID;
   info["pass"] = cryptPass;
   info["ip"] = SPIFFS_IP;
+  info["ip_mode"] = SPIFFS_IP_Mode;
+  info["mask"] = SPIFFS_Mask;
+  info["gateway"] = SPIFFS_Gateway;
+  info["dns1"] = SPIFFS_DNS1;
+  info["dns2"] = SPIFFS_DNS2;
 
 
   File configFile = SPIFFS.open(JSON_CONFIG_Reseau, "w");
@@ -534,6 +550,11 @@ bool SPIFFS_UpdateReseau() {
       SPIFFS_Config_Reseau["reseau"][i]["ssid"] = SPIFFS_SSID;
       SPIFFS_Config_Reseau["reseau"][i]["pass"] = CryptPass;
       SPIFFS_Config_Reseau["reseau"][i]["ip"] = SPIFFS_IP;
+       SPIFFS_Config_Reseau["reseau"][i]["ip_mode"] = SPIFFS_IP_Mode;
+       SPIFFS_Config_Reseau["reseau"][i]["mask"] = SPIFFS_Mask;
+       SPIFFS_Config_Reseau["reseau"][i]["gateway"] = SPIFFS_Gateway;
+       SPIFFS_Config_Reseau["reseau"][i]["dns1"] = SPIFFS_DNS1;
+       SPIFFS_Config_Reseau["reseau"][i]["dns2"] = SPIFFS_DNS2;
 
       File configFile = SPIFFS.open(JSON_CONFIG_Reseau, "w");
       if (!configFile) {
