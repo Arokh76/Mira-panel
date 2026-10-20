@@ -27,11 +27,15 @@ concurrency:
 
 jobs:
   publish:
+    # Allow publishing only after the firmware repository is private.
     if: >-
+      github.event.repository.private &&
+      (
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_branch == 'main' &&
        github.event.workflow_run.event == 'push')
+      )
     runs-on: ubuntu-latest
     env:
       RELEASE_VERSION: ${{ github.event_name == 'workflow_run' && '0.7.14' || inputs.version }}
