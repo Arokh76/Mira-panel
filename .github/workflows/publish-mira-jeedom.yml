@@ -1,0 +1,106 @@
+name: Publish Mira Jeedom plugin beta
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'jeedom/source/mira.zip'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mira-jeedom-beta-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout firmware repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: true
+
+      - name: Validate and extract Jeedom plugin
+        id: validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import re
+          import stat
+          import zipfile
+
+          archive = pathlib.Path("jeedom/source/mira.zip")
+          if not archive.is_file():
+              raise SystemExit("Missing jeedom/source/mira.zip; add the complete Jeedom plugin archive first")
+          target = pathlib.Path(os.environ["RUNNER_TEMP"]) / "mira-jeedom-dist"
+          target.mkdir(parents=True, exist_ok=True)
+
+          with zipfile.ZipFile(archive) as z:
+              names = z.namelist()
+              mandatory = {
+                  "plugin_info/info.json",
+                  "plugin_info/install.php",
+                  "core/class/mira.class.php",
+              }
+              if not mandatory.issubset(names):
+                  raise SystemExit("Archive does not contain a valid Mira plugin at ZIP root")
+              total_size = sum(info.file_size for info in z.infolist())
+              if total_size > 20 * 1024 * 1024:
+                  raise SystemExit("Archive unexpectedly large")
+              for info in z.infolist():
+                  parts = pathlib.PurePosixPath(info.filename).parts
+                  if not parts or any(part in ("", ".", "..") for part in parts) or info.filename.startswith("/"):
+                      raise SystemExit(f"Unsafe archive path: {info.filename!r}")
+                  if stat.S_ISLNK(info.external_attr >> 16):
+                      raise SystemExit(f"Symbolic link not permitted: {info.filename!r}")
+              metadata = json.loads(z.read("plugin_info/info.json"))
+              if metadata.get("id") != "mira":
+                  raise SystemExit("Jeedom plugin logical ID must be mira")
+              version = str(metadata.get("version", "unversioned"))
+              if not re.fullmatch(r"[0-9A-Za-z._-]{1,80}", version):
+                  raise SystemExit("Invalid version field")
+              z.extractall(target)
+
+          print(f"Validated {len(names)} plugin files; version {version}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"version={version}\n")
+          PY
+
+      - name: Publish the standalone Jeedom source branch
+        shell: bash
+        env:
+          PLUGIN_VERSION: ${{ steps.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git ls-remote --exit-code --heads origin jeedom-beta >/dev/null; then
+            git fetch origin jeedom-beta:refs/remotes/origin/jeedom-beta
+            git switch -C jeedom-beta origin/jeedom-beta
+          else
+            git switch --orphan jeedom-beta
+          fi
+
+          # Only plugin files belong at this branch's root.
+          # First remove all previously tracked content, then untracked files.
+          git rm -rf --ignore-unmatch . >/dev/null || true
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf -- {} +
+          cp -a "$RUNNER_TEMP/mira-jeedom-dist/." .
+          test -f plugin_info/info.json
+          test -f core/class/mira.class.php
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No plugin changes; jeedom-beta already up to date"
+            exit 0
+          fi
+          git commit -m "Jeedom Mira Panel ${PLUGIN_VERSION}"
+          git push origin HEAD:refs/heads/jeedom-beta
