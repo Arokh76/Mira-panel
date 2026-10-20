@@ -40,7 +40,7 @@ private:
   static constexpr uint8_t MAX_BINDINGS = 40;
   static constexpr uint8_t MAX_LIST_ITEMS = 12;
   static constexpr uint8_t MAX_EVENT_CONTEXTS = 96;
-  static constexpr uint8_t PAGE_COUNT = 5;  // 4 existing pages + demo Énergie
+  static constexpr uint8_t PAGE_COUNT = 4;  // Accueil, Lumières, Températures, Paramètres
   static constexpr uint8_t FAVORITE_SLOTS = 3;
   static constexpr uint8_t NAV_BUTTON_COUNT = FAVORITE_SLOTS + 1;  // + Pages
   static constexpr uint8_t NO_FAVORITE = 0xFF;
@@ -141,22 +141,6 @@ private:
   lv_obj_t* _pagePickerButtons[PAGE_COUNT] = {nullptr};
   uint32_t _lastFavoritesPollMs = 0;
 #if defined(MIRA_TARGET_WAVESHARE_43C)
-  // Diagnostic counters used only during an active page scroll.
-  // Collect inside LVGL's own task; never poll or block the display.
-  lv_obj_t* _scrollPerfPanel = nullptr;
-  lv_obj_t* _scrollPerfLabel = nullptr;
-  bool _scrollPerfActive = false;
-  uint32_t _scrollPerfStartedAt = 0;
-  uint32_t _scrollPerfLastMovementAt = 0;
-  uint32_t _scrollPerfLastFrameAt = 0;
-  uint32_t _scrollPerfSteps = 0;
-  uint32_t _scrollPerfStepsMaxGapMs = 0;
-  uint32_t _scrollPerfFrames = 0;
-  uint32_t _scrollPerfRenderSumMs = 0;
-  uint32_t _scrollPerfRenderMaxMs = 0;
-  uint32_t _scrollPerfGapMaxMs = 0;
-  uint32_t _scrollPerfPixelSum = 0;
-
   // Snapshot-only cache for non-interactive INFO cards. The interactive
   // LVGL widgets continue to receive touch events and render normally.
   // Permanent RGB565 opaque images live in PSRAM (1.5 MB max); temporary
@@ -177,13 +161,7 @@ private:
   uint32_t _scrollCacheLastBuildMs = 0;
   uint32_t _scrollCacheLastMoveMs = 0;
   bool _scrollCacheActive = false;
-  uint8_t _scrollCachedOnGesture = 0;
 
-  uint32_t _scrollDrawTimeUs = 0;
-  uint32_t _scrollFlushTimeUs = 0;
-  uint32_t _scrollFlushMaxUs = 0;
-  uint32_t _scrollDrawMaxUs = 0;
-  uint32_t _scrollFlushCalls = 0;
 #endif
   lv_obj_t* _dateTimeLabel = nullptr;
   lv_obj_t* _dateSubLabel = nullptr;
@@ -269,8 +247,6 @@ private:
 
   static void onNavigationTimer(lv_timer_t* timer);
 #if defined(MIRA_TARGET_WAVESHARE_43C)
-  static void onScrollPerfEvent(lv_event_t* e);
-  static void onDisplayPerfMonitor(lv_disp_drv_t* disp, uint32_t ms, uint32_t pixels);
   void resetScrollCache();
   void invalidateScrollCache(uint8_t idx);
   void invalidateAllScrollCaches();
@@ -278,10 +254,6 @@ private:
   void serviceScrollCache();
   void prepareScrollTile(uint8_t idx);
   static void onScrollCacheMove(lv_event_t* e);
-  static void onDisplayRenderStart(lv_disp_drv_t* disp);
-  static void onDisplayFlushTimed(lv_disp_drv_t* disp, const lv_area_t* area, lv_color_t* color_p);
-  static void (*_originalWsFlushCb)(lv_disp_drv_t*, const lv_area_t*, lv_color_t*);
-  static uint32_t _wsFlushPhaseMicros;
 #endif
   static void onNav(lv_event_t* e);
   static void onPagePick(lv_event_t* e);
@@ -317,7 +289,6 @@ private:
   void pollFavorites();
   void setPagePickerVisible(bool visible);
   void buildPagePicker();
-  void buildEnergyPreviewPage();
   void applyTheme();
   void buildSettingsPage();
   void clearDynamicPages();
