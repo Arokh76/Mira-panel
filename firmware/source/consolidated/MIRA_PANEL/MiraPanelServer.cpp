@@ -46,9 +46,8 @@ bool ConnexionPerdue = false;
 //Async
 AsyncWebSocketClient* globalClient = NULL;
 IPAddress localIP;
-IPAddress gateway(192, 168, 1, 1);
-IPAddress subnet(255, 255, 0, 0);
-IPAddress param_dns(8, 8, 8, 8);
+// DHCP and manual addresses are now stored per Wi-Fi network.
+static bool miraReadNetworkForm(AsyncWebServerRequest* req, String& err);
 AsyncWebServer server(80);
 AsyncEventSource events("/events");
 String ScanReseaux[10];
