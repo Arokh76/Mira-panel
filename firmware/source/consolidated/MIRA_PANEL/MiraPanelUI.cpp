@@ -2449,29 +2449,6 @@ void MiraPanelUI::refreshFavoriteNav() {
       else makeThermometerIcon(btn);
       continue; // the original pictograms are already centered
     }
-    if (page == 4) {
-      // Inset all stroke endpoints: 0.7.4 clipped those at the
-      // LVGL line object boundaries on both screen profiles.
-      static const lv_point_t BOLT_SMALL[7] = {
-        {10, 3}, {5, 13}, {10, 13}, {7, 22},
-        {16, 9}, {12, 9}, {13, 3}
-      };
-      static const lv_point_t BOLT_WIDE[7] = {
-        {13, 3}, {6, 15}, {12, 15}, {9, 27},
-        {22, 10}, {15, 10}, {17, 3}
-      };
-      const bool wideIcon = MIRA_DISPLAY_WIDTH >= 800;
-      lv_obj_t* bolt = lv_line_create(btn);
-      lv_line_set_points(bolt, wideIcon ? BOLT_WIDE : BOLT_SMALL, 7);
-      lv_obj_set_size(bolt, wideIcon ? 26 : 20, wideIcon ? 31 : 25);
-      lv_obj_set_style_line_color(bolt, colorAccent(), LV_PART_MAIN);
-      lv_obj_set_style_line_width(bolt, wideIcon ? 3 : 2, LV_PART_MAIN);
-      lv_obj_set_style_line_rounded(bolt, true, LV_PART_MAIN);
-      lv_obj_clear_flag(bolt, LV_OBJ_FLAG_CLICKABLE);
-      lv_obj_center(bolt);
-      continue;
-    }
-
     lv_obj_t* glyph = lv_label_create(btn);
     lv_label_set_text(glyph, page == 0 ? LV_SYMBOL_HOME :
                           page == 3 ? LV_SYMBOL_SETTINGS : LV_SYMBOL_PLUS);
