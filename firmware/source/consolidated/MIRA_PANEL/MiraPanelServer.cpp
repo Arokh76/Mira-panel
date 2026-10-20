@@ -4376,6 +4376,34 @@ String MiraPanelServer::RetourVariable(String var) {
     }
   }
 
+  // Network form placeholders (new profile and editing an existing SSID).
+  if (var == "IPMODE") return SPIFFS_IP_Mode.length() ? SPIFFS_IP_Mode : "auto";
+  if (var == "MASK") return SPIFFS_Mask;
+  if (var == "GATEWAY") return SPIFFS_Gateway;
+  if (var == "DNS1") return SPIFFS_DNS1;
+  if (var == "DNS2") return SPIFFS_DNS2;
+  if (var == "WIFIACTIVE") {
+    if (WiFi.status() != WL_CONNECTED) return "Wi-Fi non connecte";
+    return String("IP ") + WiFi.localIP().toString() +
+           " | Masque " + WiFi.subnetMask().toString() +
+           " | Passerelle " + WiFi.gatewayIP().toString() +
+           " | DNS " + WiFi.dnsIP(0).toString() +
+           " / " + WiFi.dnsIP(1).toString();
+  }
+  if (var == "IPMODEUPDATE" || var == "MASKUPDATE" ||
+      var == "GATEWAYUPDATE" || var == "DNS1UPDATE" || var == "DNS2UPDATE") {
+    JsonArray nets = SPIFFS_Config_Reseau["reseau"];
+    for (JsonVariant network : nets) {
+      if (network["id"].as<String>() != IDNetwork) continue;
+      if (var == "IPMODEUPDATE") return miraWifiMode(network);
+      String key = var == "MASKUPDATE" ? "mask" :
+                   var == "GATEWAYUPDATE" ? "gateway" :
+                   var == "DNS1UPDATE" ? "dns1" : "dns2";
+      return network[key] | "";
+    }
+    return var == "IPMODEUPDATE" ? "auto" : "";
+  }
+
   if (var == "IPUPDATE") {
     JsonArray Reseaux = SPIFFS_Config_Reseau["reseau"];
     for (int i = 0; i < Reseaux.size(); i++) {
