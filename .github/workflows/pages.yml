@@ -20,7 +20,8 @@ concurrency:
 
 jobs:
   deploy:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    # Do not deploy firmware downloads from a public repository.
+    if: github.event.repository.private && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
