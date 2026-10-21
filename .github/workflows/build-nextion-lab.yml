@@ -33,7 +33,7 @@ jobs:
           arduino-cli lib install "ArduinoJson@6.21.5"
           arduino-cli lib install "AsyncHTTPRequest_Generic@1.13.0"
           arduino-cli lib install "AsyncTCP@1.1.4"
-          arduino-cli lib install "GFX Library for Arduino"
+          arduino-cli lib install "GFX Library for Arduino@1.4.9"
           arduino-cli lib install "Adafruit CST8XX Library"
           arduino-cli lib install "Adafruit PCF8574"
       - name: Prepare isolated universal Mira source for ONX2432G028
