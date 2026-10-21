@@ -1034,8 +1034,15 @@ void MiraPanelUI::buildFromMiraJson() {
 
   JsonArray arr = doc["lvgl"].as<JsonArray>();
   if (arr.size() == 0) {
-    lv_obj_t* card = makeCard(0, 120);
+    // Compact Nextion: explicit label width + wrapping prevents horizontal
+    // scrolling on the empty-program / initial-setup information card.
+    lv_obj_t* card = makeCard(0, MIRA_DISPLAY_WIDTH <= 240 ? 168 : 120);
     lv_obj_t* msg = lv_label_create(card);
+#if defined(MIRA_TARGET_NEXTION_28)
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_width(msg, 196);  // 224px card minus borders and safe padding.
+    lv_label_set_long_mode(msg, LV_LABEL_LONG_WRAP);
+#endif
     if (_server.IsSetupMode()) {
       lv_label_set_text(msg, "Configuration initiale\n\nConnectez-vous au Wi-Fi\nMira Panel");
     } else {
