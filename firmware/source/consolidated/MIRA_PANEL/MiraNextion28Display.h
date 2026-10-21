@@ -30,7 +30,7 @@ public:
     delay(120);
     _expander.digitalWriteByte(0xFF);
     delay(120);
-    if (!_lcd.begin(80000000)) {
+    if (!_lcd.begin(40000000)) {
       Serial.println("[MIRA][NEXTION] LCD ST7789 init failure");
       return false;
     }

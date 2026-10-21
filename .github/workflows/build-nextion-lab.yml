@@ -46,13 +46,13 @@ jobs:
           mkdir -p "$HOME/Arduino/libraries"
           cp build-nextion-src/MIRA_PANEL/lv_conf.h "$HOME/Arduino/libraries/lv_conf.h"
           test -f build-nextion-src/MIRA_PANEL/MiraNextion28Display.h
-          grep -q '0.7.14-nextion-dev1' build-nextion-src/MIRA_PANEL/MIRA_PANEL.ino
+          grep -q '0.7.14-nextion-dev2' build-nextion-src/MIRA_PANEL/MIRA_PANEL.ino
       - name: Compile experimental Nextion 2.8 application (no public OTA)
         shell: bash
         run: |
           set -euo pipefail
           arduino-cli compile \
-            --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,CPUFreq=240,FlashMode=qio,FlashSize=16M,PartitionScheme=default_8MB,PSRAM=opi,UploadMode=default,USBMode=hwcdc" \
+            --fqbn "esp32:esp32:esp32s3:CDCOnBoot=default,CPUFreq=240,FlashMode=dio,FlashFreq=40,FlashSize=16M,PartitionScheme=default_8MB,PSRAM=opi,UploadMode=default,USBMode=hwcdc" \
             --build-property "compiler.cpp.extra_flags=-DMIRA_TARGET_NEXTION_28=1" \
             --output-dir build-nextion-bin \
             build-nextion-src/MIRA_PANEL
@@ -64,13 +64,13 @@ jobs:
           grep -q 'ota_0' /tmp/nextion-partitions.csv
           grep -q 'ota_1' /tmp/nextion-partitions.csv
           grep -q 'spiffs' /tmp/nextion-partitions.csv
-          strings build-nextion-bin/MIRA_PANEL.ino.bin | grep -Fq '0.7.14-nextion-dev1'
+          strings build-nextion-bin/MIRA_PANEL.ino.bin | grep -Fq '0.7.14-nextion-dev2'
       - name: Create factory package (no flashing)
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p package-nextion
-          cp build-nextion-bin/MIRA_PANEL.ino.bin package-nextion/Mira_Panel_Nextion_2.8_0.7.14-nextion-dev1_OTA.bin
+          cp build-nextion-bin/MIRA_PANEL.ino.bin package-nextion/Mira_Panel_Nextion_2.8_0.7.14-nextion-dev2_OTA.bin
           cp build-nextion-bin/MIRA_PANEL.ino.bootloader.bin package-nextion/bootloader.bin
           cp build-nextion-bin/MIRA_PANEL.ino.partitions.bin package-nextion/partitions.bin
           BOOTAPP="$(find "$HOME/.arduino15/packages/esp32" -name boot_app0.bin -type f | head -n1)"
@@ -78,16 +78,18 @@ jobs:
           cp "$BOOTAPP" package-nextion/boot_app0.bin
           python3 -m pip install --quiet esptool
           python3 -m esptool --chip esp32s3 merge-bin \
-            -o package-nextion/Mira_Panel_Nextion_2.8_0.7.14-nextion-dev1_FACTORY.bin \
-            --flash-mode qio --flash-freq 80m --flash-size 16MB \
+            -o package-nextion/Mira_Panel_Nextion_2.8_0.7.14-nextion-dev2_FACTORY.bin \
+            --flash-mode dio --flash-freq 40m --flash-size 16MB \
             0x0000 package-nextion/bootloader.bin \
             0x8000 package-nextion/partitions.bin \
             0xE000 package-nextion/boot_app0.bin \
-            0x10000 package-nextion/Mira_Panel_Nextion_2.8_0.7.14-nextion-dev1_OTA.bin
+            0x10000 package-nextion/Mira_Panel_Nextion_2.8_0.7.14-nextion-dev2_OTA.bin
+          echo "[NEXTION] Verify factory bootloader header:"
+          python3 -m esptool --chip esp32s3 image-info package-nextion/Mira_Panel_Nextion_2.8_0.7.14-nextion-dev2_FACTORY.bin
           sha256sum package-nextion/*.bin > package-nextion/SHA256SUMS.txt
           cat > package-nextion/README.txt <<'EOF'
-          MIRA PANEL 0.7.14-nextion-dev1 — ONX2432G028 ONLY
-          Experimental FIRST BUILD; NOT hardware-validated.
+          MIRA PANEL 0.7.14-nextion-dev2 — ONX2432G028 ONLY
+          Diagnostic build for boot loop: FLASH DIO 40 MHz, UART0 serial logs. NOT hardware-validated.
           Do NOT flash WT32/Waveshare images to the Nextion.
           Universal Mira core, board-specific display/touch bridge.
           No public OTA feed configured for this hardware target.
@@ -96,7 +98,7 @@ jobs:
       - name: Upload isolated preview (14-day retention)
         uses: actions/upload-artifact@v4
         with:
-          name: Mira_Nextion_2.8_0.7.14-nextion-dev1
+          name: Mira_Nextion_2.8_0.7.14-nextion-dev2
           path: package-nextion/
           retention-days: 14
           if-no-files-found: error
