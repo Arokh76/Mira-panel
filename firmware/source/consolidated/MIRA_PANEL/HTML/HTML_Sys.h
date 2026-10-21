@@ -34,7 +34,12 @@ main{max-width:940px;margin:28px auto;padding:0 18px 42px}.hero{margin-bottom:16
     <section class="card"><h2>Informations</h2><p class="hint">État général du panneau.</p><div class="kv"><span>Firmware</span><strong>%VERSION%</strong></div><div class="kv"><span>Adresse IP</span><strong>%LOCALIP%</strong></div><div class="kv"><span>Plateforme</span><strong>)rawliteral"
 MIRA_SYS_PLATFORM_LABEL
 R"rawliteral(</strong></div></section>
-    <section class="card"><h2>Maintenance</h2><p class="hint">Actions locales sur le panneau.</p><div class="buttons"><button class="btn secondary" onclick="window.location.href='/load?nav=reboot'">Redémarrer</button><button class="btn" onclick="window.location.href='/load?nav=rst'">Gestion des données</button></div></section>
+    <section class="card"><h2>Maintenance</h2><p class="hint">Actions locales sur le panneau.</p><div class="buttons"><button class="btn secondary" onclick="window.location.href='/load?nav=reboot'">Redémarrer</button><button class="btn" onclick="window.location.href='/load?nav=rst'">Gestion des données</button>
+)rawliteral"
+#if !defined(MIRA_TARGET_WAVESHARE_43C) && !defined(MIRA_TARGET_NEXTION_28)
+R"rawliteral(<a class="btn secondary" href="/load?nav=gpio">GPIO WT32</a>)rawliteral"
+#endif
+R"rawliteral(</div></section>
 
     <section class="card full">
       <h2>Mise à jour</h2>

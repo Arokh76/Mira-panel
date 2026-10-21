@@ -27,6 +27,10 @@
 #include "HTML/HTML_MQTT.h"
 #include "HTML/HTML_Index.h"
 #include "HTML/HTML_Sys.h"
+#if !defined(MIRA_TARGET_WAVESHARE_43C) && !defined(MIRA_TARGET_NEXTION_28)
+#include "HTML/HTML_GPIO.h"
+#include "MiraWT32Gpio.h"
+#endif
 #include "HTML/HTML_ReseauxEnreg.h"
 #include "HTML/HTML_Message.h"
 #include "HTML/HTML_ConfigAP.h"
@@ -497,6 +501,66 @@ static void miraObserveNavigation(const char* page) {
 }
 
 void MiraPanelServer::ServeurStation() {
+#if !defined(MIRA_TARGET_WAVESHARE_43C) && !defined(MIRA_TARGET_NEXTION_28)
+  MiraWT32GPIO::begin();
+  auto miraGpioAuthorize = [](AsyncWebServerRequest* request) -> bool {
+    char pass[50]; Uncrypt_Pass.toCharArray(pass, sizeof(pass));
+    if (!request->authenticate(Ident_ID, pass)) {
+      request->requestAuthentication(); return false;
+    }
+    return true;
+  };
+  server.on("/gpio/state", HTTP_GET, [miraGpioAuthorize](AsyncWebServerRequest* request) {
+    if (!miraGpioAuthorize(request)) return;
+    AsyncWebServerResponse* response =
+        request->beginResponse(200, "application/json", MiraWT32GPIO::stateJson());
+    response->addHeader("Cache-Control", "no-store");
+    request->send(response);
+  });
+  server.on("/gpio/config", HTTP_POST, [miraGpioAuthorize](AsyncWebServerRequest* request) {
+    if (!miraGpioAuthorize(request)) return;
+    // Disallow simple cross-origin HTML forms controlling a GPIO.
+    if (!request->hasHeader("X-Mira-GPIO") ||
+        !request->hasParam("gpio", true) || !request->hasParam("mode", true) ||
+        !request->hasParam("inverted", true)) {
+      request->send(400, "text/plain", "Parametres GPIO manquants"); return;
+    }
+    const String g = request->getParam("gpio", true)->value();
+    const String m = request->getParam("mode", true)->value();
+    const String inv = request->getParam("inverted", true)->value();
+    if (!g.length() || g.length() > 2 || !g.equals(String(g.toInt())) ||
+        (inv != "0" && inv != "1")) {
+      request->send(400, "text/plain", "GPIO invalide"); return;
+    }
+    const int i = MiraWT32GPIO::findPin(g.toInt());
+    const int parsed = MiraWT32GPIO::parseMode(m);
+    if (i < 0 || parsed < 0) {
+      request->send(400, "text/plain", "GPIO ou mode interdit"); return;
+    }
+    if (!MiraWT32GPIO::configure((uint8_t)i, (uint8_t)parsed, inv == "1")) {
+      request->send(503, "text/plain", "Erreur enregistrement NVS"); return;
+    }
+    request->send(200, "text/plain", "OK");
+  });
+  server.on("/gpio/set", HTTP_POST, [miraGpioAuthorize](AsyncWebServerRequest* request) {
+    if (!miraGpioAuthorize(request)) return;
+    if (!request->hasHeader("X-Mira-GPIO") ||
+        !request->hasParam("gpio", true) || !request->hasParam("state", true)) {
+      request->send(400, "text/plain", "Parametres GPIO manquants"); return;
+    }
+    const String g = request->getParam("gpio", true)->value();
+    const String state = request->getParam("state", true)->value();
+    if (!g.length() || g.length() > 2 || !g.equals(String(g.toInt())) ||
+        (state != "0" && state != "1")) {
+      request->send(400, "text/plain", "GPIO ou niveau invalide"); return;
+    }
+    const int i = MiraWT32GPIO::findPin(g.toInt());
+    if (i < 0 || !MiraWT32GPIO::write((uint8_t)i, state == "1")) {
+      request->send(409, "text/plain", "Broche non configuree en sortie"); return;
+    }
+    request->send(200, "text/plain", "OK");
+  });
+#endif
   server.on("/mira-health", HTTP_GET, [](AsyncWebServerRequest* request) {
     char body[440];
     snprintf(body, sizeof(body),
@@ -1687,6 +1751,10 @@ void MiraPanelServer::ServeurStation() {
         request->send_P(200, "text/html", Page_MQTT, RetourVariable);
       } else if (String(p->value().c_str()) == "system") {
         request->send_P(200, "text/html", Page_Sys, RetourVariable);
+#if !defined(MIRA_TARGET_WAVESHARE_43C) && !defined(MIRA_TARGET_NEXTION_28)
+      } else if (String(p->value().c_str()) == "gpio") {
+        request->send_P(200, "text/html", Page_GPIO, RetourVariable);
+#endif
       } else if (String(p->value().c_str()) == "configAP") {
         request->send_P(200, "text/html", Page_ConfigAP, RetourVariable);
       } else if (String(p->value().c_str()) == "rst") {
