@@ -165,7 +165,19 @@ R"rawliteral(';
     throw new Error(lastError||'GitHub inaccessible');
   }
 
+  // Experimental Nextion builds have no published public OTA manifest.
+  // Do not present an expected missing target as a GitHub network failure.
+  if(HARDWARE_PROFILE==='onx2432g028'){
+    checkBtn.textContent='Statut OTA Nextion';
+    setStatus('', 'OTA Nextion non publiée',
+      'Cette cible de développement se met à jour avec un fichier .bin dans « Mise à jour manuelle ».');
+  }
   checkBtn.addEventListener('click',async function(){
+    if(HARDWARE_PROFILE==='onx2432g028'){
+      setStatus('', 'OTA Nextion non publiée',
+        'Aucune mise à jour automatique pour le Nextion actuellement. Utilise la mise à jour manuelle ci-dessous.');
+      return;
+    }
     checkBtn.disabled=true;
     checkBtn.textContent='Vérification…';
     installRow.classList.remove('show');
