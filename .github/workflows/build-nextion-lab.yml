@@ -52,8 +52,9 @@ jobs:
         run: |
           set -euo pipefail
           arduino-cli compile \
-            --fqbn "esp32:esp32:esp32s3:CDCOnBoot=default,CPUFreq=240,FlashMode=dio,FlashFreq=40,FlashSize=16M,PartitionScheme=default_8MB,PSRAM=opi,UploadMode=default,USBMode=hwcdc" \
+            --fqbn "esp32:esp32:esp32s3:CDCOnBoot=default,CPUFreq=240,FlashMode=dio,FlashSize=16M,PartitionScheme=default_8MB,PSRAM=opi,UploadMode=default,USBMode=hwcdc" \
             --build-property "compiler.cpp.extra_flags=-DMIRA_TARGET_NEXTION_28=1" \
+            --build-property "build.flash_freq=40m" \
             --output-dir build-nextion-bin \
             build-nextion-src/MIRA_PANEL
           test -s build-nextion-bin/MIRA_PANEL.ino.bin
