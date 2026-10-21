@@ -2106,7 +2106,11 @@ void MiraPanelUI::buildPagePicker() {
 
   _pagePickerCard = lv_obj_create(_pagePicker);
   const bool wide = MIRA_DISPLAY_WIDTH >= 800;
-  lv_obj_set_size(_pagePickerCard, wide ? 460 : 298, 290);
+  // Nextion 240x320: keep this overlay inside the 240x278 content viewport.
+  const bool compactPicker = MIRA_DISPLAY_WIDTH <= 240;
+  lv_obj_set_size(_pagePickerCard,
+                  compactPicker ? 224 : (wide ? 460 : 298),
+                  compactPicker ? 244 : 290);
   lv_obj_set_style_radius(_pagePickerCard, 16, 0);
   lv_obj_set_style_bg_color(_pagePickerCard, colorPanel2(), 0);
   lv_obj_set_style_bg_opa(_pagePickerCard, LV_OPA_COVER, 0);
@@ -2119,8 +2123,8 @@ void MiraPanelUI::buildPagePicker() {
   lv_obj_t* heading = lv_label_create(_pagePickerCard);
   lv_label_set_text(heading, "Toutes les pages");
   lv_obj_set_style_text_color(heading, COL_TEXT, 0);
-  lv_obj_set_style_text_font(heading, &mira_font_fr_16, 0);
-  lv_obj_align(heading, LV_ALIGN_TOP_MID, 0, 13);
+  lv_obj_set_style_text_font(heading, compactPicker ? &mira_font_fr_14 : &mira_font_fr_16, 0);
+  lv_obj_align(heading, LV_ALIGN_TOP_MID, 0, compactPicker ? 11 : 13);
 
   const char* names[PAGE_COUNT] = {
     "Accueil", "Lumières", "Températures", "Paramètres"
@@ -2130,8 +2134,10 @@ void MiraPanelUI::buildPagePicker() {
     uint8_t page = order[row];
     lv_obj_t* btn = lv_btn_create(_pagePickerCard);
     _pagePickerButtons[page] = btn;
-    lv_obj_set_size(btn, wide ? 420 : 268, 47);
-    lv_obj_set_pos(btn, wide ? 20 : 15, 46 + row * 58);
+    lv_obj_set_size(btn, compactPicker ? 204 : (wide ? 420 : 268),
+                        compactPicker ? 40 : 47);
+    lv_obj_set_pos(btn, compactPicker ? 10 : (wide ? 20 : 15),
+                   compactPicker ? 43 + row * 48 : 46 + row * 58);
     lv_obj_set_style_radius(btn, 9, 0);
     lv_obj_set_style_bg_color(btn, colorPanel(), 0);
     lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
@@ -2144,8 +2150,8 @@ void MiraPanelUI::buildPagePicker() {
     lv_obj_t* label = lv_label_create(btn);
     lv_label_set_text(label, names[page]);
     lv_obj_set_style_text_color(label, COL_TEXT, 0);
-    lv_obj_set_style_text_font(label, &mira_font_fr_16, 0);
-    lv_obj_set_width(label, wide ? 335 : 181);
+    lv_obj_set_style_text_font(label, compactPicker ? &mira_font_fr_14 : &mira_font_fr_16, 0);
+    lv_obj_set_width(label, compactPicker ? 184 : (wide ? 335 : 181));
     lv_label_set_long_mode(label, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_center(label);
