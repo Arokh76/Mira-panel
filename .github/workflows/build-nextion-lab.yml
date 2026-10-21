@@ -52,11 +52,18 @@ jobs:
         run: |
           set -euo pipefail
           arduino-cli compile \
-            --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,CPUFreq=240,FlashMode=qio,FlashSize=16M,PartitionScheme=default,PSRAM=opi,UploadMode=default,USBMode=hwcdc" \
+            --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,CPUFreq=240,FlashMode=qio,FlashSize=16M,PartitionScheme=default_8MB,PSRAM=opi,UploadMode=default,USBMode=hwcdc" \
             --build-property "compiler.cpp.extra_flags=-DMIRA_TARGET_NEXTION_28=1" \
             --output-dir build-nextion-bin \
             build-nextion-src/MIRA_PANEL
           test -s build-nextion-bin/MIRA_PANEL.ino.bin
+          PART_TOOL="$(find "$HOME/.arduino15/packages/esp32" -name gen_esp32part.py -type f | head -n1)"
+          test -s "$PART_TOOL"
+          python3 "$PART_TOOL" build-nextion-bin/MIRA_PANEL.ino.partitions.bin > /tmp/nextion-partitions.csv
+          cat /tmp/nextion-partitions.csv
+          grep -q 'ota_0' /tmp/nextion-partitions.csv
+          grep -q 'ota_1' /tmp/nextion-partitions.csv
+          grep -q 'spiffs' /tmp/nextion-partitions.csv
           strings build-nextion-bin/MIRA_PANEL.ino.bin | grep -Fq '0.7.14-nextion-dev1'
       - name: Create factory package (no flashing)
         shell: bash
