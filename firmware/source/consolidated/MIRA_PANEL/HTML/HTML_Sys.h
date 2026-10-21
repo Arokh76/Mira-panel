@@ -4,6 +4,9 @@
 #if defined(MIRA_TARGET_WAVESHARE_43C)
   #define MIRA_SYS_PLATFORM_LABEL "Waveshare ESP32-S3 Touch LCD 4.3C"
   #define MIRA_SYS_PLATFORM_ID "waveshare-esp32s3-touch-lcd-4.3c"
+#elif defined(MIRA_TARGET_NEXTION_28)
+  #define MIRA_SYS_PLATFORM_LABEL "Open Nextion Genius 2,8\""
+  #define MIRA_SYS_PLATFORM_ID "onx2432g028"
 #else
   #define MIRA_SYS_PLATFORM_LABEL "WT32-SC01 Plus"
   #define MIRA_SYS_PLATFORM_ID "wt32-sc01-plus"
@@ -143,7 +146,7 @@ R"rawliteral(';
     }
 
     if(HARDWARE_PROFILE!=='wt32-sc01-plus'){
-      throw new Error('Aucune publication Waveshare compatible. '+targetsError);
+      throw new Error('Aucune publication OTA compatible pour '+HARDWARE_PROFILE+'. '+targetsError);
     }
     // Historical, WT32-only fallback while migrating existing deployments.
     var urls=[VERSION_URL+'?ts='+Date.now(),VERSION_API+'&ts='+Date.now()];
