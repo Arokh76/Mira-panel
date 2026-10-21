@@ -1736,12 +1736,12 @@ void MiraPanelUI::createThermostat(uint8_t idx) {
   lv_label_set_text(header, title.c_str());
   lv_obj_set_style_text_color(header, COL_TEXT, 0);
   lv_obj_set_style_text_font(header, &mira_font_fr_16, 0);
-  lv_obj_set_width(header, wide ? 300 : cardW - 126);
+  lv_obj_set_width(header, mini ? cardW - 28 : (wide ? 300 : cardW - 126));
   lv_label_set_long_mode(header, LV_LABEL_LONG_CLIP);
   lv_obj_set_style_text_align(header, LV_TEXT_ALIGN_LEFT, 0);
   lv_obj_set_pos(header, 14, 12);
 
-  {
+  if (!mini) { // Nextion: mode is already displayed in the dropdown below.
     b.thermostatModeBadge = lv_label_create(b.card);
     lv_label_set_text(b.thermostatModeBadge, b.listLabels[0].c_str());
     lv_obj_set_style_text_color(b.thermostatModeBadge, colorAccent(), 0);
@@ -1758,7 +1758,7 @@ void MiraPanelUI::createThermostat(uint8_t idx) {
   // other thermostat controls (temperature, mode, navigation, Jeedom).
   // RoundRange reference (normal): plate=196, arc=182, center=104;
   // main arc=15 and pressed arc=18.
-  const lv_coord_t arcSize = wide ? 296 : (mini ? 128 : 214);
+  const lv_coord_t arcSize = wide ? 296 : (mini ? 154 : 214);
   const lv_coord_t arcX = wide ? 27 : (cardW - arcSize) / 2;
   const lv_coord_t arcY = wide ? 63 : (mini ? 35 : 41);
   const lv_coord_t plateSize = (arcSize * 196 + 91) / 182;
@@ -1821,37 +1821,38 @@ void MiraPanelUI::createThermostat(uint8_t idx) {
   lv_obj_set_style_text_color(b.valueLabel, COL_TEXT, 0);
   lv_obj_set_style_text_font(b.valueLabel,
                             wide ? &lv_font_montserrat_40 : (mini ? &lv_font_montserrat_20 : &lv_font_montserrat_28), 0);
-  lv_obj_align(b.valueLabel, LV_ALIGN_CENTER, 0, mini ? -10 : -16);
+  lv_obj_align(b.valueLabel, LV_ALIGN_CENTER, 0, mini ? -12 : -16);
 
   lv_obj_t* hint = lv_label_create(inner);
-  lv_label_set_text(hint, "CONSIGNE");
-  lv_obj_set_width(hint, innerSize - 12);
+  lv_label_set_text(hint, mini ? "Consigne" : "CONSIGNE");
+  lv_obj_set_width(hint, mini ? innerSize - 8 : innerSize - 12);
+  if (mini) lv_label_set_long_mode(hint, LV_LABEL_LONG_CLIP);
   lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_set_style_text_color(hint, COL_MUTED, 0);
   lv_obj_set_style_text_font(hint, mini ? &mira_font_fr_12 : &mira_font_fr_14, 0);
-  lv_obj_align(hint, LV_ALIGN_CENTER, 0, mini ? 14 : 26);
+  lv_obj_align(hint, LV_ALIGN_CENTER, 0, mini ? 13 : 26);
   EventContext* rangeCtx = makeContext(idx);
   lv_obj_add_event_cb(b.control, onThermostatRange, LV_EVENT_ALL, rangeCtx);
 
   // Current temperature: read-only. Jeedom /updatenr writes the Info ID;
   // it must NEVER send a new heating command.
   lv_obj_t* tempHeading = lv_label_create(b.card);
-  lv_label_set_text(tempHeading, "Température actuelle");
+  lv_label_set_text(tempHeading, mini ? "Ambiante" : "Température actuelle");
   lv_obj_set_style_text_color(tempHeading, COL_MUTED, 0);
   lv_obj_set_style_text_font(tempHeading, mini ? &mira_font_fr_12 : &mira_font_fr_14, 0);
-  lv_obj_set_width(tempHeading, wide ? 360 : cardW - 24);
-  lv_obj_set_style_text_align(tempHeading, wide ? LV_TEXT_ALIGN_LEFT : LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_set_pos(tempHeading, wide ? 389 : 12, wide ? 122 : (mini ? 172 : 282));
+  lv_obj_set_width(tempHeading, mini ? 104 : (wide ? 360 : cardW - 24));
+  lv_obj_set_style_text_align(tempHeading, (wide || mini) ? LV_TEXT_ALIGN_LEFT : LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_pos(tempHeading, wide ? 389 : 12, wide ? 122 : (mini ? 204 : 282));
 
   b.thermostatTemperatureLabel = lv_label_create(b.card);
   lv_label_set_text(b.thermostatTemperatureLabel, "-- °C");
   lv_obj_set_style_text_color(b.thermostatTemperatureLabel, COL_TEXT, 0);
   lv_obj_set_style_text_font(b.thermostatTemperatureLabel,
                             wide ? &lv_font_montserrat_40 : (mini ? &lv_font_montserrat_20 : &lv_font_montserrat_28), 0);
-  lv_obj_set_width(b.thermostatTemperatureLabel, wide ? 350 : cardW - 24);
+  lv_obj_set_width(b.thermostatTemperatureLabel, mini ? 96 : (wide ? 350 : cardW - 24));
   lv_obj_set_style_text_align(b.thermostatTemperatureLabel,
-                              wide ? LV_TEXT_ALIGN_LEFT : LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_set_pos(b.thermostatTemperatureLabel, wide ? 389 : 12, wide ? 156 : (mini ? 190 : 299));
+                              wide ? LV_TEXT_ALIGN_LEFT : (mini ? LV_TEXT_ALIGN_RIGHT : LV_TEXT_ALIGN_CENTER), 0);
+  lv_obj_set_pos(b.thermostatTemperatureLabel, wide ? 389 : (mini ? cardW - 108 : 12), wide ? 156 : (mini ? 197 : 299));
 
   if (wide) {
     lv_obj_t* separator = lv_obj_create(b.card);
@@ -1867,9 +1868,9 @@ void MiraPanelUI::createThermostat(uint8_t idx) {
   lv_label_set_text(modeHeading, "Mode");
   lv_obj_set_style_text_color(modeHeading, COL_MUTED, 0);
   lv_obj_set_style_text_font(modeHeading, mini ? &mira_font_fr_12 : &mira_font_fr_14, 0);
-  lv_obj_set_width(modeHeading, wide ? 360 : cardW - 24);
-  lv_obj_set_style_text_align(modeHeading, wide ? LV_TEXT_ALIGN_LEFT : LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_set_pos(modeHeading, wide ? 389 : 12, wide ? 265 : (mini ? 218 : 337));
+  lv_obj_set_width(modeHeading, mini ? 70 : (wide ? 360 : cardW - 24));
+  lv_obj_set_style_text_align(modeHeading, (wide || mini) ? LV_TEXT_ALIGN_LEFT : LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_pos(modeHeading, wide ? 389 : 12, wide ? 265 : (mini ? 224 : 337));
 
   b.thermostatModeControl = lv_dropdown_create(b.card);
   String modes;
@@ -1880,7 +1881,7 @@ void MiraPanelUI::createThermostat(uint8_t idx) {
   lv_dropdown_set_options(b.thermostatModeControl, modes.c_str());
   lv_dropdown_set_selected(b.thermostatModeControl, 0);
   lv_obj_set_size(b.thermostatModeControl, wide ? cardW - 407 : cardW - 28, mini ? 30 : 43);
-  lv_obj_set_pos(b.thermostatModeControl, wide ? 387 : 14, wide ? 294 : (mini ? 236 : 356));
+  lv_obj_set_pos(b.thermostatModeControl, wide ? 387 : 14, wide ? 294 : (mini ? 238 : 356));
   // Open the menu towards the card, not across the physical navigation bar.
   lv_dropdown_set_dir(b.thermostatModeControl, LV_DIR_TOP);
   lv_obj_set_style_bg_color(b.thermostatModeControl, colorPanel2(), 0);
