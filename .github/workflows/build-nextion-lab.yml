@@ -50,9 +50,12 @@ jobs:
           grep -Fq 'MIRA_SYS_PLATFORM_ID "onx2432g028"' build-nextion-src/MIRA_PANEL/HTML/HTML_Sys.h
           grep -Fq "OTA Nextion non publiée" build-nextion-src/MIRA_PANEL/HTML/HTML_Sys.h
           grep -Fq 'const bool compactPicker = MIRA_DISPLAY_WIDTH <= 240;' build-nextion-src/MIRA_PANEL/MiraPanelUI.cpp
+          grep -Fq 'const bool mini = MIRA_DISPLAY_WIDTH <= 240;' build-nextion-src/MIRA_PANEL/MiraPanelUI.cpp
+          grep -Fq 'mini ? 128 : 214' build-nextion-src/MIRA_PANEL/MiraPanelUI.cpp
+          grep -Fq 'mini ? 236 : 356' build-nextion-src/MIRA_PANEL/MiraPanelUI.cpp
           grep -Fq 'lv_label_set_long_mode(msg, LV_LABEL_LONG_WRAP);' build-nextion-src/MIRA_PANEL/MiraPanelUI.cpp
           grep -Fq 'lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);' build-nextion-src/MIRA_PANEL/MiraPanelUI.cpp
-          grep -q '0.7.14-nextion-dev6' build-nextion-src/MIRA_PANEL/MIRA_PANEL.ino
+          grep -q '0.7.14-nextion-dev7' build-nextion-src/MIRA_PANEL/MIRA_PANEL.ino
       - name: Compile experimental Nextion 2.8 application (no public OTA)
         shell: bash
         run: |
@@ -71,13 +74,13 @@ jobs:
           grep -q 'ota_0' /tmp/nextion-partitions.csv
           grep -q 'ota_1' /tmp/nextion-partitions.csv
           grep -q 'spiffs' /tmp/nextion-partitions.csv
-          strings build-nextion-bin/MIRA_PANEL.ino.bin | grep -Fq '0.7.14-nextion-dev6'
+          strings build-nextion-bin/MIRA_PANEL.ino.bin | grep -Fq '0.7.14-nextion-dev7'
       - name: Create factory package (no flashing)
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p package-nextion
-          cp build-nextion-bin/MIRA_PANEL.ino.bin package-nextion/Mira_Panel_Nextion_2.8_0.7.14-nextion-dev6_OTA.bin
+          cp build-nextion-bin/MIRA_PANEL.ino.bin package-nextion/Mira_Panel_Nextion_2.8_0.7.14-nextion-dev7_OTA.bin
           cp build-nextion-bin/MIRA_PANEL.ino.bootloader.bin package-nextion/bootloader.bin
           cp build-nextion-bin/MIRA_PANEL.ino.partitions.bin package-nextion/partitions.bin
           BOOTAPP="$(find "$HOME/.arduino15/packages/esp32" -name boot_app0.bin -type f | head -n1)"
@@ -85,17 +88,17 @@ jobs:
           cp "$BOOTAPP" package-nextion/boot_app0.bin
           python3 -m pip install --quiet esptool
           python3 -m esptool --chip esp32s3 merge-bin \
-            -o package-nextion/Mira_Panel_Nextion_2.8_0.7.14-nextion-dev6_FACTORY.bin \
+            -o package-nextion/Mira_Panel_Nextion_2.8_0.7.14-nextion-dev7_FACTORY.bin \
             --flash-mode dio --flash-freq 40m --flash-size 16MB \
             0x0000 package-nextion/bootloader.bin \
             0x8000 package-nextion/partitions.bin \
             0xE000 package-nextion/boot_app0.bin \
-            0x10000 package-nextion/Mira_Panel_Nextion_2.8_0.7.14-nextion-dev6_OTA.bin
+            0x10000 package-nextion/Mira_Panel_Nextion_2.8_0.7.14-nextion-dev7_OTA.bin
           echo "[NEXTION] Verify factory bootloader header:"
-          python3 -m esptool --chip esp32s3 image-info package-nextion/Mira_Panel_Nextion_2.8_0.7.14-nextion-dev6_FACTORY.bin
+          python3 -m esptool --chip esp32s3 image-info package-nextion/Mira_Panel_Nextion_2.8_0.7.14-nextion-dev7_FACTORY.bin
           sha256sum package-nextion/*.bin > package-nextion/SHA256SUMS.txt
           cat > package-nextion/README.txt <<'EOF'
-          MIRA PANEL 0.7.14-nextion-dev6 — ONX2432G028 ONLY
+          MIRA PANEL 0.7.14-nextion-dev7 — ONX2432G028 ONLY
           Diagnostic build for boot loop: FLASH DIO 40 MHz, UART0 serial logs. NOT hardware-validated.
           Do NOT flash WT32/Waveshare images to the Nextion.
           Universal Mira core, board-specific display/touch bridge.
@@ -105,7 +108,7 @@ jobs:
       - name: Upload isolated preview (14-day retention)
         uses: actions/upload-artifact@v4
         with:
-          name: Mira_Nextion_2.8_0.7.14-nextion-dev6
+          name: Mira_Nextion_2.8_0.7.14-nextion-dev7
           path: package-nextion/
           retention-days: 14
           if-no-files-found: error

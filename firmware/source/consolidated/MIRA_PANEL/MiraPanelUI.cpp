@@ -1720,9 +1720,10 @@ void MiraPanelUI::createRoundRange(uint8_t idx) {
 void MiraPanelUI::createThermostat(uint8_t idx) {
   Binding& b = _bindings[idx];
   const bool wide = MIRA_DISPLAY_WIDTH >= 800;
+  const bool mini = MIRA_DISPLAY_WIDTH <= 240;
   const lv_coord_t cardW = MIRA_CARD_FULL;
   // Use the whole content viewport while leaving margin above Mira's nav.
-  const lv_coord_t cardH = MIRA_CONTENT_HEIGHT - 16;
+  const lv_coord_t cardH = MIRA_CONTENT_HEIGHT - (mini ? 8 : 16);
   b.card = makeCard(pageIndex(b.location), cardH);
   lv_obj_set_width(b.card, cardW);
   lv_obj_set_layout(b.card, 0);  // No child layout; supported by both LVGL 8 targets
@@ -1757,9 +1758,9 @@ void MiraPanelUI::createThermostat(uint8_t idx) {
   // other thermostat controls (temperature, mode, navigation, Jeedom).
   // RoundRange reference (normal): plate=196, arc=182, center=104;
   // main arc=15 and pressed arc=18.
-  const lv_coord_t arcSize = wide ? 296 : 214;
+  const lv_coord_t arcSize = wide ? 296 : (mini ? 128 : 214);
   const lv_coord_t arcX = wide ? 27 : (cardW - arcSize) / 2;
-  const lv_coord_t arcY = wide ? 63 : 41;
+  const lv_coord_t arcY = wide ? 63 : (mini ? 35 : 41);
   const lv_coord_t plateSize = (arcSize * 196 + 91) / 182;
   const lv_coord_t innerSize = (arcSize * 104 + 91) / 182;
   const lv_coord_t arcWidth = (arcSize * 15 + 91) / 182;
@@ -1793,7 +1794,7 @@ void MiraPanelUI::createThermostat(uint8_t idx) {
   lv_obj_set_style_bg_opa(b.control, LV_OPA_TRANSP, LV_PART_KNOB);
   lv_obj_set_style_border_width(b.control, 0, LV_PART_KNOB);
   lv_obj_set_style_pad_all(b.control, 0, LV_PART_KNOB);
-  lv_obj_set_ext_click_area(b.control, 10);
+  lv_obj_set_ext_click_area(b.control, mini ? 6 : 10);
 
   // The RoundRange inner medallion MUST be proportional to the outer arc.
   // Previous inner=132/116 made the large Waveshare/WT32 dials resemble a
@@ -1819,16 +1820,16 @@ void MiraPanelUI::createThermostat(uint8_t idx) {
   lv_obj_set_style_text_align(b.valueLabel, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_set_style_text_color(b.valueLabel, COL_TEXT, 0);
   lv_obj_set_style_text_font(b.valueLabel,
-                            wide ? &lv_font_montserrat_40 : &lv_font_montserrat_28, 0);
-  lv_obj_align(b.valueLabel, LV_ALIGN_CENTER, 0, -16);
+                            wide ? &lv_font_montserrat_40 : (mini ? &lv_font_montserrat_20 : &lv_font_montserrat_28), 0);
+  lv_obj_align(b.valueLabel, LV_ALIGN_CENTER, 0, mini ? -10 : -16);
 
   lv_obj_t* hint = lv_label_create(inner);
   lv_label_set_text(hint, "CONSIGNE");
   lv_obj_set_width(hint, innerSize - 12);
   lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_set_style_text_color(hint, COL_MUTED, 0);
-  lv_obj_set_style_text_font(hint, &mira_font_fr_14, 0);
-  lv_obj_align(hint, LV_ALIGN_CENTER, 0, 26);
+  lv_obj_set_style_text_font(hint, mini ? &mira_font_fr_12 : &mira_font_fr_14, 0);
+  lv_obj_align(hint, LV_ALIGN_CENTER, 0, mini ? 14 : 26);
   EventContext* rangeCtx = makeContext(idx);
   lv_obj_add_event_cb(b.control, onThermostatRange, LV_EVENT_ALL, rangeCtx);
 
@@ -1837,20 +1838,20 @@ void MiraPanelUI::createThermostat(uint8_t idx) {
   lv_obj_t* tempHeading = lv_label_create(b.card);
   lv_label_set_text(tempHeading, "Température actuelle");
   lv_obj_set_style_text_color(tempHeading, COL_MUTED, 0);
-  lv_obj_set_style_text_font(tempHeading, &mira_font_fr_14, 0);
+  lv_obj_set_style_text_font(tempHeading, mini ? &mira_font_fr_12 : &mira_font_fr_14, 0);
   lv_obj_set_width(tempHeading, wide ? 360 : cardW - 24);
   lv_obj_set_style_text_align(tempHeading, wide ? LV_TEXT_ALIGN_LEFT : LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_set_pos(tempHeading, wide ? 389 : 12, wide ? 122 : 282);
+  lv_obj_set_pos(tempHeading, wide ? 389 : 12, wide ? 122 : (mini ? 172 : 282));
 
   b.thermostatTemperatureLabel = lv_label_create(b.card);
   lv_label_set_text(b.thermostatTemperatureLabel, "-- °C");
   lv_obj_set_style_text_color(b.thermostatTemperatureLabel, COL_TEXT, 0);
   lv_obj_set_style_text_font(b.thermostatTemperatureLabel,
-                            wide ? &lv_font_montserrat_40 : &lv_font_montserrat_28, 0);
+                            wide ? &lv_font_montserrat_40 : (mini ? &lv_font_montserrat_20 : &lv_font_montserrat_28), 0);
   lv_obj_set_width(b.thermostatTemperatureLabel, wide ? 350 : cardW - 24);
   lv_obj_set_style_text_align(b.thermostatTemperatureLabel,
                               wide ? LV_TEXT_ALIGN_LEFT : LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_set_pos(b.thermostatTemperatureLabel, wide ? 389 : 12, wide ? 156 : 299);
+  lv_obj_set_pos(b.thermostatTemperatureLabel, wide ? 389 : 12, wide ? 156 : (mini ? 190 : 299));
 
   if (wide) {
     lv_obj_t* separator = lv_obj_create(b.card);
@@ -1865,10 +1866,10 @@ void MiraPanelUI::createThermostat(uint8_t idx) {
   lv_obj_t* modeHeading = lv_label_create(b.card);
   lv_label_set_text(modeHeading, "Mode");
   lv_obj_set_style_text_color(modeHeading, COL_MUTED, 0);
-  lv_obj_set_style_text_font(modeHeading, &mira_font_fr_14, 0);
+  lv_obj_set_style_text_font(modeHeading, mini ? &mira_font_fr_12 : &mira_font_fr_14, 0);
   lv_obj_set_width(modeHeading, wide ? 360 : cardW - 24);
   lv_obj_set_style_text_align(modeHeading, wide ? LV_TEXT_ALIGN_LEFT : LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_set_pos(modeHeading, wide ? 389 : 12, wide ? 265 : 337);
+  lv_obj_set_pos(modeHeading, wide ? 389 : 12, wide ? 265 : (mini ? 218 : 337));
 
   b.thermostatModeControl = lv_dropdown_create(b.card);
   String modes;
@@ -1878,13 +1879,13 @@ void MiraPanelUI::createThermostat(uint8_t idx) {
   }
   lv_dropdown_set_options(b.thermostatModeControl, modes.c_str());
   lv_dropdown_set_selected(b.thermostatModeControl, 0);
-  lv_obj_set_size(b.thermostatModeControl, wide ? cardW - 407 : cardW - 28, 43);
-  lv_obj_set_pos(b.thermostatModeControl, wide ? 387 : 14, wide ? 294 : 356);
+  lv_obj_set_size(b.thermostatModeControl, wide ? cardW - 407 : cardW - 28, mini ? 30 : 43);
+  lv_obj_set_pos(b.thermostatModeControl, wide ? 387 : 14, wide ? 294 : (mini ? 236 : 356));
   // Open the menu towards the card, not across the physical navigation bar.
   lv_dropdown_set_dir(b.thermostatModeControl, LV_DIR_TOP);
   lv_obj_set_style_bg_color(b.thermostatModeControl, colorPanel2(), 0);
   lv_obj_set_style_text_color(b.thermostatModeControl, COL_TEXT, 0);
-  lv_obj_set_style_text_font(b.thermostatModeControl, &mira_font_fr_16, 0);
+  lv_obj_set_style_text_font(b.thermostatModeControl, mini ? &mira_font_fr_12 : &mira_font_fr_16, 0);
   lv_obj_set_style_border_width(b.thermostatModeControl, 1, 0);
   lv_obj_set_style_border_color(b.thermostatModeControl, colorBorder(), 0);
   lv_obj_set_style_radius(b.thermostatModeControl, 9, 0);
