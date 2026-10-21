@@ -38,13 +38,13 @@ static const lv_color_t COL_RED     = lv_color_hex(0xE36A6A);
 
 // Automatic widget grid from screen geometry, without affecting free layout.
 // 800px page - 12px margins = 788px; 4*192+3*6 = 2*390+6 = 786px.
-static constexpr lv_coord_t MIRA_CARD_AUTO = MIRA_DISPLAY_WIDTH >= 800 ? 390 : 304;
-static constexpr lv_coord_t MIRA_CARD_TILE = MIRA_DISPLAY_WIDTH >= 800 ? 192 : 149;
-static constexpr lv_coord_t MIRA_CARD_FULL = MIRA_DISPLAY_WIDTH >= 800 ? 786 : 304;
-static constexpr lv_coord_t MIRA_LABEL_TILE = MIRA_DISPLAY_WIDTH >= 800 ? 180 : 137;
-static constexpr lv_coord_t MIRA_LABEL_AUTO = MIRA_DISPLAY_WIDTH >= 800 ? 370 : 286;
-static constexpr lv_coord_t MIRA_LABEL_WIDE_NAME = MIRA_DISPLAY_WIDTH >= 800 ? 440 : 150;
-static constexpr lv_coord_t MIRA_LABEL_WIDE_VALUE = MIRA_DISPLAY_WIDTH >= 800 ? 292 : 116;
+static constexpr lv_coord_t MIRA_CARD_AUTO = MIRA_DISPLAY_WIDTH >= 800 ? 390 : (MIRA_DISPLAY_WIDTH <= 240 ? 224 : 304);
+static constexpr lv_coord_t MIRA_CARD_TILE = MIRA_DISPLAY_WIDTH >= 800 ? 192 : (MIRA_DISPLAY_WIDTH <= 240 ? 108 : 149);
+static constexpr lv_coord_t MIRA_CARD_FULL = MIRA_DISPLAY_WIDTH >= 800 ? 786 : (MIRA_DISPLAY_WIDTH <= 240 ? 224 : 304);
+static constexpr lv_coord_t MIRA_LABEL_TILE = MIRA_DISPLAY_WIDTH >= 800 ? 180 : (MIRA_DISPLAY_WIDTH <= 240 ? 96 : 137);
+static constexpr lv_coord_t MIRA_LABEL_AUTO = MIRA_DISPLAY_WIDTH >= 800 ? 370 : (MIRA_DISPLAY_WIDTH <= 240 ? 206 : 286);
+static constexpr lv_coord_t MIRA_LABEL_WIDE_NAME = MIRA_DISPLAY_WIDTH >= 800 ? 440 : (MIRA_DISPLAY_WIDTH <= 240 ? 104 : 150);
+static constexpr lv_coord_t MIRA_LABEL_WIDE_VALUE = MIRA_DISPLAY_WIDTH >= 800 ? 292 : (MIRA_DISPLAY_WIDTH <= 240 ? 88 : 116);
 
 // Waveshare clock and WT32 clock now share the Montserrat family.
 static void miraFitInfoValue(lv_obj_t* label, lv_obj_t* icon);
@@ -961,7 +961,7 @@ void MiraPanelUI::applyFreeLayout(uint8_t idx) {
 
 lv_obj_t* MiraPanelUI::makeSettingsCard(lv_coord_t height) {
   lv_obj_t* card = lv_obj_create(_pages[3]);
-  lv_obj_set_width(card, MIRA_DISPLAY_WIDTH >= 800 ? 640 : 304);
+  lv_obj_set_width(card, MIRA_DISPLAY_WIDTH >= 800 ? 640 : (MIRA_DISPLAY_WIDTH <= 240 ? 224 : 304));
   lv_obj_set_height(card, height);
   lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_set_style_bg_color(card, colorPanel(), 0);
@@ -977,7 +977,7 @@ lv_obj_t* MiraPanelUI::makeSettingsCard(lv_coord_t height) {
 
 lv_obj_t* MiraPanelUI::makeTransparentRow(lv_obj_t* parent, lv_coord_t height) {
   lv_obj_t* row = lv_obj_create(parent);
-  lv_obj_set_width(row, MIRA_DISPLAY_WIDTH >= 800 ? lv_pct(100) : 284);
+  lv_obj_set_width(row, MIRA_DISPLAY_WIDTH >= 800 ? lv_pct(100) : (MIRA_DISPLAY_WIDTH <= 240 ? 204 : 284));
   lv_obj_set_height(row, height);
   lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
@@ -2069,7 +2069,7 @@ void MiraPanelUI::createDateTime(uint8_t idx) {
 
   _dateSubLabel = lv_label_create(b.card);
   lv_label_set_text(_dateSubLabel, "-- -- ----");
-  lv_obj_set_width(_dateSubLabel, MIRA_DISPLAY_WIDTH >= 800 ? 780 : 300);
+  lv_obj_set_width(_dateSubLabel, MIRA_DISPLAY_WIDTH >= 800 ? 780 : (MIRA_DISPLAY_WIDTH <= 240 ? 224 : 300));
   lv_obj_set_style_text_color(_dateSubLabel, COL_MUTED, 0);
   lv_obj_set_style_text_font(_dateSubLabel, &mira_font_fr_14, 0);
   lv_obj_set_style_text_align(_dateSubLabel, LV_TEXT_ALIGN_CENTER, 0);
@@ -2175,7 +2175,7 @@ void MiraPanelUI::buildSettingsPage() {
   _settingsCards[0] = makeSettingsCard(40);
   lv_obj_t* title = lv_label_create(_settingsCards[0]);
   lv_label_set_text(title, "Paramètres");
-  lv_obj_set_width(title, MIRA_DISPLAY_WIDTH >= 800 ? 620 : 286);
+  lv_obj_set_width(title, MIRA_DISPLAY_WIDTH >= 800 ? 620 : (MIRA_DISPLAY_WIDTH <= 240 ? 206 : 286));
   lv_label_set_long_mode(title, LV_LABEL_LONG_CLIP);
   lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_set_style_text_color(title, COL_TEXT, 0);
@@ -2199,7 +2199,7 @@ void MiraPanelUI::buildSettingsPage() {
   lv_obj_set_style_text_font(_brightnessValue, &mira_font_fr_12, 0);
 
   _brightnessSlider = lv_slider_create(_settingsCards[1]);
-  lv_obj_set_size(_brightnessSlider, MIRA_DISPLAY_WIDTH >= 800 ? 600 : 280, 14);
+  lv_obj_set_size(_brightnessSlider, MIRA_DISPLAY_WIDTH >= 800 ? 600 : (MIRA_DISPLAY_WIDTH <= 240 ? 200 : 280), 14);
   lv_slider_set_range(_brightnessSlider, 30, 255);
   lv_slider_set_value(_brightnessSlider, _brightness, LV_ANIM_OFF);
   lv_obj_set_style_bg_color(_brightnessSlider, COL_ACCENT2, LV_PART_INDICATOR);

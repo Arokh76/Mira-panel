@@ -42,6 +42,11 @@ void setup() {
   Serveur.AddParamText("DISPLAY_FinNuit", "07:00");
   Serveur.AddParamBool("DISPLAY_HorlogeVeille", true);
 
+#if defined(MIRA_TARGET_NEXTION_28)
+  // Never fall back to the public WT32/Waveshare OTA feed.
+  Serveur.SetupModule("Mira Panel", MIRA_HARDWARE_NAME,
+                     "0.7.14-nextion-dev1", "", "LVGL");
+#else
   Serveur.SetupModule(
     "Mira Panel",
     MIRA_HARDWARE_NAME,
@@ -49,6 +54,7 @@ void setup() {
     "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/",
     "LVGL"
   );
+#endif
 
   Interface.begin();
   if (MIRA_MQTT_RUNTIME_ENABLED) {

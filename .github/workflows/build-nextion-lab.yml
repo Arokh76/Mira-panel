@@ -1,0 +1,95 @@
+name: Mira Nextion 2.8 isolated experimental build
+on:
+  push:
+    branches: [feature/nextion-28-build-lab]
+    paths:
+      - 'firmware/source/consolidated/**'
+      - '.github/workflows/build-nextion-lab.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+        with:
+          version: 1.5.1
+      - name: Setup Arduino libraries (LVGL 8.3 and ESP32 2.0.17)
+        shell: bash
+        run: |
+          set -euo pipefail
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli lib update-index
+          arduino-cli core install esp32:esp32@2.0.17
+          arduino-cli lib install "lvgl@8.3.11"
+          arduino-cli lib install "LovyanGFX@1.1.9"
+          arduino-cli lib install "ArduinoJson@6.21.5"
+          arduino-cli lib install "AsyncHTTPRequest_Generic@1.13.0"
+          arduino-cli lib install "AsyncTCP@1.1.4"
+          arduino-cli lib install "GFX Library for Arduino"
+          arduino-cli lib install "Adafruit CST8XX Library"
+          arduino-cli lib install "Adafruit PCF8574"
+      - name: Prepare isolated universal Mira source for ONX2432G028
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build-nextion-src/MIRA_PANEL
+          cp -a firmware/source/consolidated/MIRA_PANEL/. build-nextion-src/MIRA_PANEL/
+          cp firmware/source/consolidated/MIRA_PANEL/MiraPartitionsWaveshare16MB.csv build-nextion-src/MIRA_PANEL/partitions.csv
+          mkdir -p "$HOME/Arduino/libraries"
+          cp build-nextion-src/MIRA_PANEL/lv_conf.h "$HOME/Arduino/libraries/lv_conf.h"
+          test -f build-nextion-src/MIRA_PANEL/MiraNextion28Display.h
+          grep -q '0.7.14-nextion-dev1' build-nextion-src/MIRA_PANEL/MIRA_PANEL.ino
+      - name: Compile experimental Nextion 2.8 application (no public OTA)
+        shell: bash
+        run: |
+          set -euo pipefail
+          arduino-cli compile \
+            --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,CPUFreq=240,FlashMode=qio,FlashSize=16M,PartitionScheme=default,PSRAM=opi,UploadMode=default,USBMode=hwcdc" \
+            --build-property "compiler.cpp.extra_flags=-DMIRA_TARGET_NEXTION_28=1" \
+            --output-dir build-nextion-bin \
+            build-nextion-src/MIRA_PANEL
+          test -s build-nextion-bin/MIRA_PANEL.ino.bin
+          strings build-nextion-bin/MIRA_PANEL.ino.bin | grep -Fq '0.7.14-nextion-dev1'
+      - name: Create factory package (no flashing)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p package-nextion
+          cp build-nextion-bin/MIRA_PANEL.ino.bin package-nextion/Mira_Panel_Nextion_2.8_0.7.14-nextion-dev1_OTA.bin
+          cp build-nextion-bin/MIRA_PANEL.ino.bootloader.bin package-nextion/bootloader.bin
+          cp build-nextion-bin/MIRA_PANEL.ino.partitions.bin package-nextion/partitions.bin
+          BOOTAPP="$(find "$HOME/.arduino15/packages/esp32" -name boot_app0.bin -type f | head -n1)"
+          test -s "$BOOTAPP"
+          cp "$BOOTAPP" package-nextion/boot_app0.bin
+          python3 -m pip install --quiet esptool
+          python3 -m esptool --chip esp32s3 merge-bin \
+            -o package-nextion/Mira_Panel_Nextion_2.8_0.7.14-nextion-dev1_FACTORY.bin \
+            --flash-mode qio --flash-freq 80m --flash-size 16MB \
+            0x0000 package-nextion/bootloader.bin \
+            0x8000 package-nextion/partitions.bin \
+            0xE000 package-nextion/boot_app0.bin \
+            0x10000 package-nextion/Mira_Panel_Nextion_2.8_0.7.14-nextion-dev1_OTA.bin
+          sha256sum package-nextion/*.bin > package-nextion/SHA256SUMS.txt
+          cat > package-nextion/README.txt <<'EOF'
+          MIRA PANEL 0.7.14-nextion-dev1 — ONX2432G028 ONLY
+          Experimental FIRST BUILD; NOT hardware-validated.
+          Do NOT flash WT32/Waveshare images to the Nextion.
+          Universal Mira core, board-specific display/touch bridge.
+          No public OTA feed configured for this hardware target.
+          Keep original flash backup before any erase/flash.
+          EOF
+      - name: Upload isolated preview (14-day retention)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mira_Nextion_2.8_0.7.14-nextion-dev1
+          path: package-nextion/
+          retention-days: 14
+          if-no-files-found: error
