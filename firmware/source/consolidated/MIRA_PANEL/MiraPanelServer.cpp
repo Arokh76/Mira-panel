@@ -3169,11 +3169,16 @@ void MiraPanelServer::WT32NotifyGpioChanges() {
   const String url = urlBase +
       "/core/api/jeeApi.php?plugin=mira&type=event&apikey=" + apiKey +
       "&id=" + refreshId + "&gpio_sync=1";
-  // The existing async HTTP worker handles the network request. The next
-  // minute-based Jeedom cron also repairs missed messages if Jeedom was down.
+  // Dedicated async worker: never steal / overwrite the general Jeedom
+  // command request and its response acknowledgement.
+  static AsyncHTTPRequest gpioFeedbackRequest;
+  const int ready = gpioFeedbackRequest.readyState();
+  if (ready != readyStateUnsent && ready != readyStateDone) return;
+  if (!gpioFeedbackRequest.open("GET", url.c_str())) return;
+  gpioFeedbackRequest.send();
   sentRevision = revision;
-  AsyncHTTP(url);
-  if (_Debug) Serial.printf("[MIRA][GPIO] Demande synchro Jeedom revision %u\n",
+  // The minute-based Jeedom cron is the fallback if this HTTP send fails.
+  if (_Debug) Serial.printf("[MIRA][GPIO] Notification Jeedom revision %u\n",
                             unsigned(revision));
 #endif
 }
