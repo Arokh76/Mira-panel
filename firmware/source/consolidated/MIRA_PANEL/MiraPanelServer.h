@@ -47,6 +47,10 @@ public:
   // Reconstruction WT32: remet a zero uniquement la table des actions dynamiques
   // afin de reconstruire l'interface LVGL sans redemarrer le module.
   void ResetActionsForLvgl();
+  // Local GPIO widget binding; no-op on targets without EXT GPIO.
+  int WT32GpioLinked(const String& widgetName);
+  bool WT32GpioState(uint8_t index);
+  bool WT32GpioWrite(uint8_t index, bool on);
 
   int IndexSetListByOption(String NameList, String Option);
 

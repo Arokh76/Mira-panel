@@ -1,7 +1,7 @@
 name: WT32 GPIO local web experimental build
 on:
   push:
-    branches: [feature/wt32-gpio-web]
+    branches: [feature/wt32-gpio-widget-dev3]
     paths:
       - "firmware/source/consolidated/**"
       - ".github/workflows/build-wt32-gpio-lab.yml"
@@ -41,7 +41,7 @@ jobs:
           cp -a firmware/source/consolidated/MIRA_PANEL/. build-gpio-src/MIRA_PANEL/
           cp build-gpio-src/MIRA_PANEL/lv_conf.h "$HOME/Arduino/libraries/lv_conf.h"
           rm -f build-gpio-src/MIRA_PANEL/partitions.csv
-          grep -Fq '"0.7.14-wt32-gpio-dev2"' build-gpio-src/MIRA_PANEL/MIRA_PANEL.ino
+          grep -Fq '"0.7.14-wt32-gpio-dev3"' build-gpio-src/MIRA_PANEL/MIRA_PANEL.ino
           grep -Fq 'MiraWT32GPIO::begin();' build-gpio-src/MIRA_PANEL/MiraPanelServer.cpp
           grep -Fq 'Page_GPIO' build-gpio-src/MIRA_PANEL/MiraPanelServer.cpp
           grep -Fq '/gpio/config' build-gpio-src/MIRA_PANEL/MiraPanelServer.cpp
@@ -54,26 +54,26 @@ jobs:
             --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,CPUFreq=240,FlashMode=qio,FlashSize=8M,PartitionScheme=default_8MB,PSRAM=enabled,UploadMode=default,USBMode=hwcdc" \
             --output-dir build-gpio-bin build-gpio-src/MIRA_PANEL
           test -s build-gpio-bin/MIRA_PANEL.ino.bin
-          strings build-gpio-bin/MIRA_PANEL.ino.bin | grep -Fq "0.7.14-wt32-gpio-dev2"
+          strings build-gpio-bin/MIRA_PANEL.ino.bin | grep -Fq "0.7.14-wt32-gpio-dev3"
       - name: Package application OTA (no public release)
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p package-wt32-gpio
-          cp build-gpio-bin/MIRA_PANEL.ino.bin package-wt32-gpio/Mira_WT32_GPIO_0.7.14-wt32-gpio-dev2_OTA.bin
+          cp build-gpio-bin/MIRA_PANEL.ino.bin package-wt32-gpio/Mira_WT32_GPIO_0.7.14-wt32-gpio-dev3_OTA.bin
           sha256sum package-wt32-gpio/*.bin > package-wt32-gpio/SHA256SUMS.txt
           cat > package-wt32-gpio/README.txt <<'EOF'
           Mira WT32-SC01 Plus GPIO Web dev1 — experimental.
           Install via Système > Mise à jour manuelle with OTA application bin.
           Never use on Waveshare or Nextion. No Jeedom GPIO integration.
-          Per-output restart policy OFF (default), RESTORE, ON; RESTORE saves logical state in NVS.
+          Per-output startup policy OFF/RESTORE/ON; Jeedom command bindings to local GPIO outputs.
           EXT pins: GPIO10, GPIO11, GPIO12, GPIO13, GPIO14, GPIO21.
           Electrical signals 3.3V only; do not directly drive relays/loads.
           EOF
       - name: Upload preview (not firmware release)
         uses: actions/upload-artifact@v4
         with:
-          name: Mira_WT32_GPIO_web_0.7.14-dev2
+          name: Mira_WT32_GPIO_web_0.7.14-dev3
           path: package-wt32-gpio/
           retention-days: 14
           if-no-files-found: error

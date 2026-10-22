@@ -2797,6 +2797,13 @@ void MiraPanelUI::onButton(lv_event_t* e) {
   if (ui._suppressEvents || ctx->bindingIndex >= ui._bindingCount) return;
   ui.noteActivity();
   Binding& b = ui._bindings[ctx->bindingIndex];
+  const int localIndex = ui._server.WT32GpioLinked(b.name);
+  if (localIndex >= 0) {
+    const bool wanted = !ui._server.WT32GpioState((uint8_t)localIndex);
+    if (!ui._server.WT32GpioWrite((uint8_t)localIndex, wanted))
+      Serial.println("[MIRA][GPIO] Sortie inactive ou non configuree : " + b.name);
+    return; // Never dispatch a local widget click to Jeedom or MQTT.
+  }
   ui._server.IndexSetEvent(b.id);
   ui.publishMqttAction(b, "1");
 }
@@ -2809,6 +2816,20 @@ void MiraPanelUI::onToggle(lv_event_t* e) {
   if (ui._suppressEvents || ctx->bindingIndex >= ui._bindingCount) return;
   Binding& b = ui._bindings[ctx->bindingIndex];
   bool on = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+  const int localIndex = ui._server.WT32GpioLinked(b.name);
+  if (localIndex >= 0) {
+    if (!ui._server.WT32GpioWrite((uint8_t)localIndex, on)) {
+      // Safety: if GPIO is not an output, restore the visible switch state.
+      on = ui._server.WT32GpioState((uint8_t)localIndex);
+      ui._suppressEvents = true;
+      if (on) lv_obj_add_state(lv_event_get_target(e), LV_STATE_CHECKED);
+      else lv_obj_clear_state(lv_event_get_target(e), LV_STATE_CHECKED);
+      ui._suppressEvents = false;
+      Serial.println("[MIRA][GPIO] Sortie non disponible : " + b.name);
+    }
+    ui.noteActivity();
+    return; // Do not dispatch native Jeedom commands.
+  }
   int id = on ? b.idOn : b.idOff;
   if (b.stateLabel) {
     lv_label_set_text(b.stateLabel, on ? "ON" : "OFF");
@@ -3603,6 +3624,27 @@ void MiraPanelUI::loop() {
   if (_reloadPending && (int32_t)(millis() - _reloadAt) >= 0) {
     _reloadPending = false;
     reloadFromMiraJson();
+  }
+
+  // Keep the on-screen switch synchronized with web commands and boot policy.
+  // Polling is UI-only: never generate outgoing actions or Jeedom events.
+  static uint32_t lastLocalGpioRefreshMs = 0;
+  if (millis() - lastLocalGpioRefreshMs >= 250) {
+    lastLocalGpioRefreshMs = millis();
+    _suppressEvents = true;
+    for (uint8_t i = 0; i < _bindingCount; ++i) {
+      Binding& b = _bindings[i];
+      if (b.type != W_TOGGLE || !b.control) continue;
+      const int gpio = _server.WT32GpioLinked(b.name);
+      if (gpio < 0) continue;
+      bool active = _server.WT32GpioState((uint8_t)gpio);
+      bool shown = lv_obj_has_state(b.control, LV_STATE_CHECKED);
+      if (shown != active) {
+        if (active) lv_obj_add_state(b.control, LV_STATE_CHECKED);
+        else lv_obj_clear_state(b.control, LV_STATE_CHECKED);
+      }
+    }
+    _suppressEvents = false;
   }
 
   refreshDisplayConfig(false);

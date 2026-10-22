@@ -15,10 +15,64 @@ static bool inverted[COUNT] = {false};
 static uint8_t bootPolicy[COUNT] = {0};  // 0=OFF, 1=restore last, 2=ON
 static bool logicalOn[COUNT] = {false};
 static bool initialized = false;
+// Remote mappings are indexed by the stable technical widget name, not by
+// transient screen command IDs (which change when widgets are rearranged).
+static constexpr uint8_t LINK_COUNT = 12;
+static String linkedNames[LINK_COUNT];
+static uint8_t linkedPins[LINK_COUNT] = {0};
+static int linkedIndex(const String& name) {
+  for (uint8_t j = 0; j < LINK_COUNT; ++j)
+    if (linkedNames[j].length() && linkedNames[j] == name) return j;
+  return -1;
+}
+// The first code below supplies findPin; widgetPinIndex follows it.
+
 
 static int findPin(int gpio) {
   for (uint8_t i = 0; i < COUNT; ++i) if (pins[i] == gpio) return i;
   return -1;
+}
+static int widgetPinIndex(const String& name) {
+  int j = linkedIndex(name);
+  return j < 0 ? -1 : findPin(linkedPins[j]);
+}
+static bool outputState(uint8_t i) {
+  return i < COUNT && mode[i] == 4 && logicalOn[i];
+}
+static bool configureLink(String name, int gpio) {
+  name.trim();
+  if (!name.length() || name.length() > 63) return false;
+  const int index = gpio < 0 ? -1 : findPin(gpio);
+  if (gpio >= 0 && (index < 0 || mode[index] != 4)) return false;
+  int slot = linkedIndex(name);
+  if (slot < 0 && gpio < 0) return true; // already detached
+  if (slot < 0) {
+    for (uint8_t j = 0; j < LINK_COUNT; ++j) {
+      if (!linkedNames[j].length()) { slot = j; break; }
+    }
+  }
+  if (slot < 0) return false;
+  Preferences prefs;
+  if (!prefs.begin("mirabind", false)) return false;
+  char nKey[12], pKey[12];
+  snprintf(nKey, sizeof(nKey), "name%u", unsigned(slot));
+  snprintf(pKey, sizeof(pKey), "pin%u", unsigned(slot));
+  bool saved = false;
+  if (gpio < 0) {
+    prefs.remove(nKey);
+    prefs.remove(pKey);
+    saved = true;
+  } else {
+    saved = prefs.putString(nKey, name) == name.length() &&
+            prefs.putUChar(pKey, uint8_t(gpio)) == 1;
+  }
+  prefs.end();
+  if (!saved) return false;
+  linkedNames[slot] = gpio < 0 ? String("") : name;
+  linkedPins[slot] = gpio < 0 ? 0 : uint8_t(gpio);
+  Serial.printf("[MIRA][GPIO] Widget %s => %s\n", name.c_str(),
+                gpio < 0 ? "Jeedom" : String("GPIO" + String(gpio)).c_str());
+  return true;
 }
 static const char* modeName(uint8_t m) {
   switch (m) {
@@ -89,6 +143,18 @@ static void begin() {
     prefs.end();
   }
   for (uint8_t i = 0; i < COUNT; ++i) apply(i);
+  Preferences links;
+  if (links.begin("mirabind", true)) {
+    for (uint8_t j = 0; j < LINK_COUNT; ++j) {
+      char nKey[12], pKey[12];
+      snprintf(nKey, sizeof(nKey), "name%u", unsigned(j));
+      snprintf(pKey, sizeof(pKey), "pin%u", unsigned(j));
+      linkedNames[j] = links.getString(nKey, "");
+      linkedPins[j] = links.getUChar(pKey, 0);
+      if (findPin(linkedPins[j]) < 0) linkedNames[j] = "";
+    }
+    links.end();
+  }
   initialized = true;
   Serial.println("[MIRA][GPIO] WT32 EXT initialized with per-output startup policies");
 }
