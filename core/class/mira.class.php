@@ -1148,11 +1148,51 @@ class miraCmd extends cmd {
 	}
   }
   
+
+  // Option locale disponible uniquement sur les boutons et interrupteurs.
+  private function gpioEligible() {
+    return ($this->getType() == 'action' && in_array($this->getConfiguration('type'), array('toggle','button'), true)) ||
+           ($this->getType() == 'info' && $this->getConfiguration('type') == 'toggle');
+  }
+  private function gpioRequest($route, $params = array(), $method = 'POST') {
+    $eq = $this->getEqLogic();
+    if (!is_object($eq)) return false;
+    $ip = trim((string)$eq->getConfiguration('adresseip'));
+    $pass = (string)$eq->getConfiguration('password');
+    if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) || $pass === '') return false;
+    $ch = curl_init('http://' . $ip . $route . ($method === 'GET' ? '?' . http_build_query($params) : ''));
+    curl_setopt_array($ch, array(CURLOPT_RETURNTRANSFER => true, CURLOPT_CONNECTTIMEOUT => 2,
+      CURLOPT_TIMEOUT => 4, CURLOPT_HTTPAUTH => CURLAUTH_BASIC, CURLOPT_USERPWD => 'admin:' . $pass));
+    if ($method === 'POST') {
+      curl_setopt($ch, CURLOPT_POST, true);
+      curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($params));
+      curl_setopt($ch, CURLOPT_HTTPHEADER, array('X-Mira-GPIO: 1'));
+    }
+    $out = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    return ($out !== false && $code === 200) ? $out : false;
+  }
   public function postSave() {
-		if ($this->getType() == 'info' && $this->getConfiguration('type') == 'info' &&$this->getConfiguration('calcul') != '') {			
-        	$this->event($this->execute());
-		}
-	}
+    if ($this->gpioEligible()) {
+      $source = $this->getConfiguration('mira_source', 'jeedom') === 'gpio' ? 'gpio' : 'jeedom';
+      $pin = (int)$this->getConfiguration('mira_gpio');
+      $level = $this->getConfiguration('mira_level', 'high');
+      if ($source === 'gpio' && (!in_array($pin,array(10,11,12,13,14,21),true) ||
+                                ($level !== 'high' && $level !== 'low'))) {
+        log::add('mira','warning','[GPIO] Configuration invalide : '.$this->getLogicalId());
+      } else {
+        $ok = $this->gpioRequest('/gpio/link', array('name'=>$this->getLogicalId(),
+          'source'=>$source, 'gpio'=>$source === 'gpio'?$pin:0,
+          'level'=>$this->getType() === 'info' ? 'read' : $level));
+        if ($ok === false && $source === 'gpio') {
+          log::add('mira','warning','[GPIO] Liaison impossible : '.$this->getLogicalId().' (firmware WT32 DEV3 requis)');
+        }
+      }
+    }
+    if ($this->getType() == 'info' && $this->getConfiguration('type') == 'info' &&
+        $this->getConfiguration('calcul') != '') $this->event($this->execute());
+  }
   
   private function listOptionNameFromValue($selected) {
     $listValue = $this->getConfiguration('listValue');
@@ -1200,9 +1240,24 @@ class miraCmd extends cmd {
     switch ($this->getType()) {
 		case 'info':
         $type = $this->getConfiguration('type');
-        $nom = $this->getLogicalId();
-        
-        
+                $nom = $this->getLogicalId();
+        if ($this->gpioEligible() && $this->getType() === 'info' &&
+            $this->getConfiguration('mira_source', 'jeedom') === 'gpio') {
+          $pin = (int)$this->getConfiguration('mira_gpio');
+          $json = $this->gpioRequest('/gpio/state',array(), 'GET');
+          $data = ($json !== false) ? json_decode($json,true) : null;
+          if (!is_array($data) || !isset($data['pins'])) return '';
+          $onAction = $eqLogic->getCmd(null,'On_'.$nom);
+          if (!is_object($onAction) || $onAction->getConfiguration('mira_source', 'jeedom') !== 'gpio' ||
+              (int)$onAction->getConfiguration('mira_gpio') !== $pin) return '';
+          $onHigh = $onAction->getConfiguration('mira_level', 'high') === 'high';
+          foreach ($data['pins'] as $item) {
+            if ((int)$item['gpio'] !== $pin || $item['mode'] !== 'output') continue;
+            $high = (bool)$item['state'] !== (bool)$item['inverted'];
+            return $high === $onHigh ? '1' : '0';
+          }
+          return '';
+        }
         if ($this->getConfiguration('calcul') != ''&& $this->getConfiguration('type') == 'info'){
            
           $result = jeedom::evaluateExpression($this->getConfiguration('calcul'));           
@@ -1342,8 +1397,24 @@ class miraCmd extends cmd {
         
         break;
 		case 'action':
-        $nom = $this->getLogicalId();          
-        	$cmd = $this->getConfiguration('commande');        	
+                $nom = $this->getLogicalId();
+        if ($this->gpioEligible() && $this->getConfiguration('mira_source', 'jeedom') === 'gpio') {
+          $pin = (int)$this->getConfiguration('mira_gpio');
+          $level = $this->getConfiguration('mira_level', 'high');
+          if (!in_array($pin,array(10,11,12,13,14,21),true) ||
+              !in_array($level,array('high','low'),true)) return false;
+          $ok = $this->gpioRequest('/gpio/raw', array('gpio'=>$pin,'level'=>$level));
+          if ($ok === false) {
+            log::add('mira','warning','[GPIO] Commande echouee : '.$nom);
+            return false;
+          }
+          if ($this->getConfiguration('type') === 'toggle') {
+            $eqLogic->checkAndUpdateCmd($this->getConfiguration('parent'),
+                                       $this->getConfiguration('state') === 'On' ? 1 : 0);
+          }
+          return true; // GPIO local: pas de seconde commande Jeedom
+        }
+        $cmd = $this->getConfiguration('commande');        	
         	$type = $this->getConfiguration('type');
 			
         	if ($type == 'toggle'){

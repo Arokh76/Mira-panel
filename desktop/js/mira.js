@@ -1229,7 +1229,12 @@ function addCmdToTable(_cmd) {
       tr += '</td>'
   
   	  //ID Mira
+      var miraLocalEligible = (_cmd.type === 'action' &&
+          (_cmd.configuration.type === 'toggle' || _cmd.configuration.type === 'button')) ||
+          (_cmd.type === 'info' && _cmd.configuration.type === 'toggle');
+      var miraLocalAction = (_cmd.type === 'action' && miraLocalEligible);
       tr += '<td class="num">'
+      if (miraLocalEligible) tr += '<select class="cmdAttr mira-gpio-source form-control input-sm" data-l1key="configuration" data-l2key="mira_source" style="min-width:85px"><option value="jeedom">Jeedom</option><option value="gpio">GPIO</option></select>';
   	  
         if (_cmd.configuration.commande != "-1"){
           
@@ -1287,7 +1292,15 @@ function addCmdToTable(_cmd) {
   	  tr += '</td>'
   
       //Paramètres
-  	  tr += '<td>'			
+      tr += '<td>'
+      if (miraLocalEligible) {
+        tr += '<div class="mira-gpio-params" style="display:none;gap:5px;align-items:center">' +
+            '<select class="cmdAttr form-control input-sm" data-l1key="configuration" data-l2key="mira_gpio" style="width:110px"><option value="">-- GPIO --</option>' +
+            [10,11,12,13,14,21].map(function(p){ return '<option value="'+p+'">GPIO'+p+'</option>'; }).join('') + '</select>';
+        if (miraLocalAction) tr += '<select class="cmdAttr form-control input-sm" data-l1key="configuration" data-l2key="mira_level" style="width:85px"><option value="high">HIGH</option><option value="low">LOW</option></select>';
+        else tr += '<span style="font-size:12px">Lire état</span>';
+        tr += '</div><div class="mira-jeedom-params">';
+      }			
   	  if (_cmd.type == "info" && init(_cmd.logicalId) != 'Statut' ){
         tr += '<div style="display: none">'
         tr += _cmd.configuration.calcul;
@@ -1327,9 +1340,9 @@ function addCmdToTable(_cmd) {
           tr += '<a class="btn btn-default listEquipementAction" data-input="calcul" style="margin-left:2px;height:35px;width:14%;"><i class="fas fa-list-alt"></i></a>'
         }
       }
-  		
-  	  tr += '</td>'
-  
+      if (miraLocalEligible) tr += '</div>';
+      tr += '</td>'
+
       //Etat
       tr += '<td>';
       tr += '<span class="cmdAttr" data-l1key="htmlstate"></span>';
@@ -1357,7 +1370,8 @@ function addCmdToTable(_cmd) {
         },
         success: function (result) {
           tr.find('.cmdAttr[data-l1key=value]').append(result)
-          tr.setValues(_cmd, '.cmdAttr')
+          tr.setValues(_cmd, '.cmdAttr');
+          miraRefreshGpioParams(tr);
           jeedom.cmd.changeType(tr, init(_cmd.subType))
         }
       })
@@ -1984,4 +1998,16 @@ $('#miraSyncFavorites').on('click', function(){
     var error = xhr.responseJSON && xhr.responseJSON.result || xhr.statusText || 'Écran injoignable';
     status.text('Synchronisation impossible : '+String(error).slice(0,170));
   }).always(function(){button.prop('disabled',false);});
+});
+
+
+// WT32 GPIO DEV3 — commandes ON et OFF independantes.
+function miraRefreshGpioParams(tr) {
+  var source=tr.find('.mira-gpio-source').val() || 'jeedom';
+  tr.find('.mira-gpio-params').css('display',source==='gpio'?'flex':'none');
+  tr.find('.mira-jeedom-params').toggle(source!=='gpio');
+}
+$(document).off('change.mira_gpio', '#table_cmd .mira-gpio-source')
+.on('change.mira_gpio', '#table_cmd .mira-gpio-source', function() {
+  miraRefreshGpioParams($(this).closest('tr'));
 });
