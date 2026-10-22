@@ -45,7 +45,7 @@ void setup() {
   Serveur.SetupModule(
     "Mira Panel",
     MIRA_HARDWARE_NAME,
-    "0.7.14-wt32-gpio-dev3",
+    "0.7.14-wt32-gpio-dev4",
     "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/",
     "LVGL"
   );
@@ -98,6 +98,7 @@ void loop() {
   if (paramEvent >= 0) Interface.handleParamEvent(paramEvent);
 
   Interface.loop();
+  Serveur.WT32NotifyGpioChanges();
   if (MIRA_MQTT_RUNTIME_ENABLED) Mqtt.loop();
   delay(2);
 }

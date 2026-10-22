@@ -15,6 +15,10 @@ static bool inverted[COUNT] = {false};
 static uint8_t bootPolicy[COUNT] = {0};  // 0=OFF, 1=restore last, 2=ON
 static bool logicalOn[COUNT] = {false};
 static bool initialized = false;
+// GPIO changes are reported to Jeedom from the Arduino main loop, never
+// from the AsyncWebServer callback or while handling a relay write.
+static volatile uint32_t stateRevision = 1;
+static volatile uint32_t changedAtMs = 0;
 // Mapping by stable Jeedom command logical name (On_Salle, Off_Salle, etc.).
 // kind 0 = LOW, 1 = HIGH, 2 = read-state info.
 static constexpr uint8_t LINK_COUNT = 24;
@@ -154,6 +158,8 @@ static bool configure(uint8_t i, uint8_t newMode, bool newInverted, uint8_t newB
   if (pinChanged) {
     logicalOn[i] = false;
     apply(i); // Reconfiguration always starts at OFF; boot policy applies on reboot.
+    changedAtMs = millis();
+    ++stateRevision;
   }
   return true;
 }
@@ -173,6 +179,8 @@ static bool write(uint8_t i, bool on) {
     }
   }
   driveOutput(i, on);
+  changedAtMs = millis();
+  ++stateRevision;
   return true;
 }
 static bool physicalHigh(uint8_t i) {

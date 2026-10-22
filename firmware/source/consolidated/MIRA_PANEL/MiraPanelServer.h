@@ -52,6 +52,8 @@ public:
   bool WT32HasToggle(const String& name);
   bool WT32ExecuteToggle(const String& name, bool on);
   bool WT32ReadToggle(const String& name, bool& state);
+  // Debounced, read-only Jeedom notification after local GPIO transitions.
+  void WT32NotifyGpioChanges();
 
   int IndexSetListByOption(String NameList, String Option);
 

@@ -3148,6 +3148,36 @@ bool MiraPanelServer::WT32ReadToggle(const String& name, bool& state) {
   (void)name; (void)state; return false;
 #endif
 }
+
+void MiraPanelServer::WT32NotifyGpioChanges() {
+#if !defined(MIRA_TARGET_WAVESHARE_43C) && !defined(MIRA_TARGET_NEXTION_28)
+  // A write may originate from the web server's network task. Only the main
+  // loop sends HTTP. The payload requests a READ-ONLY state synchronization.
+  static uint32_t sentRevision = 0;
+  static uint32_t lastAttemptMs = 0;
+  const uint32_t revision = MiraWT32GPIO::stateRevision;
+  if (revision == sentRevision) return;
+  const uint32_t now = millis();
+  if (now - MiraWT32GPIO::changedAtMs < 150 || now - lastAttemptMs < 250) return;
+  lastAttemptMs = now;
+  if (WiFi.status() != WL_CONNECTED || !GetParamBool("Jeedom")) return;
+  const String urlBase = GetParamText("Jeedom_IP");
+  const String apiKey = GetParamText("Jeedom_Key_mira");
+  const String refreshId = GetParamText("Jeedom_Refresh");
+  if (!urlBase.startsWith("http") || apiKey.isEmpty() || refreshId.isEmpty() ||
+      apiKey == "null" || refreshId == "null") return;
+  const String url = urlBase +
+      "/core/api/jeeApi.php?plugin=mira&type=event&apikey=" + apiKey +
+      "&id=" + refreshId + "&gpio_sync=1";
+  // The existing async HTTP worker handles the network request. The next
+  // minute-based Jeedom cron also repairs missed messages if Jeedom was down.
+  sentRevision = revision;
+  AsyncHTTP(url);
+  if (_Debug) Serial.printf("[MIRA][GPIO] Demande synchro Jeedom revision %u\n",
+                            unsigned(revision));
+#endif
+}
+
 void MiraPanelServer::IndexSetEvent(int ID) {
   Resend = true;
   Action = ID;
