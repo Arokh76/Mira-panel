@@ -82,6 +82,82 @@ class mira extends eqLogic {
     }
   }
   
+
+  /**
+   * Local GPIO state is authoritative for GPIO-linked toggles.
+   * Read-only: never call On/Off actions or send an /updatenr command.
+   * One HTTP read per screen, regardless of the number of relay widgets.
+   */
+  public function syncGpioStates() {
+    $candidates = array();
+    foreach ($this->getCmd('info') as $stateCmd) {
+      if (!is_object($stateCmd) || $stateCmd->getConfiguration('type') !== 'toggle') continue;
+      $widget = (string)$stateCmd->getLogicalId();
+      $onCmd = $this->getCmd(null, 'On_' . $widget);
+      $offCmd = $this->getCmd(null, 'Off_' . $widget);
+      if (!is_object($onCmd) || !is_object($offCmd)) continue;
+      // Two independent commands MUST address one shared GPIO at opposite levels.
+      if ($onCmd->getConfiguration('mira_source','jeedom') !== 'gpio' ||
+          $offCmd->getConfiguration('mira_source','jeedom') !== 'gpio') continue;
+      $pin = (int)$onCmd->getConfiguration('mira_gpio');
+      if (!in_array($pin, array(10,11,12,13,14,21), true) ||
+          (int)$offCmd->getConfiguration('mira_gpio') !== $pin) continue;
+      $onLevel = (string)$onCmd->getConfiguration('mira_level','high');
+      $offLevel = (string)$offCmd->getConfiguration('mira_level','low');
+      if (!in_array($onLevel,array('low','high'),true) ||
+          !in_array($offLevel,array('low','high'),true) || $onLevel === $offLevel) continue;
+      // An explicit state source elsewhere takes precedence over local inference.
+      $stateSource = (string)$stateCmd->getConfiguration('mira_source','jeedom');
+      if ($stateSource === 'jeedom' && (string)$stateCmd->getConfiguration('calcul','') !== '') continue;
+      if ($stateSource === 'gpio' && (int)$stateCmd->getConfiguration('mira_gpio') !== $pin) continue;
+      $candidates[$widget] = array('pin'=>$pin, 'onHigh'=>$onLevel === 'high');
+    }
+    if (count($candidates) === 0) return 0;
+
+    $ip = trim((string)$this->getConfiguration('adresseip'));
+    $pass = (string)$this->getConfiguration('password');
+    if (!filter_var($ip,FILTER_VALIDATE_IP,FILTER_FLAG_IPV4) || $pass === '') return 0;
+    $ch = curl_init('http://' . $ip . '/gpio/state');
+    curl_setopt_array($ch,array(CURLOPT_RETURNTRANSFER=>true,
+      CURLOPT_CONNECTTIMEOUT=>2,CURLOPT_TIMEOUT=>4,
+      CURLOPT_HTTPAUTH=>CURLAUTH_BASIC,CURLOPT_USERPWD=>'admin:'.$pass));
+    $response = curl_exec($ch);
+    $code = (int)curl_getinfo($ch,CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if ($response === false || $code !== 200) {
+      log::add('mira','debug','[GPIO] Retour d etat inaccessible sur '.$this->getName().' (HTTP '.$code.')');
+      return 0;
+    }
+    $data = json_decode($response,true);
+    if (!is_array($data) || !isset($data['pins']) || !is_array($data['pins'])) return 0;
+    $pins = array();
+    foreach ($data['pins'] as $p) {
+      if (!is_array($p) || !isset($p['gpio']) || !isset($p['mode']) ||
+          !array_key_exists('state',$p) || !array_key_exists('inverted',$p)) continue;
+      if ($p['mode'] !== 'output') continue;
+      $pins[(int)$p['gpio']] = ((bool)$p['state'] !== (bool)$p['inverted']);
+    }
+    $changed = 0;
+    foreach ($candidates as $widget=>$spec) {
+      if (!array_key_exists($spec['pin'],$pins)) continue;
+      $value = $pins[$spec['pin']] === $spec['onHigh'] ? '1' : '0';
+      // Jeedom updates only the Info command cache/event, without moving any relay.
+      $this->checkAndUpdateCmd($widget,$value);
+      ++$changed;
+    }
+    return $changed;
+  }
+
+  // Jeedom's once-a-minute scheduler. A direct Jeedom action still updates immediately.
+  public static function cron() {
+    foreach (eqLogic::byType('mira',true) as $eqLogic) {
+      try { $eqLogic->syncGpioStates(); }
+      catch (Throwable $e) {
+        log::add('mira','warning','[GPIO] Lecture état : '.$e->getMessage());
+      }
+    }
+  }
+
   public static function cron15() {
   	foreach (eqLogic::byType('mira', true) as $eqLogic) {
       if ($eqLogic->getConfiguration('ping') == "1"){
@@ -1129,8 +1205,9 @@ class mira extends eqLogic {
       return false;
     }
     $this->checkAndUpdateCmd('Statut', '1');
-    // Ne pas recopier l'état local Mira vers Jeedom : Jeedom est la source
-    // de vérité pour les actionneurs. Aucun execCmd() ici.
+    // Seules les sorties GPIO locales sont lues depuis l'ecran.
+    // Les actionneurs Jeedom classiques gardent Jeedom comme source de verite.
+    $this->syncGpioStates();
     return true;
   }
 
@@ -1229,6 +1306,7 @@ class miraCmd extends cmd {
         /* Un refresh relit aussi la structure de l'ecran afin de creer
          * les commandes ajoutees depuis la derniere programmation. */
         $eqLogic->postUpdate();
+        $eqLogic->syncGpioStates();
       	return;
 	}
    
@@ -1254,7 +1332,9 @@ class miraCmd extends cmd {
           foreach ($data['pins'] as $item) {
             if ((int)$item['gpio'] !== $pin || $item['mode'] !== 'output') continue;
             $high = (bool)$item['state'] !== (bool)$item['inverted'];
-            return $high === $onHigh ? '1' : '0';
+            $result = $high === $onHigh ? '1' : '0';
+            $this->event($result); // Reading the Info also refreshes Jeedom cache.
+            return $result;
           }
           return '';
         }
