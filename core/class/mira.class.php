@@ -204,6 +204,20 @@ class mira extends eqLogic {
 		if (!is_object($cmd)) {
 			throw new Exception(__('Commande introuvable', __FILE__) . ' : ' . json_encode($_GET));
 		}
+        // Firmware GPIO DEV4: a relay has already changed locally.
+        // The callback must READ its state; it must NEVER execute refresh,
+        // On/Off, or any Jeedom command that could actuate something again.
+        if ((string)init('gpio_sync', '') === '1') {
+          if ($cmd->getLogicalId() !== 'refresh') {
+            throw new Exception('GPIO sync: commande non autorisée');
+          }
+          $eqLogic = $cmd->getEqLogic();
+          if (!is_object($eqLogic)) throw new Exception('GPIO sync: écran inconnu');
+          $eqLogic->syncGpioStates();
+          echo init('id');
+          return;
+        }
+
 		$type = $cmd->getType();
     	if($type == 'action'){
           log::add('mira', 'debug', $cmd->getName()." ACTION HTTP");
