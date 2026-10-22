@@ -38,15 +38,19 @@ button:disabled{opacity:.45;cursor:default}
 <main><h1>GPIO · WT32-SC01 Plus</h1>
 <p class="intro">Pilotage local des 6 broches du connecteur EXT. Aucune liaison avec Jeedom.</p>
 <div class="notice"><b>Attention :</b> signaux 3,3 V uniquement, jamais de 230 V ni de relais direct.
-Toutes les broches sont désactivées par défaut. Les sorties redémarrent à OFF ; prévois une résistance
-de rappel externe adaptée si ton montage exige un état garanti pendant le démarrage.</div>
+Les sorties redémarrent à OFF par défaut. Tu peux choisir un autre comportement ci-dessous.
+Un redémarrage entraîne toujours une phase où le niveau électrique n'est pas garanti : prévois
+un rappel externe adapté. Ne choisis jamais ON ou Restaurer pour une charge dangereuse.</div>
 <p id="message" role="status"></p><div class="grid" id="pins"></div>
-<p class="small">Modes et inversion enregistrés en mémoire. Le niveau ON/OFF d'une sortie n'est pas mémorisé.
+<p class="small">Modes, inversion et politique de démarrage enregistrés en mémoire. L'état ON/OFF n'est
+mémorisé que pour les sorties réglées sur « Restaurer le dernier état ».
 Actualisation automatique des entrées toutes les 2 secondes.</p></main>
 <script>
 (function(){
 const modes=[["off","Désactivé"],["input","Entrée"],["pullup","Entrée + pull-up"],
 ["pulldown","Entrée + pull-down"],["output","Sortie numérique"]];
+const boots=[["off","Toujours OFF (défaut)"],["restore","Restaurer le dernier état"],
+["on","Toujours ON"]];
 const root=document.getElementById('pins'),msg=document.getElementById('message');
 let busy=false,ready=false;
 function message(s,bad){msg.textContent=s;msg.style.color=bad?'#a33c3c':'#1e7051';}
@@ -63,40 +67,58 @@ function build(p){
   box.innerHTML='<h2>'+p.connector+' · GPIO'+p.gpio+'</h2>'+
     '<div class="row"><label>Mode <select class="mode"></select></label></div>'+
     '<div class="row"><label><input class="invert" type="checkbox"> Inverser HIGH / LOW</label></div>'+
+    '<div class="row bootrow"><label>Au redémarrage <select class="boot"></select></label></div>'+
     '<div class="row"><span class="state"></span><button class="toggle" disabled>ON / OFF</button></div>';
   const select=box.querySelector('.mode'),inverse=box.querySelector('.invert'),
-        toggle=box.querySelector('.toggle');
+        boot=box.querySelector('.boot'),toggle=box.querySelector('.toggle');
   modes.forEach(function(m){const op=document.createElement('option');op.value=m[0];op.textContent=m[1];select.appendChild(op);});
+  boots.forEach(function(m){const op=document.createElement('option');op.value=m[0];op.textContent=m[1];boot.appendChild(op);});
   async function configure(){
     if(select.value==='output' && p.mode!=='output' &&
         !confirm('Configurer GPIO'+p.gpio+' en sortie ? Elle sera initialisée à OFF.')) {
       select.value=p.mode;return;
     }
-    try{busy=true;await api('/gpio/config',{gpio:String(p.gpio),mode:select.value,inverted:inverse.checked?'1':'0'});
+    if(select.value==='output' && boot.value!=='off' && boot.value!==p.boot &&
+        !confirm('Attention : GPIO'+p.gpio+' peut s’activer automatiquement au démarrage. '+ 
+        'Ce réglage ne garantit pas son niveau pendant le reset. Continuer ?')) {
+      boot.value=p.boot;return;
+    }
+    try{busy=true;await api('/gpio/config',{gpio:String(p.gpio),mode:select.value,
+      inverted:inverse.checked?'1':'0',boot:boot.value});
       message('Configuration GPIO'+p.gpio+' enregistrée.');await refresh();
-    }catch(e){message(e.message,true);}finally{busy=false;}
+    }catch(e){message(e.message,true);await refresh();}finally{busy=false;}
   }
   select.addEventListener('change',configure);
   inverse.addEventListener('change',configure);
+  boot.addEventListener('change',configure);
   toggle.addEventListener('click',async function(){
     try{busy=true;await api('/gpio/set',{gpio:String(p.gpio),state:toggle.dataset.next});
       await refresh();message('GPIO'+p.gpio+' mis à jour.');
     }catch(e){message(e.message,true);}finally{busy=false;}
   });
+  box._updateSaved=function(newMode,newBoot){p.mode=newMode;p.boot=newBoot;};
   root.appendChild(box);
 }
 function paint(p){
   const box=root.querySelector('[data-pin="'+p.gpio+'"]');if(!box)return;
   const select=box.querySelector('.mode'),inv=box.querySelector('.invert'),
-       badge=box.querySelector('.state'),toggle=box.querySelector('.toggle');
+       boot=box.querySelector('.boot'),badge=box.querySelector('.state'),
+       toggle=box.querySelector('.toggle');
   if(document.activeElement!==select)select.value=p.mode;
   if(document.activeElement!==inv)inv.checked=p.inverted;
+  if(document.activeElement!==boot)boot.value=p.boot||'off';
   const configured=p.mode!=='off',output=p.mode==='output',on=!!p.state;
+  box.querySelector('.bootrow').style.display=output?'flex':'none';
   badge.textContent=!configured?'INACTIF':(on?'HIGH / ON':'LOW / OFF');
   badge.className='state'+(on?' high':'');
+  boot.disabled=!output;
   toggle.disabled=!output;
   toggle.dataset.next=on?'0':'1';
   toggle.textContent=on?'Passer à OFF':'Passer à ON';
+  box.dataset.currentMode=p.mode;
+  box.dataset.currentBoot=p.boot||'off';
+  const handler=box._updateSaved;
+  if(handler)handler(p.mode,p.boot||'off');
 }
 async function refresh(){
   if(busy && ready)return;
