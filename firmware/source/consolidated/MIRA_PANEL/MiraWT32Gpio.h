@@ -15,6 +15,22 @@ static bool inverted[COUNT] = {false};
 static uint8_t bootPolicy[COUNT] = {0};  // 0=OFF, 1=restore last, 2=ON
 static bool logicalOn[COUNT] = {false};
 static bool initialized = false;
+// Mapping by stable Jeedom command logical name (On_Salle, Off_Salle, etc.).
+// kind 0 = LOW, 1 = HIGH, 2 = read-state info.
+static constexpr uint8_t LINK_COUNT = 24;
+static String linkName[LINK_COUNT];
+static uint8_t linkPin[LINK_COUNT] = {0};
+static uint8_t linkKind[LINK_COUNT] = {0};
+static int findLink(const String& name) {
+  for (uint8_t i=0; i<LINK_COUNT; ++i)
+    if (linkName[i].length() && linkName[i] == name) return i;
+  return -1;
+}
+static bool anyToggleLink(const String& widget) {
+  return findLink(String("On_") + widget) >= 0 ||
+         findLink(String("Off_") + widget) >= 0;
+}
+
 
 static int findPin(int gpio) {
   for (uint8_t i = 0; i < COUNT; ++i) if (pins[i] == gpio) return i;
@@ -89,6 +105,20 @@ static void begin() {
     prefs.end();
   }
   for (uint8_t i = 0; i < COUNT; ++i) apply(i);
+  Preferences links;
+  if (links.begin("miralinks", true)) {
+    for (uint8_t j=0; j<LINK_COUNT; ++j) {
+      char nk[12], pk[12], kk[12];
+      snprintf(nk, sizeof(nk), "name%u", unsigned(j));
+      snprintf(pk, sizeof(pk), "pin%u", unsigned(j));
+      snprintf(kk, sizeof(kk), "kind%u", unsigned(j));
+      linkName[j] = links.getString(nk, "");
+      linkPin[j] = links.getUChar(pk, 0);
+      linkKind[j] = links.getUChar(kk, 0);
+      if (findPin(linkPin[j]) < 0 || linkKind[j] > 2) linkName[j] = "";
+    }
+    links.end();
+  }
   initialized = true;
   Serial.println("[MIRA][GPIO] WT32 EXT initialized with per-output startup policies");
 }
@@ -143,6 +173,79 @@ static bool write(uint8_t i, bool on) {
     }
   }
   driveOutput(i, on);
+  return true;
+}
+static bool physicalHigh(uint8_t i) {
+  return i < COUNT && mode[i] == 4 && (logicalOn[i] != inverted[i]);
+}
+static bool writePhysical(uint8_t i, bool high) {
+  return i < COUNT && write(i, high != inverted[i]);
+}
+static bool saveLink(String name, int gpio, uint8_t kind) {
+  name.trim();
+  if (!name.length() || name.length() > 62 || kind > 2) return false;
+  int pinIndex = gpio == 0 ? -1 : findPin(gpio);
+  if (gpio != 0 && (pinIndex < 0 || mode[pinIndex] != 4)) return false;
+  int slot = findLink(name);
+  if (gpio == 0 && slot < 0) return true;
+  if (slot < 0) {
+    for (int j=0; j<LINK_COUNT; ++j) {
+      if (!linkName[j].length()) { slot=j; break; }
+    }
+  }
+  if (slot < 0) return false;
+  Preferences p;
+  if (!p.begin("miralinks", false)) return false;
+  char nk[12], pk[12], kk[12];
+  snprintf(nk, sizeof(nk), "name%u", unsigned(slot));
+  snprintf(pk, sizeof(pk), "pin%u", unsigned(slot));
+  snprintf(kk, sizeof(kk), "kind%u", unsigned(slot));
+  bool ok;
+  if (gpio == 0) {
+    p.remove(nk); p.remove(pk); p.remove(kk);
+    ok = true;
+  } else {
+    ok = p.putString(nk, name) == name.length() &&
+         p.putUChar(pk, uint8_t(gpio)) == 1 &&
+         p.putUChar(kk, kind) == 1;
+  }
+  p.end();
+  if (!ok) return false;
+  linkName[slot] = gpio == 0 ? "" : name;
+  linkPin[slot] = gpio == 0 ? 0 : gpio;
+  linkKind[slot] = kind;
+  Serial.printf("[MIRA][GPIO] liaison %s => GPIO%d kind=%u\n",
+                name.c_str(), gpio, unsigned(kind));
+  return true;
+}
+static bool actionMapped(const String& name) { return findLink(name) >= 0; }
+static bool executeAction(const String& name) {
+  int slot = findLink(name);
+  if (slot < 0 || linkKind[slot] > 1) return false;
+  int i = findPin(linkPin[slot]);
+  return i >= 0 && writePhysical(uint8_t(i), linkKind[slot] == 1);
+}
+static bool validToggle(const String& name, int& pinIndex, bool& onHigh, bool& offHigh) {
+  const int on = findLink(String("On_") + name);
+  const int off = findLink(String("Off_") + name);
+  if (on < 0 || off < 0) return false;
+  if (linkPin[on] != linkPin[off] || linkKind[on] > 1 ||
+      linkKind[off] > 1 || linkKind[on] == linkKind[off]) return false;
+  pinIndex = findPin(linkPin[on]);
+  if (pinIndex < 0 || mode[pinIndex] != 4) return false;
+  onHigh = linkKind[on] == 1;
+  offHigh = linkKind[off] == 1;
+  return true;
+}
+static bool executeToggle(const String& name, bool on) {
+  int idx = -1; bool onHigh=false, offHigh=false;
+  if (!validToggle(name, idx, onHigh, offHigh)) return false;
+  return writePhysical(uint8_t(idx), on ? onHigh : offHigh);
+}
+static bool toggleState(const String& name, bool& result) {
+  int idx = -1; bool onHigh=false, offHigh=false;
+  if (!validToggle(name, idx, onHigh, offHigh)) return false;
+  result = physicalHigh(uint8_t(idx)) == onHigh;
   return true;
 }
 static String stateJson() {

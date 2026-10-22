@@ -510,6 +510,47 @@ void MiraPanelServer::ServeurStation() {
     }
     return true;
   };
+  server.on("/gpio/link", HTTP_POST, [miraGpioAuthorize](AsyncWebServerRequest* request) {
+    if (!miraGpioAuthorize(request)) return;
+    if (!request->hasHeader("X-Mira-GPIO") ||
+        !request->hasParam("name", true) || !request->hasParam("gpio", true) ||
+        !request->hasParam("source", true) || !request->hasParam("level", true)) {
+      request->send(400, "text/plain", "Parametres incomplets"); return;
+    }
+    String name=request->getParam("name",true)->value();
+    String g=request->getParam("gpio",true)->value();
+    String source=request->getParam("source",true)->value();
+    String level=request->getParam("level",true)->value();
+    if ((source!="jeedom" && source!="gpio") ||
+        !g.length() || g.length()>2 || g!=String(g.toInt()) ||
+        (level!="high" && level!="low" && level!="read")) {
+      request->send(400, "text/plain", "Parametres incorrects"); return;
+    }
+    int gpio = source=="gpio" ? g.toInt() : 0;
+    int kind = level=="high" ? 1 : (level=="low" ? 0 : 2);
+    if (!MiraWT32GPIO::saveLink(name,gpio,kind)) {
+      request->send(409, "text/plain", "GPIO non configure en sortie ou table pleine"); return;
+    }
+    request->send(200, "text/plain", "OK");
+  });
+  server.on("/gpio/raw", HTTP_POST, [miraGpioAuthorize](AsyncWebServerRequest* request) {
+    if (!miraGpioAuthorize(request)) return;
+    if (!request->hasHeader("X-Mira-GPIO") ||
+        !request->hasParam("gpio", true) || !request->hasParam("level", true)) {
+      request->send(400, "text/plain", "Parametres manquants"); return;
+    }
+    String g=request->getParam("gpio",true)->value();
+    String level=request->getParam("level",true)->value();
+    if (!g.length() || g.length()>2 || g!=String(g.toInt()) ||
+        (level!="high" && level!="low")) {
+      request->send(400, "text/plain", "Parametres incorrects"); return;
+    }
+    int idx=MiraWT32GPIO::findPin(g.toInt());
+    if (idx<0 || !MiraWT32GPIO::writePhysical(uint8_t(idx),level=="high")) {
+      request->send(409,"text/plain","Sortie GPIO indisponible"); return;
+    }
+    request->send(200, "text/plain", "OK");
+  });
   server.on("/gpio/state", HTTP_GET, [miraGpioAuthorize](AsyncWebServerRequest* request) {
     if (!miraGpioAuthorize(request)) return;
     AsyncWebServerResponse* response =
@@ -3072,6 +3113,41 @@ bool MiraPanelServer::update_module(String fileName) {
 }
 
 
+bool MiraPanelServer::WT32HasAction(const String& name) {
+#if !defined(MIRA_TARGET_WAVESHARE_43C) && !defined(MIRA_TARGET_NEXTION_28)
+  return MiraWT32GPIO::actionMapped(name);
+#else
+  (void)name; return false;
+#endif
+}
+bool MiraPanelServer::WT32ExecuteAction(const String& name) {
+#if !defined(MIRA_TARGET_WAVESHARE_43C) && !defined(MIRA_TARGET_NEXTION_28)
+  return MiraWT32GPIO::executeAction(name);
+#else
+  (void)name; return false;
+#endif
+}
+bool MiraPanelServer::WT32HasToggle(const String& name) {
+#if !defined(MIRA_TARGET_WAVESHARE_43C) && !defined(MIRA_TARGET_NEXTION_28)
+  return MiraWT32GPIO::anyToggleLink(name);
+#else
+  (void)name; return false;
+#endif
+}
+bool MiraPanelServer::WT32ExecuteToggle(const String& name, bool on) {
+#if !defined(MIRA_TARGET_WAVESHARE_43C) && !defined(MIRA_TARGET_NEXTION_28)
+  return MiraWT32GPIO::executeToggle(name, on);
+#else
+  (void)name; (void)on; return false;
+#endif
+}
+bool MiraPanelServer::WT32ReadToggle(const String& name, bool& state) {
+#if !defined(MIRA_TARGET_WAVESHARE_43C) && !defined(MIRA_TARGET_NEXTION_28)
+  return MiraWT32GPIO::toggleState(name, state);
+#else
+  (void)name; (void)state; return false;
+#endif
+}
 void MiraPanelServer::IndexSetEvent(int ID) {
   Resend = true;
   Action = ID;

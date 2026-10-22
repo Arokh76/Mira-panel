@@ -2797,6 +2797,11 @@ void MiraPanelUI::onButton(lv_event_t* e) {
   if (ui._suppressEvents || ctx->bindingIndex >= ui._bindingCount) return;
   ui.noteActivity();
   Binding& b = ui._bindings[ctx->bindingIndex];
+  if (ui._server.WT32HasAction(b.name)) {
+    if (!ui._server.WT32ExecuteAction(b.name))
+      Serial.println("[MIRA][GPIO] Action locale non disponible : " + b.name);
+    return;
+  }
   ui._server.IndexSetEvent(b.id);
   ui.publishMqttAction(b, "1");
 }
@@ -2809,6 +2814,20 @@ void MiraPanelUI::onToggle(lv_event_t* e) {
   if (ui._suppressEvents || ctx->bindingIndex >= ui._bindingCount) return;
   Binding& b = ui._bindings[ctx->bindingIndex];
   bool on = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+  if (ui._server.WT32HasToggle(b.name)) {
+    if (!ui._server.WT32ExecuteToggle(b.name,on)) {
+      bool actual=false;
+      if (ui._server.WT32ReadToggle(b.name, actual)) {
+        ui._suppressEvents=true;
+        if (actual) lv_obj_add_state(b.control,LV_STATE_CHECKED);
+        else lv_obj_clear_state(b.control,LV_STATE_CHECKED);
+        ui._suppressEvents=false;
+      }
+      Serial.println("[MIRA][GPIO] Liaison ON/OFF incomplete : " + b.name);
+    }
+    ui.noteActivity();
+    return; // Do not send local relay commands to Jeedom or MQTT.
+  }
   int id = on ? b.idOn : b.idOff;
   if (b.stateLabel) {
     lv_label_set_text(b.stateLabel, on ? "ON" : "OFF");
@@ -3605,6 +3624,25 @@ void MiraPanelUI::loop() {
     reloadFromMiraJson();
   }
 
+  // Keep native toggles in sync with web GPIO controls & reboot policy.
+  static uint32_t lastGpioPoll = 0;
+  if (millis()-lastGpioPoll >= 250) {
+    lastGpioPoll=millis();
+    bool wasSuppressed = _suppressEvents;
+    _suppressEvents=true;
+    for (uint8_t i=0; i<_bindingCount; ++i) {
+      Binding& b=_bindings[i];
+      if (b.type!=W_TOGGLE || !b.control || !_server.WT32HasToggle(b.name)) continue;
+      bool actual=false;
+      if (!_server.WT32ReadToggle(b.name,actual)) continue;
+      bool displayed=lv_obj_has_state(b.control,LV_STATE_CHECKED);
+      if (actual != displayed) {
+        if (actual) lv_obj_add_state(b.control,LV_STATE_CHECKED);
+        else lv_obj_clear_state(b.control,LV_STATE_CHECKED);
+      }
+    }
+    _suppressEvents=wasSuppressed;
+  }
   refreshDisplayConfig(false);
   updateDisplaySchedule(false);
   uint32_t idle = millis() - _lastActivity;

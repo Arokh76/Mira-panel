@@ -47,6 +47,11 @@ public:
   // Reconstruction WT32: remet a zero uniquement la table des actions dynamiques
   // afin de reconstruire l'interface LVGL sans redemarrer le module.
   void ResetActionsForLvgl();
+  bool WT32HasAction(const String& name);
+  bool WT32ExecuteAction(const String& name);
+  bool WT32HasToggle(const String& name);
+  bool WT32ExecuteToggle(const String& name, bool on);
+  bool WT32ReadToggle(const String& name, bool& state);
 
   int IndexSetListByOption(String NameList, String Option);
 
