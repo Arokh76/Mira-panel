@@ -366,7 +366,8 @@ static bool multiPoll(String& name, uint8_t& kind) {
       multiRawChanged[i]=now;
       multiPressStarted[i]=now;
       multiClickCount[i]=0;
-      multiLongDone[i]=false;
+      // A contact already held during boot/config must never count as a hold.
+      multiLongDone[i]=down;
       continue;
     }
     if (down != multiRawDown[i]) {
