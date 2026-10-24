@@ -30,6 +30,7 @@ log::add('mira', 'debug', "Lancement script");
                         <option value="datetime">Date et heure</option>
         				<option value="info">Info</option>
         				<option value="button">Bouton</option>
+                        <option value="multiaction">Multi-actions (bouton GPIO)</option>
         				<option value="toggle">Bouton basculant</option>
                         <option value="range">Curseur</option>
                         <option value="roundrange">Curseur arrondi</option>

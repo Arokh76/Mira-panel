@@ -993,7 +993,7 @@ $("#miratype").on('change',function(event) {
     $('#divmiraunit,#divmiralist').hide();
     $('#titlemiraval').text('Consigne de départ :');
     $('#titlemiramin').text('Consigne mini :');
-  } else if (lvgl_type == 'button' || lvgl_type == 'toggle' || lvgl_type == 'color'){
+  } else if (lvgl_type == 'button' || lvgl_type == 'toggle' || lvgl_type == 'color' || lvgl_type == 'multiaction'){
   	$("#miramin").val('');
     $("#miramax").val('');
     $("#miraval").val('');
@@ -1229,11 +1229,14 @@ function addCmdToTable(_cmd) {
       tr += '</td>'
   
   	  //ID Mira
+      var isMultiMaster = _cmd.configuration.type === 'multi_master';
+      var isMultiAction = _cmd.configuration.type === 'multi_action';
       var miraLocalEligible = (_cmd.type === 'action' &&
-          (_cmd.configuration.type === 'toggle' || _cmd.configuration.type === 'button')) ||
+          (_cmd.configuration.type === 'toggle' || _cmd.configuration.type === 'button' || isMultiAction)) ||
           (_cmd.type === 'info' && _cmd.configuration.type === 'toggle');
       var miraLocalAction = (_cmd.type === 'action' && miraLocalEligible);
       tr += '<td class="num">'
+      if (isMultiMaster) tr += '<span>Multi-actions</span>';
       if (miraLocalEligible) tr += '<select class="cmdAttr mira-gpio-source form-control input-sm" data-l1key="configuration" data-l2key="mira_source" style="min-width:85px"><option value="jeedom">Jeedom</option><option value="gpio">GPIO</option></select>';
   	  
         if (_cmd.configuration.commande != "-1"){
@@ -1293,6 +1296,13 @@ function addCmdToTable(_cmd) {
   
       //Paramètres
       tr += '<td>'
+      if (isMultiMaster) {
+        tr += '<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">' +
+          '<span>Entrée :</span><select class="cmdAttr form-control input-sm" data-l1key="configuration" data-l2key="mira_input_gpio" style="width:110px">' +
+          '<option value="">-- GPIO --</option>' +
+          [10,11,12,13,14,21].map(function(p){return '<option value="'+p+'">GPIO'+p+'</option>';}).join('') +
+          '</select><small>Contact sec vers GND · pull-up. La case Afficher contrôle la tuile Mira.</small></div>';
+      }
       if (miraLocalEligible) {
         tr += '<div class="mira-gpio-params" style="display:none;gap:5px;align-items:center">' +
             '<select class="cmdAttr form-control input-sm" data-l1key="configuration" data-l2key="mira_gpio" style="width:110px"><option value="">-- GPIO --</option>' +
@@ -1308,7 +1318,7 @@ function addCmdToTable(_cmd) {
     	tr += '<textarea class="cmdAttr  input-sm" data-l1key="configuration" data-l2key="calcul" style="height:35px;width:85%" placeholder="{{Recevoir de}}"></textarea>'
       	tr += '<a class="btn btn-default listEquipementInfo " data-input="calcul" style="margin-left:2px; height:35px; width:14%;"><i class="fas fa-list-alt"></i></a>'
       }
-  	  if (_cmd.type == "action" && init(_cmd.logicalId) != 'Redémarrer' && init(_cmd.logicalId) != 'refresh'){
+  	  if (_cmd.type == "action" && !isMultiMaster && init(_cmd.logicalId) != 'Redémarrer' && init(_cmd.logicalId) != 'refresh'){
         if (_cmd.configuration.type == 'list' && init(_cmd.configuration.listValue) != '') {
           // One Jeedom action target per Mira list option.
           var listItems = _cmd.configuration.listValue.split(';')

@@ -627,6 +627,48 @@ class mira extends eqLogic {
                   	$info->save();
                   
                   
+                }else if ($json_index[$i]['type'] == 'button' && preg_match('/^Multi_(Clic|Double|Triple|Long)_(.+)$/u', (string)$json_index[$i]['nom'], $parts)){
+                    $gesture=$parts[1];
+                    $widget=$parts[2];
+                    $name=(string)$json_index[$i]['nom'];
+                    $masterName='Multi_'.$widget;
+                    if ($gesture==='Clic') {
+                        $master=$this->getCmd(null,$masterName);
+                        if (!is_object($master)) {
+                            $master=new miraCmd();
+                            $master->setEqLogic_id($this->getId());
+                            $master->setLogicalId($masterName);
+                            $master->setName($widget.' · Multi-actions');
+                            $master->setType('action');
+                            $master->setSubType('other');
+                            $master->setIsVisible(0);
+                            $master->setConfiguration('type','multi_master');
+                            $master->setConfiguration('visible_cmd','1');
+                        }
+                        $master->setOrder($ordre++);
+                        $master->setConfiguration('type','multi_master');
+                        $master->save();
+                    }
+                    $button=$this->getCmd(null,$name);
+                    if (!is_object($button)) {
+                        $button=new miraCmd();
+                        $button->setEqLogic_id($this->getId());
+                        $button->setLogicalId($name);
+                        $button->setName($widget.' · '.array(
+                          'Clic'=>'Clic simple','Double'=>'Double clic',
+                          'Triple'=>'Triple clic','Long'=>'Appui long')[$gesture]);
+                        $button->setType('action');
+                        $button->setSubType('other');
+                        $button->setIsVisible(0);
+                        $button->setConfiguration('visible_cmd','1');
+                        $button->setConfiguration('mira_source','jeedom');
+                    }
+                    $button->setOrder($ordre++);
+                    $button->setConfiguration('type','multi_action');
+                    $button->setConfiguration('commande',$json_index[$i]['id']);
+                    $button->setConfiguration('multi_parent',$masterName);
+                    $button->save();
+
                 }else if ($json_index[$i]['type'] == 'button'){
                   	$id_cmd = $json_index[$i]['id'];
                     $name = $json_index[$i]['nom'];                    
@@ -729,7 +771,10 @@ class mira extends eqLogic {
                 if (!isset($json_index[$i]['type'])) continue;
                 $widgetType = (string)$json_index[$i]['type'];
 
-                if ($widgetType == 'info' || $widgetType == 'button') {
+                if ($widgetType == 'button' && preg_match('/^Multi_(Clic|Double|Triple|Long)_(.+)$/u',(string)($json_index[$i]['nom'] ?? ''),$parts)) {
+                    $expectedLogicalIds[(string)$json_index[$i]['nom']]=true;
+                    $expectedLogicalIds['Multi_'.$parts[2]]=true;
+                } else if ($widgetType == 'info' || $widgetType == 'button') {
                     if (isset($json_index[$i]['nom'])) {
                         $expectedLogicalIds[(string)$json_index[$i]['nom']] = true;
                     }
@@ -755,7 +800,7 @@ class mira extends eqLogic {
                 }
             }
 
-            $managedWidgetTypes = array('info', 'toggle', 'range', 'list', 'button', 'color');
+            $managedWidgetTypes = array('info', 'toggle', 'range', 'list', 'button', 'color', 'multi_master', 'multi_action');
             $removedCommands = 0;
             foreach ($this->getCmd() as $existingCmd) {
                 if (!is_object($existingCmd)) continue;
@@ -1242,7 +1287,7 @@ class miraCmd extends cmd {
 
   // Option locale disponible uniquement sur les boutons et interrupteurs.
   private function gpioEligible() {
-    return ($this->getType() == 'action' && in_array($this->getConfiguration('type'), array('toggle','button'), true)) ||
+    return ($this->getType() == 'action' && in_array($this->getConfiguration('type'), array('toggle','button','multi_action'), true)) ||
            ($this->getType() == 'info' && $this->getConfiguration('type') == 'toggle');
   }
   private function gpioRequest($route, $params = array(), $method = 'POST') {
@@ -1265,7 +1310,17 @@ class miraCmd extends cmd {
     return ($out !== false && $code === 200) ? $out : false;
   }
   public function postSave() {
-    if ($this->gpioEligible()) {
+    if ($this->getConfiguration('type') === 'multi_master') {
+      $widget=substr((string)$this->getLogicalId(),strlen('Multi_'));
+      $pin=(int)$this->getConfiguration('mira_input_gpio');
+      if ($widget!=='' && ($pin===0 || in_array($pin,array(10,11,12,13,14,21),true))) {
+        $ok=$this->gpioRequest('/gpio/multi/config',array('name'=>$widget,
+          'gpio'=>$pin,'visible'=>$this->getIsVisible() ? 1 : 0));
+        if ($ok===false && $pin!==0)
+          log::add('mira','warning','[MULTI] Liaison impossible : '.$widget.' GPIO'.$pin.' (WT32 DEV5 requis)');
+      }
+    }
+    if ($this->gpioEligible() && $this->getConfiguration('type') !== 'multi_action') {
       $source = $this->getConfiguration('mira_source', 'jeedom') === 'gpio' ? 'gpio' : 'jeedom';
       $pin = (int)$this->getConfiguration('mira_gpio');
       $level = $this->getConfiguration('mira_level', 'high');
@@ -1492,6 +1547,10 @@ class miraCmd extends cmd {
         break;
 		case 'action':
                 $nom = $this->getLogicalId();
+        if ($this->getConfiguration('type') === 'multi_master') {
+          $simple=$eqLogic->getCmd(null,'Multi_Clic_'.substr((string)$nom,6));
+          return is_object($simple) ? $simple->execute() : false;
+        }
         if ($this->gpioEligible() && $this->getConfiguration('mira_source', 'jeedom') === 'gpio') {
           $pin = (int)$this->getConfiguration('mira_gpio');
           $level = $this->getConfiguration('mira_level', 'high');
@@ -1507,6 +1566,18 @@ class miraCmd extends cmd {
                                        $this->getConfiguration('state') === 'On' ? 1 : 0);
           }
           return true; // GPIO local: pas de seconde commande Jeedom
+        }
+        if ($this->getConfiguration('type') === 'multi_action') {
+          // Never echo an input event back to the screen.
+          $target=trim((string)$this->getConfiguration('calcul'));
+          if ($target==='') return true;
+          $mapped=cmd::byString($target);
+          if (!is_object($mapped) || $mapped->getId()==$this->getId()) {
+            log::add('mira','warning','[MULTI] Commande invalide pour '.$nom);
+            return false;
+          }
+          $mapped->execCmd();
+          return true;
         }
         $cmd = $this->getConfiguration('commande');        	
         	$type = $this->getConfiguration('type');
