@@ -2335,7 +2335,7 @@ void MiraPanelUI::applyTheme() {
     if (b.type == W_INFO && b.valueLabel) {
       lv_obj_set_style_text_color(b.valueLabel, colorAccent(), 0);
     }
-    else if (b.type == W_BUTTON && b.control) {
+    else if ((b.type == W_BUTTON || b.type == W_MULTI) && b.control) {
       if (b.card) {
         lv_obj_set_style_bg_opa(b.card, LV_OPA_TRANSP, 0);
         lv_obj_set_style_border_width(b.card, 0, 0);
