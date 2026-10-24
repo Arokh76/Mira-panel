@@ -45,7 +45,7 @@ void setup() {
   Serveur.SetupModule(
     "Mira Panel",
     MIRA_HARDWARE_NAME,
-    "0.7.14-wt32-gpio-dev5",
+    "0.7.14-wt32-gpio-dev6",
     "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/",
     "LVGL"
   );

@@ -54,6 +54,7 @@ private:
   enum WidgetType : uint8_t {
     W_INFO,
     W_BUTTON,
+    W_MULTI,
     W_TOGGLE,
     W_RANGE,
     W_ROUNDRANGE,
@@ -87,6 +88,12 @@ private:
     int id = -1;
     int idOff = -1;
     int idOn = -1;
+    int multiLongId = -1;
+    uint8_t multiTouchClicks = 0;
+    bool multiTouchDown = false;
+    bool multiTouchLongSent = false;
+    uint32_t multiTouchPressAt = 0;
+    uint32_t multiTouchReleasedAt = 0;
     int thermostatTempId = -1;
     float thermostatSetpoint = 20.0f;
     lv_obj_t* thermostatTemperatureLabel = nullptr;
@@ -258,6 +265,7 @@ private:
   static void onNav(lv_event_t* e);
   static void onPagePick(lv_event_t* e);
   static void onButton(lv_event_t* e);
+  static void onMultiTouch(lv_event_t* e);
   static void onToggle(lv_event_t* e);
   static void onRange(lv_event_t* e);
   static void onRoundRange(lv_event_t* e);

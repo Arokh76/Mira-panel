@@ -1135,11 +1135,11 @@ void MiraPanelUI::registerAndCreate(JsonObject obj) {
   else if (type == "multiaction") {
     // Four ordinary button IDs preserve existing Jeedom /getindex autosync.
     // The physical input exists regardless of whether a visible tile is drawn.
-    b.type = W_BUTTON;
+    b.type = W_MULTI;
     b.id = _server.IndexAddButton(String("Multi_Clic_") + name);
-    _server.IndexAddButton(String("Multi_Double_") + name);
-    _server.IndexAddButton(String("Multi_Triple_") + name);
-    _server.IndexAddButton(String("Multi_Long_") + name);
+    b.idOff = _server.IndexAddButton(String("Multi_Double_") + name);
+    b.idOn = _server.IndexAddButton(String("Multi_Triple_") + name);
+    b.multiLongId = _server.IndexAddButton(String("Multi_Long_") + name);
     if (_server.WT32MultiVisible(name)) createButton(idx);
   }
   else if (type == "toggle") {
@@ -1572,7 +1572,10 @@ void MiraPanelUI::createButton(uint8_t idx) {
   lv_obj_set_style_shadow_width(b.control, 4, 0);
   lv_obj_set_style_shadow_ofs_y(b.control, 2, 0);
   EventContext* ctx = makeContext(idx);
-  lv_obj_add_event_cb(b.control, onButton, LV_EVENT_CLICKED, ctx);
+  if (b.type == W_MULTI)
+    lv_obj_add_event_cb(b.control, onMultiTouch, LV_EVENT_ALL, ctx);
+  else
+    lv_obj_add_event_cb(b.control, onButton, LV_EVENT_CLICKED, ctx);
   lv_obj_t* lbl = lv_label_create(b.control);
   lv_label_set_text(lbl, (b.displayName.length() ? b.displayName : b.name).c_str());
   lv_obj_set_style_text_color(lbl, COL_TEXT, 0);
@@ -2816,6 +2819,38 @@ void MiraPanelUI::onButton(lv_event_t* e) {
   ui.publishMqttAction(b, "1");
 }
 
+void MiraPanelUI::onMultiTouch(lv_event_t* e) {
+  EventContext* ctx=static_cast<EventContext*>(lv_event_get_user_data(e));
+  if(!ctx || !ctx->ui)return;
+  MiraPanelUI& ui=*ctx->ui;
+  if(ctx->bindingIndex>=ui._bindingCount || ui._suppressEvents)return;
+  Binding& b=ui._bindings[ctx->bindingIndex];
+  if(b.type!=W_MULTI)return;
+  lv_event_code_t event=lv_event_get_code(e);
+  if(event==LV_EVENT_PRESSED) {
+    if(ui.touchBlocksAction(false)) {
+      b.multiTouchDown=false;
+      b.multiTouchClicks=0;
+      b.multiTouchLongSent=true;
+      return;
+    }
+    ui.noteActivity();
+    b.multiTouchDown=true;
+    b.multiTouchLongSent=false;
+    b.multiTouchPressAt=millis();
+  } else if(event==LV_EVENT_RELEASED) {
+    if(!b.multiTouchDown)return;
+    b.multiTouchDown=false;
+    if(!b.multiTouchLongSent) {
+      if(b.multiTouchClicks<3)b.multiTouchClicks++;
+      b.multiTouchReleasedAt=millis();
+    } else b.multiTouchClicks=0;
+  } else if(event==LV_EVENT_PRESS_LOST) {
+    b.multiTouchDown=false;
+    b.multiTouchClicks=0;
+  }
+}
+
 void MiraPanelUI::onToggle(lv_event_t* e) {
   if (_uiForLvgl && _uiForLvgl->touchBlocksAction(false)) return;
   EventContext* ctx = static_cast<EventContext*>(lv_event_get_user_data(e));
@@ -3624,6 +3659,27 @@ void MiraPanelUI::loop() {
 #endif
 
   pollFavorites();
+
+  // Multi-actions on the screen: same timings as the physical contact.
+  // A single click waits briefly to distinguish a double or triple click.
+  for(uint8_t i=0;i<_bindingCount;i++) {
+    Binding& b=_bindings[i];
+    if(b.type!=W_MULTI || !b.control)continue;
+    uint32_t now=millis();
+    if(b.multiTouchDown && !b.multiTouchLongSent &&
+       (uint32_t)(now-b.multiTouchPressAt)>=900) {
+      b.multiTouchLongSent=true;
+      b.multiTouchClicks=0;
+      if(b.multiLongId>=0)_server.IndexSetEvent(b.multiLongId);
+    } else if(!b.multiTouchDown && b.multiTouchClicks &&
+              (uint32_t)(now-b.multiTouchReleasedAt)>=370) {
+      uint8_t count=b.multiTouchClicks;
+      b.multiTouchClicks=0;
+      int id=count==1 ? b.id : count==2 ? b.idOff : b.idOn;
+      if(id>=0)_server.IndexSetEvent(id);
+    }
+  }
+
   // Navigation is serviced by LVGL's 10 ms onNavigationTimer.
 
   startNtpIfPossible();

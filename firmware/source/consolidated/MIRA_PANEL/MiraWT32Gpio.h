@@ -312,8 +312,9 @@ static bool multiConfigure(String name, int gpio, bool visible, bool& needsReloa
   for (uint8_t j=0; j<MULTI_COUNT; ++j)
     if (gpio && multiPin[j] == gpio && multiName[j].length() && multiName[j]!=name) return false;
 
-  // A previously unused pin is automatically assigned input pull-up.
-  if (pinIndex>=0 && mode[pinIndex]==0 &&
+  // Dry-contact input must be pulled HIGH internally, regardless of
+  // a previous non-output input mode set in the web GPIO page.
+  if (pinIndex>=0 && mode[pinIndex]!=2 &&
       !configure((uint8_t)pinIndex,2,false,0)) return false;
 
   int slot=findMulti(name);
