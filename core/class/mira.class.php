@@ -1594,6 +1594,7 @@ class miraCmd extends cmd {
             }
             $value=$stateCmd->execCmd();
             if (is_bool($value)) $isOn=$value;
+            else if (is_numeric($value)) $isOn=((float)$value>0);
             else {
               $normalized=strtolower(trim((string)$value));
               if (in_array($normalized,array('1','on','true','oui','actif'),true)) $isOn=true;
