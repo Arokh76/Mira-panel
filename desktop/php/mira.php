@@ -506,6 +506,8 @@ log::add('mira', 'debug', "Lancement script");
                                    </button>
                                 </th>
                                 
+                                <th style="width:138px; min-width:115px;">Action</th>
+
                                 <th style="cursor : pointer;">
                                    <button>
                                       Paramètres
