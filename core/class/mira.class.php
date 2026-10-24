@@ -647,6 +647,8 @@ class mira extends eqLogic {
                         }
                         $master->setOrder($ordre++);
                         $master->setConfiguration('type','multi_master');
+                        if (!$master->getConfiguration('multi_trigger'))
+                            $master->setConfiguration('multi_trigger','gpio');
                         $master->save();
                     }
                     $button=$this->getCmd(null,$name);
@@ -665,6 +667,8 @@ class mira extends eqLogic {
                     }
                     $button->setOrder($ordre++);
                     $button->setConfiguration('type','multi_action');
+                    if (!$button->getConfiguration('multi_mode'))
+                        $button->setConfiguration('multi_mode','scenario');
                     $button->setConfiguration('commande',$json_index[$i]['id']);
                     $button->setConfiguration('multi_parent',$masterName);
                     $button->save();
@@ -1313,11 +1317,15 @@ class miraCmd extends cmd {
     if ($this->getConfiguration('type') === 'multi_master') {
       $widget=substr((string)$this->getLogicalId(),strlen('Multi_'));
       $pin=(int)$this->getConfiguration('mira_input_gpio');
-      if ($widget!=='' && ($pin===0 || in_array($pin,array(10,11,12,13,14,21),true))) {
+      $trigger=(string)$this->getConfiguration('multi_trigger','gpio');
+      if (!in_array($trigger,array('jeedom','gpio','both'),true)) $trigger='gpio';
+      $activePin=$trigger==='jeedom' ? 0 : $pin;
+      // "Afficher" belongs ONLY to Jeedom dashboard, never Mira screen.
+      if ($widget!=='' && ($activePin===0 || in_array($activePin,array(10,11,12,13,14,21),true))) {
         $ok=$this->gpioRequest('/gpio/multi/config',array('name'=>$widget,
-          'gpio'=>$pin,'visible'=>$this->getIsVisible() ? 1 : 0));
-        if ($ok===false && $pin!==0)
-          log::add('mira','warning','[MULTI] Liaison impossible : '.$widget.' GPIO'.$pin.' (WT32 DEV5 requis)');
+          'gpio'=>$activePin,'visible'=>$trigger==='gpio' ? 0 : 1));
+        if ($ok===false)
+          log::add('mira','warning','[MULTI] Liaison impossible : '.$widget.' mode '.$trigger.' (WT32 DEV6 requis)');
       }
     }
     if ($this->gpioEligible() && $this->getConfiguration('type') !== 'multi_action') {
@@ -1568,12 +1576,41 @@ class miraCmd extends cmd {
           return true; // GPIO local: pas de seconde commande Jeedom
         }
         if ($this->getConfiguration('type') === 'multi_action') {
-          // Never echo an input event back to the screen.
-          $target=trim((string)$this->getConfiguration('calcul'));
+          // The gesture is already detected by WT32; never send an action back.
+          $mode=(string)$this->getConfiguration('multi_mode','scenario');
+          if ($mode==='none') return true;
+          if ($mode==='light') {
+            $on=trim((string)$this->getConfiguration('multi_on'));
+            $off=trim((string)$this->getConfiguration('multi_off'));
+            $state=trim((string)$this->getConfiguration('multi_state'));
+            if ($on==='' || $off==='' || $state==='') {
+              log::add('mira','warning','[MULTI] ON/OFF/Etat incomplets : '.$nom);
+              return false;
+            }
+            $stateCmd=cmd::byString($state);
+            if (!is_object($stateCmd) || $stateCmd->getType()!=='info') {
+              log::add('mira','warning','[MULTI] Etat Jeedom invalide : '.$nom);
+              return false;
+            }
+            $value=$stateCmd->execCmd();
+            if (is_bool($value)) $isOn=$value;
+            else {
+              $normalized=strtolower(trim((string)$value));
+              if (in_array($normalized,array('1','on','true','oui','actif'),true)) $isOn=true;
+              else if (in_array($normalized,array('0','off','false','non','inactif'),true)) $isOn=false;
+              else {
+                log::add('mira','warning','[MULTI] Etat non binaire : '.$nom);
+                return false;
+              }
+            }
+            $target=$isOn ? $off : $on;
+          } else if ($mode==='scenario') {
+            $target=trim((string)$this->getConfiguration('calcul'));
+          } else return false;
           if ($target==='') return true;
           $mapped=cmd::byString($target);
-          if (!is_object($mapped) || $mapped->getId()==$this->getId()) {
-            log::add('mira','warning','[MULTI] Commande invalide pour '.$nom);
+          if (!is_object($mapped) || $mapped->getType()!=='action' || $mapped->getId()===$this->getId()) {
+            log::add('mira','warning','[MULTI] Commande cible invalide : '.$nom);
             return false;
           }
           $mapped->execCmd();

@@ -1202,7 +1202,9 @@ function addCmdToTable(_cmd) {
   }
   
       var tr ="";
-      if (_cmd.configuration.visible_cmd == "1"){
+      if (_cmd.configuration.type === 'multi_action') {
+        tr = '<tr class="cmd mira-multi-internal" style="display:none" data-cmd_id="' + init(_cmd.id) + '">'
+      } else if (_cmd.configuration.visible_cmd == "1"){
         tr = '<tr class="cmd"  data-cmd_id="' + init(_cmd.id) + '">'      
       }else{
         tr = '<tr style="display:none;" class="cmd" data-cmd_id="' + init(_cmd.id) + '">'      
@@ -1232,11 +1234,11 @@ function addCmdToTable(_cmd) {
       var isMultiMaster = _cmd.configuration.type === 'multi_master';
       var isMultiAction = _cmd.configuration.type === 'multi_action';
       var miraLocalEligible = (_cmd.type === 'action' &&
-          (_cmd.configuration.type === 'toggle' || _cmd.configuration.type === 'button' || isMultiAction)) ||
+          (_cmd.configuration.type === 'toggle' || _cmd.configuration.type === 'button')) ||
           (_cmd.type === 'info' && _cmd.configuration.type === 'toggle');
       var miraLocalAction = (_cmd.type === 'action' && miraLocalEligible);
       tr += '<td class="num">'
-      if (isMultiMaster) tr += '<span>Multi-actions</span>';
+      if (isMultiMaster) tr += '<select class="cmdAttr mira-multi-trigger form-control input-sm" data-l1key="configuration" data-l2key="multi_trigger" style="min-width:110px"><option value="jeedom">Jeedom</option><option value="gpio">GPIO</option><option value="both">Les deux</option></select>';
       if (miraLocalEligible) tr += '<select class="cmdAttr mira-gpio-source form-control input-sm" data-l1key="configuration" data-l2key="mira_source" style="min-width:85px"><option value="jeedom">Jeedom</option><option value="gpio">GPIO</option></select>';
   	  
         if (_cmd.configuration.commande != "-1"){
@@ -1297,11 +1299,12 @@ function addCmdToTable(_cmd) {
       //Paramètres
       tr += '<td>'
       if (isMultiMaster) {
-        tr += '<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">' +
+        tr += '<div class="mira-multi-input" style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">' +
           '<span>Entrée :</span><select class="cmdAttr form-control input-sm" data-l1key="configuration" data-l2key="mira_input_gpio" style="width:110px">' +
           '<option value="">-- GPIO --</option>' +
           [10,11,12,13,14,21].map(function(p){return '<option value="'+p+'">GPIO'+p+'</option>';}).join('') +
-          '</select><small>Contact sec vers GND · pull-up. La case Afficher contrôle la tuile Mira.</small></div>';
+          '</select><small>Contact sec entre GPIO et GND (pull-up).</small></div>' +
+          '<div class="mira-multi-gestures" style="min-width:260px;margin-top:7px"></div>';
       }
       if (miraLocalEligible) {
         tr += '<div class="mira-gpio-params" style="display:none;gap:5px;align-items:center">' +
@@ -1351,6 +1354,12 @@ function addCmdToTable(_cmd) {
         }
       }
       if (miraLocalEligible) tr += '</div>';
+      if (isMultiAction) {
+        tr += '<input type="hidden" class="cmdAttr" data-l1key="configuration" data-l2key="multi_mode">' +
+          ['multi_on','multi_off','multi_state'].map(function(key) {
+            return '<input type="hidden" class="cmdAttr" data-l1key="configuration" data-l2key="'+key+'">';
+          }).join('');
+      }
       tr += '</td>'
 
       //Etat
@@ -1372,6 +1381,9 @@ function addCmdToTable(_cmd) {
      
       $('#table_cmd tbody').append(tr)
       var tr = $('#table_cmd tbody tr').last()
+      // Command identity stored safely on DOM; never embed names into HTML attributes.
+      tr.attr('data-mira-logicalid',_cmd.logicalId || '');
+      if (isMultiAction) tr.attr('data-mira-parent',_cmd.configuration.multi_parent || '');
       jeedom.eqLogic.buildSelectCmd({
         id: $('.eqLogicAttr[data-l1key=id]').value(),
         filter: { type: 'info' },
@@ -1383,6 +1395,8 @@ function addCmdToTable(_cmd) {
           tr.setValues(_cmd, '.cmdAttr');
           miraRefreshGpioParams(tr);
           jeedom.cmd.changeType(tr, init(_cmd.subType))
+          if (isMultiAction) tr.hide();
+          miraMultiRefreshCards();
         }
       })
   
@@ -2021,3 +2035,116 @@ $(document).off('change.mira_gpio', '#table_cmd .mira-gpio-source')
 .on('change.mira_gpio', '#table_cmd .mira-gpio-source', function() {
   miraRefreshGpioParams($(this).closest('tr'));
 });
+
+
+// Multi-actions beta.6: one visible master row, four hidden command rows.
+// Child commands stay real Jeedom commands, so existing API IDs and saving work.
+function miraMultiRows(master){
+  const masterId=master.attr('data-mira-logicalid') || '';
+  const results={};
+  const prefixes={single:'Multi_Clic_',double:'Multi_Double_',triple:'Multi_Triple_',long:'Multi_Long_'};
+  if (!masterId.startsWith('Multi_')) return results;
+  const widget=masterId.slice(6);
+  $('#table_cmd tbody tr.cmd').each(function(){
+    const tr=$(this), id=tr.attr('data-mira-logicalid') || '';
+    if(tr.attr('data-mira-parent') !== masterId)return;
+    Object.keys(prefixes).forEach(function(key){
+      if(id === prefixes[key]+widget) results[key]=tr;
+    });
+  });
+  return results;
+}
+function miraMultiRefreshCards(){
+  $('#table_cmd tbody tr.cmd').each(function(){
+    const master=$(this);
+    if(master.find('.mira-multi-trigger').length!==1)return;
+    const children=miraMultiRows(master);
+    if(Object.keys(children).length!==4)return;
+    const panel=master.find('.mira-multi-gestures');
+    if(!panel.length)return;
+    if(panel.data('mira-ready')){miraMultiSourceChanged(master);return;}
+    panel.data('mira-ready',true);
+    const labels={single:'Clic simple',double:'Double clic',triple:'Triple clic',long:'Appui long'};
+    Object.keys(labels).forEach(function(gesture){
+      const child=children[gesture];
+      const childValue=function(key){
+        return child.find('.cmdAttr[data-l1key="configuration"][data-l2key="'+key+'"]');
+      };
+      const card=$('<div>').addClass('mira-multi-gesture')
+        .css({borderTop:'1px solid var(--al-border-color,#ddd)',padding:'6px 0'});
+      const line=$('<div>').css({display:'flex',alignItems:'center',gap:'6px',flexWrap:'wrap'});
+      const label=$('<strong>').css({minWidth:'95px'}).text(labels[gesture]);
+      const select=$('<select class="form-control input-sm">')
+        .css({width:'145px',maxWidth:'100%'})
+        .append('<option value="none">Aucune</option><option value="scenario">Scénario / Commande</option><option value="light">Lumière ON/OFF</option>');
+      const initialMode=childValue('multi_mode').val() || 'scenario';
+      select.val(['none','scenario','light'].includes(initialMode)?initialMode:'scenario');
+      const expand=$('<button type="button" class="btn btn-default btn-xs">')
+        .text('Configurer').attr('aria-expanded','false');
+      const body=$('<div>').css({display:'none',margin:'7px 0 4px 8px'});
+      const summary=$('<small>').css({opacity:'.75',marginLeft:'4px'});
+      const formInputs={};
+      function makeTarget(labelText,key,kind) {
+        const row=$('<div>').addClass('mira-multi-target')
+          .css({display:'flex',alignItems:'center',gap:'6px',margin:'4px 0',flexWrap:'wrap'});
+        row.append($('<span>').text(labelText).css({width:'48px',flexShrink:0}));
+        const input=$('<input type="text" class="form-control input-sm">')
+          .css({flex:'1 1 160px',minWidth:0}).val(childValue(key).val() || '');
+        input.on('input change',function(){
+          childValue(key).val(input.val());
+          updateSummary();
+        });
+        const pick=$('<button type="button" class="btn btn-default btn-sm" title="Choisir une commande Jeedom"><i class="fas fa-list-alt"></i></button>');
+        pick.on('click',function(){
+          jeedom.cmd.getSelectModal({cmd:{type:kind}},function(result){
+            input.val(result.human || '').trigger('input');
+          });
+        });
+        row.append(input,pick);body.append(row);
+        formInputs[key]={row:row,input:input};
+      }
+      makeTarget('Commande','calcul','action');
+      makeTarget('ON','multi_on','action');
+      makeTarget('OFF','multi_off','action');
+      makeTarget('État','multi_state','info');
+      function updateSummary(){
+        const mode=select.val();
+        formInputs.calcul.row.toggle(mode==='scenario');
+        ['multi_on','multi_off','multi_state'].forEach(function(key){
+          formInputs[key].row.toggle(mode==='light');
+        });
+        const preview=mode==='none'?'Désactivé':
+          mode==='scenario'?(formInputs.calcul.input.val() || 'Commande à choisir'):
+          (formInputs.multi_on.input.val() && formInputs.multi_off.input.val() &&
+            formInputs.multi_state.input.val() ? 'ON / OFF / État configurés' : 'ON / OFF / État à renseigner');
+        summary.text(preview);
+      }
+      select.on('change',function(){
+        childValue('multi_mode').val(select.val());
+        updateSummary();
+        if(select.val()!=='none')body.show();
+        expand.attr('aria-expanded',body.is(':visible')?'true':'false');
+      });
+      expand.on('click',function(){
+        body.toggle();
+        expand.attr('aria-expanded',body.is(':visible')?'true':'false');
+        expand.text(body.is(':visible')?'Réduire':'Configurer');
+      });
+      line.append(label,select,expand,summary);
+      card.append(line,body);
+      panel.append(card);
+      // Default new fields only when absent: keeps existing DEV5 scenario actions.
+      if(!childValue('multi_mode').val())childValue('multi_mode').val(select.val());
+      updateSummary();
+    });
+    miraMultiSourceChanged(master);
+  });
+}
+function miraMultiSourceChanged(master){
+  const trigger=master.find('.mira-multi-trigger').val() || 'gpio';
+  master.find('.mira-multi-input').toggle(trigger!=='jeedom');
+}
+$(document).off('change.mira_multi','#table_cmd .mira-multi-trigger')
+  .on('change.mira_multi','#table_cmd .mira-multi-trigger',function(){
+    miraMultiSourceChanged($(this).closest('tr'));
+  });
