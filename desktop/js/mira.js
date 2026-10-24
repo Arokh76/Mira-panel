@@ -1396,6 +1396,7 @@ function addCmdToTable(_cmd) {
           miraRefreshGpioParams(tr);
           jeedom.cmd.changeType(tr, init(_cmd.subType))
           if (isMultiAction) tr.hide();
+          tr.data('mira-values-ready',true);
           miraMultiRefreshCards();
         }
       })
@@ -2060,6 +2061,10 @@ function miraMultiRefreshCards(){
     if(master.find('.mira-multi-trigger').length!==1)return;
     const children=miraMultiRows(master);
     if(Object.keys(children).length!==4)return;
+    // Jeedom builds each selector asynchronously. Do not snapshot child values
+    // before all four cmdAttr rows have been populated from the saved config.
+    if(!master.data('mira-values-ready') ||
+       Object.keys(children).some(function(key){return !children[key].data('mira-values-ready');}))return;
     const panel=master.find('.mira-multi-gestures');
     if(!panel.length)return;
     if(panel.data('mira-ready')){miraMultiSourceChanged(master);return;}
