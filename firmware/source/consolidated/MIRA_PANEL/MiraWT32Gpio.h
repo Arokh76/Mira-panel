@@ -14,6 +14,8 @@ static uint8_t mode[COUNT] = {0};  // 0=off, 1=input, 2=pull-up, 3=pull-down, 4=
 static bool inverted[COUNT] = {false};
 static uint8_t bootPolicy[COUNT] = {0};  // 0=OFF, 1=restore last, 2=ON
 static bool logicalOn[COUNT] = {false};
+// Declared here because begin() loads saved multi-action bindings.
+static void multiLoad();
 static bool initialized = false;
 // GPIO changes are reported to Jeedom from the Arduino main loop, never
 // from the AsyncWebServer callback or while handling a relay write.
