@@ -123,6 +123,7 @@ static void begin() {
     }
     links.end();
   }
+  multiLoad();
   initialized = true;
   Serial.println("[MIRA][GPIO] WT32 EXT initialized with per-output startup policies");
 }
@@ -256,6 +257,146 @@ static bool toggleState(const String& name, bool& result) {
   result = physicalHigh(uint8_t(idx)) == onHigh;
   return true;
 }
+
+
+// Buttons with a dry contact between GPIO and GND (active LOW).
+// Never execute an action when a pin is configured/restarted: only stable
+// press-and-release transitions can generate a click gesture.
+static constexpr uint8_t MULTI_COUNT = 6;
+static String multiName[MULTI_COUNT];
+static uint8_t multiPin[MULTI_COUNT] = {0};
+static bool multiVisible[MULTI_COUNT] = {false};
+static bool multiStarted[MULTI_COUNT] = {false};
+static bool multiRawDown[MULTI_COUNT] = {false};
+static bool multiStableDown[MULTI_COUNT] = {false};
+static bool multiLongDone[MULTI_COUNT] = {false};
+static uint8_t multiClickCount[MULTI_COUNT] = {0};
+static uint32_t multiRawChanged[MULTI_COUNT] = {0};
+static uint32_t multiPressStarted[MULTI_COUNT] = {0};
+static uint32_t multiReleaseAt[MULTI_COUNT] = {0};
+static int multiPendingSlot = -1;
+static uint8_t multiPendingKind = 0; // 0=single,1=double,2=triple,3=long
+
+static int findMulti(const String& name) {
+  for (int i=0;i<MULTI_COUNT;i++) if (multiName[i].length() && multiName[i]==name) return i;
+  return -1;
+}
+static bool isMultiVisible(const String& name) {
+  const int i=findMulti(name);
+  return i>=0 && multiVisible[i];
+}
+static void multiLoad() {
+  Preferences p;
+  if (!p.begin("miramulti", true)) return;
+  for (uint8_t i=0; i<MULTI_COUNT; i++) {
+    char nk[12],pk[12],vk[12];
+    snprintf(nk,sizeof(nk),"name%u",unsigned(i));
+    snprintf(pk,sizeof(pk),"pin%u",unsigned(i));
+    snprintf(vk,sizeof(vk),"vis%u",unsigned(i));
+    multiName[i]=p.getString(nk,"");
+    multiPin[i]=p.getUChar(pk,0);
+    multiVisible[i]=p.getBool(vk,false);
+    int idx=findPin(multiPin[i]);
+    if(idx<0 || mode[idx]==0 || mode[idx]==4) multiPin[i]=0;
+  }
+  p.end();
+}
+static bool multiConfigure(String name, int gpio, bool visible, bool& needsReload) {
+  needsReload=false;
+  name.trim();
+  if (!name.length() || name.length()>45) return false;
+  int pinIndex = gpio ? findPin(gpio) : -1;
+  if (gpio && (pinIndex < 0 || mode[pinIndex] == 4)) return false;
+  for (uint8_t j=0; j<MULTI_COUNT; ++j)
+    if (gpio && multiPin[j] == gpio && multiName[j].length() && multiName[j]!=name) return false;
+
+  // A previously unused pin is automatically assigned input pull-up.
+  if (pinIndex>=0 && mode[pinIndex]==0 &&
+      !configure((uint8_t)pinIndex,2,false,0)) return false;
+
+  int slot=findMulti(name);
+  if (slot<0) for(uint8_t i=0;i<MULTI_COUNT;i++)
+    if(!multiName[i].length()){slot=i;break;}
+  if(slot<0) return false;
+  const bool changed = multiVisible[slot]!=visible;
+  const bool differentPin = multiPin[slot] != gpio;
+  Preferences p;
+  if(!p.begin("miramulti",false))return false;
+  char nk[12],pk[12],vk[12];
+  snprintf(nk,sizeof(nk),"name%u",unsigned(slot));
+  snprintf(pk,sizeof(pk),"pin%u",unsigned(slot));
+  snprintf(vk,sizeof(vk),"vis%u",unsigned(slot));
+  bool ok = p.putString(nk,name)==name.length() &&
+            p.putUChar(pk,(uint8_t)gpio)==1 &&
+            p.putBool(vk,visible)==1;
+  p.end();
+  if(!ok)return false;
+  multiName[slot]=name;
+  multiPin[slot]=(uint8_t)gpio;
+  multiVisible[slot]=visible;
+  if (differentPin) {
+    multiStarted[slot]=false; multiClickCount[slot]=0;
+    multiLongDone[slot]=false;
+  }
+  needsReload=changed;
+  return true;
+}
+
+static bool multiPoll(String& name, uint8_t& kind) {
+  const uint32_t now=millis();
+  // Consume a pending event, never send it from a web callback.
+  if (multiPendingSlot >= 0) {
+    const int slot=multiPendingSlot;
+    multiPendingSlot=-1;
+    if (multiPin[slot] && multiName[slot].length()) {
+      name=multiName[slot]; kind=multiPendingKind; return true;
+    }
+  }
+  for(uint8_t i=0;i<MULTI_COUNT;i++) {
+    if (!multiPin[i] || !multiName[i].length()) continue;
+    int idx=findPin(multiPin[i]);
+    if(idx<0 || mode[idx]==0 || mode[idx]==4) continue;
+    const bool down = digitalRead(multiPin[i])==LOW;
+    if(!multiStarted[i]) {
+      multiStarted[i]=true;
+      multiRawDown[i]=down;
+      multiStableDown[i]=down;
+      multiRawChanged[i]=now;
+      multiPressStarted[i]=now;
+      multiClickCount[i]=0;
+      multiLongDone[i]=false;
+      continue;
+    }
+    if (down != multiRawDown[i]) {
+      multiRawDown[i]=down;
+      multiRawChanged[i]=now;
+    }
+    if (down != multiStableDown[i] && now-multiRawChanged[i]>=35) {
+      multiStableDown[i]=down;
+      if (down) { multiPressStarted[i]=now; multiLongDone[i]=false; }
+      else {
+        if (!multiLongDone[i]) {
+          if (multiClickCount[i]<3) multiClickCount[i]++;
+          multiReleaseAt[i]=now;
+        } else multiClickCount[i]=0;
+      }
+    }
+    if (multiStableDown[i] && !multiLongDone[i] &&
+        now-multiPressStarted[i]>=900) {
+      multiLongDone[i]=true;
+      multiClickCount[i]=0; // never trigger a short click after long hold
+      name=multiName[i];kind=3;return true;
+    }
+    if (!multiStableDown[i] && multiClickCount[i] &&
+        now-multiReleaseAt[i]>=370) {
+      kind=multiClickCount[i]-1; // 0,1,2
+      multiClickCount[i]=0;
+      name=multiName[i];return true;
+    }
+  }
+  return false;
+}
+
 static String stateJson() {
   StaticJsonDocument<1536> root;
   JsonArray arr = root.createNestedArray("pins");

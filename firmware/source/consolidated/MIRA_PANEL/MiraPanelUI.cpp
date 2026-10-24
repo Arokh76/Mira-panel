@@ -1132,6 +1132,16 @@ void MiraPanelUI::registerAndCreate(JsonObject obj) {
     b.id = _server.IndexAddButton(name);
     createButton(idx);
   }
+  else if (type == "multiaction") {
+    // Four ordinary button IDs preserve existing Jeedom /getindex autosync.
+    // The physical input exists regardless of whether a visible tile is drawn.
+    b.type = W_BUTTON;
+    b.id = _server.IndexAddButton(String("Multi_Clic_") + name);
+    _server.IndexAddButton(String("Multi_Double_") + name);
+    _server.IndexAddButton(String("Multi_Triple_") + name);
+    _server.IndexAddButton(String("Multi_Long_") + name);
+    if (_server.WT32MultiVisible(name)) createButton(idx);
+  }
   else if (type == "toggle") {
     b.type = W_TOGGLE;
     int* ids = _server.IndexAddToggle(name, "Off", "On", "Off");

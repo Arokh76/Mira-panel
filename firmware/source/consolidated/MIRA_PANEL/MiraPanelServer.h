@@ -54,6 +54,8 @@ public:
   bool WT32ReadToggle(const String& name, bool& state);
   // Debounced, read-only Jeedom notification after local GPIO transitions.
   void WT32NotifyGpioChanges();
+  bool WT32MultiVisible(const String& name);
+  void WT32PollMultiButtons();
 
   int IndexSetListByOption(String NameList, String Option);
 

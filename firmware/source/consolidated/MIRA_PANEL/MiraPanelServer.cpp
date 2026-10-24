@@ -510,6 +510,30 @@ void MiraPanelServer::ServeurStation() {
     }
     return true;
   };
+
+  server.on("/gpio/multi/config", HTTP_POST, [miraGpioAuthorize](AsyncWebServerRequest* request) {
+    if(!miraGpioAuthorize(request))return;
+    if(!request->hasHeader("X-Mira-GPIO") ||
+       !request->hasParam("name",true) || !request->hasParam("gpio",true) ||
+       !request->hasParam("visible",true)) {
+      request->send(400,"text/plain","Parametres manquants");return;
+    }
+    String name=request->getParam("name",true)->value();
+    String gpio=request->getParam("gpio",true)->value();
+    String vis=request->getParam("visible",true)->value();
+    if(!gpio.length() || gpio.length()>2 || gpio!=String(gpio.toInt()) ||
+       (vis!="0" && vis!="1")) {
+      request->send(400,"text/plain","Parametres invalides");return;
+    }
+    bool reload=false;
+    if(!MiraWT32GPIO::multiConfigure(name,gpio.toInt(),vis=="1",reload)) {
+      request->send(409,"text/plain","GPIO de sortie ou deja utilise");return;
+    }
+    // Defer screen reconstruction to the main loop. Never touch LVGL here.
+    if(reload) paramEvent=MIRA_SAVE_LIST_LVGL;
+    request->send(200,"text/plain","OK");
+  });
+
   server.on("/gpio/link", HTTP_POST, [miraGpioAuthorize](AsyncWebServerRequest* request) {
     if (!miraGpioAuthorize(request)) return;
     if (!request->hasHeader("X-Mira-GPIO") ||
@@ -3180,6 +3204,36 @@ void MiraPanelServer::WT32NotifyGpioChanges() {
   // The minute-based Jeedom cron is the fallback if this HTTP send fails.
   if (_Debug) Serial.printf("[MIRA][GPIO] Notification Jeedom revision %u\n",
                             unsigned(revision));
+#endif
+}
+
+
+bool MiraPanelServer::WT32MultiVisible(const String& name) {
+#if !defined(MIRA_TARGET_WAVESHARE_43C) && !defined(MIRA_TARGET_NEXTION_28)
+  return MiraWT32GPIO::isMultiVisible(name);
+#else
+  (void)name; return false;
+#endif
+}
+
+void MiraPanelServer::WT32PollMultiButtons() {
+#if !defined(MIRA_TARGET_WAVESHARE_43C) && !defined(MIRA_TARGET_NEXTION_28)
+  String name; uint8_t kind=0;
+  if (!MiraWT32GPIO::multiPoll(name,kind)) return;
+  const char* prefixes[]={"Multi_Clic_","Multi_Double_","Multi_Triple_","Multi_Long_"};
+  if(kind>=4) return;
+  const String logicalName=String(prefixes[kind])+name;
+  JsonArray actions=SPIFFS_Config_Actions["actions"];
+  for (JsonObject action : actions) {
+    if(action["type"].as<String>()!="button" ||
+       action["nom"].as<String>()!=logicalName) continue;
+    const int id=action["id"] | -1;
+    if(id>=0) {
+      IndexSetEvent(id);
+      if(_Debug) Serial.println("[MIRA][MULTI] "+logicalName);
+    }
+    return;
+  }
 #endif
 }
 
