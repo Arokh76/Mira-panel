@@ -391,3 +391,84 @@ jobs:
               assert spec['otaBytes'] > 500000
           print('All three Mira profiles can be published together, safely')
           PY
+
+  publish_camera_beta:
+    name: Publish isolated camera beta OTA (all 3 profiles)
+    needs: build
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.head_ref == 'feature/mira-camera-beta1' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !github.event.pull_request.head.repo.fork
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    env:
+      BETA_VERSION: "0.7.16"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: Mira_Panel_WT32_SC01_Plus_0.7.16_preview
+          path: /tmp/mira-camera-beta/wt32
+      - uses: actions/download-artifact@v4
+        with:
+          name: Mira_Panel_Waveshare_4.3C_0.7.16_preview
+          path: /tmp/mira-camera-beta/waveshare
+      - uses: actions/download-artifact@v4
+        with:
+          name: Mira_Panel_Nextion_2.8_0.7.16_preview
+          path: /tmp/mira-camera-beta/nextion
+
+      - name: Stage three verified binaries on the separate beta channel
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch --no-tags origin main
+          if git ls-remote --exit-code --heads origin firmware-beta >/dev/null; then
+            git fetch --no-tags origin firmware-beta
+            git switch -C firmware-beta origin/firmware-beta
+          else
+            git switch -C firmware-beta origin/main
+          fi
+          # All three images must exist and match the exact version.
+          python3 firmware/scripts/publish_multi.py \
+            --inputs /tmp/mira-camera-beta \
+            --repo . --version "$BETA_VERSION"
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          p = Path("firmware/targets.json")
+          payload = json.loads(p.read_text())
+          assert payload['version'] == '0.7.16'
+          assert set(payload['targets']) == {
+              'wt32-sc01-plus', 'waveshare-esp32s3-touch-lcd-4.3c', 'onx2432g028'
+          }
+          for target in payload['targets'].values():
+              assert target['otaBytes'] > 500000
+              for field in ('ota', 'factory'):
+                  url = target[field]
+                  assert '/main/firmware/releases/0.7.16/' in url
+                  target[field] = url.replace(
+                      '/main/firmware/releases/', '/firmware-beta/firmware/releases/'
+                  )
+          p.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + '\n')
+          assert all('/firmware-beta/' in target['ota']
+                     for target in json.loads(p.read_text())['targets'].values())
+          PY
+
+      - name: Publish beta OTA without touching stable main or Pages
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add firmware/targets.json "firmware/releases/$BETA_VERSION"
+          git diff --cached --quiet && { echo 'Camera beta already published'; exit 0; }
+          git commit -m "Beta Mira $BETA_VERSION camera OTA for three hardware profiles"
+          git push origin HEAD:refs/heads/firmware-beta
