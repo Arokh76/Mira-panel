@@ -30,6 +30,8 @@ jobs:
           php -l desktop/php/mira.php
       - name: Check JavaScript syntax
         run: node --check desktop/js/mira.js
+      - name: Regression test composite widget autosync
+        run: php tests/test_autosync_composite.php
       - name: Verify Multi-actions integration
         shell: bash
         run: |
