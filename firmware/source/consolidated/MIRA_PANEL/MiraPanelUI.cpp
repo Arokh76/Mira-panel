@@ -1080,24 +1080,6 @@ void MiraPanelUI::buildFromMiraJson() {
   }
 
   for (JsonObject obj : arr) registerAndCreate(obj);
-  // Explain the experimental energy page when no Jeedom widgets were sent
-  // there. It is removed and rebuilt on each screen reprogramming.
-  bool hasEnergyWidgets = false;
-  for (uint8_t i = 0; i < _bindingCount; ++i) {
-    if (pageIndex(_bindings[i].location) == 4) {
-      hasEnergyWidgets = true;
-      break;
-    }
-  }
-  if (!hasEnergyWidgets) {
-    lv_obj_t* hint = lv_label_create(_pages[4]);
-    lv_label_set_text(hint, "Énergie\n\nAjoutez des widgets\ndepuis Jeedom > Mira");
-    lv_obj_set_width(hint, MIRA_DISPLAY_WIDTH - 28);
-    lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_color(hint, COL_MUTED, 0);
-    lv_obj_set_style_text_font(hint, &mira_font_fr_14, 0);
-    lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
-  }
   // Applies to the entire freshly programmed LVGL tree, including nested
   // button content, sliders and thermostats, on WT32 AND Waveshare.
   // This is repeated after hot reprogramming by buildFromMiraJson().
