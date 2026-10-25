@@ -4,6 +4,9 @@
 #if defined(MIRA_TARGET_WAVESHARE_43C)
   #define MIRA_SYS_PLATFORM_LABEL "Waveshare ESP32-S3 Touch LCD 4.3C"
   #define MIRA_SYS_PLATFORM_ID "waveshare-esp32s3-touch-lcd-4.3c"
+#elif defined(MIRA_TARGET_NEXTION_28)
+  #define MIRA_SYS_PLATFORM_LABEL "Open Nextion Genius 2,8\""
+  #define MIRA_SYS_PLATFORM_ID "onx2432g028"
 #else
   #define MIRA_SYS_PLATFORM_LABEL "WT32-SC01 Plus"
   #define MIRA_SYS_PLATFORM_ID "wt32-sc01-plus"
@@ -34,7 +37,12 @@ main{max-width:940px;margin:28px auto;padding:0 18px 42px}.hero{margin-bottom:16
     <section class="card"><h2>Informations</h2><p class="hint">État général du panneau.</p><div class="kv"><span>Firmware</span><strong>%VERSION%</strong></div><div class="kv"><span>Adresse IP</span><strong>%LOCALIP%</strong></div><div class="kv"><span>Plateforme</span><strong>)rawliteral"
 MIRA_SYS_PLATFORM_LABEL
 R"rawliteral(</strong></div></section>
-    <section class="card"><h2>Maintenance</h2><p class="hint">Actions locales sur le panneau.</p><div class="buttons"><button class="btn secondary" onclick="window.location.href='/load?nav=reboot'">Redémarrer</button><button class="btn" onclick="window.location.href='/load?nav=rst'">Gestion des données</button></div></section>
+    <section class="card"><h2>Maintenance</h2><p class="hint">Actions locales sur le panneau.</p><div class="buttons"><button class="btn secondary" onclick="window.location.href='/load?nav=reboot'">Redémarrer</button><button class="btn" onclick="window.location.href='/load?nav=rst'">Gestion des données</button>
+)rawliteral"
+#if !defined(MIRA_TARGET_WAVESHARE_43C) && !defined(MIRA_TARGET_NEXTION_28)
+R"rawliteral(<a class="btn secondary" href="/load?nav=gpio">GPIO WT32</a>)rawliteral"
+#endif
+R"rawliteral(</div></section>
 
     <section class="card full">
       <h2>Mise à jour</h2>
@@ -143,7 +151,7 @@ R"rawliteral(';
     }
 
     if(HARDWARE_PROFILE!=='wt32-sc01-plus'){
-      throw new Error('Aucune publication Waveshare compatible. '+targetsError);
+      throw new Error('Aucune publication OTA compatible pour '+HARDWARE_PROFILE+'. '+targetsError);
     }
     // Historical, WT32-only fallback while migrating existing deployments.
     var urls=[VERSION_URL+'?ts='+Date.now(),VERSION_API+'&ts='+Date.now()];

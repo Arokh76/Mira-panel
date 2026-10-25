@@ -47,6 +47,15 @@ public:
   // Reconstruction WT32: remet a zero uniquement la table des actions dynamiques
   // afin de reconstruire l'interface LVGL sans redemarrer le module.
   void ResetActionsForLvgl();
+  bool WT32HasAction(const String& name);
+  bool WT32ExecuteAction(const String& name);
+  bool WT32HasToggle(const String& name);
+  bool WT32ExecuteToggle(const String& name, bool on);
+  bool WT32ReadToggle(const String& name, bool& state);
+  // Debounced, read-only Jeedom notification after local GPIO transitions.
+  void WT32NotifyGpioChanges();
+  bool WT32MultiVisible(const String& name);
+  void WT32PollMultiButtons();
 
   int IndexSetListByOption(String NameList, String Option);
 
