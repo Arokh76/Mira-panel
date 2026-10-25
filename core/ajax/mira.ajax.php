@@ -66,6 +66,11 @@ try {
 
                 if ($type == '' || $type == 'datetime') continue;
 
+                if ($type === 'multiaction') {
+                    foreach (array('Multi_Clic_','Multi_Double_','Multi_Triple_','Multi_Long_') as $prefix)
+                        $expectedSignatures[] = 'button|' . $prefix . $name;
+                    continue;
+                }
                 if ($type === 'thermostat') {
                     // One physical card, but three standard Mira entries in
                     // /getindex. Keep exact expected signatures so autosync

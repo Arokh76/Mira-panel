@@ -1,0 +1,32 @@
+name: Mira Jeedom beta - PHP and JS validation
+on:
+  push:
+    branches: [beta]
+    paths:
+      - "core/**"
+      - "desktop/**"
+      - "plugin_info/**"
+      - ".github/workflows/lint-jeedom-beta.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check PHP syntax
+        run: |
+          php -l core/class/mira.class.php
+          php -l core/ajax/mira.ajax.php
+          php -l desktop/php/mira.php
+      - name: Check JavaScript syntax
+        run: node --check desktop/js/mira.js
+      - name: Verify Multi-actions integration
+        shell: bash
+        run: |
+          grep -Fq 'Multi-actions (bouton GPIO)' desktop/php/mira.php
+          grep -Fq 'mira_input_gpio' desktop/js/mira.js
+          grep -Fq '/gpio/multi/config' core/class/mira.class.php
+          grep -Fq "type === 'multiaction'" core/ajax/mira.ajax.php

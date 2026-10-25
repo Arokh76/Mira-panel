@@ -82,6 +82,82 @@ class mira extends eqLogic {
     }
   }
   
+
+  /**
+   * Local GPIO state is authoritative for GPIO-linked toggles.
+   * Read-only: never call On/Off actions or send an /updatenr command.
+   * One HTTP read per screen, regardless of the number of relay widgets.
+   */
+  public function syncGpioStates() {
+    $candidates = array();
+    foreach ($this->getCmd('info') as $stateCmd) {
+      if (!is_object($stateCmd) || $stateCmd->getConfiguration('type') !== 'toggle') continue;
+      $widget = (string)$stateCmd->getLogicalId();
+      $onCmd = $this->getCmd(null, 'On_' . $widget);
+      $offCmd = $this->getCmd(null, 'Off_' . $widget);
+      if (!is_object($onCmd) || !is_object($offCmd)) continue;
+      // Two independent commands MUST address one shared GPIO at opposite levels.
+      if ($onCmd->getConfiguration('mira_source','jeedom') !== 'gpio' ||
+          $offCmd->getConfiguration('mira_source','jeedom') !== 'gpio') continue;
+      $pin = (int)$onCmd->getConfiguration('mira_gpio');
+      if (!in_array($pin, array(10,11,12,13,14,21), true) ||
+          (int)$offCmd->getConfiguration('mira_gpio') !== $pin) continue;
+      $onLevel = (string)$onCmd->getConfiguration('mira_level','high');
+      $offLevel = (string)$offCmd->getConfiguration('mira_level','low');
+      if (!in_array($onLevel,array('low','high'),true) ||
+          !in_array($offLevel,array('low','high'),true) || $onLevel === $offLevel) continue;
+      // An explicit state source elsewhere takes precedence over local inference.
+      $stateSource = (string)$stateCmd->getConfiguration('mira_source','jeedom');
+      if ($stateSource === 'jeedom' && (string)$stateCmd->getConfiguration('calcul','') !== '') continue;
+      if ($stateSource === 'gpio' && (int)$stateCmd->getConfiguration('mira_gpio') !== $pin) continue;
+      $candidates[$widget] = array('pin'=>$pin, 'onHigh'=>$onLevel === 'high');
+    }
+    if (count($candidates) === 0) return 0;
+
+    $ip = trim((string)$this->getConfiguration('adresseip'));
+    $pass = (string)$this->getConfiguration('password');
+    if (!filter_var($ip,FILTER_VALIDATE_IP,FILTER_FLAG_IPV4) || $pass === '') return 0;
+    $ch = curl_init('http://' . $ip . '/gpio/state');
+    curl_setopt_array($ch,array(CURLOPT_RETURNTRANSFER=>true,
+      CURLOPT_CONNECTTIMEOUT=>2,CURLOPT_TIMEOUT=>4,
+      CURLOPT_HTTPAUTH=>CURLAUTH_BASIC,CURLOPT_USERPWD=>'admin:'.$pass));
+    $response = curl_exec($ch);
+    $code = (int)curl_getinfo($ch,CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if ($response === false || $code !== 200) {
+      log::add('mira','debug','[GPIO] Retour d etat inaccessible sur '.$this->getName().' (HTTP '.$code.')');
+      return 0;
+    }
+    $data = json_decode($response,true);
+    if (!is_array($data) || !isset($data['pins']) || !is_array($data['pins'])) return 0;
+    $pins = array();
+    foreach ($data['pins'] as $p) {
+      if (!is_array($p) || !isset($p['gpio']) || !isset($p['mode']) ||
+          !array_key_exists('state',$p) || !array_key_exists('inverted',$p)) continue;
+      if ($p['mode'] !== 'output') continue;
+      $pins[(int)$p['gpio']] = ((bool)$p['state'] !== (bool)$p['inverted']);
+    }
+    $changed = 0;
+    foreach ($candidates as $widget=>$spec) {
+      if (!array_key_exists($spec['pin'],$pins)) continue;
+      $value = $pins[$spec['pin']] === $spec['onHigh'] ? '1' : '0';
+      // Jeedom updates only the Info command cache/event, without moving any relay.
+      $this->checkAndUpdateCmd($widget,$value);
+      ++$changed;
+    }
+    return $changed;
+  }
+
+  // Jeedom's once-a-minute scheduler. A direct Jeedom action still updates immediately.
+  public static function cron() {
+    foreach (eqLogic::byType('mira',true) as $eqLogic) {
+      try { $eqLogic->syncGpioStates(); }
+      catch (Throwable $e) {
+        log::add('mira','warning','[GPIO] Lecture état : '.$e->getMessage());
+      }
+    }
+  }
+
   public static function cron15() {
   	foreach (eqLogic::byType('mira', true) as $eqLogic) {
       if ($eqLogic->getConfiguration('ping') == "1"){
@@ -128,6 +204,20 @@ class mira extends eqLogic {
 		if (!is_object($cmd)) {
 			throw new Exception(__('Commande introuvable', __FILE__) . ' : ' . json_encode($_GET));
 		}
+        // Firmware GPIO DEV4: a relay has already changed locally.
+        // The callback must READ its state; it must NEVER execute refresh,
+        // On/Off, or any Jeedom command that could actuate something again.
+        if ((string)init('gpio_sync', '') === '1') {
+          if ($cmd->getLogicalId() !== 'refresh') {
+            throw new Exception('GPIO sync: commande non autorisée');
+          }
+          $eqLogic = $cmd->getEqLogic();
+          if (!is_object($eqLogic)) throw new Exception('GPIO sync: écran inconnu');
+          $eqLogic->syncGpioStates();
+          echo init('id');
+          return;
+        }
+
 		$type = $cmd->getType();
     	if($type == 'action'){
           log::add('mira', 'debug', $cmd->getName()." ACTION HTTP");
@@ -537,6 +627,52 @@ class mira extends eqLogic {
                   	$info->save();
                   
                   
+                }else if ($json_index[$i]['type'] == 'button' && preg_match('/^Multi_(Clic|Double|Triple|Long)_(.+)$/u', (string)$json_index[$i]['nom'], $parts)){
+                    $gesture=$parts[1];
+                    $widget=$parts[2];
+                    $name=(string)$json_index[$i]['nom'];
+                    $masterName='Multi_'.$widget;
+                    if ($gesture==='Clic') {
+                        $master=$this->getCmd(null,$masterName);
+                        if (!is_object($master)) {
+                            $master=new miraCmd();
+                            $master->setEqLogic_id($this->getId());
+                            $master->setLogicalId($masterName);
+                            $master->setName($widget.' · Multi-actions');
+                            $master->setType('action');
+                            $master->setSubType('other');
+                            $master->setIsVisible(0);
+                            $master->setConfiguration('type','multi_master');
+                            $master->setConfiguration('visible_cmd','1');
+                        }
+                        $master->setOrder($ordre++);
+                        $master->setConfiguration('type','multi_master');
+                        if (!$master->getConfiguration('multi_trigger'))
+                            $master->setConfiguration('multi_trigger','gpio');
+                        $master->save();
+                    }
+                    $button=$this->getCmd(null,$name);
+                    if (!is_object($button)) {
+                        $button=new miraCmd();
+                        $button->setEqLogic_id($this->getId());
+                        $button->setLogicalId($name);
+                        $button->setName($widget.' · '.array(
+                          'Clic'=>'Clic simple','Double'=>'Double clic',
+                          'Triple'=>'Triple clic','Long'=>'Appui long')[$gesture]);
+                        $button->setType('action');
+                        $button->setSubType('other');
+                        $button->setIsVisible(0);
+                        $button->setConfiguration('visible_cmd','1');
+                        $button->setConfiguration('mira_source','jeedom');
+                    }
+                    $button->setOrder($ordre++);
+                    $button->setConfiguration('type','multi_action');
+                    if (!$button->getConfiguration('multi_mode'))
+                        $button->setConfiguration('multi_mode','scenario');
+                    $button->setConfiguration('commande',$json_index[$i]['id']);
+                    $button->setConfiguration('multi_parent',$masterName);
+                    $button->save();
+
                 }else if ($json_index[$i]['type'] == 'button'){
                   	$id_cmd = $json_index[$i]['id'];
                     $name = $json_index[$i]['nom'];                    
@@ -639,7 +775,10 @@ class mira extends eqLogic {
                 if (!isset($json_index[$i]['type'])) continue;
                 $widgetType = (string)$json_index[$i]['type'];
 
-                if ($widgetType == 'info' || $widgetType == 'button') {
+                if ($widgetType == 'button' && preg_match('/^Multi_(Clic|Double|Triple|Long)_(.+)$/u',(string)($json_index[$i]['nom'] ?? ''),$parts)) {
+                    $expectedLogicalIds[(string)$json_index[$i]['nom']]=true;
+                    $expectedLogicalIds['Multi_'.$parts[2]]=true;
+                } else if ($widgetType == 'info' || $widgetType == 'button') {
                     if (isset($json_index[$i]['nom'])) {
                         $expectedLogicalIds[(string)$json_index[$i]['nom']] = true;
                     }
@@ -665,7 +804,7 @@ class mira extends eqLogic {
                 }
             }
 
-            $managedWidgetTypes = array('info', 'toggle', 'range', 'list', 'button', 'color');
+            $managedWidgetTypes = array('info', 'toggle', 'range', 'list', 'button', 'color', 'multi_master', 'multi_action');
             $removedCommands = 0;
             foreach ($this->getCmd() as $existingCmd) {
                 if (!is_object($existingCmd)) continue;
@@ -1129,8 +1268,9 @@ class mira extends eqLogic {
       return false;
     }
     $this->checkAndUpdateCmd('Statut', '1');
-    // Ne pas recopier l'état local Mira vers Jeedom : Jeedom est la source
-    // de vérité pour les actionneurs. Aucun execCmd() ici.
+    // Seules les sorties GPIO locales sont lues depuis l'ecran.
+    // Les actionneurs Jeedom classiques gardent Jeedom comme source de verite.
+    $this->syncGpioStates();
     return true;
   }
 
@@ -1148,11 +1288,65 @@ class miraCmd extends cmd {
 	}
   }
   
+
+  // Option locale disponible uniquement sur les boutons et interrupteurs.
+  private function gpioEligible() {
+    return ($this->getType() == 'action' && in_array($this->getConfiguration('type'), array('toggle','button','multi_action'), true)) ||
+           ($this->getType() == 'info' && $this->getConfiguration('type') == 'toggle');
+  }
+  private function gpioRequest($route, $params = array(), $method = 'POST') {
+    $eq = $this->getEqLogic();
+    if (!is_object($eq)) return false;
+    $ip = trim((string)$eq->getConfiguration('adresseip'));
+    $pass = (string)$eq->getConfiguration('password');
+    if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) || $pass === '') return false;
+    $ch = curl_init('http://' . $ip . $route . ($method === 'GET' ? '?' . http_build_query($params) : ''));
+    curl_setopt_array($ch, array(CURLOPT_RETURNTRANSFER => true, CURLOPT_CONNECTTIMEOUT => 2,
+      CURLOPT_TIMEOUT => 4, CURLOPT_HTTPAUTH => CURLAUTH_BASIC, CURLOPT_USERPWD => 'admin:' . $pass));
+    if ($method === 'POST') {
+      curl_setopt($ch, CURLOPT_POST, true);
+      curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($params));
+      curl_setopt($ch, CURLOPT_HTTPHEADER, array('X-Mira-GPIO: 1'));
+    }
+    $out = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    return ($out !== false && $code === 200) ? $out : false;
+  }
   public function postSave() {
-		if ($this->getType() == 'info' && $this->getConfiguration('type') == 'info' &&$this->getConfiguration('calcul') != '') {			
-        	$this->event($this->execute());
-		}
-	}
+    if ($this->getConfiguration('type') === 'multi_master') {
+      $widget=substr((string)$this->getLogicalId(),strlen('Multi_'));
+      $pin=(int)$this->getConfiguration('mira_input_gpio');
+      $trigger=(string)$this->getConfiguration('multi_trigger','gpio');
+      if (!in_array($trigger,array('jeedom','gpio','both'),true)) $trigger='gpio';
+      $activePin=$trigger==='jeedom' ? 0 : $pin;
+      // "Afficher" belongs ONLY to Jeedom dashboard, never Mira screen.
+      if ($widget!=='' && ($activePin===0 || in_array($activePin,array(10,11,12,13,14,21),true))) {
+        $ok=$this->gpioRequest('/gpio/multi/config',array('name'=>$widget,
+          'gpio'=>$activePin,'visible'=>$trigger==='gpio' ? 0 : 1));
+        if ($ok===false)
+          log::add('mira','warning','[MULTI] Liaison impossible : '.$widget.' mode '.$trigger.' (WT32 DEV6 requis)');
+      }
+    }
+    if ($this->gpioEligible() && $this->getConfiguration('type') !== 'multi_action') {
+      $source = $this->getConfiguration('mira_source', 'jeedom') === 'gpio' ? 'gpio' : 'jeedom';
+      $pin = (int)$this->getConfiguration('mira_gpio');
+      $level = $this->getConfiguration('mira_level', 'high');
+      if ($source === 'gpio' && (!in_array($pin,array(10,11,12,13,14,21),true) ||
+                                ($level !== 'high' && $level !== 'low'))) {
+        log::add('mira','warning','[GPIO] Configuration invalide : '.$this->getLogicalId());
+      } else {
+        $ok = $this->gpioRequest('/gpio/link', array('name'=>$this->getLogicalId(),
+          'source'=>$source, 'gpio'=>$source === 'gpio'?$pin:0,
+          'level'=>$this->getType() === 'info' ? 'read' : $level));
+        if ($ok === false && $source === 'gpio') {
+          log::add('mira','warning','[GPIO] Liaison impossible : '.$this->getLogicalId().' (firmware WT32 DEV3 requis)');
+        }
+      }
+    }
+    if ($this->getType() == 'info' && $this->getConfiguration('type') == 'info' &&
+        $this->getConfiguration('calcul') != '') $this->event($this->execute());
+  }
   
   private function listOptionNameFromValue($selected) {
     $listValue = $this->getConfiguration('listValue');
@@ -1189,6 +1383,7 @@ class miraCmd extends cmd {
         /* Un refresh relit aussi la structure de l'ecran afin de creer
          * les commandes ajoutees depuis la derniere programmation. */
         $eqLogic->postUpdate();
+        $eqLogic->syncGpioStates();
       	return;
 	}
    
@@ -1200,9 +1395,26 @@ class miraCmd extends cmd {
     switch ($this->getType()) {
 		case 'info':
         $type = $this->getConfiguration('type');
-        $nom = $this->getLogicalId();
-        
-        
+                $nom = $this->getLogicalId();
+        if ($this->gpioEligible() && $this->getType() === 'info' &&
+            $this->getConfiguration('mira_source', 'jeedom') === 'gpio') {
+          $pin = (int)$this->getConfiguration('mira_gpio');
+          $json = $this->gpioRequest('/gpio/state',array(), 'GET');
+          $data = ($json !== false) ? json_decode($json,true) : null;
+          if (!is_array($data) || !isset($data['pins'])) return '';
+          $onAction = $eqLogic->getCmd(null,'On_'.$nom);
+          if (!is_object($onAction) || $onAction->getConfiguration('mira_source', 'jeedom') !== 'gpio' ||
+              (int)$onAction->getConfiguration('mira_gpio') !== $pin) return '';
+          $onHigh = $onAction->getConfiguration('mira_level', 'high') === 'high';
+          foreach ($data['pins'] as $item) {
+            if ((int)$item['gpio'] !== $pin || $item['mode'] !== 'output') continue;
+            $high = (bool)$item['state'] !== (bool)$item['inverted'];
+            $result = $high === $onHigh ? '1' : '0';
+            $this->event($result); // Reading the Info also refreshes Jeedom cache.
+            return $result;
+          }
+          return '';
+        }
         if ($this->getConfiguration('calcul') != ''&& $this->getConfiguration('type') == 'info'){
            
           $result = jeedom::evaluateExpression($this->getConfiguration('calcul'));           
@@ -1342,8 +1554,70 @@ class miraCmd extends cmd {
         
         break;
 		case 'action':
-        $nom = $this->getLogicalId();          
-        	$cmd = $this->getConfiguration('commande');        	
+                $nom = $this->getLogicalId();
+        if ($this->getConfiguration('type') === 'multi_master') {
+          $simple=$eqLogic->getCmd(null,'Multi_Clic_'.substr((string)$nom,6));
+          return is_object($simple) ? $simple->execute() : false;
+        }
+        if ($this->gpioEligible() && $this->getConfiguration('mira_source', 'jeedom') === 'gpio') {
+          $pin = (int)$this->getConfiguration('mira_gpio');
+          $level = $this->getConfiguration('mira_level', 'high');
+          if (!in_array($pin,array(10,11,12,13,14,21),true) ||
+              !in_array($level,array('high','low'),true)) return false;
+          $ok = $this->gpioRequest('/gpio/raw', array('gpio'=>$pin,'level'=>$level));
+          if ($ok === false) {
+            log::add('mira','warning','[GPIO] Commande echouee : '.$nom);
+            return false;
+          }
+          if ($this->getConfiguration('type') === 'toggle') {
+            $eqLogic->checkAndUpdateCmd($this->getConfiguration('parent'),
+                                       $this->getConfiguration('state') === 'On' ? 1 : 0);
+          }
+          return true; // GPIO local: pas de seconde commande Jeedom
+        }
+        if ($this->getConfiguration('type') === 'multi_action') {
+          // The gesture is already detected by WT32; never send an action back.
+          $mode=(string)$this->getConfiguration('multi_mode','scenario');
+          if ($mode==='none') return true;
+          if ($mode==='light') {
+            $on=trim((string)$this->getConfiguration('multi_on'));
+            $off=trim((string)$this->getConfiguration('multi_off'));
+            $state=trim((string)$this->getConfiguration('multi_state'));
+            if ($on==='' || $off==='' || $state==='') {
+              log::add('mira','warning','[MULTI] ON/OFF/Etat incomplets : '.$nom);
+              return false;
+            }
+            $stateCmd=cmd::byString($state);
+            if (!is_object($stateCmd) || $stateCmd->getType()!=='info') {
+              log::add('mira','warning','[MULTI] Etat Jeedom invalide : '.$nom);
+              return false;
+            }
+            $value=$stateCmd->execCmd();
+            if (is_bool($value)) $isOn=$value;
+            else if (is_numeric($value)) $isOn=((float)$value>0);
+            else {
+              $normalized=strtolower(trim((string)$value));
+              if (in_array($normalized,array('1','on','true','oui','actif'),true)) $isOn=true;
+              else if (in_array($normalized,array('0','off','false','non','inactif'),true)) $isOn=false;
+              else {
+                log::add('mira','warning','[MULTI] Etat non binaire : '.$nom);
+                return false;
+              }
+            }
+            $target=$isOn ? $off : $on;
+          } else if ($mode==='scenario') {
+            $target=trim((string)$this->getConfiguration('calcul'));
+          } else return false;
+          if ($target==='') return true;
+          $mapped=cmd::byString($target);
+          if (!is_object($mapped) || $mapped->getType()!=='action' || $mapped->getId()===$this->getId()) {
+            log::add('mira','warning','[MULTI] Commande cible invalide : '.$nom);
+            return false;
+          }
+          $mapped->execCmd();
+          return true;
+        }
+        $cmd = $this->getConfiguration('commande');        	
         	$type = $this->getConfiguration('type');
 			
         	if ($type == 'toggle'){

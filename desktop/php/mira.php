@@ -30,6 +30,7 @@ log::add('mira', 'debug', "Lancement script");
                         <option value="datetime">Date et heure</option>
         				<option value="info">Info</option>
         				<option value="button">Bouton</option>
+                        <option value="multiaction">Multi-actions (bouton GPIO)</option>
         				<option value="toggle">Bouton basculant</option>
                         <option value="range">Curseur</option>
                         <option value="roundrange">Curseur arrondi</option>
@@ -97,7 +98,6 @@ log::add('mira', 'debug', "Lancement script");
                     
                       <div id="mirabuttonajouter" class="mirabutton" style="background-color:var(--bt-success-color); width:95%; margin-top:10px;">{{Ajouter}}</div>
                       <div id="miraboutonenvoyer" class="mirabutton" style="background-color:var(--al-warning-color); width:95%; margin-top:10px;">{{Envoyer la mise à jour au module}}</div> 
-                      <p class="mira-simple-note">Ajoute une commande, puis organise les tuiles dans le designer visuel. Les noms techniques restent distincts. Sur le firmware 0.6.49, un doublon peut encore afficher son nom technique.</p>
                       <table id="miratable" class="mirainputzone">
                         <thead>
                           <tr>
@@ -506,6 +506,8 @@ log::add('mira', 'debug', "Lancement script");
                                    </button>
                                 </th>
                                 
+                                <th style="width:138px; min-width:115px;">Action</th>
+
                                 <th style="cursor : pointer;">
                                    <button>
                                       Paramètres

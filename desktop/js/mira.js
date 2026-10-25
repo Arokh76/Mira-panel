@@ -993,7 +993,7 @@ $("#miratype").on('change',function(event) {
     $('#divmiraunit,#divmiralist').hide();
     $('#titlemiraval').text('Consigne de départ :');
     $('#titlemiramin').text('Consigne mini :');
-  } else if (lvgl_type == 'button' || lvgl_type == 'toggle' || lvgl_type == 'color'){
+  } else if (lvgl_type == 'button' || lvgl_type == 'toggle' || lvgl_type == 'color' || lvgl_type == 'multiaction'){
   	$("#miramin").val('');
     $("#miramax").val('');
     $("#miraval").val('');
@@ -1229,7 +1229,15 @@ function addCmdToTable(_cmd) {
       tr += '</td>'
   
   	  //ID Mira
+      var isMultiMaster = _cmd.configuration.type === 'multi_master';
+      var isMultiAction = _cmd.configuration.type === 'multi_action';
+      var miraLocalEligible = (_cmd.type === 'action' &&
+          (_cmd.configuration.type === 'toggle' || _cmd.configuration.type === 'button')) ||
+          (_cmd.type === 'info' && _cmd.configuration.type === 'toggle');
+      var miraLocalAction = (_cmd.type === 'action' && miraLocalEligible);
       tr += '<td class="num">'
+      if (isMultiMaster) tr += '<select class="cmdAttr mira-multi-trigger form-control input-sm" data-l1key="configuration" data-l2key="multi_trigger" style="min-width:110px"><option value="jeedom">Jeedom</option><option value="gpio">GPIO</option><option value="both">Les deux</option></select>';
+      if (miraLocalEligible) tr += '<select class="cmdAttr mira-gpio-source form-control input-sm" data-l1key="configuration" data-l2key="mira_source" style="min-width:85px"><option value="jeedom">Jeedom</option><option value="gpio">GPIO</option></select>';
   	  
         if (_cmd.configuration.commande != "-1"){
           
@@ -1286,8 +1294,50 @@ function addCmdToTable(_cmd) {
   	  tr += '</span>'
   	  tr += '</td>'
   
+      // Column of gesture action types, to the LEFT of normal parameters.
+      tr += '<td style="width:138px;vertical-align:middle">'
+      if (isMultiAction) {
+        tr += '<select class="cmdAttr mira-multi-kind form-control input-sm" data-l1key="configuration" data-l2key="multi_mode" style="width:125px;max-width:100%">' +
+          '<option value="none">Aucune</option><option value="scenario">Scénario</option><option value="light">Lumière</option></select>'
+      }
+      tr += '</td>'
+
       //Paramètres
-  	  tr += '<td>'			
+      tr += '<td>'
+      if (isMultiMaster) {
+        tr += '<div class="mira-multi-input" style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">' +
+          '<span>Entrée :</span><select class="cmdAttr form-control input-sm" data-l1key="configuration" data-l2key="mira_input_gpio" style="width:110px">' +
+          '<option value="">-- GPIO --</option>' +
+          [10,11,12,13,14,21].map(function(p){return '<option value="'+p+'">GPIO'+p+'</option>';}).join('') +
+          '</select><small>Contact sec vers GND (pull-up).</small></div>';
+      }
+
+      if (isMultiAction) {
+        // Same Jeedom fields/selectors as standard button/toggle actions.
+        // Only this gesture's chosen mode changes what is visible.
+        function multiField(label,key,kind) {
+          var html='<div style="display:flex;align-items:center;gap:5px;margin-bottom:3px;">';
+          if(label)html+='<span style="width:46px;flex-shrink:0">'+label+'</span>';
+          html+='<textarea class="cmdAttr input-sm" data-l1key="configuration" data-l2key="'+key+
+            '" style="height:35px;width:85%;min-width:0;flex:1" placeholder="{{'+(label?'Choisir '+label:'Envoyer vers')+'}}"></textarea>';
+          html+='<a class="btn btn-default '+(kind==='info'?'listEquipementInfo':'listEquipementAction')+
+            '" data-input="'+key+'" style="height:35px;min-width:44px;display:flex;align-items:center;justify-content:center">'+
+            '<i class="fas fa-list-alt"></i></a></div>';
+          return html;
+        }
+        tr += '<div class="mira-multi-scenario">'+multiField('','calcul','action')+'</div>';
+        tr += '<div class="mira-multi-light" style="display:none">'+
+          multiField('ON','multi_on','action')+multiField('OFF','multi_off','action')+
+          multiField('État','multi_state','info')+'</div>';
+      }
+      if (miraLocalEligible) {
+        tr += '<div class="mira-gpio-params" style="display:none;gap:5px;align-items:center">' +
+            '<select class="cmdAttr form-control input-sm" data-l1key="configuration" data-l2key="mira_gpio" style="width:110px"><option value="">-- GPIO --</option>' +
+            [10,11,12,13,14,21].map(function(p){ return '<option value="'+p+'">GPIO'+p+'</option>'; }).join('') + '</select>';
+        if (miraLocalAction) tr += '<select class="cmdAttr form-control input-sm" data-l1key="configuration" data-l2key="mira_level" style="width:85px"><option value="high">HIGH</option><option value="low">LOW</option></select>';
+        else tr += '<span style="font-size:12px">Lire état</span>';
+        tr += '</div><div class="mira-jeedom-params">';
+      }			
   	  if (_cmd.type == "info" && init(_cmd.logicalId) != 'Statut' ){
         tr += '<div style="display: none">'
         tr += _cmd.configuration.calcul;
@@ -1295,7 +1345,7 @@ function addCmdToTable(_cmd) {
     	tr += '<textarea class="cmdAttr  input-sm" data-l1key="configuration" data-l2key="calcul" style="height:35px;width:85%" placeholder="{{Recevoir de}}"></textarea>'
       	tr += '<a class="btn btn-default listEquipementInfo " data-input="calcul" style="margin-left:2px; height:35px; width:14%;"><i class="fas fa-list-alt"></i></a>'
       }
-  	  if (_cmd.type == "action" && init(_cmd.logicalId) != 'Redémarrer' && init(_cmd.logicalId) != 'refresh'){
+  	  if (_cmd.type == "action" && !isMultiMaster && !isMultiAction && init(_cmd.logicalId) != 'Redémarrer' && init(_cmd.logicalId) != 'refresh'){
         if (_cmd.configuration.type == 'list' && init(_cmd.configuration.listValue) != '') {
           // One Jeedom action target per Mira list option.
           var listItems = _cmd.configuration.listValue.split(';')
@@ -1327,9 +1377,9 @@ function addCmdToTable(_cmd) {
           tr += '<a class="btn btn-default listEquipementAction" data-input="calcul" style="margin-left:2px;height:35px;width:14%;"><i class="fas fa-list-alt"></i></a>'
         }
       }
-  		
-  	  tr += '</td>'
-  
+      if (miraLocalEligible) tr += '</div>';
+      tr += '</td>'
+
       //Etat
       tr += '<td>';
       tr += '<span class="cmdAttr" data-l1key="htmlstate"></span>';
@@ -1349,6 +1399,9 @@ function addCmdToTable(_cmd) {
      
       $('#table_cmd tbody').append(tr)
       var tr = $('#table_cmd tbody tr').last()
+      // Command identity stored safely on DOM; never embed names into HTML attributes.
+      tr.attr('data-mira-logicalid',_cmd.logicalId || '');
+      if (isMultiAction) tr.attr('data-mira-parent',_cmd.configuration.multi_parent || '');
       jeedom.eqLogic.buildSelectCmd({
         id: $('.eqLogicAttr[data-l1key=id]').value(),
         filter: { type: 'info' },
@@ -1357,8 +1410,11 @@ function addCmdToTable(_cmd) {
         },
         success: function (result) {
           tr.find('.cmdAttr[data-l1key=value]').append(result)
-          tr.setValues(_cmd, '.cmdAttr')
+          tr.setValues(_cmd, '.cmdAttr');
+          miraRefreshGpioParams(tr);
           jeedom.cmd.changeType(tr, init(_cmd.subType))
+          miraMultiRefreshRow(tr);
+          if (isMultiMaster) miraMultiSourceChanged(tr);
         }
       })
   
@@ -1985,3 +2041,37 @@ $('#miraSyncFavorites').on('click', function(){
     status.text('Synchronisation impossible : '+String(error).slice(0,170));
   }).always(function(){button.prop('disabled',false);});
 });
+
+
+// WT32 GPIO DEV3 — commandes ON et OFF independantes.
+function miraRefreshGpioParams(tr) {
+  var source=tr.find('.mira-gpio-source').val() || 'jeedom';
+  tr.find('.mira-gpio-params').css('display',source==='gpio'?'flex':'none');
+  tr.find('.mira-jeedom-params').toggle(source!=='gpio');
+}
+$(document).off('change.mira_gpio', '#table_cmd .mira-gpio-source')
+.on('change.mira_gpio', '#table_cmd .mira-gpio-source', function() {
+  miraRefreshGpioParams($(this).closest('tr'));
+});
+
+
+
+// Multi-actions beta.7 — classic Jeedom rows, no giant master-row editor.
+function miraMultiRefreshRow(tr) {
+  var mode=tr.find('.mira-multi-kind').val();
+  if (!mode)return;
+  tr.find('.mira-multi-scenario').toggle(mode==='scenario');
+  tr.find('.mira-multi-light').toggle(mode==='light');
+}
+function miraMultiSourceChanged(tr){
+  var trigger=tr.find('.mira-multi-trigger').val() || 'gpio';
+  tr.find('.mira-multi-input').toggle(trigger!=='jeedom');
+}
+$(document).off('change.mira_multi','#table_cmd .mira-multi-trigger')
+  .on('change.mira_multi','#table_cmd .mira-multi-trigger',function(){
+    miraMultiSourceChanged($(this).closest('tr'));
+  });
+$(document).off('change.mira_multi_kind','#table_cmd .mira-multi-kind')
+  .on('change.mira_multi_kind','#table_cmd .mira-multi-kind',function(){
+    miraMultiRefreshRow($(this).closest('tr'));
+  });
