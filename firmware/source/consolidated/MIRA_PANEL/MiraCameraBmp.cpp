@@ -215,7 +215,7 @@ void MiraCameraBmp::run() {
     uint32_t generation = 0;
     if (_mutex && xSemaphoreTake(_mutex, portMAX_DELAY) == pdTRUE) {
       if (_active && WiFi.status() == WL_CONNECTED &&
-          (!_lastRequestAt || (uint32_t)(millis() - _lastRequestAt) >= 4000UL)) {
+          (!_lastRequestAt || (uint32_t)(millis() - _lastRequestAt) >= 500UL)) {
         _lastRequestAt = millis();
         url = _url;
         w = _maxW;
@@ -225,6 +225,9 @@ void MiraCameraBmp::run() {
       xSemaphoreGive(_mutex);
     }
     if (url.length()) {
+      // Start at most one new snapshot every 500 ms (target up to ~2 fps).
+      // The same FreeRTOS worker finishes HTTP download + JPEG decoding before
+      // fetching again: no growing request queue, no LVGL/network blocking.
       // A camera proxy may resize dynamically. An ordinary BMP URL can ignore
       // these parameters, provided its bitmap fits the display limits.
       if (url.indexOf(".bmp") >= 0) {
