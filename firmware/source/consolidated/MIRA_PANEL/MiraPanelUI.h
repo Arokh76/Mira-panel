@@ -41,7 +41,7 @@ private:
   static constexpr uint8_t MAX_BINDINGS = 40;
   static constexpr uint8_t MAX_LIST_ITEMS = 12;
   static constexpr uint8_t MAX_EVENT_CONTEXTS = 96;
-  static constexpr uint8_t PAGE_COUNT = 4;  // Accueil, Lumières, Températures, Paramètres
+  static constexpr uint8_t PAGE_COUNT = 5;  // 0 Accueil, 1 Lumières, 2 Températures, 3 Paramètres, 4 Énergie
   static constexpr uint8_t FAVORITE_SLOTS = 3;
   static constexpr uint8_t NAV_BUTTON_COUNT = FAVORITE_SLOTS + 1;  // + Pages
   static constexpr uint8_t NO_FAVORITE = 0xFF;
