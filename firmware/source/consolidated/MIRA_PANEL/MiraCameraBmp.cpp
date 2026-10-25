@@ -4,9 +4,25 @@
 #include <HTTPClient.h>
 #include <new>
 #include <JPEGDEC.h>   // Larry Bank JPEGDEC: RGB565 decoder with 1/2, 1/4, 1/8 scaling
+#include <lvgl.h>       // LV_COLOR_16_SWAP defines the native LVGL image byte order
+
+#if LV_COLOR_DEPTH != 16
+#error "Mira camera framebuffer requires 16-bit LVGL RGB565"
+#endif
 #include <esp_heap_caps.h>
 
 namespace {
+// LV_IMG_CF_TRUE_COLOR consumes exactly the pixel layout configured by
+// LV_COLOR_16_SWAP. WT32/Nextion use swapped RGB565 (1), while Waveshare
+// uses native RGB565 (0). The original JPEG decoder always generated LE,
+// causing false/pseudo colors on the WT32 despite a valid JPEG source.
+static inline uint16_t miraNativeImage565(uint16_t rgb565) {
+#if LV_COLOR_16_SWAP
+  return __builtin_bswap16(rgb565);
+#else
+  return rgb565;
+#endif
+}
 uint16_t read16(const uint8_t* p) { return uint16_t(p[0]) | (uint16_t(p[1]) << 8); }
 uint32_t read32(const uint8_t* p) {
   return uint32_t(p[0]) | (uint32_t(p[1]) << 8) |
@@ -116,7 +132,11 @@ static bool miraDownloadJpeg(Stream& stream, int contentLength,
     valid = output.pixels != nullptr;
   }
   if (valid) {
+#if LV_COLOR_16_SWAP
+    jpeg->setPixelType(RGB565_BIG_ENDIAN);
+#else
     jpeg->setPixelType(RGB565_LITTLE_ENDIAN);
+#endif
     jpeg->setUserPointer(&output);
     valid = jpeg->decode(0, 0, options) == 1;
     if (!valid) Serial.printf("[MIRA][CAM] Erreur decode JPEG: %d\n", jpeg->getLastError());
@@ -300,7 +320,8 @@ bool MiraCameraBmp::downloadBmp(const String& url, uint16_t maxW,
       const uint8_t b = row[3 * x];
       const uint8_t g = row[3 * x + 1];
       const uint8_t r = row[3 * x + 2];
-      dest[x] = uint16_t(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+      const uint16_t rgb565 = uint16_t(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+      dest[x] = miraNativeImage565(rgb565);
     }
   }
   free(row);
