@@ -79,7 +79,8 @@ log::add('mira', 'debug', "Lancement script");
                           <option value="nope">-- Veuillez sélectionner un emplacement --</option>
                           <option value="accueil">Accueil</option>
                           <option value="temperatures">Températures</option>
-                          <option value="lumieres">Lumières</option>                        
+                          <option value="lumieres">Lumières</option>
+                          <option value="energie">Énergie</option>                        
     					</select>
                       </span>                        
                       <div class="mirainputzone"> 
@@ -140,6 +141,7 @@ log::add('mira', 'debug', "Lancement script");
                           <button type="button" class="mira-page-tab active" data-page="accueil">Accueil</button>
                           <button type="button" class="mira-page-tab" data-page="lumieres">Lumières</button>
                           <button type="button" class="mira-page-tab" data-page="temperatures">Températures</button>
+                          <button type="button" class="mira-page-tab" data-page="energie">Énergie</button>
                         </div>
                         <div class="mira-designer-actions">
                           <button type="button" id="miradesignergrid" class="btn btn-sm btn-default active" title="Aimantation sur la grille"><i class="fas fa-th"></i> Grille</button>
