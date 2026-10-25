@@ -318,8 +318,10 @@ function MiraSetRowName(row,technicalName,displayName){
   if(MiraRowType(row)!=='datetime'){
     var edit=document.createElement('button');
     edit.type='button'; edit.className='mira-row-options';
-    edit.textContent='Modifier';
-    edit.title='Changer le nom affiché et les paramètres utiles';
+    edit.textContent=MiraRowType(row)==='camera' ? 'Paramètres' : 'Modifier';
+    edit.title=MiraRowType(row)==='camera' ?
+      'Configurer ou modifier l’URL de la caméra' :
+      'Changer le nom affiché et les paramètres utiles';
     edit.addEventListener('click',function(){ MiraOpenQuickOptions(row); });
     cell.appendChild(edit);
   }
@@ -469,6 +471,29 @@ function MiraCellValue(cell){
   return input ? input.value : MiraSafeText(cell.innerText).trim();
 }
 
+// Camera settings are intentionally edited AFTER adding the widget.
+// Keep the entire URL in the row data, not in the small 'Valeur' table cell.
+function MiraCameraGetUrl(row){
+  if(Object.prototype.hasOwnProperty.call(row.dataset, 'cameraUrl'))
+    return row.dataset.cameraUrl;
+  // Backward compatibility: camera widgets created in beta.2 stored the raw
+  // URL directly in cells[7]. They remain editable without recreating them.
+  return MiraSafeText(row.cells[7].textContent).trim();
+}
+
+function MiraCameraSetUrl(row, url){
+  var value=MiraSafeText(url).trim();
+  row.dataset.cameraUrl=value;
+  row.cells[7].textContent=value ? 'Configurée' : 'À configurer';
+  row.cells[7].title=value ? 'Ouvrir les paramètres pour modifier l’URL caméra' :
+                               'Cliquer sur Paramètres pour renseigner l’URL caméra';
+}
+
+function MiraValidCameraUrl(url){
+  return url.length <= 768 && /^http:\/\/[^\s]+$/i.test(url) &&
+    !/[\r\n]/.test(url);
+}
+
 function MiraValidateRangeRow(row){
   var type=row.cells[0].dataset.value || row.cells[0].innerText.trim();
   if (type !== 'range' && type !== 'roundrange' && type !== 'thermostat') return true;
@@ -499,6 +524,13 @@ async function SendListHTTP(ip,mdp){
     for (let i = 2; i < miratable.rows.length; i++) {
       if (!MiraValidateRangeRow(miratable.rows[i])) return;
       if (!MiraValidateListRow(miratable.rows[i])) return;
+      if (MiraRowType(miratable.rows[i]) === 'camera') {
+        var cameraUrl=MiraCameraGetUrl(miratable.rows[i]);
+        if (cameraUrl && !MiraValidCameraUrl(cameraUrl)) {
+          alert('Caméra « '+MiraDisplayName(miratable.rows[i])+' » : URL HTTP BMP incorrecte. Ouvre ses paramètres.');
+          return;
+        }
+      }
     }
 
     /* 1.2.9 : on construit le JSON complet côté Jeedom puis on l'envoie en
@@ -514,7 +546,8 @@ async function SendListHTTP(ip,mdp){
       var miraunit = MiraSafeText(row.cells[4].innerText);
       var miramin = MiraCellValue(row.cells[5]);
       var miramax = MiraCellValue(row.cells[6]);
-      var miraval = MiraSafeText(row.cells[7].innerText);
+      var miraval = miratype === 'camera' ? MiraCameraGetUrl(row) :
+                    MiraSafeText(row.cells[7].innerText);
       var layoutSelect = row.cells[8].querySelector('.mira-row-layout');
       var miralayout = layoutSelect ? layoutSelect.value : (row.cells[8].dataset.value || 'auto');
 
@@ -826,6 +859,7 @@ function Remplissage(contjson){
     miracellmin.appendChild(nmiramin);  
     miracellmax.appendChild(nmiramax);  
     miracellval.appendChild(nmiraval);
+    if(miratype === 'camera') MiraCameraSetUrl(mirarow, miraval);
     miracelllayout.dataset.value = miralayout;
     miracelllayout.appendChild(MiraLayoutSelect(miratype, miralayout));
     mirarow.dataset.freeLayout = miralayout === 'free' ? '1' : '0';
@@ -888,13 +922,7 @@ $("#mirabuttonajouter").on('click', function (event) {
   var miratable = document.getElementById('miratable');
   miraname=MiraSafeText(miraname).trim();
   var thermoModes=$('#mirathermomodes').val().trim() || 'Confort|Éco|Hors gel|Arrêt';
-  if (miratype === 'camera') {
-    miraval = String(miraval || '').trim();
-    if (!/^http:\/\/[^\s]+$/i.test(miraval) || /[\r\n]/.test(miraval)) {
-      alert('Caméra beta : saisir une URL HTTP BMP locale valide.');
-      return;
-    }
-  }
+  if (miratype === 'camera') miraval = ''; // URL editable later in Paramètres
   if(miratype==='thermostat'){
     if(!thermoModes.split('|').some(function(v){return v.trim();})){ alert('Il faut au moins un mode thermostat.'); return; }
     miraval=String(Math.round(Number(miraval)*2)/2);
@@ -945,6 +973,7 @@ $("#mirabuttonajouter").on('click', function (event) {
   miracellmin.appendChild(nmiramin);  
   miracellmax.appendChild(nmiramax);  
   miracellval.appendChild(nmiraval);
+  if(miratype === 'camera') MiraCameraSetUrl(mirarow, '');
   miracelllayout.dataset.value = miralayout;
   miracelllayout.appendChild(MiraLayoutSelect(miratype, miralayout));
   mirarow.dataset.freeLayout = miralayout === 'free' ? '1' : '0';
@@ -993,11 +1022,8 @@ $("#miratype").on('change',function(event) {
   MiraRefreshLayoutSelector(lvgl_type, 'auto');
   MiraRefreshInfoSelectors(lvgl_type);
   $('#divmirathermomodes').toggle(lvgl_type==='thermostat');
-  $('#miracamerahelp').toggle(lvgl_type==='camera');
-  $('#miraval').attr('type', lvgl_type === 'camera' ? 'text' : 'number');
-  $('#miraval').attr('maxlength', lvgl_type === 'camera' ? 768 : 6);
-  if(lvgl_type === 'camera') $('#miraval').attr('placeholder','http://192.168.1.x:8098/snapshot.bmp');
-  else $('#miraval').removeAttr('placeholder');
+  // Camera URL is deliberately not requested in the add-widget form.
+  $('#miraval').attr('type', 'number').attr('maxlength', 6).removeAttr('placeholder');
   if (lvgl_type === 'thermostat') {
     $('#miramin').val('5'); $('#miramax').val('30'); $('#miraval').val('20.5');
     $('#miraunit').val('°C'); $('#miralist').val('');
@@ -1006,10 +1032,10 @@ $("#miratype").on('change',function(event) {
     $('#titlemiraval').text('Consigne de départ :');
     $('#titlemiramin').text('Consigne mini :');
   } else if (lvgl_type === 'camera') {
-    $('#miramin,#miramax,#miraunit,#miralist').val('');
-    $('#miraemplacement,#divmiraname,#divmiraval,#mirabuttonajouter').show();
-    $('#divmiramin,#divmiramax,#divmiraunit,#divmiralist').hide();
-    $('#titlemiraval').text('URL image BMP :');
+    $('#miramin,#miramax,#miraval,#miraunit,#miralist').val('');
+    $('#miraemplacement,#divmiraname,#mirabuttonajouter').show();
+    $('#divmiramin,#divmiramax,#divmiraval,#divmiraunit,#divmiralist').hide();
+    $('#titlemiraval').text('Valeur :');
   } else if (lvgl_type == 'button' || lvgl_type == 'toggle' || lvgl_type == 'color' || lvgl_type == 'multiaction'){
   	$("#miramin").val('');
     $("#miramax").val('');
@@ -1840,6 +1866,7 @@ function MiraDesignerSelect(block){
   if(!row) return;
   $('#mirainspectempty').hide(); $('#mirainspectfields').show();
   $('#mirainspectname').text(MiraRowName(row)); $('#mirainspecttype').text(MiraRowType(row));
+  $('#mirainspectcamera').toggle(MiraRowType(row) === 'camera');
   var min=MiraMinWidgetSize(MiraRowType(row));
   $('#mirageow').attr('min',min.w); $('#mirageoh').attr('min',min.h);
   MiraDesignerNumericDirty=false;
@@ -1921,6 +1948,11 @@ $('#mirageox,#mirageoy,#mirageow,#mirageoh').on('input',function(){
   }
 });
 $('#mirageoapply').on('click',MiraDesignerNumericChange);
+$('#mirainspectcamera').on('click',function(){
+  if(!MiraDesignerSelected) return;
+  var row=document.getElementById('miratable').rows[Number(MiraDesignerSelected.dataset.rowIndex)];
+  if(row && MiraRowType(row)==='camera') MiraOpenQuickOptions(row);
+});
 // Keep manual entry stable when tabbing among the four fields. Only apply
 // after leaving the whole group, or via Enter/Apply.
 $('#mirageox,#mirageoy,#mirageow,#mirageoh').on('focusout',function(){
@@ -1960,6 +1992,8 @@ function MiraOpenQuickOptions(row){
   $('#miraquickmin').val(MiraCellValue(row.cells[5]));
   $('#miraquickmax').val(MiraCellValue(row.cells[6]));
   $('#miraquickvalue').val(MiraCellValue(row.cells[7]));
+  $('#miraquickcameraurl').val(type === 'camera' ? MiraCameraGetUrl(row) : '');
+  $('#miraquickcamerawrap').toggle(type === 'camera');
   $('#miraquickunitwrap').toggle(type==='info' || type==='roundrange');
   $('#miraquickminmaxwrap').toggle(type==='range' || type==='roundrange' || type==='thermostat');
   $('#miraquickvaluewrap').toggle(type==='list' || type==='listbutton' || type==='range' || type==='roundrange' || type==='thermostat');
@@ -1980,6 +2014,14 @@ $('#miraquicksave').on('click',function(){
   var value=$('#miraquickvalue').val();
   if((type==='list' || type==='listbutton') && !value.split('|').some(function(x){return x.trim();})){
     alert('Indique au moins une option de liste.'); return;
+  }
+  if(type === 'camera') {
+    var cameraUrl=$('#miraquickcameraurl').val().trim();
+    if(cameraUrl && !MiraValidCameraUrl(cameraUrl)){
+      alert('URL caméra incorrecte. Indique une URL http:// locale ou laisse vide pour configurer plus tard.');
+      return;
+    }
+    MiraCameraSetUrl(row,cameraUrl);
   }
   MiraSetRowName(row,MiraTechnicalName(row),display);
   if(type==='info' || type==='roundrange') row.cells[4].textContent=$('#miraquickunit').val();
