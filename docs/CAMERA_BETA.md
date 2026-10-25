@@ -1,4 +1,4 @@
-# Mira Camera beta 0.7.19 — bouton simple + JPEG direct
+# Mira Camera beta 0.7.20 — bouton simple + JPEG direct
 
 **Branche expérimentale uniquement. Ne pas fusionner avec main/stable avant essais physiques.**
 
@@ -11,12 +11,12 @@ d'aperçu, de rafraîchissement ni de requête HTTP sur la page principale.
 - Appui : affiche une vue plein écran et lance le téléchargement des images.
 - Retour, veille ou reprogrammation : arrêt du téléchargement et libération
   des images en PSRAM.
-- Une image toutes les 4 secondes, pas de RTSP/MJPEG/H.264 continu.
+- Rafraîchissement JPEG/BMP lancé au plus toutes les **500 ms** (objectif jusqu'à ~2 images/s suivant Wi-Fi, résolution et temps de décodage), pas de flux RTSP/MJPEG/H.264 continu.
 - Tous les écrans (WT32, Waveshare, Nextion) partagent le même code UI.
 
 ## Configuration Jeedom
 
-**Plugin beta 1.2.28-beta.4 minimum** et **firmware 0.7.19 beta**.
+**Plugin beta 1.2.28-beta.4 minimum** et **firmware 0.7.20 beta**.
 
 1. Dans « Programmer un écran ESP32 », créer **Caméra**, nom et page
    uniquement, puis programmer l'écran.
@@ -52,7 +52,7 @@ pour tester le proxy initial. Les JPEG dépassant 900 KiB sont refusés.
 
 Le succès de compilation/CI ne vaut pas validation sur les écrans réels.
 
-## Correctif couleurs 0.7.19
+## Correctif couleurs 0.7.20
 
 Le firmware 0.7.18 affichait les JPEG avec des couleurs artificielles sur le WT32 :
 le JPEGDEC utilisait `RGB565_LITTLE_ENDIAN` alors que LVGL WT32 était configuré
@@ -60,3 +60,14 @@ avec `LV_COLOR_16_SWAP=1`. Les trames JPEG **et BMP** utilisent désormais l'ord
 RGB565 attendu par LVGL selon chaque cible, sans modifier la palette ni les
 styles des autres widgets. Le bouton caméra reste identique ; seules les images
 en plein écran sont concernées. Validation sur le matériel physique recommandée.
+
+## Image plein écran & rafraîchissement 0.7.20
+
+- **Mode paysage conservé** même si le panneau est en portrait : aucun pivot de 90°.
+- Zoom proportionnel avec LVGL pour occuper la largeur utile en affichage complet,
+  sans déformation ni recadrage.
+- Intervalle entre débuts des requêtes d'image réduit de 4 000 ms à 500 ms.
+  Les téléchargements et le décodage restent séquentiels dans leur propre tâche
+  FreeRTOS ; la cadence effective dépend de la caméra et du Wi-Fi.
+- Pas de connexion ni de rafraîchissement réseau lorsque la tuile Caméra n'est
+  pas ouverte ; sortie et veille stoppent le travail caméra.
