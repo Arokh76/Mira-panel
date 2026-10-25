@@ -35,7 +35,7 @@ log::add('mira', 'debug', "Lancement script");
                         <option value="range">Curseur</option>
                         <option value="roundrange">Curseur arrondi</option>
                         <option value="thermostat">Thermostat</option>
-                        <option value="camera">Caméra (beta : aperçu + plein écran)</option>
+                        <option value="camera">Caméra</option>
                         <option value="color">Couleur</option>
                         <option value="list">Liste</option>
                         <option value="listbutton">Liste vers boutons</option>
@@ -130,10 +130,7 @@ log::add('mira', 'debug', "Lancement script");
                         <div id="miraquickminmaxwrap"><label>Minimum <input type="number" id="miraquickmin"></label><label>Maximum <input type="number" id="miraquickmax"></label></div>
                         <div id="miraquickvaluewrap"><label><span id="miraquickvaluetitle">Valeur / options</span><input type="text" id="miraquickvalue"></label></div>
                         <div id="miraquickthermomodeswrap" style="display:none"><label>Modes du thermostat <input type="text" id="miraquickthermomodes" placeholder="Confort|Éco|Hors gel|Arrêt"></label></div>
-                        <div id="miraquickcamerawrap" style="display:none">
-                          <label>URL de la caméra (BMP) <input type="url" id="miraquickcameraurl" maxlength="768" placeholder="http://192.168.1.10:8098/snapshot.bmp" style="width:100%;"></label>
-                          <small>Modifiable à tout moment. Utiliser une URL HTTP locale vers une image BMP 24 bits ; une caméra JPEG nécessite le proxy de conversion Mira.</small>
-                        </div>
+
                         <div class="mira-quickoptions-actions"><button type="button" id="miraquickcancel" class="btn btn-default">Annuler</button><button type="button" id="miraquicksave" class="btn btn-success">Valider</button></div>
                       </div>
                     </div>
@@ -174,7 +171,6 @@ log::add('mira', 'debug', "Lancement script");
                               <label>H <input id="mirageoh" type="number" min="32" step="1"></label>
                             </div>
                             <div id="mirageounit" class="mira-geometry-unit"></div>
-                            <button type="button" id="mirainspectcamera" class="btn btn-sm btn-default btn-block" style="display:none;"><i class="fas fa-camera"></i> Paramètres de la caméra</button>
                             <button type="button" id="mirageoapply" class="btn btn-sm btn-primary btn-block"><i class="fas fa-check"></i> Appliquer les coordonnées</button>
                             <div id="mirageovalidation" class="mira-geometry-validation" role="status" aria-live="polite"></div>
                             <button type="button" id="miradesignerauto" class="btn btn-sm btn-default btn-block"><i class="fas fa-magic"></i> Repasser ce widget en Auto</button>
