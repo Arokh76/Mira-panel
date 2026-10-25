@@ -88,6 +88,27 @@ static int miraCompareVersion(const String& a, const String& b) {
   return 0;
 }
 
+
+static String miraCameraNvsKey(const String& name) {
+  // Namespace keys are at most 15 chars. Stable 32-bit FNV-1a of the
+  // technical widget name, never derived from Jeedom's volatile command ID.
+  uint32_t hash = 2166136261UL;
+  for (size_t i = 0; i < name.length(); ++i) {
+    hash ^= static_cast<uint8_t>(name[i]);
+    hash *= 16777619UL;
+  }
+  char key[12];
+  snprintf(key, sizeof(key), "c%08lx", static_cast<unsigned long>(hash));
+  return String(key);
+}
+
+static bool miraCameraSafeUrl(const String& url) {
+  return (url.isEmpty() ||
+          (url.startsWith("http://") && url.length() <= 768 &&
+           url.indexOf('\\n') < 0 && url.indexOf('\\r') < 0 &&
+           url.indexOf(' ') < 0 && url.indexOf('@') < 0));
+}
+
 String ScriptConstruct = "";
 bool ModeAP = false;
 unsigned long previousMillis = 0;
@@ -2835,6 +2856,47 @@ void MiraPanelServer::ServeurStation() {
     request->send(200, "text/plain", "OK");
   });
 
+  // Camera URLs are configured as normal Jeedom commands. Do not reprogram
+  // /miralvgl.json or rebuild every widget when a camera URL changes.
+  server.on("/camera/config", HTTP_POST, [](AsyncWebServerRequest* request) {
+    if (!request->hasParam("key", true) ||
+        request->getParam("key", true)->value() != Uncrypt_Pass) {
+      request->send(403, "text/plain", "Cle invalide"); return;
+    }
+    if (!request->hasParam("name", true) || !request->hasParam("url", true)) {
+      request->send(400, "text/plain", "Nom ou URL manquante"); return;
+    }
+    const String name = request->getParam("name", true)->value();
+    const String url = request->getParam("url", true)->value();
+    if (name.length() < 1 || name.length() > 100 || !miraCameraSafeUrl(url)) {
+      request->send(400, "text/plain", "URL camera invalide"); return;
+    }
+    bool found = false;
+    JsonArray widgets = mira_Json_LVGL["lvgl"].as<JsonArray>();
+    for (JsonObject widget : widgets) {
+      if (widget["type"].as<String>() == "camera" &&
+          widget["name"].as<String>() == name) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      request->send(404, "text/plain", "Widget camera introuvable"); return;
+    }
+    Preferences prefs;
+    if (!prefs.begin("miracam", false)) {
+      request->send(503, "text/plain", "NVS indisponible"); return;
+    }
+    const String storageKey = miraCameraNvsKey(name);
+    // Persist even a blank string: clearing the command disables the stream.
+    const size_t written = prefs.putString(storageKey.c_str(), url);
+    prefs.end();
+    if (written != url.length()) {
+      request->send(503, "text/plain", "Sauvegarde URL impossible"); return;
+    }
+    request->send(200, "text/plain", "OK");
+  });
+
   // Dedicated authenticated navigation endpoint; no /programui/reboot.
   server.on("/navfavorites", HTTP_POST, [](AsyncWebServerRequest* request) {
     if (!request->hasParam("key", true) ||
@@ -3240,6 +3302,15 @@ void MiraPanelServer::WT32PollMultiButtons() {
 void MiraPanelServer::IndexSetEvent(int ID) {
   Resend = true;
   Action = ID;
+}
+
+String MiraPanelServer::GetCameraUrl(const String& name) {
+  Preferences prefs;
+  if (!prefs.begin("miracam", true)) return "";
+  const String key = miraCameraNvsKey(name);
+  const String value = prefs.getString(key.c_str(), "");
+  prefs.end();
+  return value;
 }
 
 String MiraPanelServer::GetJsonLvgl() {
