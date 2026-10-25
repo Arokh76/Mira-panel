@@ -35,7 +35,7 @@ log::add('mira', 'debug', "Lancement script");
                         <option value="range">Curseur</option>
                         <option value="roundrange">Curseur arrondi</option>
                         <option value="thermostat">Thermostat</option>
-                        <option value="camera">Caméra (beta : aperçu + plein écran)</option>
+                        <option value="camera">Caméra</option>
                         <option value="color">Couleur</option>
                         <option value="list">Liste</option>
                         <option value="listbutton">Liste vers boutons</option>
