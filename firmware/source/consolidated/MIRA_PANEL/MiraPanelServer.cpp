@@ -105,7 +105,7 @@ static String miraCameraNvsKey(const String& name) {
 static bool miraCameraSafeUrl(const String& url) {
   return (url.isEmpty() ||
           (url.startsWith("http://") && url.length() <= 768 &&
-           url.indexOf('\\n') < 0 && url.indexOf('\\r') < 0 &&
+           url.indexOf('\n') < 0 && url.indexOf('\r') < 0 &&
            url.indexOf(' ') < 0 && url.indexOf('@') < 0));
 }
 
