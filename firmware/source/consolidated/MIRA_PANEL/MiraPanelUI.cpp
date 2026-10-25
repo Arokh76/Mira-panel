@@ -1642,6 +1642,237 @@ void MiraPanelUI::createButton(uint8_t idx) {
   lv_obj_center(lbl);
 }
 
+// Small fixed-layout helpers. Composite widgets keep the Mira palette and
+// remain entirely LVGL-native (no images, external UI frameworks or GPU).
+static lv_obj_t* miraCompositeLabel(lv_obj_t* parent, const String& text,
+                                     int x, int y, int width,
+                                     const lv_font_t* font, lv_color_t color,
+                                     lv_text_align_t align = LV_TEXT_ALIGN_LEFT) {
+  lv_obj_t* label = lv_label_create(parent);
+  lv_label_set_text(label, text.c_str());
+  lv_obj_set_width(label, width);
+  lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+  lv_obj_set_style_text_font(label, font, 0);
+  lv_obj_set_style_text_color(label, color, 0);
+  lv_obj_set_style_text_align(label, align, 0);
+  lv_obj_set_pos(label, x, y);
+  return label;
+}
+
+void MiraPanelUI::createEnergy(uint8_t idx) {
+  Binding& b = _bindings[idx];
+  const bool mini = MIRA_DISPLAY_WIDTH <= 240;
+  const bool wide = MIRA_DISPLAY_WIDTH >= 800;
+  const int W = MIRA_CARD_FULL;
+  const int H = wide ? 344 : (mini ? 294 : 353);
+  b.card = makeCard(pageIndex(b.location), H);
+  lv_obj_set_size(b.card, W, H);
+  lv_obj_set_layout(b.card, 0);
+  lv_obj_set_style_pad_all(b.card, 0, 0);
+  lv_obj_clear_flag(b.card, LV_OBJ_FLAG_SCROLLABLE);
+
+  const int pad = mini ? 9 : 13;
+  const int gap = 8;
+  const int boxW = (W - 2 * pad - gap) / 2;
+  const int boxH = mini ? 77 : 91;
+  const int y1 = mini ? 39 : 50;
+  const int y2 = y1 + boxH + gap;
+  const lv_font_t* infoFont = mini ? &mira_font_fr_14 : &lv_font_montserrat_20;
+  const lv_font_t* headingFont = mini ? &mira_font_fr_12 : &mira_font_fr_14;
+
+  miraCompositeLabel(b.card,
+      b.displayName.length() ? b.displayName : String("Énergie"),
+      pad, 9, W - 2 * pad, &mira_font_fr_16, COL_TEXT);
+  const char* const titles[4] = {"SOLAIRE", "MAISON", "RÉSEAU", "BATTERIE"};
+  const uint32_t tints[4] = {0xF6BF49, 0xFF9F61, 0x42C7EE, 0x55DAAB};
+  for (uint8_t n = 0; n < 4; ++n) {
+    const int x = pad + (n % 2) * (boxW + gap);
+    const int y = y1 + (n / 2) * (boxH + gap);
+    lv_obj_t* cell = lv_obj_create(b.card);
+    lv_obj_set_pos(cell, x, y);
+    lv_obj_set_size(cell, boxW, boxH);
+    lv_obj_set_style_pad_all(cell, 0, 0);
+    lv_obj_set_style_radius(cell, 11, 0);
+    lv_obj_set_style_bg_color(cell, colorPanel2(), 0);
+    lv_obj_set_style_bg_opa(cell, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(cell, lv_color_hex(tints[n]), 0);
+    lv_obj_set_style_border_width(cell, 1, 0);
+    lv_obj_clear_flag(cell, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(cell, LV_OBJ_FLAG_CLICKABLE);
+    miraCompositeLabel(cell, titles[n], 10, 9, boxW - 20,
+                       headingFont, COL_MUTED);
+    b.compositeLabels[n] =
+        miraCompositeLabel(cell, "-- W", 10, mini ? 34 : 38,
+                           boxW - 18, infoFont, lv_color_hex(tints[n]));
+  }
+
+  const int sectionY = y2 + boxH + (mini ? 9 : 17);
+  miraCompositeLabel(b.card, "STOCKAGE", pad + 3, sectionY,
+                     W - 2 * pad, &mira_font_fr_14, COL_MUTED);
+  b.compositeLabels[4] = miraCompositeLabel(
+      b.card, "-- %", W - pad - (mini ? 58 : 72), sectionY - 1,
+      mini ? 55 : 70, infoFont, COL_GREEN, LV_TEXT_ALIGN_RIGHT);
+  b.compositeGauge = lv_bar_create(b.card);
+  lv_obj_set_pos(b.compositeGauge, pad + 3, sectionY + (mini ? 29 : 32));
+  lv_obj_set_size(b.compositeGauge, W - 2 * pad - 6, mini ? 8 : 11);
+  lv_bar_set_range(b.compositeGauge, 0, 100);
+  lv_bar_set_value(b.compositeGauge, 0, LV_ANIM_OFF);
+  lv_obj_set_style_bg_color(b.compositeGauge, colorPanel2(), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(b.compositeGauge, COL_GREEN, LV_PART_INDICATOR);
+  lv_obj_set_style_radius(b.compositeGauge, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+  lv_obj_set_style_radius(b.compositeGauge, LV_RADIUS_CIRCLE, LV_PART_INDICATOR);
+  lv_obj_clear_flag(b.compositeGauge, LV_OBJ_FLAG_CLICKABLE);
+}
+
+// A dedicated Mira media dashboard (not a Home Assistant media-player card).
+// Three explicit commands are linked through the existing Jeedom Button
+// mechanism; the volume slider is a standard indexed Range action.
+void MiraPanelUI::createMedia(uint8_t idx) {
+  Binding& b = _bindings[idx];
+  const bool mini = MIRA_DISPLAY_WIDTH <= 240;
+  const bool wide = MIRA_DISPLAY_WIDTH >= 800;
+  const int W = MIRA_CARD_FULL;
+  const int H = wide ? 338 : (mini ? 288 : 350);
+  const int pad = mini ? 10 : 14;
+  b.card = makeCard(pageIndex(b.location), H);
+  lv_obj_set_size(b.card, W, H);
+  lv_obj_set_layout(b.card, 0);
+  lv_obj_set_style_pad_all(b.card, 0, 0);
+  lv_obj_clear_flag(b.card, LV_OBJ_FLAG_SCROLLABLE);
+
+  miraCompositeLabel(b.card,
+      b.displayName.length() ? b.displayName : String("Multimédia"),
+      pad, 9, W - 2 * pad, &mira_font_fr_16, COL_TEXT);
+
+  const int artW = mini ? 65 : (wide ? 112 : 86);
+  const int artY = mini ? 35 : 42;
+  lv_obj_t* art = lv_obj_create(b.card);
+  lv_obj_set_size(art, artW, artW);
+  lv_obj_set_pos(art, pad, artY);
+  lv_obj_set_style_radius(art, 12, 0);
+  lv_obj_set_style_bg_color(art, lv_color_hex(0x132A47), 0);
+  lv_obj_set_style_bg_grad_color(art, lv_color_hex(0x315C87), 0);
+  lv_obj_set_style_bg_grad_dir(art, LV_GRAD_DIR_VER, 0);
+  lv_obj_set_style_border_color(art, colorAccent(), 0);
+  lv_obj_set_style_border_width(art, 1, 0);
+  lv_obj_set_style_pad_all(art, 0, 0);
+  lv_obj_clear_flag(art, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_clear_flag(art, LV_OBJ_FLAG_SCROLLABLE);
+  miraCompositeLabel(art, LV_SYMBOL_AUDIO, 0, mini ? 16 : 25,
+                     artW, &lv_font_montserrat_28,
+                     colorAccent(), LV_TEXT_ALIGN_CENTER);
+
+  const int tx = pad + artW + 11;
+  const int tw = W - tx - pad - 3;
+  b.compositeLabels[0] = miraCompositeLabel(
+      b.card, "Aucune lecture", tx, artY + 3, tw,
+      mini ? &mira_font_fr_14 : &mira_font_fr_16, COL_TEXT);
+  b.compositeLabels[1] = miraCompositeLabel(
+      b.card, "Artiste", tx, artY + (mini ? 25 : 31), tw,
+      &mira_font_fr_12, COL_MUTED);
+  b.compositeLabels[2] = miraCompositeLabel(
+      b.card, "Album", tx, artY + (mini ? 44 : 56), tw,
+      &mira_font_fr_12, COL_MUTED);
+
+  const int progressY = mini ? 122 : (wide ? 176 : 151);
+  miraCompositeLabel(b.card, "LECTURE", pad + 1, progressY - 20,
+                     90, &mira_font_fr_12, COL_MUTED);
+  b.compositeLabels[4] = miraCompositeLabel(
+      b.card, "-- %", W - pad - 57, progressY - 20, 55,
+      &mira_font_fr_12, COL_MUTED, LV_TEXT_ALIGN_RIGHT);
+  b.compositeGauge = lv_bar_create(b.card);
+  lv_obj_set_pos(b.compositeGauge, pad, progressY);
+  lv_obj_set_size(b.compositeGauge, W - 2 * pad, 7);
+  lv_bar_set_range(b.compositeGauge, 0, 100);
+  lv_bar_set_value(b.compositeGauge, 0, LV_ANIM_OFF);
+  lv_obj_set_style_bg_color(b.compositeGauge, colorPanel2(), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(b.compositeGauge, colorAccent(), LV_PART_INDICATOR);
+  lv_obj_clear_flag(b.compositeGauge, LV_OBJ_FLAG_CLICKABLE);
+
+  const int actionsY = mini ? 147 : (wide ? 206 : 182);
+  const int buttonW = mini ? 54 : 65;
+  const int buttonGap = mini ? 12 : 18;
+  const int groupW = 3 * buttonW + 2 * buttonGap;
+  const int firstX = (W - groupW) / 2;
+  const char* symbols[3] = {LV_SYMBOL_PREV, LV_SYMBOL_PLAY, LV_SYMBOL_NEXT};
+  for (uint8_t i = 0; i < 3; ++i) {
+    lv_obj_t* btn = lv_btn_create(b.card);
+    lv_obj_set_pos(btn, firstX + i * (buttonW + buttonGap), actionsY);
+    lv_obj_set_size(btn, buttonW, mini ? 43 : 52);
+    lv_obj_set_style_radius(btn, 12, 0);
+    lv_obj_set_style_bg_color(btn, i == 1 ? colorAccent2() : colorPanel2(), 0);
+    lv_obj_set_style_border_color(btn, colorAccent(), 0);
+    lv_obj_set_style_border_width(btn, 1, 0);
+    lv_obj_set_style_shadow_width(btn, 0, 0);
+    lv_obj_set_style_pad_all(btn, 0, 0);
+    lv_obj_clear_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(btn, onMediaAction, LV_EVENT_CLICKED, makeContext(idx, i));
+    lv_obj_t* icon = miraCompositeLabel(btn, symbols[i], 0, mini ? 9 : 13,
+        buttonW, &lv_font_montserrat_20, COL_TEXT, LV_TEXT_ALIGN_CENTER);
+    if (i == 1) b.stateLabel = icon; // updated from playback-state Info
+  }
+  const int volY = mini ? 209 : (wide ? 281 : 257);
+  miraCompositeLabel(b.card, LV_SYMBOL_VOLUME_MAX, pad, volY + 2, 28,
+                     &lv_font_montserrat_20, colorAccent());
+  b.compositeLabels[5] = miraCompositeLabel(b.card, "-- %",
+      W - pad - 49, volY + 7, 48, &mira_font_fr_12,
+      COL_TEXT, LV_TEXT_ALIGN_RIGHT);
+  b.mediaVolumeSlider = lv_slider_create(b.card);
+  lv_obj_set_pos(b.mediaVolumeSlider, pad + 35, volY + 5);
+  lv_obj_set_size(b.mediaVolumeSlider, W - 2 * pad - 92, 9);
+  lv_slider_set_range(b.mediaVolumeSlider, 0, 100);
+  lv_slider_set_value(b.mediaVolumeSlider, 40, LV_ANIM_OFF);
+  lv_obj_set_style_bg_color(b.mediaVolumeSlider, colorPanel2(), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(b.mediaVolumeSlider, colorAccent(), LV_PART_INDICATOR);
+  lv_obj_set_style_bg_color(b.mediaVolumeSlider, COL_TEXT, LV_PART_KNOB);
+  lv_obj_set_style_pad_all(b.mediaVolumeSlider, 0, LV_PART_KNOB);
+  lv_obj_set_ext_click_area(b.mediaVolumeSlider, 12);
+  lv_obj_add_event_cb(b.mediaVolumeSlider, onMediaVolume, LV_EVENT_RELEASED,
+                      makeContext(idx));
+  b.compositeLabels[3] = miraCompositeLabel(b.card, "À l'arrêt",
+      pad, H - (mini ? 27 : 29), W - 2 * pad, &mira_font_fr_12, COL_MUTED);
+}
+
+// Common passive view update for Jeedom /updatenr and MQTT States. It never
+// executes actions or publishes MQTT and hence cannot move a physical device.
+void MiraPanelUI::updateCompositeInfo(Binding& b, uint8_t field, const String& raw) {
+  String text = raw;
+  text.trim();
+  if (!text.length()) text = "--";
+  if (b.type == W_ENERGY) {
+    if (field >= 5) return;
+    if (text != "--" && text.indexOf('%') < 0 && field == 4) text += " %";
+    if (text != "--" && field < 4 &&
+        text.indexOf('W') < 0 && text.indexOf('w') < 0) text += " W";
+    if (b.compositeLabels[field])
+      lv_label_set_text(b.compositeLabels[field], text.c_str());
+    if (field == 4 && b.compositeGauge)
+      lv_bar_set_value(b.compositeGauge, clampInt(raw.toInt(), 0, 100), LV_ANIM_OFF);
+    return;
+  }
+  if (b.type != W_MEDIA || field >= 6) return;
+  if (field == 3) {
+    String state = raw; state.toLowerCase(); state.trim();
+    const bool playing = (state == "playing" || state == "lecture" ||
+                          state == "play" || state == "1" || state == "on");
+    if (b.stateLabel) lv_label_set_text(b.stateLabel,
+                                        playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
+    text = playing ? "En lecture" : "En pause";
+  } else if (field == 4 || field == 5) {
+    if (text != "--" && text.indexOf('%') < 0) text += " %";
+    if (field == 4 && b.compositeGauge)
+      lv_bar_set_value(b.compositeGauge, clampInt(raw.toInt(), 0, 100), LV_ANIM_OFF);
+    if (field == 5 && b.mediaVolumeSlider) {
+      _suppressEvents = true;
+      lv_slider_set_value(b.mediaVolumeSlider, clampInt(raw.toInt(), 0, 100),
+                          LV_ANIM_OFF);
+      _suppressEvents = false;
+    }
+  }
+  if (b.compositeLabels[field])
+    lv_label_set_text(b.compositeLabels[field], text.c_str());
+}
+
 // Same compact action row as ordinary Mira buttons. No thumbnail, no
 // snapshot requests and no preview on the page: icon + camera name only.
 // The network worker starts strictly when the user opens the fullscreen view.
