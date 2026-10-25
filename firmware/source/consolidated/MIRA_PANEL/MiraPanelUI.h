@@ -65,6 +65,8 @@ private:
     W_DATETIME,
     W_THERMOSTAT,
     W_CAMERA,
+    W_ENERGY,
+    W_MEDIA,
     W_UNSUPPORTED
   };
 
@@ -97,6 +99,15 @@ private:
     bool multiTouchLongSent = false;
     uint32_t multiTouchPressAt = 0;
     uint32_t multiTouchReleasedAt = 0;
+    // Composite widgets: ordinary indexed Jeedom Info and action commands.
+    // Energy: solar/home/grid/battery power + battery SoC.
+    // Media: title/artist/album/state/progress + volume.
+    int compositeIds[6] = {-1, -1, -1, -1, -1, -1};
+    lv_obj_t* compositeLabels[6] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+    lv_obj_t* compositeGauge = nullptr;
+    int mediaActionIds[3] = {-1, -1, -1}; // previous/playpause/next
+    int mediaVolumeCmdId = -1;
+    lv_obj_t* mediaVolumeSlider = nullptr;
     int thermostatTempId = -1;
     float thermostatSetpoint = 20.0f;
     lv_obj_t* thermostatTemperatureLabel = nullptr;
@@ -278,6 +289,8 @@ private:
   static void onButton(lv_event_t* e);
   static void onCameraTile(lv_event_t* e);
   static void onCameraBack(lv_event_t* e);
+  static void onMediaAction(lv_event_t* e);
+  static void onMediaVolume(lv_event_t* e);
   static void onMultiTouch(lv_event_t* e);
   static void onToggle(lv_event_t* e);
   static void onRange(lv_event_t* e);
@@ -320,6 +333,9 @@ private:
   void decorateInfo(uint8_t idx);
   void createButton(uint8_t idx);
   void createCamera(uint8_t idx);
+  void createEnergy(uint8_t idx);
+  void createMedia(uint8_t idx);
+  void updateCompositeInfo(Binding& b, uint8_t field, const String& value);
   void openCamera(uint8_t idx);
   void closeCamera();
   void serviceCamera();
