@@ -75,6 +75,28 @@ try {
                         $expectedSignatures[] = 'button|' . $prefix . $name;
                     continue;
                 }
+                if ($type === 'energy') {
+                    // One visual Energy card -> five standard Jeedom Info IDs.
+                    // Without these signatures autosync times out even though
+                    // the ESP32 /getindex was rebuilt successfully.
+                    foreach (array('solar', 'home', 'grid', 'battery', 'soc') as $field) {
+                        $expectedSignatures[] = 'info|' . $name . '__' . $field;
+                    }
+                    continue;
+                }
+                if ($type === 'media') {
+                    // Media player: six passive Info values, three touch buttons
+                    // and one volume Range. Compare the EXACT signatures:
+                    // an old index must never be accepted after reprogramming.
+                    foreach (array('title', 'artist', 'album', 'state', 'progress', 'volume') as $field) {
+                        $expectedSignatures[] = 'info|' . $name . '__' . $field;
+                    }
+                    foreach (array('previous', 'playpause', 'next') as $action) {
+                        $expectedSignatures[] = 'button|' . $name . '__' . $action;
+                    }
+                    $expectedSignatures[] = 'range|' . $name . '__volume_cmd';
+                    continue;
+                }
                 if ($type === 'thermostat') {
                     // One physical card, but three standard Mira entries in
                     // /getindex. Keep exact expected signatures so autosync
