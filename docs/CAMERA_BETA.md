@@ -11,7 +11,7 @@ d'aperçu, de rafraîchissement ni de requête HTTP sur la page principale.
 - Appui : affiche une vue plein écran et lance le téléchargement des images.
 - Retour, veille ou reprogrammation : arrêt du téléchargement et libération
   des images en PSRAM.
-- Rafraîchissement JPEG/BMP lancé au plus toutes les **500 ms** (objectif jusqu'à ~2 images/s suivant Wi-Fi, résolution et temps de décodage), pas de flux RTSP/MJPEG/H.264 continu.
+- Rafraîchissement JPEG/BMP lancé au plus toutes les **250 ms** (objectif jusqu'à ~4 images/s suivant Wi-Fi, résolution et temps de décodage), pas de flux RTSP/MJPEG/H.264 continu.
 - Tous les écrans (WT32, Waveshare, Nextion) partagent le même code UI.
 
 ## Configuration Jeedom
@@ -66,8 +66,9 @@ en plein écran sont concernées. Validation sur le matériel physique recommand
 - **Mode paysage conservé** même si le panneau est en portrait : aucun pivot de 90°.
 - Zoom proportionnel avec LVGL pour occuper la largeur utile en affichage complet,
   sans déformation ni recadrage.
-- Intervalle entre débuts des requêtes d'image réduit de 4 000 ms à 500 ms.
+- Intervalle entre débuts des requêtes d'image réduit de 4 000 ms à 250 ms.
   Les téléchargements et le décodage restent séquentiels dans leur propre tâche
-  FreeRTOS ; la cadence effective dépend de la caméra et du Wi-Fi.
+  FreeRTOS ; la cadence effective dépend de la caméra et du Wi-Fi. Après
+  un échec HTTP/JPEG, prochaine tentative après 2 secondes.
 - Pas de connexion ni de rafraîchissement réseau lorsque la tuile Caméra n'est
   pas ouverte ; sortie et veille stoppent le travail caméra.
