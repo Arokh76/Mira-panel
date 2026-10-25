@@ -94,13 +94,13 @@ jobs:
           grep -Fq 'lv_obj_set_style_text_font(_dateSubLabel, &mira_font_fr_14, 0);' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -Fq 'if (MIRA_DISPLAY_WIDTH >= 800 && b.layout != "free")' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           # Existing WT32 settings width remains exactly 304px.
-          grep -Fq 'MIRA_DISPLAY_WIDTH >= 800 ? 640 : 304' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -Fq 'MIRA_DISPLAY_WIDTH >= 800 ? 640 : (MIRA_DISPLAY_WIDTH <= 240 ? 224 : 304)' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           # Regression guard: settings rows cannot exceed their settings card.
-          grep -Fq 'MIRA_DISPLAY_WIDTH >= 800 ? 640 : 304' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -Fq 'MIRA_DISPLAY_WIDTH >= 800 ? lv_pct(100) : 284' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -Fq 'MIRA_DISPLAY_WIDTH >= 800 ? 600 : 280' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -q 'MIRA_CARD_TILE = MIRA_DISPLAY_WIDTH >= 800 ? 192 : 149' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -q 'MIRA_CARD_AUTO = MIRA_DISPLAY_WIDTH >= 800 ? 390 : 304' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -Fq 'MIRA_DISPLAY_WIDTH >= 800 ? 640 : (MIRA_DISPLAY_WIDTH <= 240 ? 224 : 304)' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -Fq 'MIRA_DISPLAY_WIDTH >= 800 ? lv_pct(100) : (MIRA_DISPLAY_WIDTH <= 240 ? 204 : 284)' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -Fq 'MIRA_DISPLAY_WIDTH >= 800 ? 600 : (MIRA_DISPLAY_WIDTH <= 240 ? 200 : 280)' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -q 'MIRA_CARD_TILE = MIRA_DISPLAY_WIDTH >= 800 ? 192 : (MIRA_DISPLAY_WIDTH <= 240 ? 108 : 149)' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -q 'MIRA_CARD_AUTO = MIRA_DISPLAY_WIDTH >= 800 ? 390 : (MIRA_DISPLAY_WIDTH <= 240 ? 224 : 304)' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q 'MIRA_DISPLAY_WIDTH <= 320' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -q '#define LV_COLOR_16_SWAP 0' firmware/source/work/MIRA_PANEL/lv_conf.h
           test -f firmware/source/work/MIRA_PANEL/MiraPartitionsWaveshare16MB.csv
