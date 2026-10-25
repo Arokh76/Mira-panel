@@ -36,6 +36,8 @@ log::add('mira', 'debug', "Lancement script");
                         <option value="roundrange">Curseur arrondi</option>
                         <option value="thermostat">Thermostat</option>
                         <option value="camera">Caméra</option>
+                        <option value="energy">Énergie · instrumentation</option>
+                        <option value="media">Lecteur multimédia</option>
                         <option value="color">Couleur</option>
                         <option value="list">Liste</option>
                         <option value="listbutton">Liste vers boutons</option>
