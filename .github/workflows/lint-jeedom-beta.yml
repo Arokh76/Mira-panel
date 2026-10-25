@@ -7,6 +7,13 @@ on:
       - "desktop/**"
       - "plugin_info/**"
       - ".github/workflows/lint-jeedom-beta.yml"
+  pull_request:
+    branches: [beta]
+    paths:
+      - "core/**"
+      - "desktop/**"
+      - "plugin_info/**"
+      - ".github/workflows/lint-jeedom-beta.yml"
   workflow_dispatch:
 permissions:
   contents: read
