@@ -1599,38 +1599,66 @@ void MiraPanelUI::createButton(uint8_t idx) {
   lv_obj_center(lbl);
 }
 
-// Beta: the tile is a non-streaming vignette, it makes ZERO network requests.
-// A single tap creates a fullscreen viewer, only then enabling the BMP fetcher.
+// Same compact action row as ordinary Mira buttons. No thumbnail, no
+// snapshot requests and no preview on the page: icon + camera name only.
+// The network worker starts strictly when the user opens the fullscreen view.
 void MiraPanelUI::createCamera(uint8_t idx) {
   Binding& b = _bindings[idx];
   const bool compact = b.style == "compact";
-  b.card = makeCard(pageIndex(b.location), compact ? 75 : 116);
+  b.card = makeCard(pageIndex(b.location), compact ? 44 : 54);
   lv_obj_clear_flag(b.card, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_set_style_pad_all(b.card, 2, 0);
+  lv_obj_set_style_bg_opa(b.card, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(b.card, 0, 0);
+  lv_obj_set_style_shadow_width(b.card, 0, 0);
+  lv_obj_set_style_pad_all(b.card, 0, 0);
+
   b.control = lv_btn_create(b.card);
-  lv_obj_set_size(b.control, MIRA_DISPLAY_WIDTH >= 800 ? 370 :
-                  (MIRA_DISPLAY_WIDTH <= 240 ? 206 : 286), compact ? 66 : 106);
+  const lv_coord_t btnW = MIRA_DISPLAY_WIDTH >= 800 ? (compact ? 344 : 360) :
+                         (MIRA_DISPLAY_WIDTH <= 240 ? 206 : (compact ? 230 : 288));
+  lv_obj_set_size(b.control, btnW, compact ? 34 : 44);
   lv_obj_center(b.control);
-  lv_obj_set_style_radius(b.control, 12, 0);
+  lv_obj_clear_flag(b.control, LV_OBJ_FLAG_SCROLLABLE);
+  // Reuse the normal Mira button colors, pressed feedback, border and radius.
   lv_obj_set_style_bg_color(b.control, colorPanel2(), 0);
+  lv_obj_set_style_bg_opa(b.control, LV_OPA_COVER, 0);
   lv_obj_set_style_border_color(b.control, colorAccent2(), 0);
+  lv_obj_set_style_border_opa(b.control, LV_OPA_70, 0);
   lv_obj_set_style_border_width(b.control, 1, 0);
   lv_obj_set_style_bg_color(b.control, colorAccent(), LV_STATE_PRESSED);
+  lv_obj_set_style_border_color(b.control, lv_color_hex(0x7DEEFF), LV_STATE_PRESSED);
+  lv_obj_set_style_border_width(b.control, 1, LV_STATE_PRESSED);
+  lv_obj_set_style_radius(b.control, 13, 0);
+  lv_obj_set_style_shadow_color(b.control, lv_color_hex(0x000000), 0);
+  lv_obj_set_style_shadow_opa(b.control, LV_OPA_20, 0);
+  lv_obj_set_style_shadow_width(b.control, 4, 0);
+  lv_obj_set_style_shadow_ofs_y(b.control, 2, 0);
+  lv_obj_set_style_pad_all(b.control, 0, 0);
+
+  // Tiny native LVGL camera pictogram (body, shutter bump and lens).
+  // No font icon dependency, so the three display profiles render alike.
+  lv_obj_t* cameraIcon = lv_obj_create(b.control);
+  lv_obj_set_size(cameraIcon, 26, 24);
+  lv_obj_align(cameraIcon, LV_ALIGN_LEFT_MID, 12, 0);
+  lv_obj_clear_flag(cameraIcon, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_clear_flag(cameraIcon, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_style_bg_opa(cameraIcon, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(cameraIcon, 0, 0);
+  lv_obj_set_style_pad_all(cameraIcon, 0, 0);
+  miraGlyphPart(cameraIcon, 1, 7, 24, 16, true, 4, colorAccent());
+  miraGlyphPart(cameraIcon, 5, 4, 9, 5, false, 2, colorAccent());
+  miraGlyphPart(cameraIcon, 9, 11, 8, 8, true, LV_RADIUS_CIRCLE, colorAccent());
+
+  lv_obj_t* name = lv_label_create(b.control);
+  lv_label_set_text(name, (b.displayName.length() ? b.displayName : b.name).c_str());
+  lv_obj_set_width(name, btnW - 56);
+  lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
+  lv_obj_set_style_text_color(name, COL_TEXT, 0);
+  lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_LEFT, 0);
+  lv_obj_set_style_text_font(name, compact ? &mira_font_fr_14 : &mira_font_fr_16, 0);
+  lv_obj_align(name, LV_ALIGN_LEFT_MID, 48, 0);
+
   EventContext* ctx = makeContext(idx);
   lv_obj_add_event_cb(b.control, onCameraTile, LV_EVENT_CLICKED, ctx);
-  lv_obj_t* icon = lv_label_create(b.control);
-  lv_label_set_text(icon, LV_SYMBOL_IMAGE);
-  lv_obj_set_style_text_color(icon, colorAccent(), 0);
-  lv_obj_set_style_text_font(icon, &lv_font_montserrat_28, 0);
-  lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, 5);
-  lv_obj_t* name = lv_label_create(b.control);
-  lv_obj_set_width(name, MIRA_DISPLAY_WIDTH <= 240 ? 180 : 252);
-  lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
-  lv_label_set_text(name, (b.displayName.length() ? b.displayName : b.name).c_str());
-  lv_obj_set_style_text_color(name, lv_color_white(), 0);
-  lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_set_style_text_font(name, &mira_font_fr_14, 0);
-  lv_obj_align(name, LV_ALIGN_BOTTOM_MID, 0, -5);
 }
 
 void MiraPanelUI::openCamera(uint8_t idx) {
