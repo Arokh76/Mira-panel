@@ -734,6 +734,7 @@ void MiraPanelUI::begin() {
   _theme = savedTheme <= THEME_GLASS ? savedTheme : THEME_DARK;
   _returnHomeEnabled = _prefs.getBool("home", true);
   loadFavorites();
+  _visiblePageMask = _prefs.getUChar("pageMask", 0x3F) | 0x01;
   _sleepEnabled = _prefs.getBool("sleep", true);
   _clockInSleep = _prefs.getBool("clock", true);
 
@@ -795,8 +796,8 @@ void MiraPanelUI::begin() {
       lv_obj_set_flex_flow(_pages[i], LV_FLEX_FLOW_ROW_WRAP);
       lv_obj_set_flex_align(_pages[i], LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     } else {
-      if (i == 1 || i == 2 || i == 4) lv_obj_set_style_pad_top(_pages[i], 8, 0);
-      if (MIRA_DISPLAY_WIDTH >= 800 && (i == 1 || i == 2 || i == 4)) {
+      if (i == 1 || i == 2 || i == 4 || i == 5) lv_obj_set_style_pad_top(_pages[i], 8, 0);
+      if (MIRA_DISPLAY_WIDTH >= 800 && (i == 1 || i == 2 || i == 4 || i == 5)) {
         lv_obj_set_flex_flow(_pages[i], LV_FLEX_FLOW_ROW_WRAP);
         lv_obj_set_flex_align(_pages[i], LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
       } else {
@@ -877,6 +878,7 @@ void MiraPanelUI::begin() {
 
   buildSettingsPage();
   buildPagePicker();
+  refreshPagePickerVisibility();
   refreshFavoriteNav();
 
 #if defined(MIRA_TARGET_WAVESHARE_43C)
@@ -942,6 +944,7 @@ uint8_t MiraPanelUI::pageIndex(const String& location) const {
   if (location == "lumieres") return 1;
   if (location == "temperatures") return 2;
   if (location == "energie" || location == "energy") return 4;
+  if (location == "multimedia" || location == "media") return 5;
   return 0;
 }
 
@@ -2576,7 +2579,7 @@ void MiraPanelUI::buildPagePicker() {
   const bool compactPicker = MIRA_DISPLAY_WIDTH <= 240;
   lv_obj_set_size(_pagePickerCard,
                   compactPicker ? 224 : (wide ? 460 : 298),
-                  compactPicker ? 265 : 340);
+                  compactPicker ? 260 : 376);
   lv_obj_set_style_radius(_pagePickerCard, 16, 0);
   lv_obj_set_style_bg_color(_pagePickerCard, colorPanel2(), 0);
   lv_obj_set_style_bg_opa(_pagePickerCard, LV_OPA_COVER, 0);
@@ -2593,17 +2596,17 @@ void MiraPanelUI::buildPagePicker() {
   lv_obj_align(heading, LV_ALIGN_TOP_MID, 0, compactPicker ? 11 : 13);
 
   const char* names[PAGE_COUNT] = {
-    "Accueil", "Lumières", "Températures", "Paramètres", "Énergie"
+    "Accueil", "Lumières", "Températures", "Paramètres", "Énergie", "Multimédia"
   };
-  const uint8_t order[PAGE_COUNT] = {0, 1, 2, 4, 3};
+  const uint8_t order[PAGE_COUNT] = {0, 1, 2, 4, 5, 3};
   for (uint8_t row = 0; row < PAGE_COUNT; ++row) {
     uint8_t page = order[row];
     lv_obj_t* btn = lv_btn_create(_pagePickerCard);
     _pagePickerButtons[page] = btn;
     lv_obj_set_size(btn, compactPicker ? 204 : (wide ? 420 : 268),
-                        compactPicker ? 38 : 46);
+                        compactPicker ? 32 : 43);
     lv_obj_set_pos(btn, compactPicker ? 10 : (wide ? 20 : 15),
-                   compactPicker ? 40 + row * 44 : 47 + row * 56);
+                   compactPicker ? 34 + row * 37 : 47 + row * 54);
     lv_obj_set_style_radius(btn, 9, 0);
     lv_obj_set_style_bg_color(btn, colorPanel(), 0);
     lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
@@ -2625,6 +2628,32 @@ void MiraPanelUI::buildPagePicker() {
 
   }
   lv_obj_add_flag(_pagePicker, LV_OBJ_FLAG_HIDDEN);
+}
+
+void MiraPanelUI::refreshPagePickerVisibility() {
+  if (!_pagePickerCard) return;
+  // Keep Home in the menu; Settings remains configurable. Favorite slots are
+  // independent shortcuts and their persisted IDs are never remapped.
+  const bool mini = MIRA_DISPLAY_WIDTH <= 240;
+  const bool wide = MIRA_DISPLAY_WIDTH >= 800;
+  const uint8_t order[PAGE_COUNT] = {0, 1, 2, 4, 5, 3};
+  uint8_t row = 0;
+  for (uint8_t i = 0; i < PAGE_COUNT; ++i) {
+    const uint8_t page = order[i];
+    lv_obj_t* btn = _pagePickerButtons[page];
+    if (!btn) continue;
+    if (!(_visiblePageMask & (1 << page))) {
+      lv_obj_add_flag(btn, LV_OBJ_FLAG_HIDDEN);
+      continue;
+    }
+    lv_obj_clear_flag(btn, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_pos(btn, mini ? 10 : (wide ? 20 : 15),
+                   mini ? 34 + row * 37 : 47 + row * 54);
+    ++row;
+  }
+  lv_obj_set_height(_pagePickerCard, mini ? 39 + row * 37 :
+                                          52 + row * 54);
+  lv_obj_center(_pagePickerCard);
 }
 
 void MiraPanelUI::setPagePickerVisible(bool visible) {
@@ -2881,6 +2910,13 @@ void MiraPanelUI::pollFavorites() {
   // modifications of UI objects, and no effect on widget programmation.
   if ((uint32_t)(millis() - _lastFavoritesPollMs) < 1000UL) return;
   _lastFavoritesPollMs = millis();
+  const uint8_t newMask = _prefs.getUChar("pageMask", 0x3F) | 0x01;
+  if (newMask != _visiblePageMask) {
+    _visiblePageMask = newMask;
+    refreshPagePickerVisibility();
+    if (_currentPage != 0 && !(_visiblePageMask & (1 << _currentPage)))
+      showPage(0);
+  }
   uint8_t incoming[FAVORITE_SLOTS];
   bool valid = true;
   for (uint8_t slot = 0; slot < FAVORITE_SLOTS; ++slot) {
@@ -2924,7 +2960,8 @@ void MiraPanelUI::refreshFavoriteNav() {
     lv_obj_t* glyph = lv_label_create(btn);
     lv_label_set_text(glyph, page == 0 ? LV_SYMBOL_HOME :
                           page == 3 ? LV_SYMBOL_SETTINGS :
-                          page == 4 ? LV_SYMBOL_CHARGE : LV_SYMBOL_PLUS);
+                          page == 4 ? LV_SYMBOL_CHARGE :
+                          page == 5 ? LV_SYMBOL_AUDIO : LV_SYMBOL_PLUS);
     // Home glyph has a heavier visual weight than the custom nav pictograms.
     lv_obj_set_style_text_font(glyph,
         (page == 0 || page == 4) ? &lv_font_montserrat_16 : &lv_font_montserrat_20, 0);
@@ -2962,7 +2999,7 @@ void MiraPanelUI::setNavActive(uint8_t index) {
 }
 
 void MiraPanelUI::showPage(uint8_t index) {
-  if (index >= PAGE_COUNT) return;
+  if (index >= PAGE_COUNT || !(_visiblePageMask & (1 << index))) return;
 #if defined(MIRA_TARGET_WAVESHARE_43C)
   setScrollCacheActive(false);
 #endif
