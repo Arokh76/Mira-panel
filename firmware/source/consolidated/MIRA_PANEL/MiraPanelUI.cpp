@@ -770,8 +770,8 @@ void MiraPanelUI::begin() {
       lv_obj_set_flex_flow(_pages[i], LV_FLEX_FLOW_ROW_WRAP);
       lv_obj_set_flex_align(_pages[i], LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     } else {
-      if (i == 1 || i == 2) lv_obj_set_style_pad_top(_pages[i], 8, 0);
-      if (MIRA_DISPLAY_WIDTH >= 800 && (i == 1 || i == 2)) {
+      if (i == 1 || i == 2 || i == 4) lv_obj_set_style_pad_top(_pages[i], 8, 0);
+      if (MIRA_DISPLAY_WIDTH >= 800 && (i == 1 || i == 2 || i == 4)) {
         lv_obj_set_flex_flow(_pages[i], LV_FLEX_FLOW_ROW_WRAP);
         lv_obj_set_flex_align(_pages[i], LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
       } else {
@@ -916,6 +916,7 @@ uint8_t MiraPanelUI::addBinding() {
 uint8_t MiraPanelUI::pageIndex(const String& location) const {
   if (location == "lumieres") return 1;
   if (location == "temperatures") return 2;
+  if (location == "energie" || location == "energy") return 4;
   return 0;
 }
 
@@ -1000,7 +1001,9 @@ void MiraPanelUI::clearDynamicPages() {
 #if defined(MIRA_TARGET_WAVESHARE_43C)
   resetScrollCache(); // release images and PSRAM BEFORE deleting cards
 #endif
-  for (uint8_t i = 0; i < 3; ++i) lv_obj_clean(_pages[i]);
+  for (uint8_t i = 0; i < PAGE_COUNT; ++i) {
+    if (i != 3) lv_obj_clean(_pages[i]); // Paramètres is static
+  }
   _bindingCount = 0;
   _homeStandardInfoTotal = 0;
   _homeStandardInfoCreated = 0;
@@ -1077,6 +1080,24 @@ void MiraPanelUI::buildFromMiraJson() {
   }
 
   for (JsonObject obj : arr) registerAndCreate(obj);
+  // Explain the experimental energy page when no Jeedom widgets were sent
+  // there. It is removed and rebuilt on each screen reprogramming.
+  bool hasEnergyWidgets = false;
+  for (uint8_t i = 0; i < _bindingCount; ++i) {
+    if (pageIndex(_bindings[i].location) == 4) {
+      hasEnergyWidgets = true;
+      break;
+    }
+  }
+  if (!hasEnergyWidgets) {
+    lv_obj_t* hint = lv_label_create(_pages[4]);
+    lv_label_set_text(hint, "Énergie\\n\\nAjoutez des widgets\\ndepuis Jeedom > Mira");
+    lv_obj_set_width(hint, MIRA_DISPLAY_WIDTH - 28);
+    lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_color(hint, COL_MUTED, 0);
+    lv_obj_set_style_text_font(hint, &mira_font_fr_14, 0);
+    lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
+  }
   // Applies to the entire freshly programmed LVGL tree, including nested
   // button content, sliders and thermostats, on WT32 AND Waveshare.
   // This is repeated after hot reprogramming by buildFromMiraJson().
@@ -2300,7 +2321,7 @@ void MiraPanelUI::buildPagePicker() {
   const bool compactPicker = MIRA_DISPLAY_WIDTH <= 240;
   lv_obj_set_size(_pagePickerCard,
                   compactPicker ? 224 : (wide ? 460 : 298),
-                  compactPicker ? 244 : 290);
+                  compactPicker ? 265 : 340);
   lv_obj_set_style_radius(_pagePickerCard, 16, 0);
   lv_obj_set_style_bg_color(_pagePickerCard, colorPanel2(), 0);
   lv_obj_set_style_bg_opa(_pagePickerCard, LV_OPA_COVER, 0);
@@ -2317,17 +2338,17 @@ void MiraPanelUI::buildPagePicker() {
   lv_obj_align(heading, LV_ALIGN_TOP_MID, 0, compactPicker ? 11 : 13);
 
   const char* names[PAGE_COUNT] = {
-    "Accueil", "Lumières", "Températures", "Paramètres"
+    "Accueil", "Lumières", "Températures", "Paramètres", "Énergie"
   };
-  const uint8_t order[PAGE_COUNT] = {0, 1, 2, 3};
+  const uint8_t order[PAGE_COUNT] = {0, 1, 2, 4, 3};
   for (uint8_t row = 0; row < PAGE_COUNT; ++row) {
     uint8_t page = order[row];
     lv_obj_t* btn = lv_btn_create(_pagePickerCard);
     _pagePickerButtons[page] = btn;
     lv_obj_set_size(btn, compactPicker ? 204 : (wide ? 420 : 268),
-                        compactPicker ? 40 : 47);
+                        compactPicker ? 38 : 46);
     lv_obj_set_pos(btn, compactPicker ? 10 : (wide ? 20 : 15),
-                   compactPicker ? 43 + row * 48 : 46 + row * 58);
+                   compactPicker ? 40 + row * 44 : 47 + row * 56);
     lv_obj_set_style_radius(btn, 9, 0);
     lv_obj_set_style_bg_color(btn, colorPanel(), 0);
     lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
@@ -2647,10 +2668,11 @@ void MiraPanelUI::refreshFavoriteNav() {
     }
     lv_obj_t* glyph = lv_label_create(btn);
     lv_label_set_text(glyph, page == 0 ? LV_SYMBOL_HOME :
-                          page == 3 ? LV_SYMBOL_SETTINGS : LV_SYMBOL_PLUS);
+                          page == 3 ? LV_SYMBOL_SETTINGS :
+                          page == 4 ? LV_SYMBOL_CHARGE : LV_SYMBOL_PLUS);
     // Home glyph has a heavier visual weight than the custom nav pictograms.
     lv_obj_set_style_text_font(glyph,
-        page == 0 ? &lv_font_montserrat_16 : &lv_font_montserrat_20, 0);
+        (page == 0 || page == 4) ? &lv_font_montserrat_16 : &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_color(glyph,
         page == NO_FAVORITE ? COL_MUTED : colorAccent(), 0);
     lv_obj_center(glyph);
