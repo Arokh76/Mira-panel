@@ -1738,7 +1738,7 @@ void MiraPanelUI::serviceCamera() {
     _cameraOpenedAt = millis();
   } else if (!_cameraPixels && (uint32_t)(millis() - _cameraOpenedAt) > 12000UL) {
     if (_cameraStatus) lv_label_set_text(_cameraStatus,
-                        "Flux indisponible : verifier URL / BMP RGB24");
+                        "Image indisponible : verifier URL / JPEG ou BMP");
   }
 }
 
