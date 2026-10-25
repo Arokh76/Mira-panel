@@ -124,6 +124,8 @@ jobs:
           grep -Fq 'dest[x] = miraNativeImage565(rgb565);' firmware/source/work/MIRA_PANEL/MiraCameraBmp.cpp
           grep -Fq 'lv_img_set_zoom(_cameraImage, (uint16_t)zoom);' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -Fq 'lv_img_set_angle(_cameraImage, 0);' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -Fq '_refreshIntervalMs = 250;' firmware/source/work/MIRA_PANEL/MiraCameraBmp.cpp
+          grep -Fq '_refreshIntervalMs = ok ? 250 : 2000;' firmware/source/work/MIRA_PANEL/MiraCameraBmp.cpp
 
       - name: Setup Arduino CLI 1.5.1
         uses: arduino/setup-arduino-cli@v2
