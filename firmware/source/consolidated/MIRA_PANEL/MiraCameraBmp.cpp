@@ -119,7 +119,7 @@ static bool miraDownloadJpeg(Stream& stream, int contentLength,
     jpeg->setPixelType(RGB565_LITTLE_ENDIAN);
     jpeg->setUserPointer(&output);
     valid = jpeg->decode(0, 0, options) == 1;
-    if (!valid) Serial.printf("[MIRA][CAM] Erreur decode JPEG: %d\\n", jpeg->getLastError());
+    if (!valid) Serial.printf("[MIRA][CAM] Erreur decode JPEG: %d\n", jpeg->getLastError());
   }
   jpeg->close();
   delete jpeg;
