@@ -347,6 +347,7 @@ function MiraRowIconConfig(row){
 function MiraStyleOptions(type){
   if (type === 'info') return [['standard','Standard'],['value','Valeur dominante'],['compact','Compact']];
   if (type === 'button' || type === 'camera') return [['standard','Standard'],['compact','Compact']];
+  if (type === 'energy' || type === 'media') return [['standard','Tableau Mira']];
   if (type === 'toggle') return [['standard','Standard'],['compact','Compact']];
   if (type === 'range' || type === 'roundrange' || type === 'list') return [['standard','Standard'],['compact','Compact']];
   if (type === 'listbutton') return [['standard','Standard'],['compact','Compact'],['segmented','Segmenté']];
@@ -415,7 +416,7 @@ function MiraLayoutSelect(type,layout){
   var select=document.createElement('select');
   select.className='mira-row-layout';
   // Valeurs des anciennes versions conservées sans forcer leur conversion.
-  (type==='thermostat' ? [['auto','Auto']] : [['auto','Auto'],['free','Manuel · designer']]).forEach(function(o){
+  (['thermostat','energy','media'].includes(type) ? [['auto','Auto']] : [['auto','Auto'],['free','Manuel · designer']]).forEach(function(o){
     var opt=document.createElement('option'); opt.value=o[0]; opt.textContent=o[1]; select.appendChild(opt);
   });
   if(layout && layout!=='auto' && layout!=='free'){
@@ -997,6 +998,12 @@ $("#miratype").on('change',function(event) {
     $('#divmiraunit,#divmiralist').hide();
     $('#titlemiraval').text('Consigne de départ :');
     $('#titlemiramin').text('Consigne mini :');
+  } else if (lvgl_type === 'energy' || lvgl_type === 'media') {
+    // All values/actions are configured in this screen's Jeedom Commandes
+    // after programming. Do not add dummy values to the widget JSON.
+    $('#miramin,#miramax,#miraval,#miraunit,#miralist').val('');
+    $('#miraemplacement,#divmiraname,#mirabuttonajouter').show();
+    $('#divmiramin,#divmiramax,#divmiraval,#divmiraunit,#divmiralist').hide();
   } else if (lvgl_type === 'camera') {
     $('#miramin,#miramax,#miraval,#miraunit,#miralist').val('');
     $('#miraemplacement,#divmiraname,#mirabuttonajouter').show();
@@ -1518,6 +1525,7 @@ function MiraRowName(row){ return MiraDisplayName(row) || MiraRowType(row); }
 
 function MiraMinWidgetSize(type){
   if(type==='thermostat') return {w:300,h:305};
+  if(type==='energy' || type==='media') return {w:200,h:250};
   if(type==='roundrange' || type==='color') return {w:160,h:160};
   if(type==='range') return {w:180,h:60};
   if(type==='button' || type==='camera' || type==='toggle') return {w:150,h:44};
@@ -1530,6 +1538,8 @@ function MiraMinWidgetSize(type){
 function MiraDefaultWidgetSize(type){
   var W=MiraDisplayInfo.contentWidth || MiraDisplayInfo.width || 320;
   if(type==='thermostat') return {w:W>=800?786:304,h:W>=800?310:405};
+  if(type==='energy') return {w:W>=800?786:W<=240?224:304,h:W<=240?294:353};
+  if(type==='media') return {w:W>=800?786:W<=240?224:304,h:W<=240?288:350};
   if(type==='datetime') return {w:Math.max(120,W-16),h:82};
   if(type==='info') return {w:Math.max(90,Math.floor((W-22)/2)),h:66};
   if(type==='toggle') return {w:Math.max(160,W-16),h:54};
