@@ -26,7 +26,7 @@ jobs:
       - name: Verify Multi-actions integration
         shell: bash
         run: |
-          grep -Fq 'Multi-actions (bouton GPIO)' desktop/php/mira.php
+          grep -Fq 'Bouton multi-actions' desktop/php/mira.php
           grep -Fq 'mira_input_gpio' desktop/js/mira.js
           grep -Fq '/gpio/multi/config' core/class/mira.class.php
           grep -Fq "type === 'multiaction'" core/ajax/mira.ajax.php
