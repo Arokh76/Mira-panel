@@ -88,7 +88,6 @@ log::add('mira', 'debug', "Lancement script");
                         <div id="divmiramin" style="margin-top:2px; display:flex; line-height:40px; vertical-align: middle;"><div id="titlemiramin" align=right style="width:30%;">{{Valeur mini}}:&nbsp;</div><input style="width:70%;" type="number" id="miramin" size="12" onkeydown="return event.keyCode !== 69" maxlength="3" oninput="javascript: if (this.value.length > this.maxLength) this.value = this.value.slice(0, this.maxLength);"/></div>
                         <div id="divmiramax" style="margin-top:2px; display:flex; line-height:40px; vertical-align: middle;"><div align=right style="width:30%;">{{Valeur maxi}}:&nbsp;</div><input style="width:70%;" type="number" id="miramax" size="12"  onkeydown="return event.keyCode !== 69" maxlength="3" oninput="javascript: if (this.value.length > this.maxLength) this.value = this.value.slice(0, this.maxLength);"/></div>
                         <div id="divmiraval" style="margin-top:2px; display:flex; line-height:40px; vertical-align: middle;"><div id="titlemiraval" align=right style="width:30%;">{{Valeur}}:&nbsp;</div><input style="width:70%;" type="number" id="miraval" size="12" step="0.5" maxlength="6" oninput="if (this.type === 'number' && this.value.length > 6) this.value = this.value.slice(0, 6);"/></div>
-                        <div id="miracamerahelp" style="display:none;font-size:12px;margin:4px auto;max-width:95%;">Prototype : URL HTTP d’une image BMP (24 bits, sans compression). La vignette reste inactive, les images ne sont chargées qu’au clic. Pour une caméra JPEG, utiliser le mini-proxy BMP fourni avec le firmware de test.</div>
                         <div id="divmiraunit" style="margin-top:2px; display:flex; line-height:40px; vertical-align: middle;"><div align=right style="width:30%;">{{Unité}}:&nbsp;</div><input style="width:70%;" type="text" id="miraunit" size="12" /></div>
                         <div id="divmiralist" style="margin-top:2px; display:flex; line-height:40px; vertical-align: middle;"><div align=right style="width:30%;">{{Contenu}}:&nbsp;</div><input placeholder="{{Séparer le contenu de la liste par | (Item1|Item2)}}" style="width:70%;" type="text" id="miralist" size="12" /></div>
                         <div id="divmirathermomodes" style="display:none;margin:3px auto; width:96%;">
@@ -131,6 +130,10 @@ log::add('mira', 'debug', "Lancement script");
                         <div id="miraquickminmaxwrap"><label>Minimum <input type="number" id="miraquickmin"></label><label>Maximum <input type="number" id="miraquickmax"></label></div>
                         <div id="miraquickvaluewrap"><label><span id="miraquickvaluetitle">Valeur / options</span><input type="text" id="miraquickvalue"></label></div>
                         <div id="miraquickthermomodeswrap" style="display:none"><label>Modes du thermostat <input type="text" id="miraquickthermomodes" placeholder="Confort|Éco|Hors gel|Arrêt"></label></div>
+                        <div id="miraquickcamerawrap" style="display:none">
+                          <label>URL de la caméra (BMP) <input type="url" id="miraquickcameraurl" maxlength="768" placeholder="http://192.168.1.10:8098/snapshot.bmp" style="width:100%;"></label>
+                          <small>Modifiable à tout moment. Utiliser une URL HTTP locale vers une image BMP 24 bits ; une caméra JPEG nécessite le proxy de conversion Mira.</small>
+                        </div>
                         <div class="mira-quickoptions-actions"><button type="button" id="miraquickcancel" class="btn btn-default">Annuler</button><button type="button" id="miraquicksave" class="btn btn-success">Valider</button></div>
                       </div>
                     </div>
