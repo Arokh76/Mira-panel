@@ -1,4 +1,4 @@
-# Mira Camera beta 0.7.18 — bouton simple + JPEG direct
+# Mira Camera beta 0.7.19 — bouton simple + JPEG direct
 
 **Branche expérimentale uniquement. Ne pas fusionner avec main/stable avant essais physiques.**
 
@@ -16,7 +16,7 @@ d'aperçu, de rafraîchissement ni de requête HTTP sur la page principale.
 
 ## Configuration Jeedom
 
-**Plugin beta 1.2.28-beta.4 minimum** et **firmware 0.7.18 beta**.
+**Plugin beta 1.2.28-beta.4 minimum** et **firmware 0.7.19 beta**.
 
 1. Dans « Programmer un écran ESP32 », créer **Caméra**, nom et page
    uniquement, puis programmer l'écran.
@@ -51,3 +51,12 @@ pour tester le proxy initial. Les JPEG dépassant 900 KiB sont refusés.
 - Vérifier que les autres widgets Jeedom fonctionnent normalement.
 
 Le succès de compilation/CI ne vaut pas validation sur les écrans réels.
+
+## Correctif couleurs 0.7.19
+
+Le firmware 0.7.18 affichait les JPEG avec des couleurs artificielles sur le WT32 :
+le JPEGDEC utilisait `RGB565_LITTLE_ENDIAN` alors que LVGL WT32 était configuré
+avec `LV_COLOR_16_SWAP=1`. Les trames JPEG **et BMP** utilisent désormais l'ordre
+RGB565 attendu par LVGL selon chaque cible, sans modifier la palette ni les
+styles des autres widgets. Le bouton caméra reste identique ; seules les images
+en plein écran sont concernées. Validation sur le matériel physique recommandée.
