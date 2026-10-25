@@ -71,7 +71,7 @@ bool SetupModuleDone = false;
 String MiraRuntimeVersion = "";
 String UpdateURL = "";
 
-static const char* MIRA_GITHUB_VERSION_URL = "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/targets.json";
+static const char* MIRA_GITHUB_VERSION_URL = "https://raw.githubusercontent.com/Arokh76/Mira-panel/firmware-beta/firmware/targets.json";
 static const char* MIRA_GITHUB_BIN_URL = "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/Mira_Panel.bin";
 
 static int miraCompareVersion(const String& a, const String& b) {
@@ -1772,7 +1772,7 @@ void MiraPanelServer::ServeurStation() {
           String remoteVersion = versionDoc["version"] | "";
           String binUrl = versionDoc["targets"][MIRA_DISPLAY_PROFILE_ID]["ota"] | "";
 
-          if (project != "Mira Panel" || !remoteVersion.length() || !binUrl.startsWith("https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/releases/")) {
+          if (project != "Mira Panel" || !remoteVersion.length() || !binUrl.startsWith("https://raw.githubusercontent.com/Arokh76/Mira-panel/firmware-beta/firmware/releases/")) {
             result["status"] = "error";
             result["message"] = "Les informations de mise à jour ne correspondent pas à Mira Panel.";
           } else {
@@ -1897,7 +1897,7 @@ void MiraPanelServer::ServeurStation() {
               String project = doc["project"] | "";
               String remoteVersion = doc["version"] | "";
               String binUrl = doc["targets"][MIRA_DISPLAY_PROFILE_ID]["ota"] | "";
-              if (project != "Mira Panel" || !remoteVersion.length() || !binUrl.startsWith("https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/releases/")) {
+              if (project != "Mira Panel" || !remoteVersion.length() || !binUrl.startsWith("https://raw.githubusercontent.com/Arokh76/Mira-panel/firmware-beta/firmware/releases/")) {
                 TITRE = "Mise à jour";
                 Retour = "Les informations de mise à jour GitHub ne correspondent pas à Mira Panel.";
               } else if (miraCompareVersion(remoteVersion, version) <= 0) {
