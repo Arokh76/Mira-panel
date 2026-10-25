@@ -35,6 +35,7 @@ log::add('mira', 'debug', "Lancement script");
                         <option value="range">Curseur</option>
                         <option value="roundrange">Curseur arrondi</option>
                         <option value="thermostat">Thermostat</option>
+                        <option value="camera">Caméra (beta : aperçu + plein écran)</option>
                         <option value="color">Couleur</option>
                         <option value="list">Liste</option>
                         <option value="listbutton">Liste vers boutons</option>
@@ -87,6 +88,7 @@ log::add('mira', 'debug', "Lancement script");
                         <div id="divmiramin" style="margin-top:2px; display:flex; line-height:40px; vertical-align: middle;"><div id="titlemiramin" align=right style="width:30%;">{{Valeur mini}}:&nbsp;</div><input style="width:70%;" type="number" id="miramin" size="12" onkeydown="return event.keyCode !== 69" maxlength="3" oninput="javascript: if (this.value.length > this.maxLength) this.value = this.value.slice(0, this.maxLength);"/></div>
                         <div id="divmiramax" style="margin-top:2px; display:flex; line-height:40px; vertical-align: middle;"><div align=right style="width:30%;">{{Valeur maxi}}:&nbsp;</div><input style="width:70%;" type="number" id="miramax" size="12"  onkeydown="return event.keyCode !== 69" maxlength="3" oninput="javascript: if (this.value.length > this.maxLength) this.value = this.value.slice(0, this.maxLength);"/></div>
                         <div id="divmiraval" style="margin-top:2px; display:flex; line-height:40px; vertical-align: middle;"><div id="titlemiraval" align=right style="width:30%;">{{Valeur}}:&nbsp;</div><input style="width:70%;" type="number" id="miraval" size="12" step="0.5" onkeydown="return event.keyCode !== 69" maxlength="6" oninput="javascript: if (this.value.length > this.maxLength) this.value = this.value.slice(0, this.maxLength);"/></div>
+                        <div id="miracamerahelp" style="display:none;font-size:12px;margin:4px auto;max-width:95%;">Prototype : URL HTTP d’une image BMP (24 bits, sans compression). La vignette reste inactive, les images ne sont chargées qu’au clic. Pour une caméra JPEG, utiliser le mini-proxy BMP fourni avec le firmware de test.</div>
                         <div id="divmiraunit" style="margin-top:2px; display:flex; line-height:40px; vertical-align: middle;"><div align=right style="width:30%;">{{Unité}}:&nbsp;</div><input style="width:70%;" type="text" id="miraunit" size="12" /></div>
                         <div id="divmiralist" style="margin-top:2px; display:flex; line-height:40px; vertical-align: middle;"><div align=right style="width:30%;">{{Contenu}}:&nbsp;</div><input placeholder="{{Séparer le contenu de la liste par | (Item1|Item2)}}" style="width:70%;" type="text" id="miralist" size="12" /></div>
                         <div id="divmirathermomodes" style="display:none;margin:3px auto; width:96%;">
