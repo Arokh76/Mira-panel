@@ -379,13 +379,15 @@ jobs:
           data = json.loads(p.read_text())
           assert data['version'] == '0.7.15'
           assert len(data['targets']) == 3
-          legacy = json.loads(Path('/tmp/mira-release-check/output/firmware/version.json').read_text())
-          assert legacy['version'] == '0.7.15'
-          assert Path('/tmp/mira-release-check/output/firmware/Mira_Panel.bin').is_file()
+          # The old untyped OTA feed must stay pinned for older Waveshare.
+          # The release generator deliberately does not write it.
+          assert not Path('/tmp/mira-release-check/output/firmware/version.json').exists()
+          assert not Path('/tmp/mira-release-check/output/firmware/Mira_Panel.bin').exists()
           assert Path('/tmp/mira-release-check/output/docs/manifest.json').is_file()
+          assert Path('/tmp/mira-release-check/output/docs/manifest-nextion.json').is_file()
           for profile, spec in data['targets'].items():
               assert len(spec['otaSha256']) == 64
               assert len(spec['factorySha256']) == 64
               assert spec['otaBytes'] > 500000
-          print('Both real Mira firmware profiles can be published together')
+          print('All three Mira profiles can be published together, safely')
           PY
