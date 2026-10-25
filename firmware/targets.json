@@ -5,11 +5,12 @@
     "wt32-sc01-plus": {
       "label": "WT32-SC01 Plus",
       "flashMB": 8,
-      "ota": "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/releases/0.7.14/wt32-sc01-plus/ota.bin",
+      "ota": "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/releases/0.7.14-wt32-gpio-dev6/wt32-sc01-plus/ota.bin",
       "factory": "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/releases/0.7.14/wt32-sc01-plus/factory.bin",
-      "otaSha256": "6ef01ef47b8cd17a9db7c04760535d6d287ff7650feaa142dab8633d8a911571",
+      "otaSha256": "c933305ed27a04add4e7658129c32c1c5ba2fd98ace956742f91e2b2b446f32f",
       "factorySha256": "82d2727af7a3d426a4bd9e8a469e34c3b01d919ab3cd713566c88a0d74d632e8",
-      "otaBytes": 1863248
+      "otaBytes": 1889408,
+      "version": "0.7.14-wt32-gpio-dev6"
     },
     "waveshare-esp32s3-touch-lcd-4.3c": {
       "label": "Waveshare ESP32-S3 Touch LCD 4.3C",

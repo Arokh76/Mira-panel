@@ -1,0 +1,10 @@
+{
+  "project": "Mira Panel",
+  "target": "wt32-sc01-plus",
+  "version": "0.7.14-wt32-gpio-dev6",
+  "bin": "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/releases/0.7.14-wt32-gpio-dev6/wt32-sc01-plus/ota.bin",
+  "sha256": "c933305ed27a04add4e7658129c32c1c5ba2fd98ace956742f91e2b2b446f32f",
+  "bytes": 1889408,
+  "factory": "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/releases/0.7.14/wt32-sc01-plus/factory.bin",
+  "installer": "https://arokh76.github.io/Mira-panel/"
+}
