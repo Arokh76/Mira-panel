@@ -1733,7 +1733,22 @@ void MiraPanelUI::serviceCamera() {
     _cameraDescriptor.data_size = uint32_t(frame.width) * frame.height * 2;
     _cameraDescriptor.data = reinterpret_cast<const uint8_t*>(_cameraPixels);
     lv_img_set_src(_cameraImage, &_cameraDescriptor);
-    lv_obj_align(_cameraImage, LV_ALIGN_CENTER, 0, 18);
+    // Fit the full landscape frame to the portrait screen: no 90-degree
+    // rotation, cropping or aspect-ratio distortion. JPEGDEC downsizes in
+    // powers of two; LVGL then fills the spare width exactly (e.g. 256 -> 316).
+    // Reserve 50 px for the back button/title and a small bottom margin.
+    const uint32_t viewportW = MIRA_DISPLAY_WIDTH - 4;
+    const uint32_t viewportH = MIRA_DISPLAY_HEIGHT - 66;
+    const uint32_t zoomW = (viewportW * 256UL) / frame.width;
+    const uint32_t zoomH = (viewportH * 256UL) / frame.height;
+    uint32_t zoom = zoomW < zoomH ? zoomW : zoomH;
+    if (zoom > 2048) zoom = 2048; // LVGL 8 image zoom maximum, 8x
+    if (zoom < 1) zoom = 1;
+    lv_img_set_pivot(_cameraImage, frame.width / 2, frame.height / 2);
+    lv_img_set_angle(_cameraImage, 0);  // camera must stay horizontal
+    lv_img_set_zoom(_cameraImage, (uint16_t)zoom);
+    // Center within the area below the header, not over the back button.
+    lv_obj_align(_cameraImage, LV_ALIGN_CENTER, 0, 20);
     if (_cameraStatus) lv_obj_add_flag(_cameraStatus, LV_OBJ_FLAG_HIDDEN);
     _cameraOpenedAt = millis();
   } else if (!_cameraPixels && (uint32_t)(millis() - _cameraOpenedAt) > 12000UL) {
