@@ -1,0 +1,91 @@
+name: Publish WT32 DEV6 OTA (target-specific)
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/publish-wt32-dev6-ota.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: mira-wt32-dev6-ota-release
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: true
+      - name: Verify successful and pinned DEV6 source build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api repos/Arokh76/Mira-panel/actions/runs/40139130050 |
+            jq -e '.conclusion == "success" and .head_branch == "feature/wt32-multiaction-dev6" and .head_sha == "5cb982ee5c8f8738fe04ca63097b4dad89f34ea2"'
+      - name: Download hardware-tested WT32 OTA artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/wt32-dev6
+          gh run download 40139130050 --name Mira_WT32_GPIO_web_0.7.14-dev6 --dir /tmp/wt32-dev6
+          test -s /tmp/wt32-dev6/Mira_WT32_GPIO_0.7.14-wt32-gpio-dev6_OTA.bin
+          echo 'c933305ed27a04add4e7658129c32c1c5ba2fd98ace956742f91e2b2b446f32f  /tmp/wt32-dev6/Mira_WT32_GPIO_0.7.14-wt32-gpio-dev6_OTA.bin' | sha256sum -c -
+      - name: Publish WT32-only OTA with hardware-scoped version metadata
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, json
+          version = '0.7.14-wt32-gpio-dev6'
+          source = Path('/tmp/wt32-dev6/Mira_WT32_GPIO_0.7.14-wt32-gpio-dev6_OTA.bin')
+          binary = source.read_bytes()
+          sha = hashlib.sha256(binary).hexdigest()
+          assert sha == 'c933305ed27a04add4e7658129c32c1c5ba2fd98ace956742f91e2b2b446f32f'
+          assert len(binary) == 1889408 and version.encode() in binary
+          assert b'WT32-SC01 Plus' in binary, 'Wrong hardware profile'
+          path = Path('firmware/targets.json')
+          info = json.loads(path.read_text())
+          assert info['version'] == '0.7.14', 'Unexpected shared release state'
+          profiles = info['targets']
+          wt = profiles['wt32-sc01-plus']
+          assert wt['flashMB'] == 8
+          assert wt['factory'].endswith('/0.7.14/wt32-sc01-plus/factory.bin')
+          assert profiles['waveshare-esp32s3-touch-lcd-4.3c']['ota'].endswith('/0.7.14/waveshare-esp32s3-touch-lcd-4.3c/ota.bin')
+          path_rel = 'firmware/releases/' + version + '/wt32-sc01-plus/ota.bin'
+          target = Path(path_rel)
+          target.parent.mkdir(parents=True, exist_ok=True)
+          if target.exists():
+              assert target.read_bytes() == binary, 'Existing OTA artifact differs'
+          target.write_bytes(binary)
+          url = 'https://raw.githubusercontent.com/Arokh76/Mira-panel/main/' + path_rel
+          wt.update({'version': version, 'ota': url, 'otaSha256': sha, 'otaBytes': len(binary)})
+          path.write_text(json.dumps(info, indent=2, ensure_ascii=False) + '\n')
+          scoped = {
+              'project': 'Mira Panel',
+              'target': 'wt32-sc01-plus',
+              'version': version,
+              'bin': url,
+              'sha256': sha,
+              'bytes': len(binary),
+              'factory': wt['factory'],
+              'installer': 'https://arokh76.github.io/Mira-panel/'
+          }
+          Path('firmware/version-wt32.json').write_text(json.dumps(scoped, indent=2, ensure_ascii=False) + '\n')
+          # Do not update firmware/version.json or firmware/Mira_Panel.bin:
+          # currently running Waveshare firmware also reads those WT32 legacy endpoints.
+          print('Published WT32 DEV6 OTA; global legacy version and Waveshare binaries untouched')
+          PY
+      - name: Commit only WT32 OTA and manifests
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add firmware/targets.json firmware/version-wt32.json firmware/releases/0.7.14-wt32-gpio-dev6/wt32-sc01-plus/ota.bin
+          git diff --cached --quiet && exit 0
+          git commit -m 'Publish WT32 DEV6 OTA in hardware-specific update channel'
+          git push origin HEAD:main
