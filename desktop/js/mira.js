@@ -1313,22 +1313,23 @@ function addCmdToTable(_cmd) {
       }
 
       if (isMultiAction) {
-        // Same Jeedom fields/selectors as standard button/toggle actions.
-        // Only this gesture's chosen mode changes what is visible.
-        function multiField(label,key,kind) {
-          var html='<div style="display:flex;align-items:center;gap:5px;margin-bottom:3px;">';
-          if(label)html+='<span style="width:46px;flex-shrink:0">'+label+'</span>';
+        // Same sizing/alignment as the regular Jeedom command selector above.
+        // No extra labels: one field per line, ordered like a native toggle
+        // (info state, OFF, ON); only the placeholder identifies an empty field.
+        function multiField(key,kind,placeholder) {
+          var html='<div style="display:flex;align-items:center;width:100%;margin-bottom:3px;">';
           html+='<textarea class="cmdAttr input-sm" data-l1key="configuration" data-l2key="'+key+
-            '" style="height:35px;width:85%;min-width:0;flex:1" placeholder="{{'+(label?'Choisir '+label:'Envoyer vers')+'}}"></textarea>';
+            '" style="height:35px;width:85%;min-width:0;flex:1 1 85%" placeholder="'+placeholder+'"></textarea>';
           html+='<a class="btn btn-default '+(kind==='info'?'listEquipementInfo':'listEquipementAction')+
-            '" data-input="'+key+'" style="height:35px;min-width:44px;display:flex;align-items:center;justify-content:center">'+
+            '" data-input="'+key+'" style="margin-left:2px;height:35px;width:14%;min-width:35px;flex:0 0 14%;display:flex;align-items:center;justify-content:center">'+
             '<i class="fas fa-list-alt"></i></a></div>';
           return html;
         }
-        tr += '<div class="mira-multi-scenario">'+multiField('','calcul','action')+'</div>';
+        tr += '<div class="mira-multi-scenario">'+multiField('calcul','action','Envoyer vers')+'</div>';
         tr += '<div class="mira-multi-light" style="display:none">'+
-          multiField('ON','multi_on','action')+multiField('OFF','multi_off','action')+
-          multiField('État','multi_state','info')+'</div>';
+          multiField('multi_state','info','Recevoir de (état)')+
+          multiField('multi_off','action','Envoyer vers OFF')+
+          multiField('multi_on','action','Envoyer vers ON')+'</div>';
       }
       if (miraLocalEligible) {
         tr += '<div class="mira-gpio-params" style="display:none;gap:5px;align-items:center">' +
