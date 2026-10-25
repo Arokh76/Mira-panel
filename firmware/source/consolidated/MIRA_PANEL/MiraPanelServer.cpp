@@ -2919,7 +2919,7 @@ void MiraPanelServer::ServeurStation() {
         request->send(400, "text/plain", "Favori non numerique"); return;
       }
       int page = v.as<int>();
-      if (page != 255 && (page < 0 || page > 3)) {
+      if (page != 255 && (page < 0 || page > 4)) {
         request->send(400, "text/plain", "Page favorite invalide"); return;
       }
       for (uint8_t j = 0; j < i; ++j) {
