@@ -1622,7 +1622,7 @@ void MiraPanelUI::createCamera(uint8_t idx) {
   lv_obj_set_style_text_font(icon, &lv_font_montserrat_28, 0);
   lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, 5);
   lv_obj_t* name = lv_label_create(b.control);
-  lv_label_set_width(name, MIRA_DISPLAY_WIDTH <= 240 ? 180 : 252);
+  lv_obj_set_width(name, MIRA_DISPLAY_WIDTH <= 240 ? 180 : 252);
   lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
   lv_label_set_text(name, (b.displayName.length() ? b.displayName : b.name).c_str());
   lv_obj_set_style_text_color(name, lv_color_white(), 0);
@@ -1662,7 +1662,7 @@ void MiraPanelUI::openCamera(uint8_t idx) {
   lv_label_set_text(arrow, LV_SYMBOL_LEFT);
   lv_obj_center(arrow);
   lv_obj_t* title = lv_label_create(_cameraOverlay);
-  lv_label_set_width(title, MIRA_DISPLAY_WIDTH - 70);
+  lv_obj_set_width(title, MIRA_DISPLAY_WIDTH - 70);
   lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
   lv_label_set_text(title, (b.displayName.length() ? b.displayName : b.name).c_str());
   lv_obj_set_style_text_color(title, lv_color_white(), 0);
