@@ -65,6 +65,10 @@ try {
                 $value = isset($widget['value']) ? (string)$widget['value'] : '';
 
                 if ($type == '' || $type == 'datetime') continue;
+                if ($type === 'camera') {
+                    $expectedSignatures[] = 'info|Camera_' . $name;
+                    continue;
+                }
 
                 if ($type === 'multiaction') {
                     foreach (array('Multi_Clic_','Multi_Double_','Multi_Triple_','Multi_Long_') as $prefix)
