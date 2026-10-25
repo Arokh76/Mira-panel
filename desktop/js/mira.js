@@ -1520,7 +1520,7 @@ function MiraMinWidgetSize(type){
   if(type==='thermostat') return {w:300,h:305};
   if(type==='roundrange' || type==='color') return {w:160,h:160};
   if(type==='range') return {w:180,h:60};
-  if(type==='button' || type==='toggle') return {w:150,h:44};
+  if(type==='button' || type==='camera' || type==='toggle') return {w:150,h:44};
   if(type==='list' || type==='listbutton') return {w:160,h:60};
   if(type==='datetime') return {w:180,h:60};
   if(type==='info') return {w:70,h:40};
@@ -1533,7 +1533,7 @@ function MiraDefaultWidgetSize(type){
   if(type==='datetime') return {w:Math.max(120,W-16),h:82};
   if(type==='info') return {w:Math.max(90,Math.floor((W-22)/2)),h:66};
   if(type==='toggle') return {w:Math.max(160,W-16),h:54};
-  if(type==='button') return {w:Math.max(160,W-16),h:54};
+  if(type==='button' || type==='camera') return {w:Math.max(160,W-16),h:54};
   if(type==='range') return {w:Math.max(180,W-16),h:80};
   if(type==='roundrange') return {w:Math.min(W-16,238),h:238};
   if(type==='color') return {w:Math.min(W-16,210),h:196};
