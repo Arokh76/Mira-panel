@@ -2897,6 +2897,53 @@ void MiraPanelServer::ServeurStation() {
     request->send(200, "text/plain", "OK");
   });
 
+  // Individual page visibility is stored in the same miraui NVS namespace as
+  // the persistent favorites. Screen reload is not required. Home is mandatory.
+  server.on("/navpages", HTTP_POST, [](AsyncWebServerRequest* request) {
+    if (!request->hasParam("key", true) ||
+        request->getParam("key", true)->value() != Uncrypt_Pass) {
+      request->send(403, "text/plain", "Cle invalide"); return;
+    }
+    if (!request->hasParam("mask", true)) {
+      request->send(400, "text/plain", "Masque absent"); return;
+    }
+    const String value = request->getParam("mask", true)->value();
+    for (uint8_t i = 0; i < value.length(); ++i) {
+      if (!isDigit(value[i])) {
+        request->send(400, "text/plain", "Masque invalide"); return;
+      }
+    }
+    const int mask = value.toInt();
+    if (mask < 1 || mask > 63 || !(mask & 1)) {
+      request->send(400, "text/plain", "Accueil obligatoire"); return;
+    }
+    Preferences prefs;
+    if (!prefs.begin("miraui", false)) {
+      request->send(503, "text/plain", "NVS indisponible"); return;
+    }
+    const bool stored = prefs.putUChar("pageMask", (uint8_t)mask) == 1;
+    prefs.end();
+    request->send(stored ? 200 : 503, "text/plain",
+                  stored ? "OK" : "Ecriture masque echouee");
+  });
+
+  server.on("/navpages", HTTP_GET, [](AsyncWebServerRequest* request) {
+    if (!request->hasParam("key") ||
+        request->getParam("key")->value() != Uncrypt_Pass) {
+      request->send(403, "text/plain", "Cle invalide"); return;
+    }
+    Preferences prefs;
+    if (!prefs.begin("miraui", true)) {
+      request->send(503, "text/plain", "NVS indisponible"); return;
+    }
+    const uint8_t mask = prefs.getUChar("pageMask", 0x3F) | 1;
+    prefs.end();
+    DynamicJsonDocument response(128);
+    response["mask"] = mask;
+    String body; serializeJson(response, body);
+    request->send(200, "application/json", body);
+  });
+
   // Dedicated authenticated navigation endpoint; no /programui/reboot.
   server.on("/navfavorites", HTTP_POST, [](AsyncWebServerRequest* request) {
     if (!request->hasParam("key", true) ||
@@ -2919,7 +2966,7 @@ void MiraPanelServer::ServeurStation() {
         request->send(400, "text/plain", "Favori non numerique"); return;
       }
       int page = v.as<int>();
-      if (page != 255 && (page < 0 || page > 4)) {
+      if (page != 255 && (page < 0 || page > 5)) {
         request->send(400, "text/plain", "Page favorite invalide"); return;
       }
       for (uint8_t j = 0; j < i; ++j) {
