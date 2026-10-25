@@ -770,8 +770,8 @@ void MiraPanelUI::begin() {
       lv_obj_set_flex_flow(_pages[i], LV_FLEX_FLOW_ROW_WRAP);
       lv_obj_set_flex_align(_pages[i], LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     } else {
-      if (i == 1 || i == 2) lv_obj_set_style_pad_top(_pages[i], 8, 0);
-      if (MIRA_DISPLAY_WIDTH >= 800 && (i == 1 || i == 2)) {
+      if (i == 1 || i == 2 || i == 4) lv_obj_set_style_pad_top(_pages[i], 8, 0);
+      if (MIRA_DISPLAY_WIDTH >= 800 && (i == 1 || i == 2 || i == 4)) {
         lv_obj_set_flex_flow(_pages[i], LV_FLEX_FLOW_ROW_WRAP);
         lv_obj_set_flex_align(_pages[i], LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
       } else {
@@ -916,6 +916,7 @@ uint8_t MiraPanelUI::addBinding() {
 uint8_t MiraPanelUI::pageIndex(const String& location) const {
   if (location == "lumieres") return 1;
   if (location == "temperatures") return 2;
+  if (location == "energie" || location == "energy") return 4;
   return 0;
 }
 
@@ -996,10 +997,13 @@ void MiraPanelUI::makeNameLabel(lv_obj_t* parent, const String& text) {
 }
 
 void MiraPanelUI::clearDynamicPages() {
+  closeCamera(); // never keep a camera request alive after Jeedom reprograms pages
 #if defined(MIRA_TARGET_WAVESHARE_43C)
   resetScrollCache(); // release images and PSRAM BEFORE deleting cards
 #endif
-  for (uint8_t i = 0; i < 3; ++i) lv_obj_clean(_pages[i]);
+  for (uint8_t i = 0; i < PAGE_COUNT; ++i) {
+    if (i != 3) lv_obj_clean(_pages[i]); // Paramètres is static
+  }
   _bindingCount = 0;
   _homeStandardInfoTotal = 0;
   _homeStandardInfoCreated = 0;
@@ -1148,6 +1152,14 @@ void MiraPanelUI::registerAndCreate(JsonObject obj) {
     b.idOn = _server.IndexAddButton(String("Multi_Triple_") + name);
     b.multiLongId = _server.IndexAddButton(String("Multi_Long_") + name);
     if (_server.WT32MultiVisible(name)) createButton(idx);
+  }
+  else if (type == "camera") {
+    b.type = W_CAMERA;
+    // Register as a standard Mira info command so Jeedom auto-sync creates
+    // Caméra : <name> under the specific screen's Commandes tab.
+    b.id = _server.IndexAddInfo(String("Camera_") + name, "");
+    b.cameraUrl = _server.GetCameraUrl(name);
+    createCamera(idx);
   }
   else if (type == "toggle") {
     b.type = W_TOGGLE;
@@ -1589,6 +1601,165 @@ void MiraPanelUI::createButton(uint8_t idx) {
   lv_obj_set_style_text_font(lbl, compact ? &mira_font_fr_14 : &mira_font_fr_16, 0);
   lv_obj_center(lbl);
 }
+
+// Same compact action row as ordinary Mira buttons. No thumbnail, no
+// snapshot requests and no preview on the page: icon + camera name only.
+// The network worker starts strictly when the user opens the fullscreen view.
+void MiraPanelUI::createCamera(uint8_t idx) {
+  Binding& b = _bindings[idx];
+  const bool compact = b.style == "compact";
+  b.card = makeCard(pageIndex(b.location), compact ? 44 : 54);
+  lv_obj_clear_flag(b.card, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_bg_opa(b.card, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(b.card, 0, 0);
+  lv_obj_set_style_shadow_width(b.card, 0, 0);
+  lv_obj_set_style_pad_all(b.card, 0, 0);
+
+  b.control = lv_btn_create(b.card);
+  const lv_coord_t btnW = MIRA_DISPLAY_WIDTH >= 800 ? (compact ? 344 : 360) :
+                         (MIRA_DISPLAY_WIDTH <= 240 ? 206 : (compact ? 230 : 288));
+  lv_obj_set_size(b.control, btnW, compact ? 34 : 44);
+  lv_obj_center(b.control);
+  lv_obj_clear_flag(b.control, LV_OBJ_FLAG_SCROLLABLE);
+  // Reuse the normal Mira button colors, pressed feedback, border and radius.
+  lv_obj_set_style_bg_color(b.control, colorPanel2(), 0);
+  lv_obj_set_style_bg_opa(b.control, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_color(b.control, colorAccent2(), 0);
+  lv_obj_set_style_border_opa(b.control, LV_OPA_70, 0);
+  lv_obj_set_style_border_width(b.control, 1, 0);
+  lv_obj_set_style_bg_color(b.control, colorAccent(), LV_STATE_PRESSED);
+  lv_obj_set_style_border_color(b.control, lv_color_hex(0x7DEEFF), LV_STATE_PRESSED);
+  lv_obj_set_style_border_width(b.control, 1, LV_STATE_PRESSED);
+  lv_obj_set_style_radius(b.control, 13, 0);
+  lv_obj_set_style_shadow_color(b.control, lv_color_hex(0x000000), 0);
+  lv_obj_set_style_shadow_opa(b.control, LV_OPA_20, 0);
+  lv_obj_set_style_shadow_width(b.control, 4, 0);
+  lv_obj_set_style_shadow_ofs_y(b.control, 2, 0);
+  lv_obj_set_style_pad_all(b.control, 0, 0);
+
+  // Tiny native LVGL camera pictogram (body, shutter bump and lens).
+  // No font icon dependency, so the three display profiles render alike.
+  lv_obj_t* cameraIcon = lv_obj_create(b.control);
+  lv_obj_set_size(cameraIcon, 26, 24);
+  lv_obj_align(cameraIcon, LV_ALIGN_LEFT_MID, 12, 0);
+  lv_obj_clear_flag(cameraIcon, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_clear_flag(cameraIcon, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_style_bg_opa(cameraIcon, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(cameraIcon, 0, 0);
+  lv_obj_set_style_pad_all(cameraIcon, 0, 0);
+  miraGlyphPart(cameraIcon, 1, 7, 24, 16, true, 4, colorAccent());
+  miraGlyphPart(cameraIcon, 5, 4, 9, 5, false, 2, colorAccent());
+  miraGlyphPart(cameraIcon, 9, 11, 8, 8, true, LV_RADIUS_CIRCLE, colorAccent());
+
+  lv_obj_t* name = lv_label_create(b.control);
+  lv_label_set_text(name, (b.displayName.length() ? b.displayName : b.name).c_str());
+  lv_obj_set_width(name, btnW - 56);
+  lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
+  lv_obj_set_style_text_color(name, COL_TEXT, 0);
+  lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_LEFT, 0);
+  lv_obj_set_style_text_font(name, compact ? &mira_font_fr_14 : &mira_font_fr_16, 0);
+  lv_obj_align(name, LV_ALIGN_LEFT_MID, 48, 0);
+
+  EventContext* ctx = makeContext(idx);
+  lv_obj_add_event_cb(b.control, onCameraTile, LV_EVENT_CLICKED, ctx);
+}
+
+void MiraPanelUI::openCamera(uint8_t idx) {
+  if (idx >= _bindingCount || _bindings[idx].type != W_CAMERA) return;
+  if (_cameraOverlay) closeCamera();
+  const Binding& b = _bindings[idx];
+  _cameraOverlay = lv_obj_create(lv_layer_top());
+  lv_obj_set_size(_cameraOverlay, MIRA_DISPLAY_WIDTH, MIRA_DISPLAY_HEIGHT);
+  lv_obj_align(_cameraOverlay, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_clear_flag(_cameraOverlay, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_bg_color(_cameraOverlay, lv_color_black(), 0);
+  lv_obj_set_style_bg_opa(_cameraOverlay, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(_cameraOverlay, 0, 0);
+  lv_obj_set_style_radius(_cameraOverlay, 0, 0);
+  lv_obj_set_style_pad_all(_cameraOverlay, 0, 0);
+  _cameraImage = lv_img_create(_cameraOverlay);
+  lv_obj_align(_cameraImage, LV_ALIGN_CENTER, 0, 18);
+  _cameraStatus = lv_label_create(_cameraOverlay);
+  lv_obj_set_width(_cameraStatus, MIRA_DISPLAY_WIDTH - 22);
+  lv_label_set_long_mode(_cameraStatus, LV_LABEL_LONG_WRAP);
+  lv_obj_set_style_text_color(_cameraStatus, lv_color_white(), 0);
+  lv_obj_set_style_text_align(_cameraStatus, LV_TEXT_ALIGN_CENTER, 0);
+  lv_label_set_text(_cameraStatus, "Chargement camera...");
+  lv_obj_align(_cameraStatus, LV_ALIGN_CENTER, 0, 10);
+  lv_obj_t* back = lv_btn_create(_cameraOverlay);
+  lv_obj_set_size(back, 56, 34);
+  lv_obj_align(back, LV_ALIGN_TOP_LEFT, 4, 4);
+  lv_obj_set_style_radius(back, 10, 0);
+  lv_obj_add_event_cb(back, onCameraBack, LV_EVENT_CLICKED, this);
+  lv_obj_t* arrow = lv_label_create(back);
+  lv_label_set_text(arrow, LV_SYMBOL_LEFT);
+  lv_obj_center(arrow);
+  lv_obj_t* title = lv_label_create(_cameraOverlay);
+  lv_obj_set_width(title, MIRA_DISPLAY_WIDTH - 70);
+  lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
+  lv_label_set_text(title, (b.displayName.length() ? b.displayName : b.name).c_str());
+  lv_obj_set_style_text_color(title, lv_color_white(), 0);
+  lv_obj_set_style_text_font(title, &mira_font_fr_14, 0);
+  lv_obj_align(title, LV_ALIGN_TOP_LEFT, 66, 12);
+  _cameraOpenedAt = millis();
+  const String cameraUrl = _server.GetCameraUrl(b.name);
+  if (!_cameraFeed.start(cameraUrl, MIRA_DISPLAY_WIDTH,
+                          MIRA_DISPLAY_HEIGHT - 50)) {
+    lv_label_set_text(_cameraStatus, "Configurer URL dans Jeedom > Mira > Commandes");
+  }
+}
+
+void MiraPanelUI::closeCamera() {
+  _cameraFeed.stop();
+  if (_cameraOverlay) lv_obj_del(_cameraOverlay);
+  _cameraOverlay = nullptr;
+  _cameraImage = nullptr;
+  _cameraStatus = nullptr;
+  if (_cameraPixels) heap_caps_free(_cameraPixels);
+  _cameraPixels = nullptr;
+  _cameraDescriptor = {};
+}
+
+void MiraPanelUI::serviceCamera() {
+  if (!_cameraOverlay) return;
+  if (_sleeping) { closeCamera(); return; }
+  MiraCameraBmp::Frame frame;
+  if (_cameraFeed.take(frame)) {
+    if (_cameraImage) lv_img_set_src(_cameraImage, nullptr);
+    if (_cameraPixels) heap_caps_free(_cameraPixels);
+    _cameraPixels = frame.pixels;
+    _cameraDescriptor = {};
+    _cameraDescriptor.header.always_zero = 0;
+    _cameraDescriptor.header.cf = LV_IMG_CF_TRUE_COLOR;
+    _cameraDescriptor.header.w = frame.width;
+    _cameraDescriptor.header.h = frame.height;
+    _cameraDescriptor.data_size = uint32_t(frame.width) * frame.height * 2;
+    _cameraDescriptor.data = reinterpret_cast<const uint8_t*>(_cameraPixels);
+    lv_img_set_src(_cameraImage, &_cameraDescriptor);
+    // Fit the full landscape frame to the portrait screen: no 90-degree
+    // rotation, cropping or aspect-ratio distortion. JPEGDEC downsizes in
+    // powers of two; LVGL then fills the spare width exactly (e.g. 256 -> 316).
+    // Reserve 50 px for the back button/title and a small bottom margin.
+    const uint32_t viewportW = MIRA_DISPLAY_WIDTH - 4;
+    const uint32_t viewportH = MIRA_DISPLAY_HEIGHT - 66;
+    const uint32_t zoomW = (viewportW * 256UL) / frame.width;
+    const uint32_t zoomH = (viewportH * 256UL) / frame.height;
+    uint32_t zoom = zoomW < zoomH ? zoomW : zoomH;
+    if (zoom > 2048) zoom = 2048; // LVGL 8 image zoom maximum, 8x
+    if (zoom < 1) zoom = 1;
+    lv_img_set_pivot(_cameraImage, frame.width / 2, frame.height / 2);
+    lv_img_set_angle(_cameraImage, 0);  // camera must stay horizontal
+    lv_img_set_zoom(_cameraImage, (uint16_t)zoom);
+    // Center within the area below the header, not over the back button.
+    lv_obj_align(_cameraImage, LV_ALIGN_CENTER, 0, 20);
+    if (_cameraStatus) lv_obj_add_flag(_cameraStatus, LV_OBJ_FLAG_HIDDEN);
+    _cameraOpenedAt = millis();
+  } else if (!_cameraPixels && (uint32_t)(millis() - _cameraOpenedAt) > 12000UL) {
+    if (_cameraStatus) lv_label_set_text(_cameraStatus,
+                        "Image indisponible : verifier URL / JPEG ou BMP");
+  }
+}
+
 void MiraPanelUI::createToggle(uint8_t idx) {
   Binding& b = _bindings[idx];
   const bool compact = b.style == "compact";
@@ -2132,7 +2303,7 @@ void MiraPanelUI::buildPagePicker() {
   const bool compactPicker = MIRA_DISPLAY_WIDTH <= 240;
   lv_obj_set_size(_pagePickerCard,
                   compactPicker ? 224 : (wide ? 460 : 298),
-                  compactPicker ? 244 : 290);
+                  compactPicker ? 265 : 340);
   lv_obj_set_style_radius(_pagePickerCard, 16, 0);
   lv_obj_set_style_bg_color(_pagePickerCard, colorPanel2(), 0);
   lv_obj_set_style_bg_opa(_pagePickerCard, LV_OPA_COVER, 0);
@@ -2149,17 +2320,17 @@ void MiraPanelUI::buildPagePicker() {
   lv_obj_align(heading, LV_ALIGN_TOP_MID, 0, compactPicker ? 11 : 13);
 
   const char* names[PAGE_COUNT] = {
-    "Accueil", "Lumières", "Températures", "Paramètres"
+    "Accueil", "Lumières", "Températures", "Paramètres", "Énergie"
   };
-  const uint8_t order[PAGE_COUNT] = {0, 1, 2, 3};
+  const uint8_t order[PAGE_COUNT] = {0, 1, 2, 4, 3};
   for (uint8_t row = 0; row < PAGE_COUNT; ++row) {
     uint8_t page = order[row];
     lv_obj_t* btn = lv_btn_create(_pagePickerCard);
     _pagePickerButtons[page] = btn;
     lv_obj_set_size(btn, compactPicker ? 204 : (wide ? 420 : 268),
-                        compactPicker ? 40 : 47);
+                        compactPicker ? 38 : 46);
     lv_obj_set_pos(btn, compactPicker ? 10 : (wide ? 20 : 15),
-                   compactPicker ? 43 + row * 48 : 46 + row * 58);
+                   compactPicker ? 40 + row * 44 : 47 + row * 56);
     lv_obj_set_style_radius(btn, 9, 0);
     lv_obj_set_style_bg_color(btn, colorPanel(), 0);
     lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
@@ -2479,10 +2650,11 @@ void MiraPanelUI::refreshFavoriteNav() {
     }
     lv_obj_t* glyph = lv_label_create(btn);
     lv_label_set_text(glyph, page == 0 ? LV_SYMBOL_HOME :
-                          page == 3 ? LV_SYMBOL_SETTINGS : LV_SYMBOL_PLUS);
+                          page == 3 ? LV_SYMBOL_SETTINGS :
+                          page == 4 ? LV_SYMBOL_CHARGE : LV_SYMBOL_PLUS);
     // Home glyph has a heavier visual weight than the custom nav pictograms.
     lv_obj_set_style_text_font(glyph,
-        page == 0 ? &lv_font_montserrat_16 : &lv_font_montserrat_20, 0);
+        (page == 0 || page == 4) ? &lv_font_montserrat_16 : &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_color(glyph,
         page == NO_FAVORITE ? COL_MUTED : colorAccent(), 0);
     lv_obj_center(glyph);
@@ -2832,6 +3004,22 @@ void MiraPanelUI::onButton(lv_event_t* e) {
   }
   ui._server.IndexSetEvent(b.id);
   ui.publishMqttAction(b, "1");
+}
+
+
+void MiraPanelUI::onCameraTile(lv_event_t* e) {
+  EventContext* ctx = static_cast<EventContext*>(lv_event_get_user_data(e));
+  if (!ctx || !ctx->ui || ctx->ui->touchBlocksAction(false)) return;
+  if (ctx->ui->_suppressEvents || ctx->bindingIndex >= ctx->ui->_bindingCount) return;
+  ctx->ui->noteActivity();
+  ctx->ui->openCamera(ctx->bindingIndex);
+}
+
+void MiraPanelUI::onCameraBack(lv_event_t* e) {
+  MiraPanelUI* ui = static_cast<MiraPanelUI*>(lv_event_get_user_data(e));
+  if (!ui) return;
+  ui->noteActivity();
+  ui->closeCamera();
 }
 
 void MiraPanelUI::onMultiTouch(lv_event_t* e) {
@@ -3674,6 +3862,7 @@ void MiraPanelUI::loop() {
 #endif
 
   pollFavorites();
+  serviceCamera();
 
   // Multi-actions on the screen: same timings as the physical contact.
   // A single click waits briefly to distinguish a double or triple click.
