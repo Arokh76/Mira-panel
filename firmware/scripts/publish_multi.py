@@ -20,6 +20,15 @@ TARGETS = {
         "manifest": "manifest-wt32.json",
         "flash_mb": 8,
     },
+    "onx2432g028": {
+        "label": "Open Nextion Genius 2.8",
+        "dir": "nextion",
+        "ota": "Mira_Panel_Nextion_2.8_{version}.bin",
+        "factory": "Mira_Panel_Nextion_2.8_{version}_FACTORY.bin",
+        "docs_factory": "Mira_Panel_Nextion_2.8_FACTORY.bin",
+        "manifest": "manifest-nextion.json",
+        "flash_mb": 16,
+    },
     "waveshare-esp32s3-touch-lcd-4.3c": {
         "label": "Waveshare ESP32-S3 Touch LCD 4.3C",
         "dir": "waveshare",
@@ -97,23 +106,13 @@ def prepare(inputs: Path, root: Path, version: str) -> dict:
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(json.dumps(web_manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
-    # Legacy WT32 0.6.5 installations still use the generic OTA URL.
-    # These two files MUST remain specific to WT32, never to Waveshare.
-    wt32_ota = prepared["wt32-sc01-plus"]["ota"]
-    (root / "firmware" / "Mira_Panel.bin").write_bytes(wt32_ota)
+    # Do not advance the old WT32-only version.json / Mira_Panel.bin updater.
+    # Previously deployed Waveshare also uses that untyped endpoint. Advancing
+    # it would offer the WRONG hardware image to Waveshare and risk bricking it.
+    # All current hardware uses targets.json to select its own compatible OTA.
+    # The legacy USB manifest can still point to the latest WT32 factory image.
     wt32_manifest = root / "docs" / TARGETS["wt32-sc01-plus"]["manifest"]
     (root / "docs" / "manifest.json").write_bytes(wt32_manifest.read_bytes())
-    legacy_version = {
-        "project": "Mira Panel",
-        "version": version,
-        "bin": RAW_BASE + "firmware/Mira_Panel.bin",
-        "factory": targets["wt32-sc01-plus"]["factory"],
-        "installer": "https://arokh76.github.io/Mira-panel/",
-    }
-    (root / "firmware" / "version.json").write_text(
-        json.dumps(legacy_version, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
 
     release = {"project": "Mira Panel", "version": version, "targets": targets}
     outfile = root / "firmware" / "targets.json"
