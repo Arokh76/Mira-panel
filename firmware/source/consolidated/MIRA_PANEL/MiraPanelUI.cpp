@@ -1091,7 +1091,7 @@ void MiraPanelUI::buildFromMiraJson() {
   }
   if (!hasEnergyWidgets) {
     lv_obj_t* hint = lv_label_create(_pages[4]);
-    lv_label_set_text(hint, "Énergie\\n\\nAjoutez des widgets\\ndepuis Jeedom > Mira");
+    lv_label_set_text(hint, "Énergie\n\nAjoutez des widgets\ndepuis Jeedom > Mira");
     lv_obj_set_width(hint, MIRA_DISPLAY_WIDTH - 28);
     lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_color(hint, COL_MUTED, 0);
