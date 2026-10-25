@@ -38,13 +38,13 @@ static const lv_color_t COL_RED     = lv_color_hex(0xE36A6A);
 
 // Automatic widget grid from screen geometry, without affecting free layout.
 // 800px page - 12px margins = 788px; 4*192+3*6 = 2*390+6 = 786px.
-static constexpr lv_coord_t MIRA_CARD_AUTO = MIRA_DISPLAY_WIDTH >= 800 ? 390 : 304;
-static constexpr lv_coord_t MIRA_CARD_TILE = MIRA_DISPLAY_WIDTH >= 800 ? 192 : 149;
-static constexpr lv_coord_t MIRA_CARD_FULL = MIRA_DISPLAY_WIDTH >= 800 ? 786 : 304;
-static constexpr lv_coord_t MIRA_LABEL_TILE = MIRA_DISPLAY_WIDTH >= 800 ? 180 : 137;
-static constexpr lv_coord_t MIRA_LABEL_AUTO = MIRA_DISPLAY_WIDTH >= 800 ? 370 : 286;
-static constexpr lv_coord_t MIRA_LABEL_WIDE_NAME = MIRA_DISPLAY_WIDTH >= 800 ? 440 : 150;
-static constexpr lv_coord_t MIRA_LABEL_WIDE_VALUE = MIRA_DISPLAY_WIDTH >= 800 ? 292 : 116;
+static constexpr lv_coord_t MIRA_CARD_AUTO = MIRA_DISPLAY_WIDTH >= 800 ? 390 : (MIRA_DISPLAY_WIDTH <= 240 ? 224 : 304);
+static constexpr lv_coord_t MIRA_CARD_TILE = MIRA_DISPLAY_WIDTH >= 800 ? 192 : (MIRA_DISPLAY_WIDTH <= 240 ? 108 : 149);
+static constexpr lv_coord_t MIRA_CARD_FULL = MIRA_DISPLAY_WIDTH >= 800 ? 786 : (MIRA_DISPLAY_WIDTH <= 240 ? 224 : 304);
+static constexpr lv_coord_t MIRA_LABEL_TILE = MIRA_DISPLAY_WIDTH >= 800 ? 180 : (MIRA_DISPLAY_WIDTH <= 240 ? 96 : 137);
+static constexpr lv_coord_t MIRA_LABEL_AUTO = MIRA_DISPLAY_WIDTH >= 800 ? 370 : (MIRA_DISPLAY_WIDTH <= 240 ? 206 : 286);
+static constexpr lv_coord_t MIRA_LABEL_WIDE_NAME = MIRA_DISPLAY_WIDTH >= 800 ? 440 : (MIRA_DISPLAY_WIDTH <= 240 ? 104 : 150);
+static constexpr lv_coord_t MIRA_LABEL_WIDE_VALUE = MIRA_DISPLAY_WIDTH >= 800 ? 292 : (MIRA_DISPLAY_WIDTH <= 240 ? 88 : 116);
 
 // Waveshare clock and WT32 clock now share the Montserrat family.
 static void miraFitInfoValue(lv_obj_t* label, lv_obj_t* icon);
@@ -961,7 +961,7 @@ void MiraPanelUI::applyFreeLayout(uint8_t idx) {
 
 lv_obj_t* MiraPanelUI::makeSettingsCard(lv_coord_t height) {
   lv_obj_t* card = lv_obj_create(_pages[3]);
-  lv_obj_set_width(card, MIRA_DISPLAY_WIDTH >= 800 ? 640 : 304);
+  lv_obj_set_width(card, MIRA_DISPLAY_WIDTH >= 800 ? 640 : (MIRA_DISPLAY_WIDTH <= 240 ? 224 : 304));
   lv_obj_set_height(card, height);
   lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_set_style_bg_color(card, colorPanel(), 0);
@@ -977,7 +977,7 @@ lv_obj_t* MiraPanelUI::makeSettingsCard(lv_coord_t height) {
 
 lv_obj_t* MiraPanelUI::makeTransparentRow(lv_obj_t* parent, lv_coord_t height) {
   lv_obj_t* row = lv_obj_create(parent);
-  lv_obj_set_width(row, MIRA_DISPLAY_WIDTH >= 800 ? lv_pct(100) : 284);
+  lv_obj_set_width(row, MIRA_DISPLAY_WIDTH >= 800 ? lv_pct(100) : (MIRA_DISPLAY_WIDTH <= 240 ? 204 : 284));
   lv_obj_set_height(row, height);
   lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
@@ -1034,8 +1034,15 @@ void MiraPanelUI::buildFromMiraJson() {
 
   JsonArray arr = doc["lvgl"].as<JsonArray>();
   if (arr.size() == 0) {
-    lv_obj_t* card = makeCard(0, 120);
+    // Compact Nextion: explicit label width + wrapping prevents horizontal
+    // scrolling on the empty-program / initial-setup information card.
+    lv_obj_t* card = makeCard(0, MIRA_DISPLAY_WIDTH <= 240 ? 168 : 120);
     lv_obj_t* msg = lv_label_create(card);
+#if defined(MIRA_TARGET_NEXTION_28)
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_width(msg, 196);  // 224px card minus borders and safe padding.
+    lv_label_set_long_mode(msg, LV_LABEL_LONG_WRAP);
+#endif
     if (_server.IsSetupMode()) {
       lv_label_set_text(msg, "Configuration initiale\n\nConnectez-vous au Wi-Fi\nMira Panel");
     } else {
@@ -1131,6 +1138,16 @@ void MiraPanelUI::registerAndCreate(JsonObject obj) {
     b.type = W_BUTTON;
     b.id = _server.IndexAddButton(name);
     createButton(idx);
+  }
+  else if (type == "multiaction") {
+    // Four ordinary button IDs preserve existing Jeedom /getindex autosync.
+    // The physical input exists regardless of whether a visible tile is drawn.
+    b.type = W_MULTI;
+    b.id = _server.IndexAddButton(String("Multi_Clic_") + name);
+    b.idOff = _server.IndexAddButton(String("Multi_Double_") + name);
+    b.idOn = _server.IndexAddButton(String("Multi_Triple_") + name);
+    b.multiLongId = _server.IndexAddButton(String("Multi_Long_") + name);
+    if (_server.WT32MultiVisible(name)) createButton(idx);
   }
   else if (type == "toggle") {
     b.type = W_TOGGLE;
@@ -1562,7 +1579,10 @@ void MiraPanelUI::createButton(uint8_t idx) {
   lv_obj_set_style_shadow_width(b.control, 4, 0);
   lv_obj_set_style_shadow_ofs_y(b.control, 2, 0);
   EventContext* ctx = makeContext(idx);
-  lv_obj_add_event_cb(b.control, onButton, LV_EVENT_CLICKED, ctx);
+  if (b.type == W_MULTI)
+    lv_obj_add_event_cb(b.control, onMultiTouch, LV_EVENT_ALL, ctx);
+  else
+    lv_obj_add_event_cb(b.control, onButton, LV_EVENT_CLICKED, ctx);
   lv_obj_t* lbl = lv_label_create(b.control);
   lv_label_set_text(lbl, (b.displayName.length() ? b.displayName : b.name).c_str());
   lv_obj_set_style_text_color(lbl, COL_TEXT, 0);
@@ -1713,9 +1733,10 @@ void MiraPanelUI::createRoundRange(uint8_t idx) {
 void MiraPanelUI::createThermostat(uint8_t idx) {
   Binding& b = _bindings[idx];
   const bool wide = MIRA_DISPLAY_WIDTH >= 800;
+  const bool mini = MIRA_DISPLAY_WIDTH <= 240;
   const lv_coord_t cardW = MIRA_CARD_FULL;
   // Use the whole content viewport while leaving margin above Mira's nav.
-  const lv_coord_t cardH = MIRA_CONTENT_HEIGHT - 16;
+  const lv_coord_t cardH = MIRA_CONTENT_HEIGHT - (mini ? 8 : 16);
   b.card = makeCard(pageIndex(b.location), cardH);
   lv_obj_set_width(b.card, cardW);
   lv_obj_set_layout(b.card, 0);  // No child layout; supported by both LVGL 8 targets
@@ -1728,12 +1749,12 @@ void MiraPanelUI::createThermostat(uint8_t idx) {
   lv_label_set_text(header, title.c_str());
   lv_obj_set_style_text_color(header, COL_TEXT, 0);
   lv_obj_set_style_text_font(header, &mira_font_fr_16, 0);
-  lv_obj_set_width(header, wide ? 300 : cardW - 126);
+  lv_obj_set_width(header, mini ? cardW - 28 : (wide ? 300 : cardW - 126));
   lv_label_set_long_mode(header, LV_LABEL_LONG_CLIP);
   lv_obj_set_style_text_align(header, LV_TEXT_ALIGN_LEFT, 0);
   lv_obj_set_pos(header, 14, 12);
 
-  {
+  if (!mini) { // Nextion: mode is already displayed in the dropdown below.
     b.thermostatModeBadge = lv_label_create(b.card);
     lv_label_set_text(b.thermostatModeBadge, b.listLabels[0].c_str());
     lv_obj_set_style_text_color(b.thermostatModeBadge, colorAccent(), 0);
@@ -1750,9 +1771,9 @@ void MiraPanelUI::createThermostat(uint8_t idx) {
   // other thermostat controls (temperature, mode, navigation, Jeedom).
   // RoundRange reference (normal): plate=196, arc=182, center=104;
   // main arc=15 and pressed arc=18.
-  const lv_coord_t arcSize = wide ? 296 : 214;
+  const lv_coord_t arcSize = wide ? 296 : (mini ? 154 : 214);
   const lv_coord_t arcX = wide ? 27 : (cardW - arcSize) / 2;
-  const lv_coord_t arcY = wide ? 63 : 41;
+  const lv_coord_t arcY = wide ? 63 : (mini ? 35 : 41);
   const lv_coord_t plateSize = (arcSize * 196 + 91) / 182;
   const lv_coord_t innerSize = (arcSize * 104 + 91) / 182;
   const lv_coord_t arcWidth = (arcSize * 15 + 91) / 182;
@@ -1786,7 +1807,7 @@ void MiraPanelUI::createThermostat(uint8_t idx) {
   lv_obj_set_style_bg_opa(b.control, LV_OPA_TRANSP, LV_PART_KNOB);
   lv_obj_set_style_border_width(b.control, 0, LV_PART_KNOB);
   lv_obj_set_style_pad_all(b.control, 0, LV_PART_KNOB);
-  lv_obj_set_ext_click_area(b.control, 10);
+  lv_obj_set_ext_click_area(b.control, mini ? 6 : 10);
 
   // The RoundRange inner medallion MUST be proportional to the outer arc.
   // Previous inner=132/116 made the large Waveshare/WT32 dials resemble a
@@ -1812,38 +1833,39 @@ void MiraPanelUI::createThermostat(uint8_t idx) {
   lv_obj_set_style_text_align(b.valueLabel, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_set_style_text_color(b.valueLabel, COL_TEXT, 0);
   lv_obj_set_style_text_font(b.valueLabel,
-                            wide ? &lv_font_montserrat_40 : &lv_font_montserrat_28, 0);
-  lv_obj_align(b.valueLabel, LV_ALIGN_CENTER, 0, -16);
+                            wide ? &lv_font_montserrat_40 : (mini ? &lv_font_montserrat_20 : &lv_font_montserrat_28), 0);
+  lv_obj_align(b.valueLabel, LV_ALIGN_CENTER, 0, mini ? -12 : -16);
 
   lv_obj_t* hint = lv_label_create(inner);
-  lv_label_set_text(hint, "CONSIGNE");
-  lv_obj_set_width(hint, innerSize - 12);
+  lv_label_set_text(hint, mini ? "Consigne" : "CONSIGNE");
+  lv_obj_set_width(hint, mini ? innerSize - 8 : innerSize - 12);
+  if (mini) lv_label_set_long_mode(hint, LV_LABEL_LONG_CLIP);
   lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_set_style_text_color(hint, COL_MUTED, 0);
-  lv_obj_set_style_text_font(hint, &mira_font_fr_14, 0);
-  lv_obj_align(hint, LV_ALIGN_CENTER, 0, 26);
+  lv_obj_set_style_text_font(hint, mini ? &mira_font_fr_12 : &mira_font_fr_14, 0);
+  lv_obj_align(hint, LV_ALIGN_CENTER, 0, mini ? 13 : 26);
   EventContext* rangeCtx = makeContext(idx);
   lv_obj_add_event_cb(b.control, onThermostatRange, LV_EVENT_ALL, rangeCtx);
 
   // Current temperature: read-only. Jeedom /updatenr writes the Info ID;
   // it must NEVER send a new heating command.
   lv_obj_t* tempHeading = lv_label_create(b.card);
-  lv_label_set_text(tempHeading, "Température actuelle");
+  lv_label_set_text(tempHeading, mini ? "Ambiante" : "Température actuelle");
   lv_obj_set_style_text_color(tempHeading, COL_MUTED, 0);
-  lv_obj_set_style_text_font(tempHeading, &mira_font_fr_14, 0);
-  lv_obj_set_width(tempHeading, wide ? 360 : cardW - 24);
-  lv_obj_set_style_text_align(tempHeading, wide ? LV_TEXT_ALIGN_LEFT : LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_set_pos(tempHeading, wide ? 389 : 12, wide ? 122 : 282);
+  lv_obj_set_style_text_font(tempHeading, mini ? &mira_font_fr_12 : &mira_font_fr_14, 0);
+  lv_obj_set_width(tempHeading, mini ? 104 : (wide ? 360 : cardW - 24));
+  lv_obj_set_style_text_align(tempHeading, (wide || mini) ? LV_TEXT_ALIGN_LEFT : LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_pos(tempHeading, wide ? 389 : 12, wide ? 122 : (mini ? 204 : 282));
 
   b.thermostatTemperatureLabel = lv_label_create(b.card);
   lv_label_set_text(b.thermostatTemperatureLabel, "-- °C");
   lv_obj_set_style_text_color(b.thermostatTemperatureLabel, COL_TEXT, 0);
   lv_obj_set_style_text_font(b.thermostatTemperatureLabel,
-                            wide ? &lv_font_montserrat_40 : &lv_font_montserrat_28, 0);
-  lv_obj_set_width(b.thermostatTemperatureLabel, wide ? 350 : cardW - 24);
+                            wide ? &lv_font_montserrat_40 : (mini ? &lv_font_montserrat_20 : &lv_font_montserrat_28), 0);
+  lv_obj_set_width(b.thermostatTemperatureLabel, mini ? 96 : (wide ? 350 : cardW - 24));
   lv_obj_set_style_text_align(b.thermostatTemperatureLabel,
-                              wide ? LV_TEXT_ALIGN_LEFT : LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_set_pos(b.thermostatTemperatureLabel, wide ? 389 : 12, wide ? 156 : 299);
+                              wide ? LV_TEXT_ALIGN_LEFT : (mini ? LV_TEXT_ALIGN_RIGHT : LV_TEXT_ALIGN_CENTER), 0);
+  lv_obj_set_pos(b.thermostatTemperatureLabel, wide ? 389 : (mini ? cardW - 108 : 12), wide ? 156 : (mini ? 197 : 299));
 
   if (wide) {
     lv_obj_t* separator = lv_obj_create(b.card);
@@ -1858,10 +1880,10 @@ void MiraPanelUI::createThermostat(uint8_t idx) {
   lv_obj_t* modeHeading = lv_label_create(b.card);
   lv_label_set_text(modeHeading, "Mode");
   lv_obj_set_style_text_color(modeHeading, COL_MUTED, 0);
-  lv_obj_set_style_text_font(modeHeading, &mira_font_fr_14, 0);
-  lv_obj_set_width(modeHeading, wide ? 360 : cardW - 24);
-  lv_obj_set_style_text_align(modeHeading, wide ? LV_TEXT_ALIGN_LEFT : LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_set_pos(modeHeading, wide ? 389 : 12, wide ? 265 : 337);
+  lv_obj_set_style_text_font(modeHeading, mini ? &mira_font_fr_12 : &mira_font_fr_14, 0);
+  lv_obj_set_width(modeHeading, mini ? 70 : (wide ? 360 : cardW - 24));
+  lv_obj_set_style_text_align(modeHeading, (wide || mini) ? LV_TEXT_ALIGN_LEFT : LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_set_pos(modeHeading, wide ? 389 : 12, wide ? 265 : (mini ? 224 : 337));
 
   b.thermostatModeControl = lv_dropdown_create(b.card);
   String modes;
@@ -1871,13 +1893,13 @@ void MiraPanelUI::createThermostat(uint8_t idx) {
   }
   lv_dropdown_set_options(b.thermostatModeControl, modes.c_str());
   lv_dropdown_set_selected(b.thermostatModeControl, 0);
-  lv_obj_set_size(b.thermostatModeControl, wide ? cardW - 407 : cardW - 28, 43);
-  lv_obj_set_pos(b.thermostatModeControl, wide ? 387 : 14, wide ? 294 : 356);
+  lv_obj_set_size(b.thermostatModeControl, wide ? cardW - 407 : cardW - 28, mini ? 30 : 43);
+  lv_obj_set_pos(b.thermostatModeControl, wide ? 387 : 14, wide ? 294 : (mini ? 238 : 356));
   // Open the menu towards the card, not across the physical navigation bar.
   lv_dropdown_set_dir(b.thermostatModeControl, LV_DIR_TOP);
   lv_obj_set_style_bg_color(b.thermostatModeControl, colorPanel2(), 0);
   lv_obj_set_style_text_color(b.thermostatModeControl, COL_TEXT, 0);
-  lv_obj_set_style_text_font(b.thermostatModeControl, &mira_font_fr_16, 0);
+  lv_obj_set_style_text_font(b.thermostatModeControl, mini ? &mira_font_fr_12 : &mira_font_fr_16, 0);
   lv_obj_set_style_border_width(b.thermostatModeControl, 1, 0);
   lv_obj_set_style_border_color(b.thermostatModeControl, colorBorder(), 0);
   lv_obj_set_style_radius(b.thermostatModeControl, 9, 0);
@@ -2069,7 +2091,7 @@ void MiraPanelUI::createDateTime(uint8_t idx) {
 
   _dateSubLabel = lv_label_create(b.card);
   lv_label_set_text(_dateSubLabel, "-- -- ----");
-  lv_obj_set_width(_dateSubLabel, MIRA_DISPLAY_WIDTH >= 800 ? 780 : 300);
+  lv_obj_set_width(_dateSubLabel, MIRA_DISPLAY_WIDTH >= 800 ? 780 : (MIRA_DISPLAY_WIDTH <= 240 ? 224 : 300));
   lv_obj_set_style_text_color(_dateSubLabel, COL_MUTED, 0);
   lv_obj_set_style_text_font(_dateSubLabel, &mira_font_fr_14, 0);
   lv_obj_set_style_text_align(_dateSubLabel, LV_TEXT_ALIGN_CENTER, 0);
@@ -2106,7 +2128,11 @@ void MiraPanelUI::buildPagePicker() {
 
   _pagePickerCard = lv_obj_create(_pagePicker);
   const bool wide = MIRA_DISPLAY_WIDTH >= 800;
-  lv_obj_set_size(_pagePickerCard, wide ? 460 : 298, 290);
+  // Nextion 240x320: keep this overlay inside the 240x278 content viewport.
+  const bool compactPicker = MIRA_DISPLAY_WIDTH <= 240;
+  lv_obj_set_size(_pagePickerCard,
+                  compactPicker ? 224 : (wide ? 460 : 298),
+                  compactPicker ? 244 : 290);
   lv_obj_set_style_radius(_pagePickerCard, 16, 0);
   lv_obj_set_style_bg_color(_pagePickerCard, colorPanel2(), 0);
   lv_obj_set_style_bg_opa(_pagePickerCard, LV_OPA_COVER, 0);
@@ -2119,8 +2145,8 @@ void MiraPanelUI::buildPagePicker() {
   lv_obj_t* heading = lv_label_create(_pagePickerCard);
   lv_label_set_text(heading, "Toutes les pages");
   lv_obj_set_style_text_color(heading, COL_TEXT, 0);
-  lv_obj_set_style_text_font(heading, &mira_font_fr_16, 0);
-  lv_obj_align(heading, LV_ALIGN_TOP_MID, 0, 13);
+  lv_obj_set_style_text_font(heading, compactPicker ? &mira_font_fr_14 : &mira_font_fr_16, 0);
+  lv_obj_align(heading, LV_ALIGN_TOP_MID, 0, compactPicker ? 11 : 13);
 
   const char* names[PAGE_COUNT] = {
     "Accueil", "Lumières", "Températures", "Paramètres"
@@ -2130,8 +2156,10 @@ void MiraPanelUI::buildPagePicker() {
     uint8_t page = order[row];
     lv_obj_t* btn = lv_btn_create(_pagePickerCard);
     _pagePickerButtons[page] = btn;
-    lv_obj_set_size(btn, wide ? 420 : 268, 47);
-    lv_obj_set_pos(btn, wide ? 20 : 15, 46 + row * 58);
+    lv_obj_set_size(btn, compactPicker ? 204 : (wide ? 420 : 268),
+                        compactPicker ? 40 : 47);
+    lv_obj_set_pos(btn, compactPicker ? 10 : (wide ? 20 : 15),
+                   compactPicker ? 43 + row * 48 : 46 + row * 58);
     lv_obj_set_style_radius(btn, 9, 0);
     lv_obj_set_style_bg_color(btn, colorPanel(), 0);
     lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
@@ -2144,8 +2172,8 @@ void MiraPanelUI::buildPagePicker() {
     lv_obj_t* label = lv_label_create(btn);
     lv_label_set_text(label, names[page]);
     lv_obj_set_style_text_color(label, COL_TEXT, 0);
-    lv_obj_set_style_text_font(label, &mira_font_fr_16, 0);
-    lv_obj_set_width(label, wide ? 335 : 181);
+    lv_obj_set_style_text_font(label, compactPicker ? &mira_font_fr_14 : &mira_font_fr_16, 0);
+    lv_obj_set_width(label, compactPicker ? 184 : (wide ? 335 : 181));
     lv_label_set_long_mode(label, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_center(label);
@@ -2175,7 +2203,7 @@ void MiraPanelUI::buildSettingsPage() {
   _settingsCards[0] = makeSettingsCard(40);
   lv_obj_t* title = lv_label_create(_settingsCards[0]);
   lv_label_set_text(title, "Paramètres");
-  lv_obj_set_width(title, MIRA_DISPLAY_WIDTH >= 800 ? 620 : 286);
+  lv_obj_set_width(title, MIRA_DISPLAY_WIDTH >= 800 ? 620 : (MIRA_DISPLAY_WIDTH <= 240 ? 206 : 286));
   lv_label_set_long_mode(title, LV_LABEL_LONG_CLIP);
   lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_set_style_text_color(title, COL_TEXT, 0);
@@ -2199,7 +2227,7 @@ void MiraPanelUI::buildSettingsPage() {
   lv_obj_set_style_text_font(_brightnessValue, &mira_font_fr_12, 0);
 
   _brightnessSlider = lv_slider_create(_settingsCards[1]);
-  lv_obj_set_size(_brightnessSlider, MIRA_DISPLAY_WIDTH >= 800 ? 600 : 280, 14);
+  lv_obj_set_size(_brightnessSlider, MIRA_DISPLAY_WIDTH >= 800 ? 600 : (MIRA_DISPLAY_WIDTH <= 240 ? 200 : 280), 14);
   lv_slider_set_range(_brightnessSlider, 30, 255);
   lv_slider_set_value(_brightnessSlider, _brightness, LV_ANIM_OFF);
   lv_obj_set_style_bg_color(_brightnessSlider, COL_ACCENT2, LV_PART_INDICATOR);
@@ -2322,7 +2350,7 @@ void MiraPanelUI::applyTheme() {
     if (b.type == W_INFO && b.valueLabel) {
       lv_obj_set_style_text_color(b.valueLabel, colorAccent(), 0);
     }
-    else if (b.type == W_BUTTON && b.control) {
+    else if ((b.type == W_BUTTON || b.type == W_MULTI) && b.control) {
       if (b.card) {
         lv_obj_set_style_bg_opa(b.card, LV_OPA_TRANSP, 0);
         lv_obj_set_style_border_width(b.card, 0, 0);
@@ -2797,8 +2825,45 @@ void MiraPanelUI::onButton(lv_event_t* e) {
   if (ui._suppressEvents || ctx->bindingIndex >= ui._bindingCount) return;
   ui.noteActivity();
   Binding& b = ui._bindings[ctx->bindingIndex];
+  if (ui._server.WT32HasAction(b.name)) {
+    if (!ui._server.WT32ExecuteAction(b.name))
+      Serial.println("[MIRA][GPIO] Action locale non disponible : " + b.name);
+    return;
+  }
   ui._server.IndexSetEvent(b.id);
   ui.publishMqttAction(b, "1");
+}
+
+void MiraPanelUI::onMultiTouch(lv_event_t* e) {
+  EventContext* ctx=static_cast<EventContext*>(lv_event_get_user_data(e));
+  if(!ctx || !ctx->ui)return;
+  MiraPanelUI& ui=*ctx->ui;
+  if(ctx->bindingIndex>=ui._bindingCount || ui._suppressEvents)return;
+  Binding& b=ui._bindings[ctx->bindingIndex];
+  if(b.type!=W_MULTI)return;
+  lv_event_code_t event=lv_event_get_code(e);
+  if(event==LV_EVENT_PRESSED) {
+    if(ui.touchBlocksAction(false)) {
+      b.multiTouchDown=false;
+      b.multiTouchClicks=0;
+      b.multiTouchLongSent=true;
+      return;
+    }
+    ui.noteActivity();
+    b.multiTouchDown=true;
+    b.multiTouchLongSent=false;
+    b.multiTouchPressAt=millis();
+  } else if(event==LV_EVENT_RELEASED) {
+    if(!b.multiTouchDown)return;
+    b.multiTouchDown=false;
+    if(!b.multiTouchLongSent) {
+      if(b.multiTouchClicks<3)b.multiTouchClicks++;
+      b.multiTouchReleasedAt=millis();
+    } else b.multiTouchClicks=0;
+  } else if(event==LV_EVENT_PRESS_LOST) {
+    b.multiTouchDown=false;
+    b.multiTouchClicks=0;
+  }
 }
 
 void MiraPanelUI::onToggle(lv_event_t* e) {
@@ -2809,6 +2874,20 @@ void MiraPanelUI::onToggle(lv_event_t* e) {
   if (ui._suppressEvents || ctx->bindingIndex >= ui._bindingCount) return;
   Binding& b = ui._bindings[ctx->bindingIndex];
   bool on = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+  if (ui._server.WT32HasToggle(b.name)) {
+    if (!ui._server.WT32ExecuteToggle(b.name,on)) {
+      bool actual=false;
+      if (ui._server.WT32ReadToggle(b.name, actual)) {
+        ui._suppressEvents=true;
+        if (actual) lv_obj_add_state(b.control,LV_STATE_CHECKED);
+        else lv_obj_clear_state(b.control,LV_STATE_CHECKED);
+        ui._suppressEvents=false;
+      }
+      Serial.println("[MIRA][GPIO] Liaison ON/OFF incomplete : " + b.name);
+    }
+    ui.noteActivity();
+    return; // Do not send local relay commands to Jeedom or MQTT.
+  }
   int id = on ? b.idOn : b.idOff;
   if (b.stateLabel) {
     lv_label_set_text(b.stateLabel, on ? "ON" : "OFF");
@@ -3595,6 +3674,27 @@ void MiraPanelUI::loop() {
 #endif
 
   pollFavorites();
+
+  // Multi-actions on the screen: same timings as the physical contact.
+  // A single click waits briefly to distinguish a double or triple click.
+  for(uint8_t i=0;i<_bindingCount;i++) {
+    Binding& b=_bindings[i];
+    if(b.type!=W_MULTI || !b.control)continue;
+    uint32_t now=millis();
+    if(b.multiTouchDown && !b.multiTouchLongSent &&
+       (uint32_t)(now-b.multiTouchPressAt)>=900) {
+      b.multiTouchLongSent=true;
+      b.multiTouchClicks=0;
+      if(b.multiLongId>=0)_server.IndexSetEvent(b.multiLongId);
+    } else if(!b.multiTouchDown && b.multiTouchClicks &&
+              (uint32_t)(now-b.multiTouchReleasedAt)>=370) {
+      uint8_t count=b.multiTouchClicks;
+      b.multiTouchClicks=0;
+      int id=count==1 ? b.id : count==2 ? b.idOff : b.idOn;
+      if(id>=0)_server.IndexSetEvent(id);
+    }
+  }
+
   // Navigation is serviced by LVGL's 10 ms onNavigationTimer.
 
   startNtpIfPossible();
@@ -3605,6 +3705,25 @@ void MiraPanelUI::loop() {
     reloadFromMiraJson();
   }
 
+  // Keep native toggles in sync with web GPIO controls & reboot policy.
+  static uint32_t lastGpioPoll = 0;
+  if (millis()-lastGpioPoll >= 250) {
+    lastGpioPoll=millis();
+    bool wasSuppressed = _suppressEvents;
+    _suppressEvents=true;
+    for (uint8_t i=0; i<_bindingCount; ++i) {
+      Binding& b=_bindings[i];
+      if (b.type!=W_TOGGLE || !b.control || !_server.WT32HasToggle(b.name)) continue;
+      bool actual=false;
+      if (!_server.WT32ReadToggle(b.name,actual)) continue;
+      bool displayed=lv_obj_has_state(b.control,LV_STATE_CHECKED);
+      if (actual != displayed) {
+        if (actual) lv_obj_add_state(b.control,LV_STATE_CHECKED);
+        else lv_obj_clear_state(b.control,LV_STATE_CHECKED);
+      }
+    }
+    _suppressEvents=wasSuppressed;
+  }
   refreshDisplayConfig(false);
   updateDisplaySchedule(false);
   uint32_t idle = millis() - _lastActivity;

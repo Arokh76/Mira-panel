@@ -3,14 +3,14 @@ name: Publish Mira Panel - one release, multiple hardware targets
 on:
   workflow_run:
     workflows:
-      - 'Build Mira Panel 0.7.14 - WT32 SC01 Plus et Waveshare 4.3C'
+      - 'Build Mira Panel 0.7.15 - WT32 Waveshare Nextion'
     types: [completed]
   workflow_dispatch:
     inputs:
       version:
-        description: "Version produced by build-mira.yml (example 0.7.14)"
+        description: "Version produced by build-mira.yml (example 0.7.15)"
         required: true
-        default: "0.7.14"
+        default: "0.7.15"
         type: string
       run_id:
         description: "Successful build-mira.yml run ID on main, same commit"
@@ -27,18 +27,14 @@ concurrency:
 
 jobs:
   publish:
-    # Allow publishing only after the firmware repository is private.
     if: >-
-      github.event.repository.private &&
-      (
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_branch == 'main' &&
        github.event.workflow_run.event == 'push')
-      )
     runs-on: ubuntu-latest
     env:
-      RELEASE_VERSION: ${{ github.event_name == 'workflow_run' && '0.7.14' || inputs.version }}
+      RELEASE_VERSION: ${{ github.event_name == 'workflow_run' && '0.7.15' || inputs.version }}
       RELEASE_RUN_ID: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || inputs.run_id }}
     steps:
       - name: Checkout current main
@@ -85,7 +81,7 @@ jobs:
           ' /tmp/mira-build.json
           echo "Verified build #$RUN_ID of main commit $COMMIT"
 
-      - name: Download the two hardware artifacts
+      - name: Download three hardware artifacts
         if: steps.release_gate.outputs.needed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -94,13 +90,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p /tmp/mira-release-inputs/wt32 /tmp/mira-release-inputs/waveshare
+          mkdir -p /tmp/mira-release-inputs/wt32 /tmp/mira-release-inputs/waveshare /tmp/mira-release-inputs/nextion
           gh run download "$RUN_ID" \
             --name "Mira_Panel_WT32_SC01_Plus_${VERSION}_preview" \
             --dir /tmp/mira-release-inputs/wt32
           gh run download "$RUN_ID" \
             --name "Mira_Panel_Waveshare_4.3C_${VERSION}_preview" \
             --dir /tmp/mira-release-inputs/waveshare
+          gh run download "$RUN_ID" \
+            --name "Mira_Panel_Nextion_2.8_${VERSION}_preview" \
+            --dir /tmp/mira-release-inputs/nextion
 
       - name: Prepare all target files and manifests atomically
         if: steps.release_gate.outputs.needed == 'true'
@@ -116,13 +115,16 @@ jobs:
           cat firmware/targets.json
           test -f docs/manifest-wt32.json
           test -f docs/manifest-waveshare.json
+          test -f docs/manifest-nextion.json
           test -s docs/firmware/Mira_Panel_WT32_SC01_Plus_FACTORY.bin
           test -s docs/firmware/Mira_Panel_Waveshare_4.3C_FACTORY.bin
+          test -s docs/firmware/Mira_Panel_Nextion_2.8_FACTORY.bin
           test -s firmware/Mira_Panel.bin
           test -f firmware/version.json
+          test -f firmware/releases/$VERSION/onx2432g028/ota.bin
           test -f docs/manifest.json
 
-      - name: Publish both hardware profiles in one commit
+      - name: Publish all hardware profiles in one commit
         if: steps.release_gate.outputs.needed == 'true'
         env:
           VERSION: ${{ env.RELEASE_VERSION }}
@@ -131,11 +133,13 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add firmware/targets.json firmware/Mira_Panel.bin firmware/version.json \
-            "firmware/releases/$VERSION" docs/manifest.json \
-            docs/manifest-wt32.json docs/manifest-waveshare.json \
+          # Version legacy pinned at 0.7.14: older Waveshare firmware must
+          # never see an untyped new WT32 image.
+          git add firmware/targets.json "firmware/releases/$VERSION" docs/manifest.json \
+            docs/manifest-wt32.json docs/manifest-waveshare.json docs/manifest-nextion.json \
             docs/firmware/Mira_Panel_WT32_SC01_Plus_FACTORY.bin \
-            docs/firmware/Mira_Panel_Waveshare_4.3C_FACTORY.bin
+            docs/firmware/Mira_Panel_Waveshare_4.3C_FACTORY.bin \
+            docs/firmware/Mira_Panel_Nextion_2.8_FACTORY.bin
           git diff --cached --quiet && { echo 'Already published'; exit 0; }
           git commit -m "Release Mira Panel $VERSION for WT32 and Waveshare"
           git push origin HEAD:main

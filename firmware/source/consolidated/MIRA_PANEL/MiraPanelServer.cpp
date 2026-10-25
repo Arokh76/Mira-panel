@@ -27,6 +27,10 @@
 #include "HTML/HTML_MQTT.h"
 #include "HTML/HTML_Index.h"
 #include "HTML/HTML_Sys.h"
+#if !defined(MIRA_TARGET_WAVESHARE_43C) && !defined(MIRA_TARGET_NEXTION_28)
+#include "HTML/HTML_GPIO.h"
+#include "MiraWT32Gpio.h"
+#endif
 #include "HTML/HTML_ReseauxEnreg.h"
 #include "HTML/HTML_Message.h"
 #include "HTML/HTML_ConfigAP.h"
@@ -67,7 +71,7 @@ bool SetupModuleDone = false;
 String MiraRuntimeVersion = "";
 String UpdateURL = "";
 
-static const char* MIRA_GITHUB_VERSION_URL = "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/version.json";
+static const char* MIRA_GITHUB_VERSION_URL = "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/targets.json";
 static const char* MIRA_GITHUB_BIN_URL = "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/Mira_Panel.bin";
 
 static int miraCompareVersion(const String& a, const String& b) {
@@ -497,6 +501,133 @@ static void miraObserveNavigation(const char* page) {
 }
 
 void MiraPanelServer::ServeurStation() {
+#if !defined(MIRA_TARGET_WAVESHARE_43C) && !defined(MIRA_TARGET_NEXTION_28)
+  MiraWT32GPIO::begin();
+  auto miraGpioAuthorize = [](AsyncWebServerRequest* request) -> bool {
+    char pass[50]; Uncrypt_Pass.toCharArray(pass, sizeof(pass));
+    if (!request->authenticate(Ident_ID, pass)) {
+      request->requestAuthentication(); return false;
+    }
+    return true;
+  };
+
+  server.on("/gpio/multi/config", HTTP_POST, [miraGpioAuthorize](AsyncWebServerRequest* request) {
+    if(!miraGpioAuthorize(request))return;
+    if(!request->hasHeader("X-Mira-GPIO") ||
+       !request->hasParam("name",true) || !request->hasParam("gpio",true) ||
+       !request->hasParam("visible",true)) {
+      request->send(400,"text/plain","Parametres manquants");return;
+    }
+    String name=request->getParam("name",true)->value();
+    String gpio=request->getParam("gpio",true)->value();
+    String vis=request->getParam("visible",true)->value();
+    if(!gpio.length() || gpio.length()>2 || gpio!=String(gpio.toInt()) ||
+       (vis!="0" && vis!="1")) {
+      request->send(400,"text/plain","Parametres invalides");return;
+    }
+    bool reload=false;
+    if(!MiraWT32GPIO::multiConfigure(name,gpio.toInt(),vis=="1",reload)) {
+      request->send(409,"text/plain","GPIO de sortie ou deja utilise");return;
+    }
+    // Defer screen reconstruction to the main loop. Never touch LVGL here.
+    if(reload) paramEvent=MIRA_SAVE_LIST_LVGL;
+    request->send(200,"text/plain","OK");
+  });
+
+  server.on("/gpio/link", HTTP_POST, [miraGpioAuthorize](AsyncWebServerRequest* request) {
+    if (!miraGpioAuthorize(request)) return;
+    if (!request->hasHeader("X-Mira-GPIO") ||
+        !request->hasParam("name", true) || !request->hasParam("gpio", true) ||
+        !request->hasParam("source", true) || !request->hasParam("level", true)) {
+      request->send(400, "text/plain", "Parametres incomplets"); return;
+    }
+    String name=request->getParam("name",true)->value();
+    String g=request->getParam("gpio",true)->value();
+    String source=request->getParam("source",true)->value();
+    String level=request->getParam("level",true)->value();
+    if ((source!="jeedom" && source!="gpio") ||
+        !g.length() || g.length()>2 || g!=String(g.toInt()) ||
+        (level!="high" && level!="low" && level!="read")) {
+      request->send(400, "text/plain", "Parametres incorrects"); return;
+    }
+    int gpio = source=="gpio" ? g.toInt() : 0;
+    int kind = level=="high" ? 1 : (level=="low" ? 0 : 2);
+    if (!MiraWT32GPIO::saveLink(name,gpio,kind)) {
+      request->send(409, "text/plain", "GPIO non configure en sortie ou table pleine"); return;
+    }
+    request->send(200, "text/plain", "OK");
+  });
+  server.on("/gpio/raw", HTTP_POST, [miraGpioAuthorize](AsyncWebServerRequest* request) {
+    if (!miraGpioAuthorize(request)) return;
+    if (!request->hasHeader("X-Mira-GPIO") ||
+        !request->hasParam("gpio", true) || !request->hasParam("level", true)) {
+      request->send(400, "text/plain", "Parametres manquants"); return;
+    }
+    String g=request->getParam("gpio",true)->value();
+    String level=request->getParam("level",true)->value();
+    if (!g.length() || g.length()>2 || g!=String(g.toInt()) ||
+        (level!="high" && level!="low")) {
+      request->send(400, "text/plain", "Parametres incorrects"); return;
+    }
+    int idx=MiraWT32GPIO::findPin(g.toInt());
+    if (idx<0 || !MiraWT32GPIO::writePhysical(uint8_t(idx),level=="high")) {
+      request->send(409,"text/plain","Sortie GPIO indisponible"); return;
+    }
+    request->send(200, "text/plain", "OK");
+  });
+  server.on("/gpio/state", HTTP_GET, [miraGpioAuthorize](AsyncWebServerRequest* request) {
+    if (!miraGpioAuthorize(request)) return;
+    AsyncWebServerResponse* response =
+        request->beginResponse(200, "application/json", MiraWT32GPIO::stateJson());
+    response->addHeader("Cache-Control", "no-store");
+    request->send(response);
+  });
+  server.on("/gpio/config", HTTP_POST, [miraGpioAuthorize](AsyncWebServerRequest* request) {
+    if (!miraGpioAuthorize(request)) return;
+    // Disallow simple cross-origin HTML forms controlling a GPIO.
+    if (!request->hasHeader("X-Mira-GPIO") ||
+        !request->hasParam("gpio", true) || !request->hasParam("mode", true) ||
+        !request->hasParam("inverted", true) || !request->hasParam("boot", true)) {
+      request->send(400, "text/plain", "Parametres GPIO manquants"); return;
+    }
+    const String g = request->getParam("gpio", true)->value();
+    const String m = request->getParam("mode", true)->value();
+    const String inv = request->getParam("inverted", true)->value();
+    const String boot = request->getParam("boot", true)->value();
+    if (!g.length() || g.length() > 2 || !g.equals(String(g.toInt())) ||
+        (inv != "0" && inv != "1")) {
+      request->send(400, "text/plain", "GPIO invalide"); return;
+    }
+    const int i = MiraWT32GPIO::findPin(g.toInt());
+    const int parsed = MiraWT32GPIO::parseMode(m);
+    const int startup = MiraWT32GPIO::parseBoot(boot);
+    if (i < 0 || parsed < 0 || startup < 0) {
+      request->send(400, "text/plain", "GPIO ou mode interdit"); return;
+    }
+    if (!MiraWT32GPIO::configure((uint8_t)i, (uint8_t)parsed, inv == "1", (uint8_t)startup)) {
+      request->send(503, "text/plain", "Erreur enregistrement NVS"); return;
+    }
+    request->send(200, "text/plain", "OK");
+  });
+  server.on("/gpio/set", HTTP_POST, [miraGpioAuthorize](AsyncWebServerRequest* request) {
+    if (!miraGpioAuthorize(request)) return;
+    if (!request->hasHeader("X-Mira-GPIO") ||
+        !request->hasParam("gpio", true) || !request->hasParam("state", true)) {
+      request->send(400, "text/plain", "Parametres GPIO manquants"); return;
+    }
+    const String g = request->getParam("gpio", true)->value();
+    const String state = request->getParam("state", true)->value();
+    if (!g.length() || g.length() > 2 || !g.equals(String(g.toInt())) ||
+        (state != "0" && state != "1")) {
+      request->send(400, "text/plain", "GPIO ou niveau invalide"); return;
+    }
+    const int i = MiraWT32GPIO::findPin(g.toInt());
+    if (i < 0 || !MiraWT32GPIO::write((uint8_t)i, state == "1")) {
+      request->send(409, "text/plain", "Broche non configuree en sortie"); return;
+    }
+    request->send(200, "text/plain", "OK");
+  });
+#endif
   server.on("/mira-health", HTTP_GET, [](AsyncWebServerRequest* request) {
     char body[440];
     snprintf(body, sizeof(body),
@@ -1631,7 +1762,7 @@ void MiraPanelServer::ServeurStation() {
         result["message"] = "Impossible de contacter GitHub.";
         if (connectionError.length()) result["detail"] = connectionError + " (code " + String(response) + ")";
       } else {
-        DynamicJsonDocument versionDoc(1024);
+        DynamicJsonDocument versionDoc(4096);
         DeserializationError err = deserializeJson(versionDoc, githubPayload);
         if (err) {
           result["status"] = "error";
@@ -1639,9 +1770,9 @@ void MiraPanelServer::ServeurStation() {
         } else {
           String project = versionDoc["project"] | "";
           String remoteVersion = versionDoc["version"] | "";
-          String binUrl = versionDoc["bin"] | MIRA_GITHUB_BIN_URL;
+          String binUrl = versionDoc["targets"][MIRA_DISPLAY_PROFILE_ID]["ota"] | "";
 
-          if (project != "Mira Panel" || !remoteVersion.length()) {
+          if (project != "Mira Panel" || !remoteVersion.length() || !binUrl.startsWith("https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/releases/")) {
             result["status"] = "error";
             result["message"] = "Les informations de mise à jour ne correspondent pas à Mira Panel.";
           } else {
@@ -1687,6 +1818,10 @@ void MiraPanelServer::ServeurStation() {
         request->send_P(200, "text/html", Page_MQTT, RetourVariable);
       } else if (String(p->value().c_str()) == "system") {
         request->send_P(200, "text/html", Page_Sys, RetourVariable);
+#if !defined(MIRA_TARGET_WAVESHARE_43C) && !defined(MIRA_TARGET_NEXTION_28)
+      } else if (String(p->value().c_str()) == "gpio") {
+        request->send_P(200, "text/html", Page_GPIO, RetourVariable);
+#endif
       } else if (String(p->value().c_str()) == "configAP") {
         request->send_P(200, "text/html", Page_ConfigAP, RetourVariable);
       } else if (String(p->value().c_str()) == "rst") {
@@ -1753,7 +1888,7 @@ void MiraPanelServer::ServeurStation() {
               Retour += "<br><br><small>Détail : " + connectionError + " (code " + String(response) + ")</small>";
             }
           } else {
-            DynamicJsonDocument doc(1024);
+            DynamicJsonDocument doc(4096);
             DeserializationError err = deserializeJson(doc, githubPayload);
             if (err) {
               TITRE = "Mise à jour";
@@ -1761,8 +1896,8 @@ void MiraPanelServer::ServeurStation() {
             } else {
               String project = doc["project"] | "";
               String remoteVersion = doc["version"] | "";
-              String binUrl = doc["bin"] | MIRA_GITHUB_BIN_URL;
-              if (project != "Mira Panel" || !remoteVersion.length()) {
+              String binUrl = doc["targets"][MIRA_DISPLAY_PROFILE_ID]["ota"] | "";
+              if (project != "Mira Panel" || !remoteVersion.length() || !binUrl.startsWith("https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/releases/")) {
                 TITRE = "Mise à jour";
                 Retour = "Les informations de mise à jour GitHub ne correspondent pas à Mira Panel.";
               } else if (miraCompareVersion(remoteVersion, version) <= 0) {
@@ -3001,6 +3136,106 @@ bool MiraPanelServer::update_module(String fileName) {
   return true;
 }
 
+
+bool MiraPanelServer::WT32HasAction(const String& name) {
+#if !defined(MIRA_TARGET_WAVESHARE_43C) && !defined(MIRA_TARGET_NEXTION_28)
+  return MiraWT32GPIO::actionMapped(name);
+#else
+  (void)name; return false;
+#endif
+}
+bool MiraPanelServer::WT32ExecuteAction(const String& name) {
+#if !defined(MIRA_TARGET_WAVESHARE_43C) && !defined(MIRA_TARGET_NEXTION_28)
+  return MiraWT32GPIO::executeAction(name);
+#else
+  (void)name; return false;
+#endif
+}
+bool MiraPanelServer::WT32HasToggle(const String& name) {
+#if !defined(MIRA_TARGET_WAVESHARE_43C) && !defined(MIRA_TARGET_NEXTION_28)
+  return MiraWT32GPIO::anyToggleLink(name);
+#else
+  (void)name; return false;
+#endif
+}
+bool MiraPanelServer::WT32ExecuteToggle(const String& name, bool on) {
+#if !defined(MIRA_TARGET_WAVESHARE_43C) && !defined(MIRA_TARGET_NEXTION_28)
+  return MiraWT32GPIO::executeToggle(name, on);
+#else
+  (void)name; (void)on; return false;
+#endif
+}
+bool MiraPanelServer::WT32ReadToggle(const String& name, bool& state) {
+#if !defined(MIRA_TARGET_WAVESHARE_43C) && !defined(MIRA_TARGET_NEXTION_28)
+  return MiraWT32GPIO::toggleState(name, state);
+#else
+  (void)name; (void)state; return false;
+#endif
+}
+
+void MiraPanelServer::WT32NotifyGpioChanges() {
+#if !defined(MIRA_TARGET_WAVESHARE_43C) && !defined(MIRA_TARGET_NEXTION_28)
+  // A write may originate from the web server's network task. Only the main
+  // loop sends HTTP. The payload requests a READ-ONLY state synchronization.
+  static uint32_t sentRevision = 0;
+  static uint32_t lastAttemptMs = 0;
+  const uint32_t revision = MiraWT32GPIO::stateRevision;
+  if (revision == sentRevision) return;
+  const uint32_t now = millis();
+  if (now - MiraWT32GPIO::changedAtMs < 150 || now - lastAttemptMs < 250) return;
+  lastAttemptMs = now;
+  if (WiFi.status() != WL_CONNECTED || !GetParamBool("Jeedom")) return;
+  const String urlBase = GetParamText("Jeedom_IP");
+  const String apiKey = GetParamText("Jeedom_Key_mira");
+  const String refreshId = GetParamText("Jeedom_Refresh");
+  if (!urlBase.startsWith("http") || apiKey.isEmpty() || refreshId.isEmpty() ||
+      apiKey == "null" || refreshId == "null") return;
+  const String url = urlBase +
+      "/core/api/jeeApi.php?plugin=mira&type=event&apikey=" + apiKey +
+      "&id=" + refreshId + "&gpio_sync=1";
+  // Dedicated async worker: never steal / overwrite the general Jeedom
+  // command request and its response acknowledgement.
+  static AsyncHTTPRequest gpioFeedbackRequest;
+  const int ready = gpioFeedbackRequest.readyState();
+  if (ready != readyStateUnsent && ready != readyStateDone) return;
+  if (!gpioFeedbackRequest.open("GET", url.c_str())) return;
+  gpioFeedbackRequest.send();
+  sentRevision = revision;
+  // The minute-based Jeedom cron is the fallback if this HTTP send fails.
+  if (_Debug) Serial.printf("[MIRA][GPIO] Notification Jeedom revision %u\n",
+                            unsigned(revision));
+#endif
+}
+
+
+bool MiraPanelServer::WT32MultiVisible(const String& name) {
+#if !defined(MIRA_TARGET_WAVESHARE_43C) && !defined(MIRA_TARGET_NEXTION_28)
+  return MiraWT32GPIO::isMultiVisible(name);
+#else
+  (void)name; return false;
+#endif
+}
+
+void MiraPanelServer::WT32PollMultiButtons() {
+#if !defined(MIRA_TARGET_WAVESHARE_43C) && !defined(MIRA_TARGET_NEXTION_28)
+  String name; uint8_t kind=0;
+  if (!MiraWT32GPIO::multiPoll(name,kind)) return;
+  const char* prefixes[]={"Multi_Clic_","Multi_Double_","Multi_Triple_","Multi_Long_"};
+  if(kind>=4) return;
+  const String logicalName=String(prefixes[kind])+name;
+  JsonArray actions=SPIFFS_Config_Actions["actions"];
+  for (JsonObject action : actions) {
+    if(action["type"].as<String>()!="button" ||
+       action["nom"].as<String>()!=logicalName) continue;
+    const int id=action["id"] | -1;
+    if(id>=0) {
+      IndexSetEvent(id);
+      if(_Debug) Serial.println("[MIRA][MULTI] "+logicalName);
+    }
+    return;
+  }
+#endif
+}
 
 void MiraPanelServer::IndexSetEvent(int ID) {
   Resend = true;

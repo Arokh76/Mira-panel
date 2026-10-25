@@ -11,7 +11,7 @@ class MultiReleaseTests(unittest.TestCase):
             (sub / spec["ota"].format(version=version)).write_bytes(b"A" * 700_000 + version.encode() + key.encode())
             (sub / spec["factory"].format(version=version)).write_bytes(b"B" * 1_500_000)
 
-    def test_release_contains_both_profiles(self):
+    def test_release_contains_three_profiles(self):
         with tempfile.TemporaryDirectory() as work:
             p = Path(work)
             self.write_inputs(p / "inputs")
@@ -19,13 +19,17 @@ class MultiReleaseTests(unittest.TestCase):
             self.assertEqual(set(release["targets"]), set(TARGETS))
             self.assertTrue((p / "repo/docs/manifest-wt32.json").is_file())
             self.assertTrue((p / "repo/docs/manifest-waveshare.json").is_file())
+            self.assertTrue((p / "repo/docs/manifest-nextion.json").is_file())
             self.assertTrue((p / "repo/firmware/targets.json").is_file())
             import json
-            legacy = json.loads((p / "repo/firmware/version.json").read_text())
-            self.assertEqual(legacy["version"], "0.6.38")
-            self.assertTrue(legacy["bin"].endswith("/firmware/Mira_Panel.bin"))
-            self.assertEqual((p / "repo/firmware/Mira_Panel.bin").read_bytes(),
-                             (p / "inputs/wt32/Mira_Panel_WT32_SC01_Plus_0.6.38.bin").read_bytes())
+            published = json.loads((p / "repo/firmware/targets.json").read_text())
+            self.assertEqual(len(published["targets"]), 3)
+            self.assertEqual(published["version"], "0.6.38")
+            self.assertIn("onx2432g028", published["targets"])
+            # The untyped legacy WT32 OTA must not be advanced. Older
+            # Waveshare builds also read it and could flash the wrong target.
+            self.assertFalse((p / "repo/firmware/version.json").exists())
+            self.assertFalse((p / "repo/firmware/Mira_Panel.bin").exists())
             self.assertEqual((p / "repo/docs/manifest.json").read_bytes(),
                              (p / "repo/docs/manifest-wt32.json").read_bytes())
 
@@ -33,7 +37,7 @@ class MultiReleaseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as work:
             p = Path(work)
             self.write_inputs(p / "inputs")
-            spec = TARGETS["waveshare-esp32s3-touch-lcd-4.3c"]
+            spec = TARGETS["onx2432g028"]
             (p / "inputs" / spec["dir"] / spec["factory"].format(version="0.6.38")).unlink()
             with self.assertRaises(FileNotFoundError):
                 prepare(p / "inputs", p / "repo", "0.6.38")
