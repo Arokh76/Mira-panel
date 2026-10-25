@@ -1,4 +1,4 @@
-# Mira Camera beta 0.7.20 — bouton simple + JPEG direct
+# Mira Camera beta 0.7.21 — bouton simple + JPEG direct
 
 **Branche expérimentale uniquement. Ne pas fusionner avec main/stable avant essais physiques.**
 
@@ -16,7 +16,7 @@ d'aperçu, de rafraîchissement ni de requête HTTP sur la page principale.
 
 ## Configuration Jeedom
 
-**Plugin beta 1.2.28-beta.4 minimum** et **firmware 0.7.20 beta**.
+**Plugin beta 1.2.28-beta.4 minimum** et **firmware 0.7.21 beta**.
 
 1. Dans « Programmer un écran ESP32 », créer **Caméra**, nom et page
    uniquement, puis programmer l'écran.
@@ -52,7 +52,7 @@ pour tester le proxy initial. Les JPEG dépassant 900 KiB sont refusés.
 
 Le succès de compilation/CI ne vaut pas validation sur les écrans réels.
 
-## Correctif couleurs 0.7.20
+## Correctif couleurs 0.7.21
 
 Le firmware 0.7.18 affichait les JPEG avec des couleurs artificielles sur le WT32 :
 le JPEGDEC utilisait `RGB565_LITTLE_ENDIAN` alors que LVGL WT32 était configuré
@@ -61,7 +61,7 @@ RGB565 attendu par LVGL selon chaque cible, sans modifier la palette ni les
 styles des autres widgets. Le bouton caméra reste identique ; seules les images
 en plein écran sont concernées. Validation sur le matériel physique recommandée.
 
-## Image plein écran & rafraîchissement 0.7.20
+## Image plein écran & rafraîchissement 0.7.21
 
 - **Mode paysage conservé** même si le panneau est en portrait : aucun pivot de 90°.
 - Zoom proportionnel avec LVGL pour occuper la largeur utile en affichage complet,
@@ -72,3 +72,14 @@ en plein écran sont concernées. Validation sur le matériel physique recommand
   un échec HTTP/JPEG, prochaine tentative après 2 secondes.
 - Pas de connexion ni de rafraîchissement réseau lorsque la tuile Caméra n'est
   pas ouverte ; sortie et veille stoppent le travail caméra.
+
+## Retour de la page Énergie — 0.7.21
+
+Page **Énergie** rétablie (identifiant **4**), après les pages originales :
+Accueil 0, Lumières 1, Températures 2, Paramètres 3. Le menu Pages liste
+Accueil, Lumières, Températures, Énergie et Paramètres. Les favoris déjà
+synchronisés dans la mémoire NVS sont conservés. Le serveur accepte de nouveau
+Énergie (4) depuis le plugin Jeedom et l'UI charge les widgets envoyés sur
+`emplacement: "energie"` ; les commandes et la vue Caméra de 0.7.20 restent
+inchangées. Le plugin beta.6 rend cette page sélectionnable dans la
+programmation classique et le designer.
