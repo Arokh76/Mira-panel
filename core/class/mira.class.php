@@ -407,6 +407,7 @@ class mira extends eqLogic {
                     $name = $json_index[$i]['nom'];
                     $value = $json_index[$i]['value'];
                     $unite = $json_index[$i]['unit'];
+                    $isCamera = strpos($name, 'Camera_') === 0;
                   	log::add(__CLASS__, 'debug', "Ajout d'une info: " . $name);
                   
                     $info = $this->getCmd(null, $name);
@@ -423,6 +424,14 @@ class mira extends eqLogic {
                         $info->setConfiguration('visible_cmd',"1");
                     }
                   
+                    if ($isCamera) {
+                        $info->setName('Caméra : ' . substr($name, strlen('Camera_')));
+                        $info->setType('info');
+                        $info->setSubType('string');
+                        $info->setConfiguration('type', 'camera');
+                        $info->setConfiguration('visible_cmd', '1');
+                        $info->setIsVisible(0);
+                    }
                   	$info->setOrder($ordre);
           			$ordre++;
           			$info->setConfiguration('commande',$cmd_id);
@@ -804,7 +813,7 @@ class mira extends eqLogic {
                 }
             }
 
-            $managedWidgetTypes = array('info', 'toggle', 'range', 'list', 'button', 'color', 'multi_master', 'multi_action');
+            $managedWidgetTypes = array('info', 'camera', 'toggle', 'range', 'list', 'button', 'color', 'multi_master', 'multi_action');
             $removedCommands = 0;
             foreach ($this->getCmd() as $existingCmd) {
                 if (!is_object($existingCmd)) continue;
@@ -1314,6 +1323,45 @@ class miraCmd extends cmd {
     return ($out !== false && $code === 200) ? $out : false;
   }
   public function postSave() {
+    if ($this->getConfiguration('type') === 'camera') {
+      // Save URL as a normal Jeedom command setting; do not reprogram LVGL
+      // or execute any actions when editing the camera.
+      $eq = $this->getEqLogic();
+      if (is_object($eq)) {
+        $url = trim((string)$this->getConfiguration('camera_url', ''));
+        $widgetName = (string)$this->getLogicalId();
+        $widgetName = strpos($widgetName, 'Camera_') === 0
+          ? substr($widgetName, strlen('Camera_')) : '';
+        if ($widgetName !== '') {
+          if ($url !== '' && (strlen($url) > 768 ||
+              !preg_match('~^http://[^\\s@]+$~D', $url))) {
+            log::add('mira','warning','[CAMERA] URL invalide pour '.$widgetName);
+          } else {
+            $ip = trim((string)$eq->getConfiguration('adresseip'));
+            $pass = (string)$eq->getConfiguration('password');
+            if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) && $pass !== '') {
+              $ch = curl_init('http://' . $ip . '/camera/config');
+              curl_setopt_array($ch, array(
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => http_build_query(array(
+                  'key' => $pass, 'name' => $widgetName, 'url' => $url)),
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_CONNECTTIMEOUT => 2,
+                CURLOPT_TIMEOUT => 4,
+              ));
+              $result = curl_exec($ch);
+              $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+              curl_close($ch);
+              if ($result === false || $status !== 200 || trim((string)$result) !== 'OK') {
+                log::add('mira','warning','[CAMERA] URL non transmise a '.$widgetName .
+                         ' (HTTP '.$status.', firmware camera beta 0.7.17 requis)');
+              }
+            }
+          }
+        }
+      }
+      return;
+    }
     if ($this->getConfiguration('type') === 'multi_master') {
       $widget=substr((string)$this->getLogicalId(),strlen('Multi_'));
       $pin=(int)$this->getConfiguration('mira_input_gpio');
