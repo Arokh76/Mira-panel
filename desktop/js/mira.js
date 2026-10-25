@@ -995,6 +995,7 @@ $("#miratype").on('change',function(event) {
   $('#divmirathermomodes').toggle(lvgl_type==='thermostat');
   $('#miracamerahelp').toggle(lvgl_type==='camera');
   $('#miraval').attr('type', lvgl_type === 'camera' ? 'text' : 'number');
+  $('#miraval').attr('maxlength', lvgl_type === 'camera' ? 768 : 6);
   if(lvgl_type === 'camera') $('#miraval').attr('placeholder','http://192.168.1.x:8098/snapshot.bmp');
   else $('#miraval').removeAttr('placeholder');
   if (lvgl_type === 'thermostat') {
