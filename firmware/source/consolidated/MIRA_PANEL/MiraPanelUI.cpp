@@ -3293,6 +3293,41 @@ void MiraPanelUI::onCameraBack(lv_event_t* e) {
   ui->closeCamera();
 }
 
+void MiraPanelUI::onMediaAction(lv_event_t* e) {
+  EventContext* ctx = static_cast<EventContext*>(lv_event_get_user_data(e));
+  if (!ctx || !ctx->ui || ctx->itemIndex < 0 || ctx->itemIndex > 2) return;
+  MiraPanelUI& ui = *ctx->ui;
+  if (ui._suppressEvents || ui.touchBlocksAction(false) ||
+      ctx->bindingIndex >= ui._bindingCount) return;
+  Binding& b = ui._bindings[ctx->bindingIndex];
+  if (b.type != W_MEDIA) return;
+  const uint8_t action = (uint8_t)ctx->itemIndex;
+  if (b.mediaActionIds[action] < 0) return;
+  ui.noteActivity();
+  ui._server.IndexSetEvent(b.mediaActionIds[action]);
+  if (ui._mqtt && ui._mqtt->enabled())
+    ui._mqtt->publishAction(b.name + "__" + MIRA_MEDIA_ACTIONS[action], "1");
+}
+
+void MiraPanelUI::onMediaVolume(lv_event_t* e) {
+  EventContext* ctx = static_cast<EventContext*>(lv_event_get_user_data(e));
+  if (!ctx || !ctx->ui) return;
+  MiraPanelUI& ui = *ctx->ui;
+  if (ui._suppressEvents || ui.touchBlocksAction(true) ||
+      ctx->bindingIndex >= ui._bindingCount) return;
+  Binding& b = ui._bindings[ctx->bindingIndex];
+  if (b.type != W_MEDIA || !b.mediaVolumeSlider || b.mediaVolumeCmdId < 0) return;
+  const int volume = lv_slider_get_value(b.mediaVolumeSlider);
+  ui.noteActivity();
+  b.localInputUntilMs = millis() + 350; // do not undo local drag immediately
+  ui._server.IndexSetRange(b.mediaVolumeCmdId, volume);
+  ui._server.IndexSetEvent(b.mediaVolumeCmdId);
+  if (ui._mqtt && ui._mqtt->enabled())
+    ui._mqtt->publishAction(b.name + "__volume_cmd", String(volume));
+  if (b.compositeLabels[5])
+    lv_label_set_text_fmt(b.compositeLabels[5], "%d %%", volume);
+}
+
 void MiraPanelUI::onMultiTouch(lv_event_t* e) {
   EventContext* ctx=static_cast<EventContext*>(lv_event_get_user_data(e));
   if(!ctx || !ctx->ui)return;
