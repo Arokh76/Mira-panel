@@ -7,6 +7,7 @@
 #include "MiraPanelServer.h"
 #include "MiraHardware.h"
 #include "MiraDisplayProfile.h"
+#include "MiraCameraBmp.h"
 
 class MiraMqtt;
 
@@ -63,6 +64,7 @@ private:
     W_COLOR,
     W_DATETIME,
     W_THERMOSTAT,
+    W_CAMERA,
     W_UNSUPPORTED
   };
 
@@ -76,6 +78,7 @@ private:
     String labelMode = "auto";
     String icon = "auto";
     String displayName = "";
+    String cameraUrl; // HTTP BMP snapshot URL; no fetch until opened
     int layoutX = -1;
     int layoutY = -1;
     int layoutW = -1;
@@ -170,6 +173,14 @@ private:
   bool _scrollCacheActive = false;
 
 #endif
+  MiraCameraBmp _cameraFeed;
+  lv_obj_t* _cameraOverlay = nullptr;
+  lv_obj_t* _cameraImage = nullptr;
+  lv_obj_t* _cameraStatus = nullptr;
+  lv_img_dsc_t _cameraDescriptor = {};
+  uint16_t* _cameraPixels = nullptr;
+  uint32_t _cameraOpenedAt = 0;
+
   lv_obj_t* _dateTimeLabel = nullptr;
   lv_obj_t* _dateSubLabel = nullptr;
   lv_obj_t* _clockStatusLabel = nullptr;
@@ -265,6 +276,8 @@ private:
   static void onNav(lv_event_t* e);
   static void onPagePick(lv_event_t* e);
   static void onButton(lv_event_t* e);
+  static void onCameraTile(lv_event_t* e);
+  static void onCameraBack(lv_event_t* e);
   static void onMultiTouch(lv_event_t* e);
   static void onToggle(lv_event_t* e);
   static void onRange(lv_event_t* e);
@@ -306,6 +319,10 @@ private:
   void createInfo(uint8_t idx);
   void decorateInfo(uint8_t idx);
   void createButton(uint8_t idx);
+  void createCamera(uint8_t idx);
+  void openCamera(uint8_t idx);
+  void closeCamera();
+  void serviceCamera();
   void createToggle(uint8_t idx);
   void createRange(uint8_t idx);
   void createRoundRange(uint8_t idx);
