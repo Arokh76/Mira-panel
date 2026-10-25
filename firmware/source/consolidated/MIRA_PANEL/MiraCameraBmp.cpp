@@ -2,6 +2,8 @@
 #include <WiFi.h>
 #include <WiFiClient.h>
 #include <HTTPClient.h>
+#include <new>
+#include <JPEGDEC.h>   // Larry Bank JPEGDEC: RGB565 decoder with 1/2, 1/4, 1/8 scaling
 #include <esp_heap_caps.h>
 
 namespace {
@@ -23,6 +25,110 @@ bool receiveBytes(Stream& stream, uint8_t* out, size_t count) {
     }
   }
   return done == count;
+}
+
+static constexpr size_t MIRA_JPEG_MAX_BYTES = 900UL * 1024UL;
+
+// RGB565 pixels are decoded into a PSRAM frame, never drawn from the worker.
+// JPEGDEC invokes this once per MCU (usually 16x16 pixels).
+static int miraJpegDraw(JPEGDRAW* draw) {
+  if (!draw || !draw->pUser || !draw->pPixels || draw->iBpp != 16) return 0;
+  auto* f = static_cast<MiraCameraBmp::Frame*>(draw->pUser);
+  if (!f->pixels) return 0;
+  for (int yy = 0; yy < draw->iHeight; ++yy) {
+    const int ty = draw->y + yy;
+    if (ty < 0 || ty >= f->height) continue;
+    const uint16_t* row = draw->pPixels + (size_t)yy * draw->iWidth;
+    uint16_t* dest = f->pixels + (size_t)ty * f->width;
+    for (int xx = 0; xx < draw->iWidthUsed; ++xx) {
+      const int tx = draw->x + xx;
+      if (tx >= 0 && tx < f->width) dest[tx] = row[xx];
+    }
+  }
+  return 1;
+}
+
+static bool miraDownloadJpeg(Stream& stream, int contentLength,
+                             const uint8_t* first, size_t firstCount,
+                             uint16_t maxW, uint16_t maxH,
+                             MiraCameraBmp::Frame& output) {
+  if (contentLength > (int)MIRA_JPEG_MAX_BYTES) {
+    Serial.println("[MIRA][CAM] JPEG trop volumineux"); return false;
+  }
+  // JPEG itself and decompressed RGB565 framebuffer stay in PSRAM.
+  const size_t capacity = contentLength > 0 ? (size_t)contentLength : MIRA_JPEG_MAX_BYTES;
+  if (capacity < firstCount) return false;
+  uint8_t* compressed = (uint8_t*)heap_caps_malloc(capacity, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!compressed) { Serial.println("[MIRA][CAM] Memoire JPEG insuffisante"); return false; }
+  memcpy(compressed, first, firstCount);
+  size_t used = firstCount;
+  uint32_t lastData = millis();
+  bool complete = false;
+  while (used < capacity && (uint32_t)(millis() - lastData) < 4500UL) {
+    // An HTTP/1.0 snapshot normally provides Content-Length. If not, the
+    // JPEG EOI marker terminates the stream without waiting for keep-alive.
+    if (contentLength < 0 && used >= 2 &&
+        compressed[used - 2] == 0xff && compressed[used - 1] == 0xd9) {
+      complete = true;
+      break;
+    }
+    int available = stream.available();
+    if (available > 0) {
+      size_t count = (size_t)available;
+      if (count > capacity - used) count = capacity - used;
+      const size_t got = stream.readBytes(compressed + used, count);
+      if (got) { used += got; lastData = millis(); }
+    } else {
+      vTaskDelay(pdMS_TO_TICKS(10));
+    }
+  }
+  if (contentLength >= 0) complete = used == (size_t)contentLength;
+  else if (used >= 2 && compressed[used-2] == 0xff && compressed[used-1] == 0xd9)
+    complete = true;
+  if (!complete || used < 60 || compressed[0] != 0xff || compressed[1] != 0xd8) {
+    heap_caps_free(compressed);
+    Serial.println("[MIRA][CAM] JPEG incomplet ou trop grand");
+    return false;
+  }
+
+  JPEGDEC* jpeg = new (std::nothrow) JPEGDEC();
+  if (!jpeg) { heap_caps_free(compressed); return false; }
+  bool valid = jpeg->openRAM(compressed, (int)used, miraJpegDraw) == 1;
+  int options = 0, divisor = 1;
+  int width = valid ? jpeg->getWidth() : 0;
+  int height = valid ? jpeg->getHeight() : 0;
+  if (valid) {
+    while ((width + divisor - 1) / divisor > maxW ||
+           (height + divisor - 1) / divisor > maxH) {
+      divisor *= 2;
+      if (divisor > 8) { valid = false; break; }
+    }
+    if (divisor == 2) options = JPEG_SCALE_HALF;
+    else if (divisor == 4) options = JPEG_SCALE_QUARTER;
+    else if (divisor == 8) options = JPEG_SCALE_EIGHTH;
+  }
+  if (valid) {
+    output.width = (width + divisor - 1) / divisor;
+    output.height = (height + divisor - 1) / divisor;
+    const size_t bytes = size_t(output.width) * output.height * 2;
+    output.pixels = (uint16_t*)heap_caps_calloc(bytes / 2, 2,
+                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    valid = output.pixels != nullptr;
+  }
+  if (valid) {
+    jpeg->setPixelType(RGB565_LITTLE_ENDIAN);
+    jpeg->setUserPointer(&output);
+    valid = jpeg->decode(0, 0, options) == 1;
+    if (!valid) Serial.printf("[MIRA][CAM] Erreur decode JPEG: %d\\n", jpeg->getLastError());
+  }
+  jpeg->close();
+  delete jpeg;
+  heap_caps_free(compressed);
+  if (!valid) {
+    if (output.pixels) heap_caps_free(output.pixels);
+    output = {};
+  }
+  return valid;
 }
 }
 
@@ -101,8 +207,10 @@ void MiraCameraBmp::run() {
     if (url.length()) {
       // A camera proxy may resize dynamically. An ordinary BMP URL can ignore
       // these parameters, provided its bitmap fits the display limits.
-      url += (url.indexOf('?') >= 0 ? "&" : "?");
-      url += "w=" + String(w) + "&h=" + String(h);
+      if (url.indexOf(".bmp") >= 0) {
+        url += (url.indexOf('?') >= 0 ? "&" : "?");
+        url += "w=" + String(w) + "&h=" + String(h);
+      }
       Frame frame;
       if (downloadBmp(url, w, h, frame)) {
         xSemaphoreTake(_mutex, portMAX_DELAY);
@@ -136,8 +244,17 @@ bool MiraCameraBmp::downloadBmp(const String& url, uint16_t maxW,
   Stream& stream = http.getStream();
   stream.setTimeout(2000);
   uint8_t header[54];
-  if (!receiveBytes(stream, header, sizeof(header)) ||
-      header[0] != 'B' || header[1] != 'M' ||
+  if (!receiveBytes(stream, header, sizeof(header))) {
+    http.end();
+    return false;
+  }
+  if (header[0] == 0xff && header[1] == 0xd8) {
+    const bool ok = miraDownloadJpeg(stream, http.getSize(), header,
+                        sizeof(header), maxW, maxH, out);
+    http.end();
+    return ok;
+  }
+  if (header[0] != 'B' || header[1] != 'M' ||
       read32(header + 14) < 40 ||
       read16(header + 26) != 1 ||
       read16(header + 28) != 24 ||
