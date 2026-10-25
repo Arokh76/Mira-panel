@@ -28,6 +28,7 @@ private:
   uint16_t _maxH = 0;
   uint32_t _generation = 0;
   uint32_t _lastRequestAt = 0;
+  uint32_t _refreshIntervalMs = 250; // fast snapshots; slow down on fetch failures
   bool _active = false;
   Frame _ready;
 };
