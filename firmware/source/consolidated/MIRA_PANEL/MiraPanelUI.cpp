@@ -36,6 +36,14 @@ static const lv_color_t COL_ACCENT2 = lv_color_hex(0x18637A);
 static const lv_color_t COL_GREEN   = lv_color_hex(0x62D6A7);
 static const lv_color_t COL_RED     = lv_color_hex(0xE36A6A);
 
+// Composite widgets reuse existing Jeedom index types: Info, Button, Range.
+// No special plugin-to-ESP transport and no commands during initial drawing.
+static const char* const MIRA_ENERGY_FIELDS[5] = {"solar", "home", "grid", "battery", "soc"};
+static const char* const MIRA_MEDIA_FIELDS[6] =
+    {"title", "artist", "album", "state", "progress", "volume"};
+static const char* const MIRA_MEDIA_ACTIONS[3] =
+    {"previous", "playpause", "next"};
+
 // Automatic widget grid from screen geometry, without affecting free layout.
 // 800px page - 12px margins = 788px; 4*192+3*6 = 2*390+6 = 786px.
 static constexpr lv_coord_t MIRA_CARD_AUTO = MIRA_DISPLAY_WIDTH >= 800 ? 390 : (MIRA_DISPLAY_WIDTH <= 240 ? 224 : 304);
@@ -540,6 +548,21 @@ void MiraPanelUI::publishMqttAction(const Binding& b, const String& payload) {
 }
 
 void MiraPanelUI::handleMqttState(const String& topic, const String& rawPayload) {
+  // Composite data topics are strictly display-only (never Jeedom actions).
+  const String key = normalizeMqttTopicName(topic);
+  for (uint8_t i = 0; i < _bindingCount; ++i) {
+    Binding& b = _bindings[i];
+    if (b.type != W_ENERGY && b.type != W_MEDIA) continue;
+    const uint8_t fields = b.type == W_ENERGY ? 5 : 6;
+    for (uint8_t f = 0; f < fields; ++f) {
+      const char* suffix = b.type == W_ENERGY ? MIRA_ENERGY_FIELDS[f] : MIRA_MEDIA_FIELDS[f];
+      if (key != normalizeMqttTopicName(b.name + "__" + suffix)) continue;
+      const String value = mqttPayloadValue(rawPayload);
+      _server.IndexSetInfo(b.compositeIds[f], value);
+      updateCompositeInfo(b, f, value);
+      return;
+    }
+  }
   // Thermostat exposes 3 independent state topics. Always display-only.
   // Example: mira/<screen>/States/Thermostat salon__temperature
   for (uint8_t t = 0; t < _bindingCount; ++t) {
@@ -1240,6 +1263,23 @@ void MiraPanelUI::registerAndCreate(JsonObject obj) {
       b.listCount = 1;
     }
     createThermostat(idx);
+  }
+  else if (type == "energy") {
+    b.type = W_ENERGY;
+    for (uint8_t i = 0; i < 5; ++i)
+      b.compositeIds[i] = _server.IndexAddInfo(name + "__" + MIRA_ENERGY_FIELDS[i],
+                                                 i == 4 ? "%" : "W");
+    createEnergy(idx);
+  }
+  else if (type == "media") {
+    b.type = W_MEDIA;
+    for (uint8_t i = 0; i < 6; ++i)
+      b.compositeIds[i] = _server.IndexAddInfo(name + "__" + MIRA_MEDIA_FIELDS[i],
+                                                 i == 4 || i == 5 ? "%" : "");
+    for (uint8_t i = 0; i < 3; ++i)
+      b.mediaActionIds[i] = _server.IndexAddButton(name + "__" + MIRA_MEDIA_ACTIONS[i]);
+    b.mediaVolumeCmdId = _server.IndexAddRange(name + "__volume_cmd", 0, 100, 40);
+    createMedia(idx);
   }
   else if (type == "datetime") {
     b.type = W_DATETIME;
@@ -3431,6 +3471,26 @@ void MiraPanelUI::updateBindingFromServer(uint8_t idx, int eventId) {
   if (localBinding.localInputUntilMs != 0 && (int32_t)(millis() - localBinding.localInputUntilMs) < 0) return;
 
   Binding& b = _bindings[idx];
+
+  if (b.type == W_ENERGY || b.type == W_MEDIA) {
+    const uint8_t count = b.type == W_ENERGY ? 5 : 6;
+    for (uint8_t f = 0; f < count; ++f) {
+      if (b.compositeIds[f] != eventId) continue;
+      updateCompositeInfo(b, f, _server.IndexGetInfo(eventId));
+      return;
+    }
+    if (b.type == W_MEDIA && eventId == b.mediaVolumeCmdId) {
+      if (b.mediaVolumeSlider) {
+        _suppressEvents = true;
+        lv_slider_set_value(b.mediaVolumeSlider,
+                            clampInt(_server.IndexGetRange(eventId), 0, 100),
+                            LV_ANIM_OFF);
+        _suppressEvents = false;
+      }
+      return;
+    }
+    return;
+  }
 
   if (b.type == W_THERMOSTAT) {
     _suppressEvents = true;
