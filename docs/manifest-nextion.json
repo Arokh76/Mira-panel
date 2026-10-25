@@ -1,0 +1,16 @@
+{
+  "name": "Mira Panel - Open Nextion Genius 2.8",
+  "version": "0.7.15",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        {
+          "path": "firmware/Mira_Panel_Nextion_2.8_FACTORY.bin",
+          "offset": 0
+        }
+      ]
+    }
+  ]
+}
