@@ -174,6 +174,7 @@ log::add('mira', 'debug', "Lancement script");
                               <label>H <input id="mirageoh" type="number" min="32" step="1"></label>
                             </div>
                             <div id="mirageounit" class="mira-geometry-unit"></div>
+                            <button type="button" id="mirainspectcamera" class="btn btn-sm btn-default btn-block" style="display:none;"><i class="fas fa-camera"></i> Paramètres de la caméra</button>
                             <button type="button" id="mirageoapply" class="btn btn-sm btn-primary btn-block"><i class="fas fa-check"></i> Appliquer les coordonnées</button>
                             <div id="mirageovalidation" class="mira-geometry-validation" role="status" aria-live="polite"></div>
                             <button type="button" id="miradesignerauto" class="btn btn-sm btn-default btn-block"><i class="fas fa-magic"></i> Repasser ce widget en Auto</button>
