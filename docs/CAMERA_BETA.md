@@ -1,58 +1,53 @@
-# Mira Camera beta 1 — clic pour ouvrir, zéro streaming en fond
+# Mira Camera beta 0.7.18 — bouton simple + JPEG direct
 
-**Branches expérimentales uniquement. Ne pas fusionner vers `main` ou `stable` avant essais.**
+**Branche expérimentale uniquement. Ne pas fusionner avec main/stable avant essais physiques.**
 
-Le widget `camera` ne demande **aucune image tant qu'il n'est pas ouvert**.
-La vignette est un bouton fixe avec icône caméra (miniature réelle prévue après essai).
-Au clic, le firmware crée une vue LVGL plein écran. Une tâche FreeRTOS distincte
-télécharge **un BMP 24 bits non compressé toutes les 4 secondes** ;
-la conversion en RGB565 s'effectue dans la tâche réseau, puis seule
-la boucle LVGL affiche la nouvelle image. Retour/veille/reprogrammation
-ferment le flux et libèrent les images en PSRAM.
+## Interface — sans miniature
 
-Le BMP doit être au plus aux dimensions de l'écran (la requête ajoute
-automatiquement `w=` et `h=`). Le firmware **ne décode pas le JPEG**
-directement dans cette beta. Pas de RTSP, MJPEG ni vidéo fluide.
+Le widget Caméra reprend exactement l'apparence d'un bouton Mira classique :
+petit pictogramme caméra à gauche, **nom à droite**. Pas de vignette JPEG,
+d'aperçu, de rafraîchissement ni de requête HTTP sur la page principale.
 
-## Tester sans caméra
+- Appui : affiche une vue plein écran et lance le téléchargement des images.
+- Retour, veille ou reprogrammation : arrêt du téléchargement et libération
+  des images en PSRAM.
+- Une image toutes les 4 secondes, pas de RTSP/MJPEG/H.264 continu.
+- Tous les écrans (WT32, Waveshare, Nextion) partagent le même code UI.
 
-Sur une machine Debian / Raspberry Pi du réseau :
+## Configuration Jeedom
 
-```bash
-sudo apt install python3-pil
-python3 tools/mira_camera_proxy.py
+**Plugin beta 1.2.28-beta.4 minimum** et **firmware 0.7.18 beta**.
+
+1. Dans « Programmer un écran ESP32 », créer **Caméra**, nom et page
+   uniquement, puis programmer l'écran.
+2. Ouvrir l'équipement Mira dans Jeedom, onglet **Commandes**.
+3. Dans la commande « Caméra : nom », colonne Paramètres, renseigner
+   une adresse d'image **JPEG HTTP** ou **BMP RGB24 HTTP**, puis sauvegarder.
+4. Sur l'écran, appuyer sur le bouton caméra.
+
+### MotionEye JPEG (sans proxy)
+
+```text
+http://192.168.1.24:8765/picture/2/current
 ```
 
-Dans Jeedom beta, ajouter un widget **Caméra**, avec le nom `Portail`
-et l'URL `http://IP_DU_PI:8098/snapshot.bmp`. Programmer l'écran
-avec le firmware caméra beta. Un appui affiche l'image de démonstration ;
-Retour ferme immédiatement la demande d'images.
+Il s'agit d'un exemple du LAN de test. L'image doit être accessible
+sans cookie de session inaccessible à l'ESP. Si MotionEye nécessite une
+authentification navigateur, la prise d'image doit d'abord être autorisée.
 
-## Tester avec une vraie caméra
+Le firmware identifie le JPEG par sa signature `FF D8`, le BMP par `BM`.
+Les JPEG sont décodés localement avec JPEGDEC et réduits automatiquement
+(1/2, 1/4 ou 1/8) pour tenir sur l'écran. Le BMP RGB24 reste pris en charge
+pour tester le proxy initial. Les JPEG dépassant 900 KiB sont refusés.
 
-```bash
-CAMERA_SNAPSHOT_URL='http://IP_CAMERA/snapshot.jpg' python3 tools/mira_camera_proxy.py
-```
+## Recette terrain
 
-Pour une caméra nécessitant HTTP Basic Auth, ajouter les variables
-`CAMERA_USER` et `CAMERA_PASSWORD`. Le proxy prend un snapshot JPEG
-à chaque demande, le redimensionne dans le cadre demandé et renvoie un
-BMP RGB24. Tester d'abord l'URL dans un navigateur.
+- Page d'accueil : seul « icône caméra + nom » est affiché, sans requêtes réseau.
+- Appui : chargement plein écran, image JPEG MotionEye affichée.
+- Retour/reprise/veille : aucun téléchargement persistant.
+- Tester URL absente et lien cassé : afficher une erreur sans figer Mira.
+- Sur WT32, tester les 20 ouvertures/fermetures et surveiller la PSRAM.
+- Sur Waveshare et Nextion, tester affichage, navigation et retour.
+- Vérifier que les autres widgets Jeedom fonctionnent normalement.
 
-**Sécurité :** ce prototype sert les images **sans authentification**
-sur le réseau local. Ne pas rediriger le port 8098 sur Internet.
-Filtrer les accès au port et éviter toute caméra privée pendant les
-premiers essais. L'URL source, éventuellement sensible, reste côté Pi ;
-seule l'URL HTTP du proxy est envoyée à l'ESP32.
-
-## Vérifications terrain
-
-- Cliquer sur la vignette, obtenir le BMP, revenir, répéter 20 fois.
-- Vérifier que la caméra n'est pas consultée hors de sa vue et en veille.
-- Tester avec Wi-Fi indisponible : l'écran doit afficher une erreur sans geler.
-- Sur Waveshare, contrôler la navigation, les gestes, le retour et la mémoire.
-- Sur Nextion, valider d'abord la stabilité du portage matériel indépendant.
-- Comparer la consommation PSRAM avant/pendant/après la vue.
-
-La version expérimentale vise les trois profils de compilation, mais le
-Nextion reste non validé sur écran réel.
+Le succès de compilation/CI ne vaut pas validation sur les écrans réels.
