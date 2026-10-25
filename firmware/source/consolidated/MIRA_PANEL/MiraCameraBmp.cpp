@@ -170,6 +170,7 @@ bool MiraCameraBmp::start(const String& bmpUrl, uint16_t maxWidth, uint16_t maxH
   _maxW = maxWidth;
   _maxH = maxHeight;
   _lastRequestAt = 0;
+  _refreshIntervalMs = 250;
   _active = true;
   xSemaphoreGive(_mutex);
   if (!_task) {
@@ -215,7 +216,7 @@ void MiraCameraBmp::run() {
     uint32_t generation = 0;
     if (_mutex && xSemaphoreTake(_mutex, portMAX_DELAY) == pdTRUE) {
       if (_active && WiFi.status() == WL_CONNECTED &&
-          (!_lastRequestAt || (uint32_t)(millis() - _lastRequestAt) >= 500UL)) {
+          (!_lastRequestAt || (uint32_t)(millis() - _lastRequestAt) >= _refreshIntervalMs)) {
         _lastRequestAt = millis();
         url = _url;
         w = _maxW;
@@ -225,7 +226,8 @@ void MiraCameraBmp::run() {
       xSemaphoreGive(_mutex);
     }
     if (url.length()) {
-      // Start at most one new snapshot every 500 ms (target up to ~2 fps).
+      // Target up to 4 snapshots/s: JPEG download + decode run sequentially.
+      // When a camera is offline, wait 2s before retrying instead of spamming.
       // The same FreeRTOS worker finishes HTTP download + JPEG decoding before
       // fetching again: no growing request queue, no LVGL/network blocking.
       // A camera proxy may resize dynamically. An ordinary BMP URL can ignore
@@ -235,18 +237,23 @@ void MiraCameraBmp::run() {
         url += "w=" + String(w) + "&h=" + String(h);
       }
       Frame frame;
-      if (downloadBmp(url, w, h, frame)) {
-        xSemaphoreTake(_mutex, portMAX_DELAY);
-        if (_active && generation == _generation) {
+      const bool ok = downloadBmp(url, w, h, frame);
+      xSemaphoreTake(_mutex, portMAX_DELAY);
+      if (_active && generation == _generation) {
+        _refreshIntervalMs = ok ? 250 : 2000;
+        if (ok) {
           release(_ready);
           _ready = frame;
           frame = {};
+        } else {
+          // Error cooldown starts after the failed request completes.
+          _lastRequestAt = millis();
         }
-        xSemaphoreGive(_mutex);
       }
+      xSemaphoreGive(_mutex);
       release(frame);
     }
-    vTaskDelay(pdMS_TO_TICKS(100));
+    vTaskDelay(pdMS_TO_TICKS(25));
   }
 }
 
