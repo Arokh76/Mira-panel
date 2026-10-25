@@ -1152,8 +1152,10 @@ void MiraPanelUI::registerAndCreate(JsonObject obj) {
   }
   else if (type == "camera") {
     b.type = W_CAMERA;
-    b.cameraUrl = String((const char*)(obj["value"] | ""));
-    b.cameraUrl.trim();
+    // Register as a standard Mira info command so Jeedom auto-sync creates
+    // Caméra : <name> under the specific screen's Commandes tab.
+    b.id = _server.IndexAddInfo(String("Camera_") + name, "");
+    b.cameraUrl = _server.GetCameraUrl(name);
     createCamera(idx);
   }
   else if (type == "toggle") {
@@ -1669,9 +1671,10 @@ void MiraPanelUI::openCamera(uint8_t idx) {
   lv_obj_set_style_text_font(title, &mira_font_fr_14, 0);
   lv_obj_align(title, LV_ALIGN_TOP_LEFT, 66, 12);
   _cameraOpenedAt = millis();
-  if (!_cameraFeed.start(b.cameraUrl, MIRA_DISPLAY_WIDTH,
+  const String cameraUrl = _server.GetCameraUrl(b.name);
+  if (!_cameraFeed.start(cameraUrl, MIRA_DISPLAY_WIDTH,
                           MIRA_DISPLAY_HEIGHT - 50)) {
-    lv_label_set_text(_cameraStatus, "URL camera BMP non valide");
+    lv_label_set_text(_cameraStatus, "Configurer URL dans Jeedom > Mira > Commandes");
   }
 }
 
