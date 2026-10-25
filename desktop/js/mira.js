@@ -1866,6 +1866,7 @@ function MiraDesignerSelect(block){
   if(!row) return;
   $('#mirainspectempty').hide(); $('#mirainspectfields').show();
   $('#mirainspectname').text(MiraRowName(row)); $('#mirainspecttype').text(MiraRowType(row));
+  $('#mirainspectcamera').toggle(MiraRowType(row) === 'camera');
   var min=MiraMinWidgetSize(MiraRowType(row));
   $('#mirageow').attr('min',min.w); $('#mirageoh').attr('min',min.h);
   MiraDesignerNumericDirty=false;
@@ -1947,6 +1948,11 @@ $('#mirageox,#mirageoy,#mirageow,#mirageoh').on('input',function(){
   }
 });
 $('#mirageoapply').on('click',MiraDesignerNumericChange);
+$('#mirainspectcamera').on('click',function(){
+  if(!MiraDesignerSelected) return;
+  var row=document.getElementById('miratable').rows[Number(MiraDesignerSelected.dataset.rowIndex)];
+  if(row && MiraRowType(row)==='camera') MiraOpenQuickOptions(row);
+});
 // Keep manual entry stable when tabbing among the four fields. Only apply
 // after leaving the whole group, or via Enter/Apply.
 $('#mirageox,#mirageoy,#mirageow,#mirageoh').on('focusout',function(){
