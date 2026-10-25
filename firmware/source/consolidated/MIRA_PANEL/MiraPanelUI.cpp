@@ -380,6 +380,8 @@ bool MiraPanelUI::touchStartedOnAnalogControl(uint16_t x, uint16_t y) const {
     if (obj == _brightnessSlider) return true;
     for (uint8_t i = 0; i < _bindingCount; ++i) {
       const Binding& b = _bindings[i];
+      // Media volume is a real draggable slider, not a navigation swipe.
+      if (b.type == W_MEDIA && b.mediaVolumeSlider == obj) return true;
       if (b.control != obj) continue;
       if (b.type == W_RANGE || b.type == W_ROUNDRANGE ||
           b.type == W_THERMOSTAT || b.type == W_COLOR) return true;
