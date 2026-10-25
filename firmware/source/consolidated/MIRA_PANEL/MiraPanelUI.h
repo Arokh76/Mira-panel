@@ -41,7 +41,7 @@ private:
   static constexpr uint8_t MAX_BINDINGS = 40;
   static constexpr uint8_t MAX_LIST_ITEMS = 12;
   static constexpr uint8_t MAX_EVENT_CONTEXTS = 96;
-  static constexpr uint8_t PAGE_COUNT = 5;  // 0 Accueil, 1 Lumières, 2 Températures, 3 Paramètres, 4 Énergie
+  static constexpr uint8_t PAGE_COUNT = 6;  // 0 Accueil, 1 Lumières, 2 Températures, 3 Paramètres, 4 Énergie, 5 Multimédia
   static constexpr uint8_t FAVORITE_SLOTS = 3;
   static constexpr uint8_t NAV_BUTTON_COUNT = FAVORITE_SLOTS + 1;  // + Pages
   static constexpr uint8_t NO_FAVORITE = 0xFF;
@@ -154,6 +154,7 @@ private:
   lv_obj_t* _screen = nullptr;
   lv_obj_t* _nav = nullptr;
   lv_obj_t* _pages[PAGE_COUNT] = {nullptr};
+  uint8_t _visiblePageMask = 0x3F; // home+5 pages visible on first install
   uint8_t _favoritePages[FAVORITE_SLOTS] = {0, 1, 2};  // fixed slots, 0xFF = free
   lv_obj_t* _favoriteButtons[FAVORITE_SLOTS] = {nullptr};
   lv_obj_t* _navPagesButton = nullptr;
@@ -320,6 +321,7 @@ private:
   void setNavActive(uint8_t index);
   void loadFavorites();
   void refreshFavoriteNav();
+  void refreshPagePickerVisibility();
   void pollFavorites();
   void setPagePickerVisible(bool visible);
   void buildPagePicker();
