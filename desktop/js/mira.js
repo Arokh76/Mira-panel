@@ -346,7 +346,7 @@ function MiraRowIconConfig(row){
 
 function MiraStyleOptions(type){
   if (type === 'info') return [['standard','Standard'],['value','Valeur dominante'],['compact','Compact']];
-  if (type === 'button') return [['standard','Standard'],['compact','Compact']];
+  if (type === 'button' || type === 'camera') return [['standard','Standard'],['compact','Compact']];
   if (type === 'toggle') return [['standard','Standard'],['compact','Compact']];
   if (type === 'range' || type === 'roundrange' || type === 'list') return [['standard','Standard'],['compact','Compact']];
   if (type === 'listbutton') return [['standard','Standard'],['compact','Compact'],['segmented','Segmenté']];
@@ -888,6 +888,13 @@ $("#mirabuttonajouter").on('click', function (event) {
   var miratable = document.getElementById('miratable');
   miraname=MiraSafeText(miraname).trim();
   var thermoModes=$('#mirathermomodes').val().trim() || 'Confort|Éco|Hors gel|Arrêt';
+  if (miratype === 'camera') {
+    miraval = String(miraval || '').trim();
+    if (!/^http:\/\/[^\s]+$/i.test(miraval) || /[\r\n]/.test(miraval)) {
+      alert('Caméra beta : saisir une URL HTTP BMP locale valide.');
+      return;
+    }
+  }
   if(miratype==='thermostat'){
     if(!thermoModes.split('|').some(function(v){return v.trim();})){ alert('Il faut au moins un mode thermostat.'); return; }
     miraval=String(Math.round(Number(miraval)*2)/2);
@@ -986,6 +993,10 @@ $("#miratype").on('change',function(event) {
   MiraRefreshLayoutSelector(lvgl_type, 'auto');
   MiraRefreshInfoSelectors(lvgl_type);
   $('#divmirathermomodes').toggle(lvgl_type==='thermostat');
+  $('#miracamerahelp').toggle(lvgl_type==='camera');
+  $('#miraval').attr('type', lvgl_type === 'camera' ? 'text' : 'number');
+  if(lvgl_type === 'camera') $('#miraval').attr('placeholder','http://192.168.1.x:8098/snapshot.bmp');
+  else $('#miraval').removeAttr('placeholder');
   if (lvgl_type === 'thermostat') {
     $('#miramin').val('5'); $('#miramax').val('30'); $('#miraval').val('20.5');
     $('#miraunit').val('°C'); $('#miralist').val('');
@@ -993,6 +1004,11 @@ $("#miratype").on('change',function(event) {
     $('#divmiraunit,#divmiralist').hide();
     $('#titlemiraval').text('Consigne de départ :');
     $('#titlemiramin').text('Consigne mini :');
+  } else if (lvgl_type === 'camera') {
+    $('#miramin,#miramax,#miraunit,#miralist').val('');
+    $('#miraemplacement,#divmiraname,#divmiraval,#mirabuttonajouter').show();
+    $('#divmiramin,#divmiramax,#divmiraunit,#divmiralist').hide();
+    $('#titlemiraval').text('URL image BMP :');
   } else if (lvgl_type == 'button' || lvgl_type == 'toggle' || lvgl_type == 'color' || lvgl_type == 'multiaction'){
   	$("#miramin").val('');
     $("#miramax").val('');
