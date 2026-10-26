@@ -1352,12 +1352,12 @@ function addCmdToTable(_cmd) {
       }
 
       if (_cmd.configuration.type === 'camera') {
-        tr += '<label style="display:block;margin:0 0 3px">URL caméra (image BMP)</label>' +
-          '<input type="url" class="cmdAttr form-control input-sm mira-camera-url" ' +
+        tr += '<input type="url" class="cmdAttr form-control input-sm mira-camera-url" ' +
           'data-l1key="configuration" data-l2key="camera_url" ' +
-          'placeholder="http://IP_DU_PI:8098/snapshot.bmp" maxlength="768" ' +
-          'style="width:100%;min-width:180px">' +
-          '<small>Sauvegarder l’équipement pour transmettre l’URL à l’écran.</small>';
+          'placeholder="http://IP_CAMERA/snapshot.jpg" ' +
+          'title="URL du flux image caméra (JPEG ou BMP)" ' +
+          'aria-label="URL de la caméra (JPEG ou BMP)" maxlength="768" ' +
+          'style="width:100%;min-width:180px">';
       }
       if (isMultiAction) {
         // Same sizing/alignment as the regular Jeedom command selector above.
