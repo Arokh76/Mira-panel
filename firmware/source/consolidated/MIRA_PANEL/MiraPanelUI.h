@@ -113,6 +113,9 @@ private:
     int mediaActionIds[3] = {-1, -1, -1}; // previous/playpause/next
     int mediaVolumeCmdId = -1;
     lv_obj_t* mediaVolumeSlider = nullptr;
+    lv_obj_t* mediaArtworkImage = nullptr;
+    lv_obj_t* mediaArtworkPlaceholder = nullptr;
+    uint16_t mediaArtworkSize = 0;
     int thermostatTempId = -1;
     float thermostatSetpoint = 20.0f;
     lv_obj_t* thermostatTemperatureLabel = nullptr;
@@ -191,12 +194,17 @@ private:
 
 #endif
   MiraCameraBmp _cameraFeed;
+  MiraCameraBmp _albumFeed;  // independent one-shot artwork worker
   lv_obj_t* _cameraOverlay = nullptr;
   lv_obj_t* _cameraImage = nullptr;
   lv_obj_t* _cameraStatus = nullptr;
   lv_img_dsc_t _cameraDescriptor = {};
   uint16_t* _cameraPixels = nullptr;
   uint32_t _cameraOpenedAt = 0;
+  lv_img_dsc_t _albumDescriptor = {};
+  uint16_t* _albumPixels = nullptr;
+  int16_t _albumTargetIdx = -1;
+  String _albumUrl;
 
   lv_obj_t* _dateTimeLabel = nullptr;
   lv_obj_t* _dateSubLabel = nullptr;
@@ -342,6 +350,8 @@ private:
   void createCamera(uint8_t idx);
   void createEnergy(uint8_t idx);
   void createMedia(uint8_t idx);
+  void serviceAlbumArtwork();
+  void clearAlbumArtwork();
   void updateCompositeInfo(Binding& b, uint8_t field, const String& value);
   void openCamera(uint8_t idx);
   void closeCamera();
