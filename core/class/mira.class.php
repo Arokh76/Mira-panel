@@ -252,8 +252,6 @@ class mira extends eqLogic {
     // Available destinations are the configured enabled Spotify Connect
     // equipments (not a claim of current online availability). Only display
     // a selectable list when the source can actually transfer by name.
-    $deviceList=$this->getCmd(null, 'Home__devices'); // intentionally unused: names are dynamic
-    unset($deviceList);
     foreach ($this->getCmd() as $candidate) {
       if (!preg_match('/__devices$/D',(string)$candidate->getLogicalId())) continue;
       $base=substr((string)$candidate->getLogicalId(),0,-strlen('__devices'));
@@ -261,8 +259,10 @@ class mira extends eqLogic {
       $enabled=is_object($action) && (int)$action->getConfiguration('mira_media_target_cmd',0)>0;
       $names=$enabled ? self::mediaDestinationNames() : array();
       $payload=implode('|',$names);
-      $action && $action->setConfiguration('mira_media_destination_names',$payload);
-      if (is_object($action)) $action->save();
+      if (is_object($action)) {
+        $action->setConfiguration('mira_media_destination_names',$payload);
+        $action->save();
+      }
       self::mediaPushInfo($this,$candidate,$payload);
     }
     log::add('mira','debug','[MEDIA] Auto-configuration Spotify: '.$configured.' correspondances pour '.$this->getName());
