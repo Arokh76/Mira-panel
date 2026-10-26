@@ -1550,7 +1550,21 @@ class mira extends eqLogic {
 
 
 
-class miraCmd extends cmd { 
+class miraCmd extends cmd {
+  /**
+   * Round Mira energy output only; original source commands are untouched.
+   * Non-numeric readings are forwarded verbatim, without imposing units.
+   */
+  private static function formatEnergyValue($value) {
+    $raw = trim((string)$value);
+    if (!is_numeric($raw)) return (string)$value;
+    $number = (float)$raw;
+    if (!is_finite($number)) return (string)$value;
+    $rounded = round($number, 2);
+    if ($rounded == 0.0) return '0';
+    return rtrim(rtrim(number_format($rounded, 2, '.', ''), '0'), '.');
+  }
+ 
   
   
   public function preSave() {  
@@ -1762,7 +1776,8 @@ class miraCmd extends cmd {
           if (preg_match('/__(solar|home|grid|battery|soc|soc2|soc3)$/D',(string)$nom)) {
             // Never impose a unit on energy fields: append only the unit
             // explicitly selected by the Jeedom user.
-            $display = (string)$result;
+            $formattedResult = self::formatEnergyValue($result);
+            $display = $formattedResult;
             $unit = trim((string)$this->getUnite());
             if ($unit !== '' && !preg_match('/'.preg_quote($unit,'/').'\\s*$/u',trim($display)))
               $display .= ' ' . $unit;
@@ -1773,7 +1788,8 @@ class miraCmd extends cmd {
             curl_setopt_array($ch,array(CURLOPT_RETURNTRANSFER=>true,
                    CURLOPT_CONNECTTIMEOUT=>2,CURLOPT_TIMEOUT=>4));
             curl_exec($ch); curl_close($ch);
-            return $result;
+            // The Mira cached value is also rounded; source is unchanged.
+            return $formattedResult;
           }
           $url = 'http://'. $eqLogic->getConfiguration('adresseip') . '/updatenr?key=' . $eqLogic->getConfiguration('password') . '&info=' . $cmd .'&value='.$result; 
           log::add('mira', 'debug', $eqLogic->getName().': INFO: info: ' . $nom .": ".$url);

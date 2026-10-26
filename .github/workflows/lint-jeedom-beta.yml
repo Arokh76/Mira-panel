@@ -32,6 +32,8 @@ jobs:
         run: node --check desktop/js/mira.js
       - name: Regression test composite widget autosync
         run: php tests/test_autosync_composite.php
+      - name: Check energy numeric formatting
+        run: php tests/test_energy_precision.php
       - name: Verify native Multimedia page and Spotify mapping
         shell: bash
         run: |
