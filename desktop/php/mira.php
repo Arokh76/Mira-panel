@@ -426,12 +426,12 @@ log::add('mira', 'debug', "Lancement script");
                                 <select class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="media_source_eqid" id="miraMediaSourceEq">
                                   <option value="">{{Configuration manuelle}}</option>
                                   <?php
-                                  foreach (eqLogic::byType('spotify') as $miraSpotifyEq) {
+                                  foreach ((array)eqLogic::byType('spotify') as $miraSpotifyEq) {
                                     echo '<option value="'.(int)$miraSpotifyEq->getId().'">'
                                         .htmlspecialchars('Spotify · '.$miraSpotifyEq->getHumanName(),ENT_QUOTES,'UTF-8')
                                         .'</option>';
                                   }
-                                  foreach (eqLogic::byType('spotifyconnect') as $miraSpotifyEq) {
+                                  foreach (array_merge((array)eqLogic::byType('spotifyconnect'),(array)eqLogic::byType('spotifyConnect')) as $miraSpotifyEq) {
                                     echo '<option value="'.(int)$miraSpotifyEq->getId().'">'
                                         .htmlspecialchars('Spotify Connect · '.$miraSpotifyEq->getHumanName(),ENT_QUOTES,'UTF-8')
                                         .'</option>';
