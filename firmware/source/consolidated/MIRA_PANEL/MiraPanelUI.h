@@ -110,7 +110,9 @@ private:
     lv_obj_t* energyExtraGauges[2] = {nullptr, nullptr};
     bool energyExtraActive[2] = {false, false};
     int energyBaseHeight = 0;
-    int mediaActionIds[3] = {-1, -1, -1}; // previous/playpause/next
+    int mediaActionIds[3] = {-1, -1, -1}; // previous/play/next
+    int mediaPauseCmdId = -1;          // separate Pause Jeedom action
+    bool mediaPlaybackPlaying = false; // last accepted state or local button intent
     int mediaVolumeCmdId = -1;
     int mediaDeviceCmdId = -1;
     lv_obj_t* mediaDeviceDropdown = nullptr;
