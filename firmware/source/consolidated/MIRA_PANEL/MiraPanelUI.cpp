@@ -42,7 +42,7 @@ static const char* const MIRA_ENERGY_FIELDS[7] = {"solar", "home", "grid", "batt
 static const char* const MIRA_MEDIA_FIELDS[9] =
     {"title", "artist", "album", "state", "progress", "volume", "cover", "device", "devices"};
 static const char* const MIRA_MEDIA_ACTIONS[3] =
-    {"previous", "playpause", "next"};
+    {"previous", "play", "next"};
 
 // Automatic widget grid from screen geometry, without affecting free layout.
 // 800px page - 12px margins = 788px; 4*192+3*6 = 2*390+6 = 786px.
@@ -1283,6 +1283,10 @@ void MiraPanelUI::registerAndCreate(JsonObject obj) {
                                                  i == 4 || i == 5 ? "%" : "");
     for (uint8_t i = 0; i < 3; ++i)
       b.mediaActionIds[i] = _server.IndexAddButton(name + "__" + MIRA_MEDIA_ACTIONS[i]);
+    // The one central touchscreen control dispatches TWO genuine Jeedom
+    // actions. No "Playing" Info is required by Spotify Connect.
+    b.mediaPauseCmdId = _server.IndexAddButton(name + "__pause");
+    b.mediaPlaybackPlaying = false;
     b.mediaVolumeCmdId = _server.IndexAddRange(name + "__volume_cmd", 0, 100, 40);
     b.mediaDeviceCmdId = _server.IndexAddRange(name + "__device_cmd", 0, 11, 0);
     createMedia(idx);
@@ -2036,8 +2040,14 @@ void MiraPanelUI::updateCompositeInfo(Binding& b, uint8_t field, const String& r
     const bool playing = (state == "playing" || state == "lecture" ||
                           state == "play" || state == "1" || state == "on" ||
                           state == "true" || state == "en lecture");
-    if (b.stateLabel) lv_label_set_text(b.stateLabel,
-                                        playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
+    const bool paused = (state == "paused" || state == "pause" ||
+                         state == "0" || state == "off" ||
+                         state == "false" || state == "en pause" ||
+                         state == "stopped" || state == "arrêt");
+    if (!playing && !paused) return; // Ignore missing/unknown status.
+    b.mediaPlaybackPlaying = playing;
+    if (b.stateLabel)
+      lv_label_set_text(b.stateLabel, playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
     text = playing ? "En lecture" : "En pause";
   } else if (field == 4 || field == 5) {
     if (field == 4) {
@@ -3590,11 +3600,31 @@ void MiraPanelUI::onMediaAction(lv_event_t* e) {
   Binding& b = ui._bindings[ctx->bindingIndex];
   if (b.type != W_MEDIA) return;
   const uint8_t action = (uint8_t)ctx->itemIndex;
-  if (b.mediaActionIds[action] < 0) return;
+  int cmdId = b.mediaActionIds[action];
+  String suffix = MIRA_MEDIA_ACTIONS[action];
+  if (action == 1) {
+    // Optimistic fallback when Spotify Connect has no Playing Info.
+    // Next press chooses the opposite independent Jeedom action.
+    const bool sendPause = b.mediaPlaybackPlaying;
+    if (sendPause) {
+      cmdId = b.mediaPauseCmdId;
+      suffix = "pause";
+    }
+  }
+  if (cmdId < 0) return;
   ui.noteActivity();
-  ui._server.IndexSetEvent(b.mediaActionIds[action]);
+  ui._server.IndexSetEvent(cmdId);
   if (ui._mqtt && ui._mqtt->enabled())
-    ui._mqtt->publishAction(b.name + "__" + MIRA_MEDIA_ACTIONS[action], "1");
+    ui._mqtt->publishAction(b.name + "__" + suffix, "1");
+  if (action == 1) {
+    b.mediaPlaybackPlaying = !b.mediaPlaybackPlaying;
+    if (b.stateLabel)
+      lv_label_set_text(b.stateLabel,
+                        b.mediaPlaybackPlaying ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
+    if (b.compositeLabels[3])
+      lv_label_set_text(b.compositeLabels[3],
+                        b.mediaPlaybackPlaying ? "Lecture demandée" : "Pause demandée");
+  }
 }
 
 void MiraPanelUI::onMediaDeviceSelected(lv_event_t* e) {
