@@ -82,7 +82,8 @@ log::add('mira', 'debug', "Lancement script");
                           <option value="accueil">Accueil</option>
                           <option value="temperatures">Températures</option>
                           <option value="lumieres">Lumières</option>
-                          <option value="energie">Énergie</option>                        
+                          <option value="energie">Énergie</option>
+                          <option value="multimedia">Multimédia</option>                        
     					</select>
                       </span>                        
                       <div class="mirainputzone"> 
@@ -144,6 +145,7 @@ log::add('mira', 'debug', "Lancement script");
                           <button type="button" class="mira-page-tab" data-page="lumieres">Lumières</button>
                           <button type="button" class="mira-page-tab" data-page="temperatures">Températures</button>
                           <button type="button" class="mira-page-tab" data-page="energie">Énergie</button>
+                          <button type="button" class="mira-page-tab" data-page="multimedia">Multimédia</button>
                         </div>
                         <div class="mira-designer-actions">
                           <button type="button" id="miradesignergrid" class="btn btn-sm btn-default active" title="Aimantation sur la grille"><i class="fas fa-th"></i> Grille</button>
@@ -390,6 +392,7 @@ log::add('mira', 'debug', "Lancement script");
                                 '1' => 'Lumières',
                                 '2' => 'Températures',
                                 '4' => 'Énergie',
+                                '5' => 'Multimédia',
                                 '3' => 'Paramètres',
                                 '255' => 'Aucun'
                             );
@@ -404,6 +407,41 @@ log::add('mira', 'debug', "Lancement script");
                                 echo '</select></div></div>';
                             }
                             ?>
+                            <legend><i class="fas fa-eye"></i> {{Pages affichées}}</legend>
+                            <p class="help-block" style="margin-left:10px;">{{Masquer une page la retire du menu Pages et empêche de la sélectionner depuis les favoris. Aucun widget ni aucune configuration ne sera supprimé. Accueil reste toujours disponible.}}</p>
+                            <?php
+                            foreach (array('1'=>'Lumières','2'=>'Températures','3'=>'Paramètres',
+                                           '4'=>'Énergie','5'=>'Multimédia') as $miraPageId=>$miraPageName) {
+                                echo '<div class="form-group">';
+                                echo '<label class="col-sm-4 control-label">'.htmlspecialchars($miraPageName,ENT_QUOTES,'UTF-8').'</label>';
+                                echo '<div class="col-sm-6">';
+                                echo '<label class="checkbox-inline"><input type="checkbox" value="1" class="eqLogicAttr" data-l1key="configuration" data-l2key="nav_show'.$miraPageId.'" checked> {{Afficher dans Mira}}</label>';
+                                echo '</div></div>';
+                            }
+                            ?>
+                            <legend><i class="fab fa-spotify"></i> {{Lecteur multimédia}}</legend>
+                            <div class="form-group">
+                              <label class="col-sm-4 control-label">{{Lecteur Jeedom à associer}}</label>
+                              <div class="col-sm-6">
+                                <select class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="media_source_eqid" id="miraMediaSourceEq">
+                                  <option value="">{{Configuration manuelle}}</option>
+                                  <?php
+                                  foreach (eqLogic::byType('spotify') as $miraSpotifyEq) {
+                                    echo '<option value="'.(int)$miraSpotifyEq->getId().'">'
+                                        .htmlspecialchars('Spotify · '.$miraSpotifyEq->getHumanName(),ENT_QUOTES,'UTF-8')
+                                        .'</option>';
+                                  }
+                                  foreach (eqLogic::byType('spotifyconnect') as $miraSpotifyEq) {
+                                    echo '<option value="'.(int)$miraSpotifyEq->getId().'">'
+                                        .htmlspecialchars('Spotify Connect · '.$miraSpotifyEq->getHumanName(),ENT_QUOTES,'UTF-8')
+                                        .'</option>';
+                                  }
+                                  ?>
+                                </select>
+                                <small class="help-block">{{Sélectionnez votre équipement Spotify : Mira reliera les informations et commandes reconnues, sans avoir à renseigner chaque champ. Les commandes non trouvées restent configurables manuellement.}}</small>
+                              </div>
+                            </div>
+
                             <div class="form-group">
                                 <div class="col-sm-8 col-sm-offset-4">
                                     <button type="button" id="miraSyncFavorites" class="btn btn-default btn-sm">
