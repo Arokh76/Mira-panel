@@ -102,9 +102,14 @@ private:
     // Composite widgets: ordinary indexed Jeedom Info and action commands.
     // Energy: solar/home/grid/battery power + battery SoC.
     // Media: title/artist/album/state/progress + volume.
-    int compositeIds[6] = {-1, -1, -1, -1, -1, -1};
-    lv_obj_t* compositeLabels[6] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+    // 7 energy fields (4 powers + up to 3 SoCs); 6 multimedia fields.
+    int compositeIds[7] = {-1, -1, -1, -1, -1, -1, -1};
+    lv_obj_t* compositeLabels[7] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
     lv_obj_t* compositeGauge = nullptr;
+    lv_obj_t* energyExtraNames[2] = {nullptr, nullptr};
+    lv_obj_t* energyExtraGauges[2] = {nullptr, nullptr};
+    bool energyExtraActive[2] = {false, false};
+    int energyBaseHeight = 0;
     int mediaActionIds[3] = {-1, -1, -1}; // previous/playpause/next
     int mediaVolumeCmdId = -1;
     lv_obj_t* mediaVolumeSlider = nullptr;
