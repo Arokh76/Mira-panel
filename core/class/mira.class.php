@@ -153,6 +153,11 @@ class mira extends eqLogic {
       'title'=>array('Item Title','Titre','Piste','Track Name','Title'),
       'artist'=>array('Item Artist','Artiste','Artist','Interprète'),
       'album'=>array('Item Album','Album'),
+      // Depending on the installed Spotify/Spotify Connect plugin the cover
+      // URL can be called Image, Artwork, Cover or Pochette.
+      'cover'=>array('Item Image','Item Artwork','Album Image','Album Artwork',
+         'Album Art','Cover Art','Cover URL','Image URL','Artwork URL',
+         'Cover','Artwork','Pochette','Image','Album Cover','Jaquette'),
       'state'=>array('Playing','En lecture','Statut lecture','État lecture','Lecture en cours'),
       'volume'=>array('Device Volume','Volume','Volume statut','Niveau volume'),
       'progress'=>array('Progression','Position pourcent','Progress','Track progress')
@@ -186,7 +191,7 @@ class mira extends eqLogic {
     foreach ($this->getCmd() as $target) {
       if (!is_object($target)) continue;
       $id = (string)$target->getLogicalId();
-      if (!preg_match('/__(title|artist|album|state|progress|volume|previous|playpause|next|volume_cmd)$/D',$id,$match)) continue;
+      if (!preg_match('/__(title|artist|album|cover|state|progress|volume|previous|playpause|next|volume_cmd)$/D',$id,$match)) continue;
       $field = $match[1];
       if ($target->getType()==='info' && isset($mapped[$field])) {
         $target->setConfiguration('mira_media_source_cmd',(string)$mapped[$field]->getId());
@@ -672,8 +677,9 @@ class mira extends eqLogic {
                       $info->setUnite($unite);
                     if (preg_match('/__soc([23])$/D',(string)$name,$miraSocNumber) && $info->getName()===(string)$name)
                       $info->setName('SoC batterie '.$miraSocNumber[1]);
-                    if (preg_match('/__(title|artist|album|state|progress|volume)$/D',(string)$name,$miraMediaField)) {
+                    if (preg_match('/__(title|artist|album|cover|state|progress|volume)$/D',(string)$name,$miraMediaField)) {
                       $names=array('title'=>'Titre','artist'=>'Artiste','album'=>'Album',
+                                   'cover'=>'Pochette',
                                    'state'=>'État de lecture','progress'=>'Progression',
                                    'volume'=>'Volume');
                       if ($info->getName() === (string)$name) $info->setName($names[$miraMediaField[1]]);
