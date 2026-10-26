@@ -1869,27 +1869,37 @@ void MiraPanelUI::createMedia(uint8_t idx) {
     if (i == 1) b.stateLabel = glyph;
   }
 
+  // Center volume icon, slider track and value on one horizontal baseline.
+  // Keep the original 0..100 Jeedom range action and LV_EVENT_RELEASED.
   const int volY = wide ? 468 : (mini ? 279 : 344);
-  miraCompositeLabel(b.card, LV_SYMBOL_VOLUME_MAX, pad, volY + 2, 28,
-                     &lv_font_montserrat_20, colorAccent());
+  const int volCenterY = volY + 13;
+  const int volIconW = 26;
+  const int volValueW = mini ? 45 : 49;
+  const int volSliderX = pad + volIconW + 12;
+  const int volSliderW = W - 2 * pad - volIconW - 12 - volValueW - 9;
+  const int volSliderH = wide ? 18 : 16;
+  miraCompositeLabel(b.card, LV_SYMBOL_VOLUME_MAX, pad, volCenterY - 12,
+                     volIconW, &lv_font_montserrat_20, colorAccent());
   b.compositeLabels[5] = miraCompositeLabel(
-      b.card, "-- %", W - pad - 49, volY + 7, 48,
-      &mira_font_fr_12, COL_TEXT, LV_TEXT_ALIGN_RIGHT);
+      b.card, "-- %", W - pad - volValueW, volCenterY - 9,
+      volValueW, &mira_font_fr_14, COL_TEXT, LV_TEXT_ALIGN_RIGHT);
   b.mediaVolumeSlider = lv_slider_create(b.card);
-  lv_obj_set_pos(b.mediaVolumeSlider, pad + 35, volY + 5);
-  lv_obj_set_size(b.mediaVolumeSlider, W - 2 * pad - 92, 9);
+  lv_obj_set_pos(b.mediaVolumeSlider, volSliderX, volCenterY - volSliderH / 2);
+  lv_obj_set_size(b.mediaVolumeSlider, volSliderW, volSliderH);
   lv_slider_set_range(b.mediaVolumeSlider, 0, 100);
   lv_slider_set_value(b.mediaVolumeSlider, 40, LV_ANIM_OFF);
-  lv_obj_set_style_bg_color(b.mediaVolumeSlider, colorPanel2(), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(b.mediaVolumeSlider, lv_color_hex(0x244563), LV_PART_MAIN);
+  lv_obj_set_style_radius(b.mediaVolumeSlider, LV_RADIUS_CIRCLE, LV_PART_MAIN);
   lv_obj_set_style_bg_color(b.mediaVolumeSlider, colorAccent(), LV_PART_INDICATOR);
+  lv_obj_set_style_radius(b.mediaVolumeSlider, LV_RADIUS_CIRCLE, LV_PART_INDICATOR);
   lv_obj_set_style_bg_color(b.mediaVolumeSlider, COL_TEXT, LV_PART_KNOB);
-  lv_obj_set_style_pad_all(b.mediaVolumeSlider, 0, LV_PART_KNOB);
-  lv_obj_set_ext_click_area(b.mediaVolumeSlider, 12);
+  lv_obj_set_style_pad_all(b.mediaVolumeSlider, 3, LV_PART_KNOB);
+  lv_obj_set_ext_click_area(b.mediaVolumeSlider, 13);
   lv_obj_add_event_cb(b.mediaVolumeSlider, onMediaVolume,
                       LV_EVENT_RELEASED, makeContext(idx));
 
-  // The sole speaker picker is BELOW the unchanged volume control.
-  const int dropY = wide ? 506 : (mini ? 318 : 374);
+  // Speaker menu directly below volume, aligned to the card's outer edges.
+  const int dropY = wide ? 508 : (mini ? 320 : 377);
   b.mediaDeviceDropdown = lv_dropdown_create(b.card);
   lv_obj_set_pos(b.mediaDeviceDropdown, pad, dropY);
   lv_obj_set_size(b.mediaDeviceDropdown, W - 2 * pad, wide ? 42 : (mini ? 36 : 35));
