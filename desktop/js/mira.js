@@ -1572,7 +1572,7 @@ function MiraDefaultWidgetSize(type){
   var W=MiraDisplayInfo.contentWidth || MiraDisplayInfo.width || 320;
   if(type==='thermostat') return {w:W>=800?786:304,h:W>=800?310:405};
   if(type==='energy') return {w:W>=800?786:W<=240?224:304,h:W<=240?294:353};
-  if(type==='media') return {w:W>=800?786:W<=240?224:304,h:W<=240?288:350};
+  if(type==='media') return {w:W>=800?786:W<=240?224:304,h:W>=800?558:W<=240?368:417};
   if(type==='datetime') return {w:Math.max(120,W-16),h:82};
   if(type==='info') return {w:Math.max(90,Math.floor((W-22)/2)),h:66};
   if(type==='toggle') return {w:Math.max(160,W-16),h:54};
