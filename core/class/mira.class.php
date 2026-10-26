@@ -438,7 +438,8 @@ class mira extends eqLogic {
                   $target->getConfiguration('type')==='info') {
           // execute() here evaluates a passive Info only and forwards its
           // value; never touch toggle/list/range/action or hardware controls.
-          $target->execute();
+          $value=$target->execute();
+          if ($value!==null && is_scalar($value)) $target->event((string)$value);
           $count++;
         }
       } catch (Throwable $e) {
@@ -2233,7 +2234,9 @@ class miraCmd extends cmd {
                 if ($mapped->getSubType()!=='message') return false;
                 $mapped->execCmd(array('title'=>$list[$index],'message'=>$list[$index]));
               } else if ($field==='volume_cmd') {
-                $level=$_options['slider']??null;
+                // The Jeedom API forwards touchscreen range values via "value"
+                // on some installations. Direct UI actions use "slider".
+                $level=$_options['slider']??($_options['value']??null);
                 if ($level===null) {
                   // A touchscreen action is an ID; fetch the slider value
                   // from the latest ESP32 index, not an assumed percentage.
@@ -2246,12 +2249,21 @@ class miraCmd extends cmd {
                     }
                   }
                 }
-                if (!is_numeric($level)) return false;
+                if (!is_numeric($level)) {
+                  log::add('mira','warning','[MEDIA] Volume non envoyé : valeur absente pour '.$mediaName);
+                  return false;
+                }
                 $level=max(0,min(100,(int)$level));
-                if ($mapped->getSubType()==='slider') $mapped->execCmd(array('slider'=>$level));
-                else if ($mapped->getSubType()==='message')
+                $subtype=(string)$mapped->getSubType();
+                log::add('mira','debug','[MEDIA] Volume '.$level.' % -> '.
+                  (string)$mapped->getName().' (#'.$targetId.', '.$subtype.')');
+                if ($subtype==='slider') $mapped->execCmd(array('slider'=>$level));
+                else if ($subtype==='message')
                   $mapped->execCmd(array('title'=>(string)$level,'message'=>(string)$level));
-                else return false;
+                else {
+                  log::add('mira','warning','[MEDIA] Volume : type de commande non compatible '.$subtype);
+                  return false;
+                }
               } else $mapped->execCmd();
               return true;
             }
