@@ -85,13 +85,13 @@ try {
                     continue;
                 }
                 if ($type === 'media') {
-                    // Media player: six passive Info values, three touch buttons
+                    // Media player: nine passive Infos and four Jeedom actions for three touch buttons
                     // and one volume Range. Compare the EXACT signatures:
                     // an old index must never be accepted after reprogramming.
                     foreach (array('title', 'artist', 'album', 'state', 'progress', 'volume', 'cover', 'device', 'devices') as $field) {
                         $expectedSignatures[] = 'info|' . $name . '__' . $field;
                     }
-                    foreach (array('previous', 'playpause', 'next') as $action) {
+                    foreach (array('previous', 'play', 'pause', 'next') as $action) {
                         $expectedSignatures[] = 'button|' . $name . '__' . $action;
                     }
                     $expectedSignatures[] = 'range|' . $name . '__volume_cmd';
