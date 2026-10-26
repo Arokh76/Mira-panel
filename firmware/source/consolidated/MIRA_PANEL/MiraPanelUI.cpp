@@ -1272,8 +1272,7 @@ void MiraPanelUI::registerAndCreate(JsonObject obj) {
   else if (type == "energy") {
     b.type = W_ENERGY;
     for (uint8_t i = 0; i < 5; ++i)
-      b.compositeIds[i] = _server.IndexAddInfo(name + "__" + MIRA_ENERGY_FIELDS[i],
-                                                 i == 4 ? "%" : "W");
+      b.compositeIds[i] = _server.IndexAddInfo(name + "__" + MIRA_ENERGY_FIELDS[i], "");
     createEnergy(idx);
   }
   else if (type == "media") {
@@ -1715,7 +1714,7 @@ void MiraPanelUI::createEnergy(uint8_t idx) {
   miraCompositeLabel(b.card, "STOCKAGE", pad + 3, sectionY,
                      W - 2 * pad, &mira_font_fr_14, COL_MUTED);
   b.compositeLabels[4] = miraCompositeLabel(
-      b.card, "-- %", W - pad - (mini ? 58 : 72), sectionY - 1,
+      b.card, "--", W - pad - (mini ? 58 : 72), sectionY - 1,
       mini ? 55 : 70, infoFont, COL_GREEN, LV_TEXT_ALIGN_RIGHT);
   b.compositeGauge = lv_bar_create(b.card);
   lv_obj_set_pos(b.compositeGauge, pad + 3, sectionY + (mini ? 29 : 32));
@@ -1846,13 +1845,19 @@ void MiraPanelUI::updateCompositeInfo(Binding& b, uint8_t field, const String& r
   if (!text.length()) text = "--";
   if (b.type == W_ENERGY) {
     if (field >= 5) return;
-    if (text != "--" && text.indexOf('%') < 0 && field == 4) text += " %";
-    if (text != "--" && field < 4 &&
-        text.indexOf('W') < 0 && text.indexOf('w') < 0) text += " W";
+    // No hard-coded unit. Jeedom or MQTT may supply W, kW, kWh, A, %, etc.
+    // Values without units are rendered without any added suffix.
     if (b.compositeLabels[field])
       lv_label_set_text(b.compositeLabels[field], text.c_str());
-    if (field == 4 && b.compositeGauge)
-      lv_bar_set_value(b.compositeGauge, clampInt(raw.toInt(), 0, 100), LV_ANIM_OFF);
+    // SoC is a numeric gauge only when the selected Jeedom reading is
+    // actually a percentage. For a differently configured unit, leave
+    // the gauge empty; always show the source value unchanged above it.
+    if (field == 4 && b.compositeGauge) {
+      const String trimmed = raw;
+      const bool numeric = trimmed.length() > 0 && (isDigit(trimmed[0]) || trimmed[0] == '-');
+      lv_bar_set_value(b.compositeGauge,
+          numeric ? clampInt(trimmed.toInt(), 0, 100) : 0, LV_ANIM_OFF);
+    }
     return;
   }
   if (b.type != W_MEDIA || field >= 6) return;
