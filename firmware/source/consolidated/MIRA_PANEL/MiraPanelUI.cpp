@@ -39,8 +39,8 @@ static const lv_color_t COL_RED     = lv_color_hex(0xE36A6A);
 // Composite widgets reuse existing Jeedom index types: Info, Button, Range.
 // No special plugin-to-ESP transport and no commands during initial drawing.
 static const char* const MIRA_ENERGY_FIELDS[7] = {"solar", "home", "grid", "battery", "soc", "soc2", "soc3"};
-static const char* const MIRA_MEDIA_FIELDS[6] =
-    {"title", "artist", "album", "state", "progress", "volume"};
+static const char* const MIRA_MEDIA_FIELDS[7] =
+    {"title", "artist", "album", "state", "progress", "volume", "cover"};
 static const char* const MIRA_MEDIA_ACTIONS[3] =
     {"previous", "playpause", "next"};
 
@@ -555,7 +555,7 @@ void MiraPanelUI::handleMqttState(const String& topic, const String& rawPayload)
   for (uint8_t i = 0; i < _bindingCount; ++i) {
     Binding& b = _bindings[i];
     if (b.type != W_ENERGY && b.type != W_MEDIA) continue;
-    const uint8_t fields = b.type == W_ENERGY ? 7 : 6;
+    const uint8_t fields = 7;
     for (uint8_t f = 0; f < fields; ++f) {
       const char* suffix = b.type == W_ENERGY ? MIRA_ENERGY_FIELDS[f] : MIRA_MEDIA_FIELDS[f];
       if (key != normalizeMqttTopicName(b.name + "__" + suffix)) continue;
@@ -1025,6 +1025,7 @@ void MiraPanelUI::makeNameLabel(lv_obj_t* parent, const String& text) {
 }
 
 void MiraPanelUI::clearDynamicPages() {
+  clearAlbumArtwork();
   closeCamera(); // never keep a camera request alive after Jeedom reprograms pages
 #if defined(MIRA_TARGET_WAVESHARE_43C)
   resetScrollCache(); // release images and PSRAM BEFORE deleting cards
@@ -1277,7 +1278,7 @@ void MiraPanelUI::registerAndCreate(JsonObject obj) {
   }
   else if (type == "media") {
     b.type = W_MEDIA;
-    for (uint8_t i = 0; i < 6; ++i)
+    for (uint8_t i = 0; i < 7; ++i)
       b.compositeIds[i] = _server.IndexAddInfo(name + "__" + MIRA_MEDIA_FIELDS[i],
                                                  i == 4 || i == 5 ? "%" : "");
     for (uint8_t i = 0; i < 3; ++i)
@@ -1789,9 +1790,14 @@ void MiraPanelUI::createMedia(uint8_t idx) {
   lv_obj_set_style_pad_all(art, 0, 0);
   lv_obj_clear_flag(art, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_clear_flag(art, LV_OBJ_FLAG_SCROLLABLE);
-  miraCompositeLabel(art, LV_SYMBOL_AUDIO, 0, mini ? 16 : 25,
-                     artW, &lv_font_montserrat_28,
+  b.mediaArtworkSize = artW;
+  b.mediaArtworkPlaceholder = miraCompositeLabel(art, LV_SYMBOL_AUDIO,
+                     0, mini ? 16 : 25, artW, &lv_font_montserrat_28,
                      colorAccent(), LV_TEXT_ALIGN_CENTER);
+  b.mediaArtworkImage = lv_img_create(art);
+  lv_obj_align(b.mediaArtworkImage, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_add_flag(b.mediaArtworkImage, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_clear_flag(b.mediaArtworkImage, LV_OBJ_FLAG_CLICKABLE);
 
   const int tx = pad + artW + 11;
   const int tw = W - tx - pad - 3;
@@ -1916,7 +1922,24 @@ void MiraPanelUI::updateCompositeInfo(Binding& b, uint8_t field, const String& r
     }
     return;
   }
-  if (b.type != W_MEDIA || field >= 6) return;
+  if (b.type != W_MEDIA || field >= 7) return;
+  if (field == 6) {
+    // Optional cover URL; Spotify CDN only. A media Info must never trigger
+    // an arbitrary device/LAN HTTP request or leak Jeedom credentials.
+    String url = raw;
+    url.trim();
+    if (url == _albumUrl) return;
+    clearAlbumArtwork();
+    const bool safe = url.startsWith("https://i.scdn.co/image/") ||
+                      url.startsWith("https://mosaic.scdn.co/");
+    if (!safe || url.length() > 768) return;
+    _albumTargetIdx = (int16_t)(&b - _bindings);
+    _albumUrl = url;
+    if (!_albumFeed.start(url,b.mediaArtworkSize,b.mediaArtworkSize,true)) {
+      clearAlbumArtwork();
+    }
+    return;
+  }
   if (field == 3) {
     String state = raw; state.toLowerCase(); state.trim();
     const bool playing = (state == "playing" || state == "lecture" ||
@@ -1953,6 +1976,57 @@ void MiraPanelUI::updateCompositeInfo(Binding& b, uint8_t field, const String& r
   }
   if (b.compositeLabels[field])
     lv_label_set_text(b.compositeLabels[field], text.c_str());
+}
+
+void MiraPanelUI::clearAlbumArtwork() {
+  _albumFeed.stop();
+  if (_albumTargetIdx >= 0 && _albumTargetIdx < _bindingCount) {
+    Binding& old = _bindings[_albumTargetIdx];
+    if (old.mediaArtworkImage) {
+      lv_img_set_src(old.mediaArtworkImage, nullptr);
+      lv_obj_add_flag(old.mediaArtworkImage, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (old.mediaArtworkPlaceholder)
+      lv_obj_clear_flag(old.mediaArtworkPlaceholder, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (_albumPixels) heap_caps_free(_albumPixels);
+  _albumPixels = nullptr;
+  _albumDescriptor = {};
+  _albumUrl = "";
+  _albumTargetIdx = -1;
+}
+
+void MiraPanelUI::serviceAlbumArtwork() {
+  MiraCameraBmp::Frame frame;
+  if (!_albumFeed.take(frame)) return;
+  if (_albumTargetIdx < 0 || _albumTargetIdx >= _bindingCount ||
+      !_bindings[_albumTargetIdx].mediaArtworkImage || !frame.pixels ||
+      !frame.width || !frame.height) {
+    if (frame.pixels) heap_caps_free(frame.pixels);
+    return;
+  }
+  Binding& b = _bindings[_albumTargetIdx];
+  if (_albumPixels) heap_caps_free(_albumPixels);
+  _albumPixels = frame.pixels;
+  _albumDescriptor = {};
+  _albumDescriptor.header.always_zero = 0;
+  _albumDescriptor.header.cf = LV_IMG_CF_TRUE_COLOR;
+  _albumDescriptor.header.w = frame.width;
+  _albumDescriptor.header.h = frame.height;
+  _albumDescriptor.data_size = uint32_t(frame.width) * frame.height * 2;
+  _albumDescriptor.data = reinterpret_cast<const uint8_t*>(_albumPixels);
+  lv_img_set_src(b.mediaArtworkImage, &_albumDescriptor);
+  // JPEGDEC reduces large covers to an integer scale; fit the thumbnail.
+  const uint32_t zoomW = (uint32_t(b.mediaArtworkSize) * 256U) / frame.width;
+  const uint32_t zoomH = (uint32_t(b.mediaArtworkSize) * 256U) / frame.height;
+  uint32_t zoom = zoomW < zoomH ? zoomW : zoomH;
+  if (zoom > 2048) zoom = 2048;
+  if (zoom < 1) zoom = 1;
+  lv_img_set_zoom(b.mediaArtworkImage, (uint16_t)zoom);
+  lv_obj_align(b.mediaArtworkImage, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_clear_flag(b.mediaArtworkImage, LV_OBJ_FLAG_HIDDEN);
+  if (b.mediaArtworkPlaceholder)
+    lv_obj_add_flag(b.mediaArtworkPlaceholder, LV_OBJ_FLAG_HIDDEN);
 }
 
 // Same compact action row as ordinary Mira buttons. No thumbnail, no
@@ -3862,7 +3936,7 @@ void MiraPanelUI::updateBindingFromServer(uint8_t idx, int eventId) {
   Binding& b = _bindings[idx];
 
   if (b.type == W_ENERGY || b.type == W_MEDIA) {
-    const uint8_t count = b.type == W_ENERGY ? 7 : 6;
+    const uint8_t count = 7;
     for (uint8_t f = 0; f < count; ++f) {
       if (b.compositeIds[f] != eventId) continue;
       updateCompositeInfo(b, f, _server.IndexGetInfo(eventId));
@@ -4312,6 +4386,7 @@ void MiraPanelUI::loop() {
 
   pollFavorites();
   serviceCamera();
+  serviceAlbumArtwork();
 
   // Multi-actions on the screen: same timings as the physical contact.
   // A single click waits briefly to distinguish a double or triple click.
