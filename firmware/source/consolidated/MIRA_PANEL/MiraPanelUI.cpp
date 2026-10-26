@@ -1864,14 +1864,30 @@ void MiraPanelUI::updateCompositeInfo(Binding& b, uint8_t field, const String& r
   if (field == 3) {
     String state = raw; state.toLowerCase(); state.trim();
     const bool playing = (state == "playing" || state == "lecture" ||
-                          state == "play" || state == "1" || state == "on");
+                          state == "play" || state == "1" || state == "on" ||
+                          state == "true" || state == "en lecture");
     if (b.stateLabel) lv_label_set_text(b.stateLabel,
                                         playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
     text = playing ? "En lecture" : "En pause";
   } else if (field == 4 || field == 5) {
+    if (field == 4) {
+      // A Spotify track name/duration is NOT a percentage. Ignore stale
+      // mappings rather than displaying nonsense like "Blue Sky %".
+      bool numeric = raw.length() > 0;
+      for (size_t i = 0; i < raw.length(); ++i) {
+        const char ch = raw[i];
+        if (!isDigit(ch) && ch != '.' && ch != ',' && ch != ' ') {
+          numeric = false; break;
+        }
+      }
+      if (!numeric || raw.toFloat() < 0 || raw.toFloat() > 100) {
+        text = "--";
+      }
+    }
     if (text != "--" && text.indexOf('%') < 0) text += " %";
     if (field == 4 && b.compositeGauge)
-      lv_bar_set_value(b.compositeGauge, clampInt(raw.toInt(), 0, 100), LV_ANIM_OFF);
+      lv_bar_set_value(b.compositeGauge,
+          text == "--" ? 0 : clampInt(raw.toInt(), 0, 100), LV_ANIM_OFF);
     if (field == 5 && b.mediaVolumeSlider) {
       _suppressEvents = true;
       lv_slider_set_value(b.mediaVolumeSlider, clampInt(raw.toInt(), 0, 100),
