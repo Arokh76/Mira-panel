@@ -619,7 +619,16 @@ class mira extends eqLogic {
                   	$info->setOrder($ordre);
           			$ordre++;
           			$info->setConfiguration('commande',$cmd_id);
-                    $info->setUnite($unite);                  
+                    // L'unité Énergie appartient à Jeedom : ne jamais la
+                    // remplacer par une valeur imposée depuis le firmware.
+                    if ($unite !== '' || !preg_match('/__(solar|home|grid|battery|soc)$/D',(string)$name))
+                      $info->setUnite($unite);
+                    if (preg_match('/__(title|artist|album|state|progress|volume)$/D',(string)$name,$miraMediaField)) {
+                      $names=array('title'=>'Titre','artist'=>'Artiste','album'=>'Album',
+                                   'state'=>'État de lecture','progress'=>'Progression',
+                                   'volume'=>'Volume');
+                      if ($info->getName() === (string)$name) $info->setName($names[$miraMediaField[1]]);
+                    }                  
                     $info->save();
                   	
                 }else if ($json_index[$i]['type'] == 'toggle'){
@@ -915,6 +924,10 @@ class mira extends eqLogic {
                     $info->setOrder($ordre);
           			$ordre++;          			
                     $info->setConfiguration('commande',$id_cmd);
+                    if (preg_match('/__(previous|playpause|next)$/D',(string)$name,$miraMediaAct)) {
+                      $names=array('previous'=>'Précédent','playpause'=>'Lecture / pause','next'=>'Suivant');
+                      if ($info->getName() === (string)$name) $info->setName($names[$miraMediaAct[1]]);
+                    }
                     $info->save();
                                     
                   	$info_id = $info->getId();                  
@@ -1113,6 +1126,10 @@ class mira extends eqLogic {
 
             }
           	$this->Init_mira_Module();
+            try { $this->configureMediaSource(); self::rebuildMediaListener(); }
+            catch (Throwable $e) {
+              log::add('mira','warning','[MEDIA] Liaison : '.$e->getMessage());
+            }
           	
           log::add(__CLASS__, 'debug', 'Sauvegarde OK');	
         }
@@ -1848,6 +1865,54 @@ class miraCmd extends cmd {
           }
           $mapped->execCmd();
           return true;
+        }
+        // Optional one-click Spotify action mapping. No action is run
+        // during Jeedom Info events, reprogramming or page navigation.
+        $mediaName=(string)$this->getLogicalId();
+        if (preg_match('/__(previous|playpause|next|volume_cmd)$/D',$mediaName,$mediaAction)) {
+          $field=$mediaAction[1];
+          $targetId=(int)$this->getConfiguration('mira_media_target_cmd',0);
+          if ($field==='playpause') {
+            $playId=(int)$this->getConfiguration('mira_media_play_cmd',0);
+            $pauseId=(int)$this->getConfiguration('mira_media_pause_cmd',0);
+            if ($playId>0 && $pauseId>0) {
+              $state=cmd::byId((int)$this->getConfiguration('mira_media_state_cmd',0));
+              $playing=false;
+              if (is_object($state)) {
+                $v=strtolower(trim((string)$state->execCmd()));
+                $playing=in_array($v,array('1','on','true','playing','lecture','en lecture'),true);
+              }
+              $targetId=$playing?$pauseId:$playId;
+            }
+          }
+          if ($targetId>0) {
+            $mapped=cmd::byId($targetId);
+            if (is_object($mapped) && $mapped->getType()==='action' &&
+                $mapped->getId()!=$this->getId()) {
+              if ($field==='volume_cmd') {
+                $level=$_options['slider']??null;
+                if ($level===null) {
+                  // A touchscreen action is an ID; fetch the slider value
+                  // from the latest ESP32 index, not an assumed percentage.
+                  $actions=$eqLogic->GetIndex();
+                  if (is_array($actions)) foreach ($actions as $action) {
+                    if (($action['type']??'')==='range' &&
+                        (int)($action['id']??-1)===(int)$this->getConfiguration('commande',-1)) {
+                      $level=$action['value']??null;
+                      break;
+                    }
+                  }
+                }
+                if (!is_numeric($level)) return false;
+                $level=max(0,min(100,(int)$level));
+                if ($mapped->getSubType()==='slider') $mapped->execCmd(array('slider'=>$level));
+                else if ($mapped->getSubType()==='message')
+                  $mapped->execCmd(array('title'=>(string)$level,'message'=>(string)$level));
+                else return false;
+              } else $mapped->execCmd();
+              return true;
+            }
+          }
         }
         $cmd = $this->getConfiguration('commande');        	
         	$type = $this->getConfiguration('type');
