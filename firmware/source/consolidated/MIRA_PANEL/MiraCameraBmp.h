@@ -13,7 +13,8 @@ public:
     uint16_t width = 0;
     uint16_t height = 0;
   };
-  bool start(const String& bmpUrl, uint16_t maxWidth, uint16_t maxHeight);
+  bool start(const String& bmpUrl, uint16_t maxWidth, uint16_t maxHeight,
+             bool oneShot = false);
   void stop();
   bool take(Frame& destination);
 private:
@@ -30,5 +31,7 @@ private:
   uint32_t _lastRequestAt = 0;
   uint32_t _refreshIntervalMs = 250; // fast snapshots; slow down on fetch failures
   bool _active = false;
+  bool _oneShot = false;
+  bool _oneShotDone = false;
   Frame _ready;
 };
