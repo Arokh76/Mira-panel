@@ -757,6 +757,10 @@ class mira extends eqLogic {
                     $info->setConfiguration('commande',$id_cmd);
                     $info->setConfiguration('minValue', $min);
                     $info->setConfiguration('maxValue', $max);
+                    if (preg_match('/__volume_cmd$/D',(string)$name)) {
+                      $info->setConfiguration('visible_cmd','0');
+                      if ($info->getName()==='Value_'.$name) $info->setName('Volume actuel (interne)');
+                    }
                     $info->save();
                                      	
                     $info_id = $info->getId();                  	
@@ -779,6 +783,9 @@ class mira extends eqLogic {
                     $cmd->setConfiguration('maxValue', $max);
                     $cmd->setConfiguration('commande',$id_cmd);
                     $cmd->setConfiguration('parent','Value_'.$name);
+                    if (preg_match('/__volume_cmd$/D',(string)$name) &&
+                        $cmd->getName()===(string)$name)
+                      $cmd->setName('Régler le volume');
                     
                     $cmd->setValue($info_id);                        
                     $cmd->save(); 
