@@ -714,15 +714,24 @@ class mira extends eqLogic {
                     // remplacer par une valeur imposée depuis le firmware.
                     if ($unite !== '' || !preg_match('/__(solar|home|grid|battery|soc|soc2|soc3)$/D',(string)$name))
                       $info->setUnite($unite);
-                    if (preg_match('/__soc([23])$/D',(string)$name,$miraSocNumber) && $info->getName()===(string)$name)
-                      $info->setName('SoC batterie '.$miraSocNumber[1]);
-                    if (preg_match('/__(title|artist|album|cover|state|progress|volume)$/D',(string)$name,$miraMediaField)) {
+                    // Jeedom enforces unique (equipment, command name), not only logicalId.
+                    // Each composite card must therefore keep its own named Info
+                    // commands, even when several Media/Energy widgets coexist.
+                    if (preg_match('/^(.*)__soc([23])$/D',(string)$name,$miraSocNumber)) {
+                      $newName=$miraSocNumber[1].' · SoC batterie '.$miraSocNumber[2];
+                      if (in_array((string)$info->getName(),array((string)$name,
+                          'SoC batterie '.$miraSocNumber[2]),true))
+                        $info->setName($newName);
+                    }
+                    if (preg_match('/^(.*)__(title|artist|album|cover|state|progress|volume|device|devices)$/D',(string)$name,$miraMediaField)) {
                       $names=array('title'=>'Titre','artist'=>'Artiste','album'=>'Album',
                                    'cover'=>'Pochette',
                                    'state'=>'État de lecture','progress'=>'Progression',
                                    'volume'=>'Volume','device'=>'Enceinte active',
                                    'devices'=>'Enceintes disponibles');
-                      if ($info->getName() === (string)$name) $info->setName($names[$miraMediaField[1]]);
+                      $label=$names[$miraMediaField[2]];
+                      if (in_array((string)$info->getName(),array((string)$name,$label),true))
+                        $info->setName($miraMediaField[1].' · '.$label);
                     }                  
                     $info->save();
                   	
@@ -829,9 +838,15 @@ class mira extends eqLogic {
                     $info->setConfiguration('commande',$id_cmd);
                     $info->setConfiguration('minValue', $min);
                     $info->setConfiguration('maxValue', $max);
-                    if (preg_match('/__(volume_cmd|device_cmd)$/D',(string)$name)) {
+                    if (preg_match('/^(.*)__(volume_cmd|device_cmd)$/D',(string)$name,$miraRange)) {
                       $info->setConfiguration('visible_cmd','0');
-                      if ($info->getName()==='Value_'.$name) $info->setName('Volume actuel (interne)');
+                      $label=$miraRange[2]==='volume_cmd' ?
+                        'Volume actuel (interne)' : 'Enceinte sélectionnée (interne)';
+                      // Correct both fresh installs and pre-existing beta.12 commands
+                      // that were mistakenly all named "Volume actuel (interne)".
+                      if (in_array((string)$info->getName(),array('Value_'.$name,
+                          'Volume actuel (interne)', 'Enceinte sélectionnée (interne)'),true))
+                        $info->setName($miraRange[1].' · '.$label);
                     }
                     $info->save();
                                      	
@@ -855,12 +870,13 @@ class mira extends eqLogic {
                     $cmd->setConfiguration('maxValue', $max);
                     $cmd->setConfiguration('commande',$id_cmd);
                     $cmd->setConfiguration('parent','Value_'.$name);
-                    if (preg_match('/__volume_cmd$/D',(string)$name) &&
-                        $cmd->getName()===(string)$name)
-                      $cmd->setName('Régler le volume');
-                    if (preg_match('/__device_cmd$/D',(string)$name) &&
-                        $cmd->getName()===(string)$name)
-                      $cmd->setName('Choisir une enceinte');
+                    if (preg_match('/^(.*)__(volume_cmd|device_cmd)$/D',(string)$name,$miraRange)) {
+                      $label=$miraRange[2]==='volume_cmd' ? 'Régler le volume' :
+                        'Choisir une enceinte';
+                      if (in_array((string)$cmd->getName(),array((string)$name,
+                          'Régler le volume','Choisir une enceinte'),true))
+                        $cmd->setName($miraRange[1].' · '.$label);
+                    }
                     
                     $cmd->setValue($info_id);                        
                     $cmd->save(); 
