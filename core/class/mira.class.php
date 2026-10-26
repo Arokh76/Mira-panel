@@ -193,7 +193,7 @@ class mira extends eqLogic {
     foreach ($this->getCmd() as $target) {
       if (!is_object($target)) continue;
       $id = (string)$target->getLogicalId();
-      if (!preg_match('/__(title|artist|album|cover|state|progress|volume|device|devices|previous|playpause|next|volume_cmd|device_cmd)$/D',$id,$match)) continue;
+      if (!preg_match('/__(title|artist|album|cover|state|progress|volume|device|devices|previous|playpause|next|volume_cmd|device_cmd|play|pause)$/D',$id,$match)) continue;
       $field = $match[1];
       if ($target->getType()==='info' && isset($mapped[$field])) {
         $target->setConfiguration('mira_media_source_cmd',(string)$mapped[$field]->getId());
@@ -214,6 +214,19 @@ class mira extends eqLogic {
           $target->setConfiguration('mira_media_link_status',
             is_object($action) ? 'Commande '.($field==='previous'?'Précédent':'Suivant').' associée' :
             'Commande '.($field==='previous'?'Précédent':'Suivant').' absente sur le lecteur sélectionné');
+          $target->save();
+          if (is_object($action)) $configured++;
+        } elseif ($field==='play' || $field==='pause') {
+          // Two Spotify actions drive one physical button; no Playing Info.
+          $action=$actions[$field];
+          $target->setConfiguration('mira_media_target_cmd',
+            is_object($action)?(string)$action->getId():'');
+          $target->setConfiguration('mira_media_link_status',
+            is_object($action) ?
+              ($field==='play' ? 'Lecture : commande Play associée' :
+                                 'Pause : commande Pause associée') :
+              ($field==='play' ? 'Lecture : commande Play introuvable' :
+                                 'Pause : commande Pause introuvable'));
           $target->save();
           if (is_object($action)) $configured++;
         } elseif ($field==='playpause') {
@@ -1137,6 +1150,14 @@ class mira extends eqLogic {
                     $info->setOrder($ordre);
           			$ordre++;
           			$info->setConfiguration('commande',$id_cmd);                  	
+                    if (preg_match('/^(.*)__(previous|playpause|play|pause|next)$/D',
+                                   (string)$name,$mediaButton)) {
+                      $labels=array('previous'=>'Précédent',
+                        'playpause'=>'Lecture / Pause','play'=>'Lecture',
+                        'pause'=>'Pause','next'=>'Suivant');
+                      if ($info->getName()===(string)$name)
+                        $info->setName($mediaButton[1].' · '.$labels[$mediaButton[2]]);
+                    }
                     $info->save();
                   
                 }else if ($json_index[$i]['type'] == 'color'){
@@ -2185,7 +2206,7 @@ class miraCmd extends cmd {
         // Optional one-click Spotify action mapping. No action is run
         // during Jeedom Info events, reprogramming or page navigation.
         $mediaName=(string)$this->getLogicalId();
-        if (preg_match('/__(previous|playpause|next|volume_cmd|device_cmd)$/D',$mediaName,$mediaAction)) {
+        if (preg_match('/__(previous|playpause|play|pause|next|volume_cmd|device_cmd)$/D',$mediaName,$mediaAction)) {
           $field=$mediaAction[1];
           $targetId=(int)$this->getConfiguration('mira_media_target_cmd',0);
           if ($field==='playpause') {
@@ -2268,10 +2289,11 @@ class miraCmd extends cmd {
               return true;
             }
           }
-          if ($field==='playpause' && trim((string)$this->getConfiguration('calcul',''))==='') {
+          if (in_array($field,array('playpause','play','pause'),true) &&
+              trim((string)$this->getConfiguration('calcul',''))==='') {
             log::add('mira','warning','[MEDIA] Lecture/Pause non exécutée : '.
               (string)$this->getConfiguration('mira_media_link_status',
-                'commande Spotify non associée').'. Vérifier le lecteur actif, Play/Pause/Playing.');
+                'commande Spotify non associée').'. Vérifier les actions Play et Pause.');
             return false;
           }
           // An unmapped speaker transfer is never a generic Mira slider
