@@ -426,15 +426,21 @@ log::add('mira', 'debug', "Lancement script");
                                 <select class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="media_source_eqid" id="miraMediaSourceEq">
                                   <option value="">{{Configuration manuelle}}</option>
                                   <?php
-                                  foreach ((array)eqLogic::byType('spotify') as $miraSpotifyEq) {
-                                    echo '<option value="'.(int)$miraSpotifyEq->getId().'">'
-                                        .htmlspecialchars('Spotify · '.$miraSpotifyEq->getHumanName(),ENT_QUOTES,'UTF-8')
-                                        .'</option>';
-                                  }
-                                  foreach (array_merge((array)eqLogic::byType('spotifyconnect'),(array)eqLogic::byType('spotifyConnect')) as $miraSpotifyEq) {
-                                    echo '<option value="'.(int)$miraSpotifyEq->getId().'">'
-                                        .htmlspecialchars('Spotify Connect · '.$miraSpotifyEq->getHumanName(),ENT_QUOTES,'UTF-8')
-                                        .'</option>';
+                                  // Some Jeedom installs resolve both spotifyConnect and
+                                  // spotifyconnect to the very same equipment family.
+                                  // Never duplicate an equipment in Mira's source menu.
+                                  $miraSeenMediaSourceIds=array();
+                                  foreach (array('spotify','spotifyconnect','spotifyConnect') as $miraSpotifyType) {
+                                    foreach ((array)eqLogic::byType($miraSpotifyType) as $miraSpotifyEq) {
+                                      if (!is_object($miraSpotifyEq)) continue;
+                                      $miraSpotifyEqId=(int)$miraSpotifyEq->getId();
+                                      if ($miraSpotifyEqId<1 || isset($miraSeenMediaSourceIds[$miraSpotifyEqId])) continue;
+                                      $miraSeenMediaSourceIds[$miraSpotifyEqId]=true;
+                                      $miraSpotifyLabel=strtolower($miraSpotifyType)==='spotify' ? 'Spotify' : 'Spotify Connect';
+                                      echo '<option value="'.$miraSpotifyEqId.'">'
+                                          .htmlspecialchars($miraSpotifyLabel.' · '.$miraSpotifyEq->getHumanName(),ENT_QUOTES,'UTF-8')
+                                          .'</option>';
+                                    }
                                   }
                                   ?>
                                 </select>
