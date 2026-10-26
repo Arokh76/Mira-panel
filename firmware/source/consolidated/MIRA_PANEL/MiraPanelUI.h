@@ -103,8 +103,8 @@ private:
     // Energy: solar/home/grid/battery power + battery SoC.
     // Media: title/artist/album/state/progress + volume.
     // 7 energy fields (4 powers + up to 3 SoCs); 6 multimedia fields.
-    int compositeIds[7] = {-1, -1, -1, -1, -1, -1, -1};
-    lv_obj_t* compositeLabels[7] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+    int compositeIds[9] = {-1, -1, -1, -1, -1, -1, -1, -1, -1};
+    lv_obj_t* compositeLabels[9] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
     lv_obj_t* compositeGauge = nullptr;
     lv_obj_t* energyExtraNames[2] = {nullptr, nullptr};
     lv_obj_t* energyExtraGauges[2] = {nullptr, nullptr};
@@ -112,6 +112,11 @@ private:
     int energyBaseHeight = 0;
     int mediaActionIds[3] = {-1, -1, -1}; // previous/playpause/next
     int mediaVolumeCmdId = -1;
+    int mediaDeviceCmdId = -1;
+    lv_obj_t* mediaDeviceDropdown = nullptr;
+    String mediaDeviceNames[12];
+    uint8_t mediaDeviceCount = 0;
+    String mediaActiveDevice;
     lv_obj_t* mediaVolumeSlider = nullptr;
     lv_obj_t* mediaArtworkImage = nullptr;
     lv_obj_t* mediaArtworkPlaceholder = nullptr;
@@ -305,6 +310,7 @@ private:
   static void onCameraBack(lv_event_t* e);
   static void onMediaAction(lv_event_t* e);
   static void onMediaVolume(lv_event_t* e);
+  static void onMediaDeviceSelected(lv_event_t* e);
   static void onMultiTouch(lv_event_t* e);
   static void onToggle(lv_event_t* e);
   static void onRange(lv_event_t* e);
@@ -350,6 +356,7 @@ private:
   void createCamera(uint8_t idx);
   void createEnergy(uint8_t idx);
   void createMedia(uint8_t idx);
+  void refreshMediaDeviceDropdown(Binding& b);
   void serviceAlbumArtwork();
   void clearAlbumArtwork();
   void updateCompositeInfo(Binding& b, uint8_t field, const String& value);
