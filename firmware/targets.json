@@ -7,8 +7,8 @@
       "flashMB": 8,
       "ota": "https://raw.githubusercontent.com/Arokh76/Mira-panel/firmware-beta/firmware/releases/0.7.25/wt32-sc01-plus/ota.bin",
       "factory": "https://raw.githubusercontent.com/Arokh76/Mira-panel/firmware-beta/firmware/releases/0.7.25/wt32-sc01-plus/factory.bin",
-      "otaSha256": "47b391b51f15152044776bc803cb553f9e1d1c0da1c22fd3c376bae5df62f6d0",
-      "factorySha256": "f35d4decb30c41ac3ba7cbbeb62cc38578f67d7b02c0b33ec17067c6b77c3660",
+      "otaSha256": "ec5b6160eaa1252455199abdf2d3a6d4b05d3448cd7dcf4ced8b3ea77a113e5f",
+      "factorySha256": "8a063d8395f9dfc4ce8be3d38496c7f787904ed30c1944d81b05b7aa96417522",
       "otaBytes": 1937504
     },
     "onx2432g028": {
@@ -16,8 +16,8 @@
       "flashMB": 16,
       "ota": "https://raw.githubusercontent.com/Arokh76/Mira-panel/firmware-beta/firmware/releases/0.7.25/onx2432g028/ota.bin",
       "factory": "https://raw.githubusercontent.com/Arokh76/Mira-panel/firmware-beta/firmware/releases/0.7.25/onx2432g028/factory.bin",
-      "otaSha256": "79c84b12b5cfac449c7fb443fb501b464dc223673966d853afdac47ce323b6c8",
-      "factorySha256": "429beeb4d708612dc1faa8f8dad7b9d0e9159348ba431df2fae2e960e9a60108",
+      "otaSha256": "c35198776d422edf9ae834cb9e401c17e736a60c8fcd35ea0f4f5c4f83915283",
+      "factorySha256": "77d132dd7c06d1e87c706c412bb9945c613fd636cdc170dabdc4e8359bb95409",
       "otaBytes": 1935104
     },
     "waveshare-esp32s3-touch-lcd-4.3c": {
@@ -25,8 +25,8 @@
       "flashMB": 16,
       "ota": "https://raw.githubusercontent.com/Arokh76/Mira-panel/firmware-beta/firmware/releases/0.7.25/waveshare-esp32s3-touch-lcd-4.3c/ota.bin",
       "factory": "https://raw.githubusercontent.com/Arokh76/Mira-panel/firmware-beta/firmware/releases/0.7.25/waveshare-esp32s3-touch-lcd-4.3c/factory.bin",
-      "otaSha256": "248ffb264c794b6dbe34665e1fd83674d7e3a0a08d2a7c3dae773ea498ad32ed",
-      "factorySha256": "02131e0e7d58a8b79c5ae9d9437efd8c38e72190e9f5d255f1ff9996a76a4da1",
+      "otaSha256": "cdf010453e6056cf4c8a5276d69c9bc5c44366f50b8316131aebb74828fd4161",
+      "factorySha256": "8d107898ee58adf438bc33dfe096d4831b0872f546abefffb8a7873b9f6033a3",
       "otaBytes": 2036976
     }
   }
