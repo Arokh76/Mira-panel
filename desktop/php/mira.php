@@ -407,7 +407,15 @@ log::add('mira', 'debug', "Lancement script");
                                 echo '</select></div></div>';
                             }
                             ?>
-                            <legend><i class="fas fa-eye"></i> {{Pages affichées}}</legend>
+                            <div class="form-group">
+                                <div class="col-sm-8 col-sm-offset-4">
+                                    <button type="button" id="miraSyncFavorites" class="btn btn-default btn-sm">
+                                        <i class="fas fa-sync-alt"></i> {{Réenvoyer les favoris}}
+                                    </button>
+                                    <small id="miraFavoritesSyncStatus" class="help-block">{{Utile après un redémarrage ou si l'écran était déconnecté.}}</small>
+                                </div>
+                            </div>
+                             <legend><i class="fas fa-eye"></i> {{Pages affichées}}</legend>
                             <p class="help-block" style="margin-left:10px;">{{Masquer une page la retire du menu Pages et empêche de la sélectionner depuis les favoris. Aucun widget ni aucune configuration ne sera supprimé. Accueil reste toujours disponible.}}</p>
                             <?php
                             foreach (array('1'=>'Lumières','2'=>'Températures','3'=>'Paramètres',
@@ -444,28 +452,15 @@ log::add('mira', 'debug', "Lancement script");
                                   }
                                   ?>
                                 </select>
-                                <small class="help-block">
-                                  {{Chaque enceinte apparaît une seule fois dans cette liste. L'affichage des enceintes sur Mira ne garantit pas que le plugin Spotify propose une commande pour transférer la lecture.}}
-                                  {{Sélectionnez l'équipement Spotify qui contrôle réellement la lecture active (par exemple Salle si la musique joue dans Salle), puis enregistrez et actualisez les commandes Mira.}}
-                                  {{Aucune saisie n'est nécessaire dans les commandes « Enceinte active » et « Enceintes disponibles » : Mira les renseigne automatiquement.}}
-                                  {{Le bouton central Mira utilise désormais deux commandes Spotify séparées, « Play » et « Pause » : il alterne entre elles sur l'écran, sans exiger de commande « Playing ». Si Spotify est piloté ailleurs et ne renvoie pas l'état de lecture, l'icône peut demander un appui de resynchronisation.}} {{Pour changer d'enceinte, le plugin Spotify doit proposer Device Name Set.}}
-                                  {{Un diagnostic vert ou orange dans la ligne de commande indique si cette association a réussi.}}
-                                </small>
+                                <small class="help-block">{{Choisissez le lecteur Spotify piloté par Mira. Les commandes sont associées automatiquement.}}</small>
                               </div>
                             </div>
 
-                            <div class="form-group">
-                                <div class="col-sm-8 col-sm-offset-4">
-                                    <button type="button" id="miraSyncFavorites" class="btn btn-default btn-sm">
-                                        <i class="fas fa-sync-alt"></i> {{Réenvoyer les favoris}}
-                                    </button>
-                                    <small id="miraFavoritesSyncStatus" class="help-block">{{Utile après un redémarrage ou si l'écran était déconnecté.}}</small>
-                                </div>
-                            </div>
+                            
 
                             <div class="form-group">
-								<label class="col-sm-4 control-label"> {{Pinguer et rafraîchir toutes les 15 minutes}}
-									<sup><i class="fas fa-question-circle tooltips" title="{{Si la case est cochée, un ping et un rafraichissement seront effectués toutes les 15 minutes}}"></i></sup>
+								<label class="col-sm-4 control-label"> {{Surveiller l'écran (15 min)}}
+									<sup><i class="fas fa-question-circle tooltips" title="{{Vérifie la connexion toutes les 15 minutes et rafraîchit les informations lorsque l'écran répond.}}"></i></sup>
 								</label>
 								<div class="col-sm-6">
 									<input type="checkbox" value="1" class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="ping" checked>
