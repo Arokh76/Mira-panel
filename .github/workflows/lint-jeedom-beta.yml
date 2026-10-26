@@ -32,6 +32,17 @@ jobs:
         run: node --check desktop/js/mira.js
       - name: Regression test composite widget autosync
         run: php tests/test_autosync_composite.php
+      - name: Verify native Multimedia page and Spotify mapping
+        shell: bash
+        run: |
+          grep -Fq 'value="multimedia"' desktop/php/mira.php
+          grep -Fq 'data-page="multimedia"' desktop/php/mira.php
+          grep -Fq 'media_source_eqid' desktop/php/mira.php
+          grep -Fq 'pushVisiblePages' core/class/mira.class.php
+          grep -Fq 'rebuildMediaListener' core/class/mira.class.php
+          grep -Fq 'onMediaSourceEvent' core/class/mira.class.php
+          grep -Fq 'mira_media_play_cmd' core/class/mira.class.php
+          grep -Fq 'mira_media_source_cmd' desktop/js/mira.js
       - name: Verify Multi-actions integration
         shell: bash
         run: |
