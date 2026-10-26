@@ -1375,12 +1375,23 @@ class mira extends eqLogic {
           if ($json_index['actions'][$i]['type'] == 'info' || $json_index['actions'][$i]['type'] == 'button'){
           	$name = $json_index['actions'][$i]['nom'];             
           } else if ($json_index['actions'][$i]['type'] == 'list'){
-          	$name = 'Value_'.$json_index['actions'][$i]['nomliste'];            
+          	$name = 'Value_'.$json_index['actions'][$i]['nomliste'];
+          } else if ($json_index['actions'][$i]['type'] == 'range' &&
+                     preg_match('/__(volume_cmd|device_cmd)$/D',
+                       (string)$json_index['actions'][$i]['nom'])) {
+            // Composite Spotify sliders are ACTION commands. The old
+            // Value_... Info mapping silently swallowed volume adjustments,
+            // while button actions like Next continued to work.
+            $name = $json_index['actions'][$i]['nom'];
           } else {
-          	$name = 'Value_'.$json_index['actions'][$i]['nom'];            
+          	$name = 'Value_'.$json_index['actions'][$i]['nom'];
           }
           $info = $this->getCmd(null, $name);
-          $eqLogic = $info->getId();   
+          if (!is_object($info)) {
+            log::add('mira','warning','[Init] Commande Jeedom introuvable : '.$name);
+            continue;
+          }
+          $eqLogic = $info->getId();
           $json_index['actions'][$i]['jeedom'] = $eqLogic;
           log::add(__CLASS__, 'debug', $id.' : '.$eqLogic);	
       }
