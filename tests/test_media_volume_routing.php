@@ -31,6 +31,7 @@ $end=strpos($source,'/** Saved Jeedom equipment',$start);
 if($start===false||$end===false) throw new RuntimeException('Passive refresh absent');
 $body=substr($source,$start,$end-$start);
 if(strpos($body,"$"."target->getType()!=='info'")===false ||
-   strpos($body,'$target->execute();')!==false)
-  throw new RuntimeException('Passive refresh may execute actions');
+   strpos($body,"$"."target->getConfiguration('type')==='info'")===false ||
+   strpos($body,'$mapped->execCmd(')!==false)
+  throw new RuntimeException('Passive refresh must only evaluate Info values');
 echo "PASS refresh ignores action and range commands\n";
