@@ -153,6 +153,11 @@ class mira extends eqLogic {
       'title'=>array('Item Title','Titre','Piste','Track Name','Title'),
       'artist'=>array('Item Artist','Artiste','Artist','Interprète'),
       'album'=>array('Item Album','Album'),
+      // Depending on the installed Spotify/Spotify Connect plugin the cover
+      // URL can be called Image, Artwork, Cover or Pochette.
+      'cover'=>array('Item Image','Item Artwork','Album Image','Album Artwork',
+         'Album Art','Cover Art','Cover URL','Image URL','Artwork URL',
+         'Cover','Artwork','Pochette','Image','Album Cover','Jaquette'),
       'state'=>array('Playing','En lecture','Statut lecture','État lecture','Lecture en cours'),
       'volume'=>array('Device Volume','Volume','Volume statut','Niveau volume'),
       'progress'=>array('Progression','Position pourcent','Progress','Track progress')
@@ -174,6 +179,11 @@ class mira extends eqLogic {
       'next'=>self::findMediaSourceCmd($source,'action',array('Next','Suivant','Piste suivante')),
       'play'=>self::findMediaSourceCmd($source,'action',array('Play','Lecture','Lire','Reprendre')),
       'pause'=>self::findMediaSourceCmd($source,'action',array('Pause','Mettre en pause')),
+      // The selected Spotify Connect source can expose one toggle action.
+      'playpause'=>self::findMediaSourceCmd($source,'action',array(
+        'Play/Pause','Play Pause','PlayPause','Pause/Play','Lecture/Pause',
+        'Lecture / Pause','Lire / Pause','Lecture pause','Toggle Playback',
+        'Toggle Play Pause','Toggle','Play-Pause')),
       'volume_cmd'=>self::findMediaSourceCmd($source,'action',array('Device Volume Set','Volume Set','Régler volume','Volume','Modifier volume','Set Volume'))
     );
 
@@ -181,7 +191,7 @@ class mira extends eqLogic {
     foreach ($this->getCmd() as $target) {
       if (!is_object($target)) continue;
       $id = (string)$target->getLogicalId();
-      if (!preg_match('/__(title|artist|album|state|progress|volume|previous|playpause|next|volume_cmd)$/D',$id,$match)) continue;
+      if (!preg_match('/__(title|artist|album|cover|state|progress|volume|previous|playpause|next|volume_cmd)$/D',$id,$match)) continue;
       $field = $match[1];
       if ($target->getType()==='info' && isset($mapped[$field])) {
         $target->setConfiguration('mira_media_source_cmd',(string)$mapped[$field]->getId());
@@ -200,13 +210,29 @@ class mira extends eqLogic {
           $target->setConfiguration('mira_media_target_cmd',(string)$actions[$field]->getId());
           $target->save(); $configured++;
         } elseif ($field==='playpause') {
+          $toggle = $actions['playpause'];
           $play = $actions['play']; $pause = $actions['pause'];
-          if (is_object($play) && is_object($pause)) {
+          // Prefer the native combined action; no Spotify state info required.
+          if (is_object($toggle)) {
+            $target->setConfiguration('mira_media_target_cmd',(string)$toggle->getId());
+            $target->setConfiguration('mira_media_play_cmd','');
+            $target->setConfiguration('mira_media_pause_cmd','');
+            $target->setConfiguration('mira_media_state_cmd','');
+            $target->save(); $configured++;
+          } elseif (is_object($play) && is_object($pause)) {
+            $target->setConfiguration('mira_media_target_cmd','');
             $target->setConfiguration('mira_media_play_cmd',(string)$play->getId());
             $target->setConfiguration('mira_media_pause_cmd',(string)$pause->getId());
-            if (isset($mapped['state']))
-              $target->setConfiguration('mira_media_state_cmd',(string)$mapped['state']->getId());
+            $target->setConfiguration('mira_media_state_cmd',
+              isset($mapped['state']) ? (string)$mapped['state']->getId() : '');
             $target->save(); $configured++;
+          } else {
+            // Remove stale auto targets if source device changed.
+            $target->setConfiguration('mira_media_target_cmd','');
+            $target->setConfiguration('mira_media_play_cmd','');
+            $target->setConfiguration('mira_media_pause_cmd','');
+            $target->setConfiguration('mira_media_state_cmd','');
+            $target->save();
           }
         } elseif ($field==='volume_cmd' && is_object($actions['volume_cmd'])) {
           $target->setConfiguration('mira_media_target_cmd',(string)$actions['volume_cmd']->getId());
@@ -647,10 +673,13 @@ class mira extends eqLogic {
           			$info->setConfiguration('commande',$cmd_id);
                     // L'unité Énergie appartient à Jeedom : ne jamais la
                     // remplacer par une valeur imposée depuis le firmware.
-                    if ($unite !== '' || !preg_match('/__(solar|home|grid|battery|soc)$/D',(string)$name))
+                    if ($unite !== '' || !preg_match('/__(solar|home|grid|battery|soc|soc2|soc3)$/D',(string)$name))
                       $info->setUnite($unite);
-                    if (preg_match('/__(title|artist|album|state|progress|volume)$/D',(string)$name,$miraMediaField)) {
+                    if (preg_match('/__soc([23])$/D',(string)$name,$miraSocNumber) && $info->getName()===(string)$name)
+                      $info->setName('SoC batterie '.$miraSocNumber[1]);
+                    if (preg_match('/__(title|artist|album|cover|state|progress|volume)$/D',(string)$name,$miraMediaField)) {
                       $names=array('title'=>'Titre','artist'=>'Artiste','album'=>'Album',
+                                   'cover'=>'Pochette',
                                    'state'=>'État de lecture','progress'=>'Progression',
                                    'volume'=>'Volume');
                       if ($info->getName() === (string)$name) $info->setName($names[$miraMediaField[1]]);
@@ -1557,6 +1586,29 @@ class miraCmd extends cmd {
     return ($out !== false && $code === 200) ? $out : false;
   }
   public function postSave() {
+    // The SOC master row owns the 1..3 battery selector. Clear unused
+    // secondary screen slots without removing Jeedom commands or mappings.
+    if (preg_match('/^(.*)__soc$/D',(string)$this->getLogicalId(),$socMaster)) {
+      $count=(int)$this->getConfiguration('mira_battery_count',1);
+      if ($count<1 || $count>3) $count=1;
+      $eq=$this->getEqLogic();
+      if (is_object($eq)) {
+        $ip=(string)$eq->getConfiguration('adresseip','');
+        $key=(string)$eq->getConfiguration('password','');
+        if (preg_match('/^[A-Za-z0-9.\\-]+$/D',$ip) && $key!=='') {
+          for($n=$count+1;$n<=3;$n++) {
+            $unused=$eq->getCmd(null,$socMaster[1].'__soc'.$n);
+            if (!is_object($unused)) continue;
+            $id=(int)$unused->getConfiguration('commande',-1);
+            if ($id<1) continue;
+            $url='http://'.$ip.'/updatenr?key='.rawurlencode($key).'&info='.$id.'&value=';
+            $ch=curl_init($url);
+            curl_setopt_array($ch,array(CURLOPT_RETURNTRANSFER=>true,CURLOPT_CONNECTTIMEOUT=>1,CURLOPT_TIMEOUT=>2));
+            curl_exec($ch); curl_close($ch);
+          }
+        }
+      }
+    }
     if ($this->getConfiguration('type') === 'camera') {
       // Save URL as a normal Jeedom command setting; do not reprogram LVGL
       // or execute any actions when editing the camera.
@@ -1697,11 +1749,17 @@ class miraCmd extends cmd {
           }
           return '';
         }
+        // Optional SoC 2/3 are not emitted when their battery is disabled.
+        if (preg_match('/^(.*)__soc([23])$/D',(string)$nom,$miraSocInfo)) {
+          $socMaster=$eqLogic->getCmd(null,$miraSocInfo[1].'__soc');
+          $batteryCount=is_object($socMaster) ? (int)$socMaster->getConfiguration('mira_battery_count',1) : 1;
+          if ($batteryCount<(int)$miraSocInfo[2]) return '';
+        }
         if ($this->getConfiguration('calcul') != ''&& $this->getConfiguration('type') == 'info'){
            
           $result = jeedom::evaluateExpression($this->getConfiguration('calcul'));
           $cmd = $this->getConfiguration('commande');
-          if (preg_match('/__(solar|home|grid|battery|soc)$/D',(string)$nom)) {
+          if (preg_match('/__(solar|home|grid|battery|soc|soc2|soc3)$/D',(string)$nom)) {
             // Never impose a unit on energy fields: append only the unit
             // explicitly selected by the Jeedom user.
             $display = (string)$result;
