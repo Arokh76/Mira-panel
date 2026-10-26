@@ -1664,6 +1664,32 @@ static lv_obj_t* miraCompositeLabel(lv_obj_t* parent, const String& text,
   return label;
 }
 
+// The WT32 energy cells are only ~135px wide. LV_LABEL_LONG_DOT used to
+// elide the unit of e.g. "10.1 kW". Measure the complete value AND unit,
+// reduce the font when needed, and wrap as a last resort. No unit is added.
+static void miraFitEnergyPowerLabel(lv_obj_t* label, const String& text) {
+  if (!label) return;
+  const lv_font_t* fonts[] = {
+    &lv_font_montserrat_20, &mira_font_fr_16,
+    &mira_font_fr_14, &mira_font_fr_12
+  };
+  const lv_coord_t width = lv_obj_get_width(label);
+  const lv_coord_t spacing = lv_obj_get_style_text_letter_space(label, LV_PART_MAIN);
+  const lv_font_t* chosen = fonts[3];
+  bool fits = false;
+  for (const lv_font_t* font : fonts) {
+    if (lv_txt_get_width(text.c_str(), text.length(), font,
+                         spacing, LV_TEXT_FLAG_NONE) <= width) {
+      chosen = font;
+      fits = true;
+      break;
+    }
+  }
+  lv_obj_set_style_text_font(label, chosen, 0);
+  lv_label_set_long_mode(label, fits ? LV_LABEL_LONG_DOT : LV_LABEL_LONG_WRAP);
+  lv_label_set_text(label, text.c_str());
+}
+
 void MiraPanelUI::createEnergy(uint8_t idx) {
   Binding& b = _bindings[idx];
   const bool mini = MIRA_DISPLAY_WIDTH <= 240;
@@ -1708,7 +1734,7 @@ void MiraPanelUI::createEnergy(uint8_t idx) {
     miraCompositeLabel(cell, titles[n], 10, 9, boxW - 20,
                        headingFont, COL_MUTED);
     b.compositeLabels[n] =
-        miraCompositeLabel(cell, "-- W", 10, mini ? 34 : 38,
+        miraCompositeLabel(cell, "--", 10, mini ? 34 : 38,
                            boxW - 18, infoFont, lv_color_hex(tints[n]));
   }
 
@@ -1880,8 +1906,10 @@ void MiraPanelUI::updateCompositeInfo(Binding& b, uint8_t field, const String& r
     if (field >= 7) return;
     // No hard-coded unit. Jeedom or MQTT may supply W, kW, kWh, A, %, etc.
     // Values without units are rendered without any added suffix.
-    if (b.compositeLabels[field])
-      lv_label_set_text(b.compositeLabels[field], text.c_str());
+    if (b.compositeLabels[field]) {
+      if (field < 4) miraFitEnergyPowerLabel(b.compositeLabels[field], text);
+      else lv_label_set_text(b.compositeLabels[field], text.c_str());
+    }
     // SoC is a numeric gauge only when the selected Jeedom reading is
     // actually a percentage. For a differently configured unit, leave
     // the gauge empty; always show the source value unchanged above it.
