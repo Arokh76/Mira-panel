@@ -426,19 +426,26 @@ log::add('mira', 'debug', "Lancement script");
                                 <select class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="media_source_eqid" id="miraMediaSourceEq">
                                   <option value="">{{Configuration manuelle}}</option>
                                   <?php
-                                  foreach ((array)eqLogic::byType('spotify') as $miraSpotifyEq) {
-                                    echo '<option value="'.(int)$miraSpotifyEq->getId().'">'
-                                        .htmlspecialchars('Spotify · '.$miraSpotifyEq->getHumanName(),ENT_QUOTES,'UTF-8')
-                                        .'</option>';
-                                  }
-                                  foreach (array_merge((array)eqLogic::byType('spotifyconnect'),(array)eqLogic::byType('spotifyConnect')) as $miraSpotifyEq) {
-                                    echo '<option value="'.(int)$miraSpotifyEq->getId().'">'
-                                        .htmlspecialchars('Spotify Connect · '.$miraSpotifyEq->getHumanName(),ENT_QUOTES,'UTF-8')
-                                        .'</option>';
+                                  // Some Jeedom installs resolve both spotifyConnect and
+                                  // spotifyconnect to the very same equipment family.
+                                  // Never duplicate an equipment in Mira's source menu.
+                                  $miraSeenMediaSourceIds=array();
+                                  foreach (array('spotify','spotifyconnect','spotifyConnect') as $miraSpotifyType) {
+                                    foreach ((array)eqLogic::byType($miraSpotifyType) as $miraSpotifyEq) {
+                                      if (!is_object($miraSpotifyEq)) continue;
+                                      $miraSpotifyEqId=(int)$miraSpotifyEq->getId();
+                                      if ($miraSpotifyEqId<1 || isset($miraSeenMediaSourceIds[$miraSpotifyEqId])) continue;
+                                      $miraSeenMediaSourceIds[$miraSpotifyEqId]=true;
+                                      $miraSpotifyLabel=strtolower($miraSpotifyType)==='spotify' ? 'Spotify' : 'Spotify Connect';
+                                      echo '<option value="'.$miraSpotifyEqId.'">'
+                                          .htmlspecialchars($miraSpotifyLabel.' · '.$miraSpotifyEq->getHumanName(),ENT_QUOTES,'UTF-8')
+                                          .'</option>';
+                                    }
                                   }
                                   ?>
                                 </select>
                                 <small class="help-block">
+                                  {{Chaque enceinte apparaît une seule fois dans cette liste. L'affichage des enceintes sur Mira ne garantit pas que le plugin Spotify propose une commande pour transférer la lecture.}}
                                   {{Sélectionnez l'équipement Spotify qui contrôle réellement la lecture active (par exemple Salle si la musique joue dans Salle), puis enregistrez et actualisez les commandes Mira.}}
                                   {{Aucune saisie n'est nécessaire dans les commandes « Enceinte active » et « Enceintes disponibles » : Mira les renseigne automatiquement.}}
                                   {{Le bouton Lecture/Pause utilise Play, Pause et Playing (ou une commande Play/Pause unique). Pour changer d'enceinte, le plugin Spotify doit proposer Device Name Set.}}

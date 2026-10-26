@@ -38,6 +38,8 @@ jobs:
         run: php tests/test_media_unique_names.php
       - name: Check French Energy and Media labels
         run: php tests/test_media_energy_french_names.php
+      - name: Check no duplicate Spotify Connect sources
+        run: php tests/test_spotify_source_menu.php
       - name: Verify native Multimedia page and Spotify mapping
         shell: bash
         run: |
