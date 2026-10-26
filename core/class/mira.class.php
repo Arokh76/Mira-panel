@@ -158,7 +158,7 @@ class mira extends eqLogic {
       'cover'=>array('Item Image','Item Artwork','Album Image','Album Artwork',
          'Album Art','Cover Art','Cover URL','Image URL','Artwork URL',
          'Cover','Artwork','Pochette','Image','Album Cover','Jaquette'),
-      'state'=>array('Playing','En lecture','Statut lecture','État lecture','Lecture en cours'),
+      'state'=>array('Playing','Is Playing','Item Playing','Play State','En lecture','Statut lecture','État lecture','Lecture en cours'),
       'volume'=>array('Device Volume','Volume','Volume statut','Niveau volume'),
        'device'=>array('Device Name','Nom appareil','Nom du lecteur','Lecteur actif','Appareil actif'),
       'progress'=>array('Progression','Position pourcent','Progress','Track progress')
@@ -208,9 +208,14 @@ class mira extends eqLogic {
         }
         $configured++;
       } elseif ($target->getType()==='action') {
-        if (in_array($field,array('previous','next'),true) && is_object($actions[$field])) {
-          $target->setConfiguration('mira_media_target_cmd',(string)$actions[$field]->getId());
-          $target->save(); $configured++;
+        if (in_array($field,array('previous','next'),true)) {
+          $action=$actions[$field];
+          $target->setConfiguration('mira_media_target_cmd',is_object($action)?(string)$action->getId():'');
+          $target->setConfiguration('mira_media_link_status',
+            is_object($action) ? 'Commande '.($field==='previous'?'Précédent':'Suivant').' associée' :
+            'Commande '.($field==='previous'?'Précédent':'Suivant').' absente sur le lecteur sélectionné');
+          $target->save();
+          if (is_object($action)) $configured++;
         } elseif ($field==='playpause') {
           $toggle = $actions['playpause'];
           $play = $actions['play']; $pause = $actions['pause'];
@@ -220,20 +225,29 @@ class mira extends eqLogic {
             $target->setConfiguration('mira_media_play_cmd','');
             $target->setConfiguration('mira_media_pause_cmd','');
             $target->setConfiguration('mira_media_state_cmd','');
+            $target->setConfiguration('mira_media_link_status','Lecture/Pause : commande unique associée');
             $target->save(); $configured++;
-          } elseif (is_object($play) && is_object($pause)) {
+          } elseif (is_object($play) && is_object($pause) && isset($mapped['state'])) {
             $target->setConfiguration('mira_media_target_cmd','');
             $target->setConfiguration('mira_media_play_cmd',(string)$play->getId());
             $target->setConfiguration('mira_media_pause_cmd',(string)$pause->getId());
-            $target->setConfiguration('mira_media_state_cmd',
-              isset($mapped['state']) ? (string)$mapped['state']->getId() : '');
+            $target->setConfiguration('mira_media_state_cmd',(string)$mapped['state']->getId());
+            $target->setConfiguration('mira_media_link_status','Lecture/Pause : Play, Pause et Playing associés');
             $target->save(); $configured++;
           } else {
-            // Remove stale auto targets if source device changed.
+            // Avoid silently sending Play forever when Playing is missing.
+            $missing=array();
+            if (!is_object($play)) $missing[]='Play';
+            if (!is_object($pause)) $missing[]='Pause';
+            if (!isset($mapped['state'])) $missing[]='Playing';
             $target->setConfiguration('mira_media_target_cmd','');
             $target->setConfiguration('mira_media_play_cmd','');
             $target->setConfiguration('mira_media_pause_cmd','');
             $target->setConfiguration('mira_media_state_cmd','');
+            $target->setConfiguration('mira_media_link_status',
+              'Lecture/Pause non associée : '.implode(', ',$missing).' introuvable(s)');
+            log::add('mira','warning','[MEDIA] '.$source->getName().
+              ' : impossible de piloter Lecture/Pause ('.implode(', ',$missing).')');
             $target->save();
           }
         } elseif ($field==='device_cmd') {
@@ -241,11 +255,18 @@ class mira extends eqLogic {
           // playing on another Jeedom equipment transfers the Spotify session.
           $cmd=$actions['device_cmd'];
           $target->setConfiguration('mira_media_target_cmd',is_object($cmd)?(string)$cmd->getId():'');
+          $target->setConfiguration('mira_media_link_status',is_object($cmd) ?
+            'Sélection d’enceinte : Device Name Set associé' :
+            'Transfert non disponible : Device Name Set introuvable');
           $target->save();
           if (is_object($cmd)) $configured++;
-        } elseif ($field==='volume_cmd' && is_object($actions['volume_cmd'])) {
-          $target->setConfiguration('mira_media_target_cmd',(string)$actions['volume_cmd']->getId());
-          $target->save(); $configured++;
+        } elseif ($field==='volume_cmd') {
+          $cmd=$actions['volume_cmd'];
+          $target->setConfiguration('mira_media_target_cmd',is_object($cmd)?(string)$cmd->getId():'');
+          $target->setConfiguration('mira_media_link_status',is_object($cmd) ?
+            'Volume : commande associée' : 'Volume : Device Volume Set introuvable');
+          $target->save();
+          if (is_object($cmd)) $configured++;
         }
       }
     }
@@ -717,11 +738,16 @@ class mira extends eqLogic {
                     // Jeedom enforces unique (equipment, command name), not only logicalId.
                     // Each composite card must therefore keep its own named Info
                     // commands, even when several Media/Energy widgets coexist.
-                    if (preg_match('/^(.*)__soc([23])$/D',(string)$name,$miraSocNumber)) {
-                      $newName=$miraSocNumber[1].' · SoC batterie '.$miraSocNumber[2];
-                      if (in_array((string)$info->getName(),array((string)$name,
-                          'SoC batterie '.$miraSocNumber[2]),true))
-                        $info->setName($newName);
+                    // Keep stable logical IDs, translate labels only, preserve custom names.
+                    if (preg_match('/^(.*)__(solar|home|grid|battery|soc|soc2|soc3)$/D',(string)$name,$miraEnergyField)) {
+                      $energyNames=array('solar'=>'Solaire','home'=>'Consommation maison',
+                        'grid'=>'Réseau','battery'=>'Batterie','soc'=>'Stockage · SoC',
+                        'soc2'=>'SoC batterie 2','soc3'=>'SoC batterie 3');
+                      $suffix=$miraEnergyField[2];
+                      $oldLabel=preg_match('/^soc([23])$/D',$suffix,$socN) ?
+                        'SoC batterie '.$socN[1] : '';
+                      if (in_array((string)$info->getName(),array((string)$name,$oldLabel),true))
+                        $info->setName($miraEnergyField[1].' · '.$energyNames[$suffix]);
                     }
                     if (preg_match('/^(.*)__(title|artist|album|cover|state|progress|volume|device|devices)$/D',(string)$name,$miraMediaField)) {
                       $names=array('title'=>'Titre','artist'=>'Artiste','album'=>'Album',
@@ -2071,6 +2097,11 @@ class miraCmd extends cmd {
             $mapped=cmd::byId($targetId);
             if (is_object($mapped) && $mapped->getType()==='action' &&
                 $mapped->getId()!=$this->getId()) {
+              if ($field==='playpause') {
+                log::add('mira','debug','[MEDIA] Lecture/Pause : lecteur Jeedom '.
+                  (string)$eqLogic->getConfiguration('media_source_eqid',0).
+                  ', commande '.(string)$mapped->getName().' (#'.$targetId.')');
+              }
               if ($field==='device_cmd') {
                 // The native Mira range holds an index, NEVER arbitrary text.
                 // Resolve against the exact names sent to that screen. Validate
@@ -2115,6 +2146,12 @@ class miraCmd extends cmd {
               } else $mapped->execCmd();
               return true;
             }
+          }
+          if ($field==='playpause' && trim((string)$this->getConfiguration('calcul',''))==='') {
+            log::add('mira','warning','[MEDIA] Lecture/Pause non exécutée : '.
+              (string)$this->getConfiguration('mira_media_link_status',
+                'commande Spotify non associée').'. Vérifier le lecteur actif, Play/Pause/Playing.');
+            return false;
           }
         }
         $cmd = $this->getConfiguration('commande');        	

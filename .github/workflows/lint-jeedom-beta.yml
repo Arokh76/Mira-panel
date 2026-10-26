@@ -36,6 +36,8 @@ jobs:
         run: php tests/test_energy_precision.php
       - name: Check unique multimedia command names
         run: php tests/test_media_unique_names.php
+      - name: Check French Energy and Media labels
+        run: php tests/test_media_energy_french_names.php
       - name: Verify native Multimedia page and Spotify mapping
         shell: bash
         run: |

@@ -1399,7 +1399,14 @@ function addCmdToTable(_cmd) {
         }
       }
   	  if (_cmd.type == "action" && !isMultiMaster && !isMultiAction && init(_cmd.logicalId) != 'Redémarrer' && init(_cmd.logicalId) != 'refresh'){
-        if (_cmd.configuration.mira_media_target_cmd || _cmd.configuration.mira_media_play_cmd) {
+        if (_cmd.configuration.mira_media_link_status) {
+          var mediaOk = !!(_cmd.configuration.mira_media_target_cmd || _cmd.configuration.mira_media_play_cmd);
+          var mediaStatus = $('<span>').text(_cmd.configuration.mira_media_link_status).html();
+          tr += '<span style="color:' + (mediaOk ? '#45cbb4' : '#f4b66a') + ';display:block;margin:5px 0">' +
+            '<i class="fas fa-' + (mediaOk ? 'link' : 'exclamation-triangle') + '"></i> Spotify · ' + mediaStatus + '</span>';
+          if (mediaOk) tr += '<textarea class="cmdAttr" data-l1key="configuration" data-l2key="calcul" style="display:none"></textarea>';
+          else tr += '<textarea class="cmdAttr input-sm" data-l1key="configuration" data-l2key="calcul" style="height:35px;width:85%" placeholder="{{Commande Jeedom manuelle}}"></textarea>';
+        } else if (_cmd.configuration.mira_media_target_cmd || _cmd.configuration.mira_media_play_cmd) {
           tr += '<span style="color:#45cbb4;display:block;margin:5px 0"><i class="fas fa-link"></i> Spotify · commande automatique</span>';
           tr += '<textarea class="cmdAttr" data-l1key="configuration" data-l2key="calcul" style="display:none"></textarea>';
         } else
