@@ -9,8 +9,12 @@ class MiraAutoNameMock {
   public function setName($name) { $this->name=$name; }
   public function setConfiguration($key,$value) {}
 }
-function extractNamingBlock($source, $first, $last) {
-  $start=strpos($source,$first);
+function extractNamingBlock($source, $first, $last, $occurrence=1) {
+  $start=false;
+  for($i=0;$i<$occurrence;$i++) {
+    $start=strpos($source,$first,$start===false?0:$start+1);
+    if($start===false) break;
+  }
   if($start===false) throw new RuntimeException('Cannot find naming block: '.$first);
   $end=strpos($source,$last,$start);
   if($end===false) throw new RuntimeException('Cannot find naming block end: '.$last);
@@ -18,7 +22,7 @@ function extractNamingBlock($source, $first, $last) {
 }
 $begin="if (preg_match('/^(.*)__(volume_cmd|device_cmd)\$/D',(string)\$name,\$miraRange)) {";
 $infoBlock=extractNamingBlock($source,$begin,'$info->save();');
-$actionBlock=extractNamingBlock($source,$begin,'$cmd->setValue($info_id);');
+$actionBlock=extractNamingBlock($source,$begin,'$cmd->setValue($info_id);',2);
 $names=array();
 foreach(array('Maison__volume_cmd','Maison__device_cmd',
               'Salle__volume_cmd','Salle__device_cmd') as $logical) {
