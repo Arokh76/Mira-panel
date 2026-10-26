@@ -39,8 +39,8 @@ static const lv_color_t COL_RED     = lv_color_hex(0xE36A6A);
 // Composite widgets reuse existing Jeedom index types: Info, Button, Range.
 // No special plugin-to-ESP transport and no commands during initial drawing.
 static const char* const MIRA_ENERGY_FIELDS[7] = {"solar", "home", "grid", "battery", "soc", "soc2", "soc3"};
-static const char* const MIRA_MEDIA_FIELDS[7] =
-    {"title", "artist", "album", "state", "progress", "volume", "cover"};
+static const char* const MIRA_MEDIA_FIELDS[9] =
+    {"title", "artist", "album", "state", "progress", "volume", "cover", "device", "devices"};
 static const char* const MIRA_MEDIA_ACTIONS[3] =
     {"previous", "playpause", "next"};
 
@@ -555,7 +555,7 @@ void MiraPanelUI::handleMqttState(const String& topic, const String& rawPayload)
   for (uint8_t i = 0; i < _bindingCount; ++i) {
     Binding& b = _bindings[i];
     if (b.type != W_ENERGY && b.type != W_MEDIA) continue;
-    const uint8_t fields = 7;
+    const uint8_t fields = b.type == W_ENERGY ? 7 : 9;
     for (uint8_t f = 0; f < fields; ++f) {
       const char* suffix = b.type == W_ENERGY ? MIRA_ENERGY_FIELDS[f] : MIRA_MEDIA_FIELDS[f];
       if (key != normalizeMqttTopicName(b.name + "__" + suffix)) continue;
@@ -1278,12 +1278,13 @@ void MiraPanelUI::registerAndCreate(JsonObject obj) {
   }
   else if (type == "media") {
     b.type = W_MEDIA;
-    for (uint8_t i = 0; i < 7; ++i)
+    for (uint8_t i = 0; i < 9; ++i)
       b.compositeIds[i] = _server.IndexAddInfo(name + "__" + MIRA_MEDIA_FIELDS[i],
                                                  i == 4 || i == 5 ? "%" : "");
     for (uint8_t i = 0; i < 3; ++i)
       b.mediaActionIds[i] = _server.IndexAddButton(name + "__" + MIRA_MEDIA_ACTIONS[i]);
     b.mediaVolumeCmdId = _server.IndexAddRange(name + "__volume_cmd", 0, 100, 40);
+    b.mediaDeviceCmdId = _server.IndexAddRange(name + "__device_cmd", 0, 11, 0);
     createMedia(idx);
   }
   else if (type == "datetime") {
@@ -1790,24 +1791,27 @@ void MiraPanelUI::createMedia(uint8_t idx) {
   const bool mini = MIRA_DISPLAY_WIDTH <= 240;
   const bool wide = MIRA_DISPLAY_WIDTH >= 800;
   const int W = MIRA_CARD_FULL;
-  const int H = wide ? 338 : (mini ? 288 : 350);
-  const int pad = mini ? 10 : 14;
+  const int H = wide ? 558 : (mini ? 368 : 417);
+  const int pad = mini ? 9 : (wide ? 22 : 13);
   b.card = makeCard(pageIndex(b.location), H);
   lv_obj_set_size(b.card, W, H);
   lv_obj_set_layout(b.card, 0);
   lv_obj_set_style_pad_all(b.card, 0, 0);
   lv_obj_clear_flag(b.card, LV_OBJ_FLAG_SCROLLABLE);
 
+  // Jeedom Spotify Connect tile: vertically centered album artwork,
+  // track info and 3 actions. Keep Mira's original volume slider as-is.
   miraCompositeLabel(b.card,
       b.displayName.length() ? b.displayName : String("Multimédia"),
-      pad, 9, W - 2 * pad, &mira_font_fr_16, COL_TEXT);
+      pad, 7, W - 2 * pad, &mira_font_fr_16, COL_TEXT,
+      LV_TEXT_ALIGN_CENTER);
 
-  const int artW = mini ? 65 : (wide ? 112 : 86);
-  const int artY = mini ? 35 : 42;
+  const int artW = wide ? 230 : (mini ? 114 : 154);
+  const int artY = wide ? 38 : (mini ? 31 : 32);
   lv_obj_t* art = lv_obj_create(b.card);
   lv_obj_set_size(art, artW, artW);
-  lv_obj_set_pos(art, pad, artY);
-  lv_obj_set_style_radius(art, 12, 0);
+  lv_obj_set_pos(art, (W - artW) / 2, artY);
+  lv_obj_set_style_radius(art, 11, 0);
   lv_obj_set_style_bg_color(art, lv_color_hex(0x132A47), 0);
   lv_obj_set_style_bg_grad_color(art, lv_color_hex(0x315C87), 0);
   lv_obj_set_style_bg_grad_dir(art, LV_GRAD_DIR_VER, 0);
@@ -1817,51 +1821,40 @@ void MiraPanelUI::createMedia(uint8_t idx) {
   lv_obj_clear_flag(art, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_clear_flag(art, LV_OBJ_FLAG_SCROLLABLE);
   b.mediaArtworkSize = artW;
-  b.mediaArtworkPlaceholder = miraCompositeLabel(art, LV_SYMBOL_AUDIO,
-                     0, mini ? 16 : 25, artW, &lv_font_montserrat_28,
-                     colorAccent(), LV_TEXT_ALIGN_CENTER);
+  b.mediaArtworkPlaceholder = miraCompositeLabel(
+      art, LV_SYMBOL_AUDIO, 0, (artW - 28) / 2, artW,
+      &lv_font_montserrat_28, colorAccent(), LV_TEXT_ALIGN_CENTER);
   b.mediaArtworkImage = lv_img_create(art);
   lv_obj_align(b.mediaArtworkImage, LV_ALIGN_CENTER, 0, 0);
   lv_obj_add_flag(b.mediaArtworkImage, LV_OBJ_FLAG_HIDDEN);
   lv_obj_clear_flag(b.mediaArtworkImage, LV_OBJ_FLAG_CLICKABLE);
 
-  const int tx = pad + artW + 11;
-  const int tw = W - tx - pad - 3;
+  const int titleY = wide ? 279 : (mini ? 151 : 197);
+  const int artistY = wide ? 314 : (mini ? 176 : 224);
+  const int stateY = wide ? 340 : (mini ? 194 : 245);
   b.compositeLabels[0] = miraCompositeLabel(
-      b.card, "Aucune lecture", tx, artY + 3, tw,
-      mini ? &mira_font_fr_14 : &mira_font_fr_16, COL_TEXT);
+      b.card, "Aucune lecture", pad, titleY, W - 2 * pad,
+      wide ? &lv_font_montserrat_20 : &mira_font_fr_16,
+      COL_TEXT, LV_TEXT_ALIGN_CENTER);
   b.compositeLabels[1] = miraCompositeLabel(
-      b.card, "Artiste", tx, artY + (mini ? 25 : 31), tw,
-      &mira_font_fr_12, COL_MUTED);
-  b.compositeLabels[2] = miraCompositeLabel(
-      b.card, "Album", tx, artY + (mini ? 44 : 56), tw,
-      &mira_font_fr_12, COL_MUTED);
+      b.card, "", pad, artistY, W - 2 * pad,
+      &mira_font_fr_14, COL_MUTED, LV_TEXT_ALIGN_CENTER);
+  // The album metadata and progress remain available in Jeedom / MQTT
+  // for compatibility but are not shown in the compact Jeedom-style tile.
+  b.compositeLabels[3] = miraCompositeLabel(
+      b.card, "À l'arrêt", pad, stateY, W - 2 * pad,
+      &mira_font_fr_12, COL_MUTED, LV_TEXT_ALIGN_CENTER);
 
-  const int progressY = mini ? 122 : (wide ? 176 : 151);
-  miraCompositeLabel(b.card, "LECTURE", pad + 1, progressY - 20,
-                     90, &mira_font_fr_12, COL_MUTED);
-  b.compositeLabels[4] = miraCompositeLabel(
-      b.card, "-- %", W - pad - 57, progressY - 20, 55,
-      &mira_font_fr_12, COL_MUTED, LV_TEXT_ALIGN_RIGHT);
-  b.compositeGauge = lv_bar_create(b.card);
-  lv_obj_set_pos(b.compositeGauge, pad, progressY);
-  lv_obj_set_size(b.compositeGauge, W - 2 * pad, 7);
-  lv_bar_set_range(b.compositeGauge, 0, 100);
-  lv_bar_set_value(b.compositeGauge, 0, LV_ANIM_OFF);
-  lv_obj_set_style_bg_color(b.compositeGauge, colorPanel2(), LV_PART_MAIN);
-  lv_obj_set_style_bg_color(b.compositeGauge, colorAccent(), LV_PART_INDICATOR);
-  lv_obj_clear_flag(b.compositeGauge, LV_OBJ_FLAG_CLICKABLE);
-
-  const int actionsY = mini ? 147 : (wide ? 206 : 182);
-  const int buttonW = mini ? 54 : 65;
-  const int buttonGap = mini ? 12 : 18;
-  const int groupW = 3 * buttonW + 2 * buttonGap;
-  const int firstX = (W - groupW) / 2;
+  const int actionsY = wide ? 380 : (mini ? 219 : 273);
+  const int buttonW = mini ? 52 : (wide ? 72 : 62);
+  const int buttonGap = mini ? 11 : (wide ? 24 : 20);
+  const int buttonH = mini ? 42 : (wide ? 57 : 50);
+  const int firstX = (W - 3 * buttonW - 2 * buttonGap) / 2;
   const char* symbols[3] = {LV_SYMBOL_PREV, LV_SYMBOL_PLAY, LV_SYMBOL_NEXT};
   for (uint8_t i = 0; i < 3; ++i) {
     lv_obj_t* btn = lv_btn_create(b.card);
     lv_obj_set_pos(btn, firstX + i * (buttonW + buttonGap), actionsY);
-    lv_obj_set_size(btn, buttonW, mini ? 43 : 52);
+    lv_obj_set_size(btn, buttonW, buttonH);
     lv_obj_set_style_radius(btn, 12, 0);
     lv_obj_set_style_bg_color(btn, i == 1 ? colorAccent2() : colorPanel2(), 0);
     lv_obj_set_style_border_color(btn, colorAccent(), 0);
@@ -1870,16 +1863,18 @@ void MiraPanelUI::createMedia(uint8_t idx) {
     lv_obj_set_style_pad_all(btn, 0, 0);
     lv_obj_clear_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(btn, onMediaAction, LV_EVENT_CLICKED, makeContext(idx, i));
-    lv_obj_t* icon = miraCompositeLabel(btn, symbols[i], 0, mini ? 9 : 13,
+    lv_obj_t* glyph = miraCompositeLabel(
+        btn, symbols[i], 0, mini ? 9 : (wide ? 16 : 13),
         buttonW, &lv_font_montserrat_20, COL_TEXT, LV_TEXT_ALIGN_CENTER);
-    if (i == 1) b.stateLabel = icon; // updated from playback-state Info
+    if (i == 1) b.stateLabel = glyph;
   }
-  const int volY = mini ? 209 : (wide ? 281 : 257);
+
+  const int volY = wide ? 468 : (mini ? 279 : 344);
   miraCompositeLabel(b.card, LV_SYMBOL_VOLUME_MAX, pad, volY + 2, 28,
                      &lv_font_montserrat_20, colorAccent());
-  b.compositeLabels[5] = miraCompositeLabel(b.card, "-- %",
-      W - pad - 49, volY + 7, 48, &mira_font_fr_12,
-      COL_TEXT, LV_TEXT_ALIGN_RIGHT);
+  b.compositeLabels[5] = miraCompositeLabel(
+      b.card, "-- %", W - pad - 49, volY + 7, 48,
+      &mira_font_fr_12, COL_TEXT, LV_TEXT_ALIGN_RIGHT);
   b.mediaVolumeSlider = lv_slider_create(b.card);
   lv_obj_set_pos(b.mediaVolumeSlider, pad + 35, volY + 5);
   lv_obj_set_size(b.mediaVolumeSlider, W - 2 * pad - 92, 9);
@@ -1890,10 +1885,45 @@ void MiraPanelUI::createMedia(uint8_t idx) {
   lv_obj_set_style_bg_color(b.mediaVolumeSlider, COL_TEXT, LV_PART_KNOB);
   lv_obj_set_style_pad_all(b.mediaVolumeSlider, 0, LV_PART_KNOB);
   lv_obj_set_ext_click_area(b.mediaVolumeSlider, 12);
-  lv_obj_add_event_cb(b.mediaVolumeSlider, onMediaVolume, LV_EVENT_RELEASED,
-                      makeContext(idx));
-  b.compositeLabels[3] = miraCompositeLabel(b.card, "À l'arrêt",
-      pad, H - (mini ? 27 : 29), W - 2 * pad, &mira_font_fr_12, COL_MUTED);
+  lv_obj_add_event_cb(b.mediaVolumeSlider, onMediaVolume,
+                      LV_EVENT_RELEASED, makeContext(idx));
+
+  // The sole speaker picker is BELOW the unchanged volume control.
+  const int dropY = wide ? 506 : (mini ? 318 : 374);
+  b.mediaDeviceDropdown = lv_dropdown_create(b.card);
+  lv_obj_set_pos(b.mediaDeviceDropdown, pad, dropY);
+  lv_obj_set_size(b.mediaDeviceDropdown, W - 2 * pad, wide ? 42 : (mini ? 36 : 35));
+  lv_obj_set_style_radius(b.mediaDeviceDropdown, 9, 0);
+  lv_obj_set_style_bg_color(b.mediaDeviceDropdown, colorPanel2(), 0);
+  lv_obj_set_style_border_color(b.mediaDeviceDropdown, colorAccent(), 0);
+  lv_obj_set_style_border_width(b.mediaDeviceDropdown, 1, 0);
+  lv_obj_set_style_text_color(b.mediaDeviceDropdown, COL_TEXT, 0);
+  lv_obj_set_style_text_font(b.mediaDeviceDropdown, &mira_font_fr_14, 0);
+  lv_dropdown_set_options(b.mediaDeviceDropdown, "Aucune enceinte disponible");
+  lv_obj_add_state(b.mediaDeviceDropdown, LV_STATE_DISABLED);
+  lv_obj_add_event_cb(b.mediaDeviceDropdown, onMediaDeviceSelected,
+                      LV_EVENT_VALUE_CHANGED, makeContext(idx));
+}
+
+void MiraPanelUI::refreshMediaDeviceDropdown(Binding& b) {
+  if (!b.mediaDeviceDropdown) return;
+  _suppressEvents = true;
+  if (!b.mediaDeviceCount) {
+    lv_dropdown_set_options(b.mediaDeviceDropdown, "Aucune enceinte disponible");
+    lv_obj_add_state(b.mediaDeviceDropdown, LV_STATE_DISABLED);
+  } else {
+    String options = "Choisir une enceinte";
+    uint16_t selected = 0;
+    for (uint8_t i = 0; i < b.mediaDeviceCount; ++i) {
+      options += "\n";
+      options += b.mediaDeviceNames[i];
+      if (b.mediaDeviceNames[i] == b.mediaActiveDevice) selected = i + 1;
+    }
+    lv_dropdown_set_options(b.mediaDeviceDropdown, options.c_str());
+    lv_dropdown_set_selected(b.mediaDeviceDropdown, selected);
+    lv_obj_clear_state(b.mediaDeviceDropdown, LV_STATE_DISABLED);
+  }
+  _suppressEvents = false;
 }
 
 // Common passive view update for Jeedom /updatenr and MQTT States. It never
@@ -1950,7 +1980,28 @@ void MiraPanelUI::updateCompositeInfo(Binding& b, uint8_t field, const String& r
     }
     return;
   }
-  if (b.type != W_MEDIA || field >= 7) return;
+  if (b.type != W_MEDIA || field >= 9) return;
+  if (field == 7) {
+    b.mediaActiveDevice = raw;
+    b.mediaActiveDevice.trim();
+    refreshMediaDeviceDropdown(b);
+    return;
+  }
+  if (field == 8) {
+    b.mediaDeviceCount = 0;
+    int pos = 0;
+    while (pos < (int)raw.length() && b.mediaDeviceCount < 12) {
+      int sep = raw.indexOf('|', pos);
+      String item = sep < 0 ? raw.substring(pos) : raw.substring(pos,sep);
+      item.trim();
+      if (item.length() && item.length() < 97 && item.indexOf('\n') < 0)
+        b.mediaDeviceNames[b.mediaDeviceCount++] = item;
+      if (sep < 0) break;
+      pos = sep + 1;
+    }
+    refreshMediaDeviceDropdown(b);
+    return;
+  }
   if (field == 6) {
     // Optional cover URL; Spotify CDN only. A media Info must never trigger
     // an arbitrary device/LAN HTTP request or leak Jeedom credentials.
@@ -3536,6 +3587,23 @@ void MiraPanelUI::onMediaAction(lv_event_t* e) {
     ui._mqtt->publishAction(b.name + "__" + MIRA_MEDIA_ACTIONS[action], "1");
 }
 
+void MiraPanelUI::onMediaDeviceSelected(lv_event_t* e) {
+  EventContext* ctx = static_cast<EventContext*>(lv_event_get_user_data(e));
+  if (!ctx || !ctx->ui) return;
+  MiraPanelUI& ui = *ctx->ui;
+  if (ui._suppressEvents || ui.touchBlocksAction(false) ||
+      ctx->bindingIndex >= ui._bindingCount) return;
+  Binding& b = ui._bindings[ctx->bindingIndex];
+  if (b.type != W_MEDIA || !b.mediaDeviceDropdown || b.mediaDeviceCmdId < 0) return;
+  const uint16_t selection = lv_dropdown_get_selected(b.mediaDeviceDropdown);
+  if (selection == 0 || selection > b.mediaDeviceCount) return;
+  ui.noteActivity();
+  // Index of the EXACT device-name list received from Jeedom. The plugin
+  // validates the index against its current list before transferring playback.
+  ui._server.IndexSetRange(b.mediaDeviceCmdId, selection - 1);
+  ui._server.IndexSetEvent(b.mediaDeviceCmdId);
+}
+
 void MiraPanelUI::onMediaVolume(lv_event_t* e) {
   EventContext* ctx = static_cast<EventContext*>(lv_event_get_user_data(e));
   if (!ctx || !ctx->ui) return;
@@ -3966,7 +4034,7 @@ void MiraPanelUI::updateBindingFromServer(uint8_t idx, int eventId) {
   Binding& b = _bindings[idx];
 
   if (b.type == W_ENERGY || b.type == W_MEDIA) {
-    const uint8_t count = 7;
+    const uint8_t count = b.type == W_ENERGY ? 7 : 9;
     for (uint8_t f = 0; f < count; ++f) {
       if (b.compositeIds[f] != eventId) continue;
       updateCompositeInfo(b, f, _server.IndexGetInfo(eventId));
