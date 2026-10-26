@@ -126,11 +126,28 @@ class mira extends eqLogic {
    * fields recognized on the selected Spotify equipment. */
   public function configureMediaSource() {
     $sourceId = (int)$this->getConfiguration('media_source_eqid',0);
-    if ($sourceId < 1) return;
+    if ($sourceId < 1) {
+      // Switching back to manual mode only clears previously auto-wired
+      // command references. Existing hand-configured Jeedom targets remain.
+      foreach ($this->getCmd() as $target) {
+        if ((int)$target->getConfiguration('mira_media_source_cmd',0)>0 ||
+            (int)$target->getConfiguration('mira_media_target_cmd',0)>0 ||
+            (int)$target->getConfiguration('mira_media_play_cmd',0)>0) {
+          foreach (array('mira_media_source_cmd','mira_media_target_cmd',
+                   'mira_media_play_cmd','mira_media_pause_cmd','mira_media_state_cmd') as $key)
+            $target->setConfiguration($key,'');
+          $target->save();
+        }
+      }
+      return;
+    }
     $source = eqLogic::byId($sourceId);
     if (!is_object($source)) {
       log::add('mira','warning','[MEDIA] Équipement Spotify introuvable : '.$sourceId);
       return;
+    }
+    if (!$source->getIsEnable()) {
+      log::add('mira','warning','[MEDIA] Spotify sélectionné mais équipement désactivé : '.$sourceId);
     }
     $aliases = array(
       'title'=>array('Item Title','Titre','Piste','Track Name','Title'),
@@ -168,9 +185,15 @@ class mira extends eqLogic {
       $field = $match[1];
       if ($target->getType()==='info' && isset($mapped[$field])) {
         $target->setConfiguration('mira_media_source_cmd',(string)$mapped[$field]->getId());
-        // Keep a normal Jeedom source expression for manual read and fallback.
-        $target->setConfiguration('calcul','#'.$mapped[$field]->getId().'#');
+        // Do not use a shell-backed Jeedom expression for Spotify strings.
+        // The event listener will push updates safely through encoded HTTP.
+        $target->setConfiguration('calcul','');
         $target->save();
+        $initial=$mapped[$field]->execCmd();
+        if ($initial!==null && $initial!=='') {
+          if ($field!=='progress' || is_numeric($initial))
+            self::mediaPushInfo($this,$target,$initial);
+        }
         $configured++;
       } elseif ($target->getType()==='action') {
         if (in_array($field,array('previous','next'),true) && is_object($actions[$field])) {
