@@ -160,6 +160,7 @@ class mira extends eqLogic {
          'Cover','Artwork','Pochette','Image','Album Cover','Jaquette'),
       'state'=>array('Playing','En lecture','Statut lecture','État lecture','Lecture en cours'),
       'volume'=>array('Device Volume','Volume','Volume statut','Niveau volume'),
+       'device'=>array('Device Name','Nom appareil','Nom du lecteur','Lecteur actif','Appareil actif'),
       'progress'=>array('Progression','Position pourcent','Progress','Track progress')
     );
     $mapped = array();
@@ -184,14 +185,15 @@ class mira extends eqLogic {
         'Play/Pause','Play Pause','PlayPause','Pause/Play','Lecture/Pause',
         'Lecture / Pause','Lire / Pause','Lecture pause','Toggle Playback',
         'Toggle Play Pause','Toggle','Play-Pause')),
-      'volume_cmd'=>self::findMediaSourceCmd($source,'action',array('Device Volume Set','Volume Set','Régler volume','Volume','Modifier volume','Set Volume'))
+      'volume_cmd'=>self::findMediaSourceCmd($source,'action',array('Device Volume Set','Volume Set','Régler volume','Volume','Modifier volume','Set Volume')),
+       'device_cmd'=>self::findMediaSourceCmd($source,'action',array('Device Name Set','Changer appareil','Choisir appareil','Changer lecteur','Sélectionner appareil','Select Device By Name'))
     );
 
     $configured = 0;
     foreach ($this->getCmd() as $target) {
       if (!is_object($target)) continue;
       $id = (string)$target->getLogicalId();
-      if (!preg_match('/__(title|artist|album|cover|state|progress|volume|previous|playpause|next|volume_cmd)$/D',$id,$match)) continue;
+      if (!preg_match('/__(title|artist|album|cover|state|progress|volume|device|devices|previous|playpause|next|volume_cmd|device_cmd)$/D',$id,$match)) continue;
       $field = $match[1];
       if ($target->getType()==='info' && isset($mapped[$field])) {
         $target->setConfiguration('mira_media_source_cmd',(string)$mapped[$field]->getId());
@@ -234,13 +236,50 @@ class mira extends eqLogic {
             $target->setConfiguration('mira_media_state_cmd','');
             $target->save();
           }
+        } elseif ($field==='device_cmd') {
+          // Only use an explicit native transfer command; never guess that
+          // playing on another Jeedom equipment transfers the Spotify session.
+          $cmd=$actions['device_cmd'];
+          $target->setConfiguration('mira_media_target_cmd',is_object($cmd)?(string)$cmd->getId():'');
+          $target->save();
+          if (is_object($cmd)) $configured++;
         } elseif ($field==='volume_cmd' && is_object($actions['volume_cmd'])) {
           $target->setConfiguration('mira_media_target_cmd',(string)$actions['volume_cmd']->getId());
           $target->save(); $configured++;
         }
       }
     }
+    // Available destinations are the configured enabled Spotify Connect
+    // equipments (not a claim of current online availability). Only display
+    // a selectable list when the source can actually transfer by name.
+    $deviceList=$this->getCmd(null, 'Home__devices'); // intentionally unused: names are dynamic
+    unset($deviceList);
+    foreach ($this->getCmd() as $candidate) {
+      if (!preg_match('/__devices$/D',(string)$candidate->getLogicalId())) continue;
+      $base=substr((string)$candidate->getLogicalId(),0,-strlen('__devices'));
+      $action=$this->getCmd(null,$base.'__device_cmd');
+      $enabled=is_object($action) && (int)$action->getConfiguration('mira_media_target_cmd',0)>0;
+      $names=$enabled ? self::mediaDestinationNames() : array();
+      $payload=implode('|',$names);
+      $action && $action->setConfiguration('mira_media_destination_names',$payload);
+      if (is_object($action)) $action->save();
+      self::mediaPushInfo($this,$candidate,$payload);
+    }
     log::add('mira','debug','[MEDIA] Auto-configuration Spotify: '.$configured.' correspondances pour '.$this->getName());
+  }
+
+  private static function mediaDestinationNames() {
+    $names=array();
+    foreach (array('spotifyconnect','spotifyConnect','spotify') as $kind) {
+      foreach ((array)eqLogic::byType($kind) as $speaker) {
+        if (!is_object($speaker) || !$speaker->getIsEnable()) continue;
+        $name=trim((string)$speaker->getName());
+        if ($name==='' || strlen($name)>96 || preg_match('/[|\\r\\n\\x00-\\x1f]/',$name)) continue;
+        $names[$name]=$name;
+        if (count($names)>=12) break 2; // firmware dropdown limit
+      }
+    }
+    return array_values($names);
   }
 
   private static function mediaPushInfo($mira, $cmd, $value) {
@@ -681,7 +720,8 @@ class mira extends eqLogic {
                       $names=array('title'=>'Titre','artist'=>'Artiste','album'=>'Album',
                                    'cover'=>'Pochette',
                                    'state'=>'État de lecture','progress'=>'Progression',
-                                   'volume'=>'Volume');
+                                   'volume'=>'Volume','device'=>'Enceinte active',
+                                   'devices'=>'Enceintes disponibles');
                       if ($info->getName() === (string)$name) $info->setName($names[$miraMediaField[1]]);
                     }                  
                     $info->save();
@@ -789,7 +829,7 @@ class mira extends eqLogic {
                     $info->setConfiguration('commande',$id_cmd);
                     $info->setConfiguration('minValue', $min);
                     $info->setConfiguration('maxValue', $max);
-                    if (preg_match('/__volume_cmd$/D',(string)$name)) {
+                    if (preg_match('/__(volume_cmd|device_cmd)$/D',(string)$name)) {
                       $info->setConfiguration('visible_cmd','0');
                       if ($info->getName()==='Value_'.$name) $info->setName('Volume actuel (interne)');
                     }
@@ -818,6 +858,9 @@ class mira extends eqLogic {
                     if (preg_match('/__volume_cmd$/D',(string)$name) &&
                         $cmd->getName()===(string)$name)
                       $cmd->setName('Régler le volume');
+                    if (preg_match('/__device_cmd$/D',(string)$name) &&
+                        $cmd->getName()===(string)$name)
+                      $cmd->setName('Choisir une enceinte');
                     
                     $cmd->setValue($info_id);                        
                     $cmd->save(); 
@@ -1992,7 +2035,7 @@ class miraCmd extends cmd {
         // Optional one-click Spotify action mapping. No action is run
         // during Jeedom Info events, reprogramming or page navigation.
         $mediaName=(string)$this->getLogicalId();
-        if (preg_match('/__(previous|playpause|next|volume_cmd)$/D',$mediaName,$mediaAction)) {
+        if (preg_match('/__(previous|playpause|next|volume_cmd|device_cmd)$/D',$mediaName,$mediaAction)) {
           $field=$mediaAction[1];
           $targetId=(int)$this->getConfiguration('mira_media_target_cmd',0);
           if ($field==='playpause') {
@@ -2012,7 +2055,28 @@ class miraCmd extends cmd {
             $mapped=cmd::byId($targetId);
             if (is_object($mapped) && $mapped->getType()==='action' &&
                 $mapped->getId()!=$this->getId()) {
-              if ($field==='volume_cmd') {
+              if ($field==='device_cmd') {
+                // The native Mira range holds an index, NEVER arbitrary text.
+                // Resolve against the exact names sent to that screen. Validate
+                // against the current enabled-device list before forwarding.
+                $selection=$_options['slider']??null;
+                if ($selection===null) {
+                  $actions=$eqLogic->GetIndex();
+                  if (is_array($actions)) foreach ($actions as $a) {
+                    if (($a['type']??'')==='range' &&
+                        (int)($a['id']??-1)===(int)$this->getConfiguration('commande',-1)) {
+                      $selection=$a['value']??null;
+                      break;
+                    }
+                  }
+                }
+                if (!is_numeric($selection) || (string)(int)$selection!==trim((string)$selection)) return false;
+                $list=explode('|',(string)$this->getConfiguration('mira_media_destination_names',''));
+                $index=(int)$selection;
+                if ($index<0 || $index>=count($list) || !in_array($list[$index],self::mediaDestinationNames(),true)) return false;
+                if ($mapped->getSubType()!=='message') return false;
+                $mapped->execCmd(array('title'=>$list[$index],'message'=>$list[$index]));
+              } else if ($field==='volume_cmd') {
                 $level=$_options['slider']??null;
                 if ($level===null) {
                   // A touchscreen action is an ID; fetch the slider value
