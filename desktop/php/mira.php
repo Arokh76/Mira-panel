@@ -445,6 +445,7 @@ log::add('mira', 'debug', "Lancement script");
                                   ?>
                                 </select>
                                 <small class="help-block">
+                                  {{Chaque enceinte apparaît une seule fois dans cette liste. L'affichage des enceintes sur Mira ne garantit pas que le plugin Spotify propose une commande pour transférer la lecture.}}
                                   {{Sélectionnez l'équipement Spotify qui contrôle réellement la lecture active (par exemple Salle si la musique joue dans Salle), puis enregistrez et actualisez les commandes Mira.}}
                                   {{Aucune saisie n'est nécessaire dans les commandes « Enceinte active » et « Enceintes disponibles » : Mira les renseigne automatiquement.}}
                                   {{Le bouton Lecture/Pause utilise Play, Pause et Playing (ou une commande Play/Pause unique). Pour changer d'enceinte, le plugin Spotify doit proposer Device Name Set.}}
