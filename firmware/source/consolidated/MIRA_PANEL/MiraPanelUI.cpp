@@ -1935,7 +1935,9 @@ void MiraPanelUI::updateCompositeInfo(Binding& b, uint8_t field, const String& r
     if (!safe || url.length() > 768) return;
     _albumTargetIdx = (int16_t)(&b - _bindings);
     _albumUrl = url;
-    if (!_albumFeed.start(url,b.mediaArtworkSize,b.mediaArtworkSize,true)) {
+    // JPEGDEC only scales by 1/2, 1/4 or 1/8. Decode up to 160px,
+    // then fit LVGL into 65/86/112px thumbnails even on Nextion.
+    if (!_albumFeed.start(url,160,160,true)) {
       clearAlbumArtwork();
     }
     return;
