@@ -1853,10 +1853,13 @@ void MiraPanelUI::updateCompositeInfo(Binding& b, uint8_t field, const String& r
     // actually a percentage. For a differently configured unit, leave
     // the gauge empty; always show the source value unchanged above it.
     if (field == 4 && b.compositeGauge) {
-      const String trimmed = raw;
-      const bool numeric = trimmed.length() > 0 && (isDigit(trimmed[0]) || trimmed[0] == '-');
+      // A gauge is meaningful for battery percentage only. If Jeedom
+      // uses V, Ah, kWh or no unit, hide it instead of pretending 0..100 %.
+      const bool hasPercent = raw.indexOf('%') >= 0;
+      if (hasPercent) lv_obj_clear_flag(b.compositeGauge, LV_OBJ_FLAG_HIDDEN);
+      else lv_obj_add_flag(b.compositeGauge, LV_OBJ_FLAG_HIDDEN);
       lv_bar_set_value(b.compositeGauge,
-          numeric ? clampInt(trimmed.toInt(), 0, 100) : 0, LV_ANIM_OFF);
+          hasPercent ? clampInt(raw.toInt(), 0, 100) : 0, LV_ANIM_OFF);
     }
     return;
   }
@@ -2935,6 +2938,7 @@ void MiraPanelUI::pollFavorites() {
   if (newMask != _visiblePageMask) {
     _visiblePageMask = newMask;
     refreshPagePickerVisibility();
+    refreshFavoriteNav();
     if (_currentPage != 0 && !(_visiblePageMask & (1 << _currentPage)))
       showPage(0);
   }
@@ -2973,6 +2977,12 @@ void MiraPanelUI::refreshFavoriteNav() {
     if (!btn) continue;
     lv_obj_clean(btn);
     const uint8_t page = _favoritePages[slot];
+    // Hidden pages must not leave dead favorite buttons on the nav bar.
+    if (page != NO_FAVORITE && !(_visiblePageMask & (1 << page))) {
+      lv_obj_add_flag(btn, LV_OBJ_FLAG_HIDDEN);
+      continue;
+    }
+    lv_obj_clear_flag(btn, LV_OBJ_FLAG_HIDDEN);
     if (page == 1 || page == 2) {
       if (page == 1) makeBulbIcon(btn);
       else makeThermometerIcon(btn);
