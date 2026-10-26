@@ -40,6 +40,8 @@ jobs:
         run: php tests/test_media_energy_french_names.php
       - name: Check no duplicate Spotify Connect sources
         run: php tests/test_spotify_source_menu.php
+      - name: Check Spotify range routing and read-only refresh
+        run: php tests/test_media_volume_routing.php
       - name: Verify native Multimedia page and Spotify mapping
         shell: bash
         run: |

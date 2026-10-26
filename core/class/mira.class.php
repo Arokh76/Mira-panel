@@ -402,6 +402,53 @@ class mira extends eqLogic {
     }
   }
 
+  /**
+   * Safe periodic resync from Jeedom TO Mira. Never executes device actions:
+   * read only Spotify Info sources, evaluate only Jeedom Info expressions.
+   * Source listeners still push Spotify changes immediately when available.
+   * This minute-based path repairs lost events and stale screen displays.
+   */
+  public function refreshPassiveWidgets() {
+    $source=eqLogic::byId((int)$this->getConfiguration('media_source_eqid',0));
+    $count=0;
+    foreach ($this->getCmd() as $target) {
+      if (!is_object($target) || $target->getType()!=='info') continue;
+      $logical=(string)$target->getLogicalId();
+      $sourceId=(int)$target->getConfiguration('mira_media_source_cmd',0);
+      try {
+        if ($sourceId>0) {
+          $sourceCmd=cmd::byId($sourceId);
+          if (!is_object($sourceCmd) || $sourceCmd->getType()!=='info') continue;
+          $value=$sourceCmd->execCmd();
+          if ($value===null || $value==='') continue;
+          if (preg_match('/__progress$/D',$logical) &&
+              (!is_numeric($value) || (float)$value<0 || (float)$value>100)) continue;
+          self::mediaPushInfo($this,$target,$value);
+          $count++;
+        } elseif (preg_match('/__devices$/D',$logical) &&
+                  (int)$target->getConfiguration('mira_media_auto_devices',0)===1) {
+          self::mediaPushInfo($this,$target,implode('|',self::mediaDestinationNames($source)));
+          $count++;
+        } elseif (preg_match('/__device$/D',$logical) &&
+                  (int)$target->getConfiguration('mira_media_auto_reader',0)===1 &&
+                  is_object($source)) {
+          self::mediaPushInfo($this,$target,(string)$source->getName());
+          $count++;
+        } elseif (trim((string)$target->getConfiguration('calcul',''))!=='' &&
+                  $target->getConfiguration('type')==='info') {
+          // execute() here evaluates a passive Info only and forwards its
+          // value; never touch toggle/list/range/action or hardware controls.
+          $value=$target->execute();
+          if ($value!==null && is_scalar($value)) $target->event((string)$value);
+          $count++;
+        }
+      } catch (Throwable $e) {
+        log::add('mira','warning','[Refresh] Info '.$logical.' : '.$e->getMessage());
+      }
+    }
+    return $count;
+  }
+
   /** Saved Jeedom equipment configuration is the source of truth. */
   public function postSave() {
     if (!$this->getId()) return;
@@ -482,12 +529,21 @@ class mira extends eqLogic {
     return $changed;
   }
 
-  // Jeedom's once-a-minute scheduler. A direct Jeedom action still updates immediately.
+  // Jeedom minute scheduler: passive Info refresh is a read of sources,
+  // NOT an action. The source listener handles low-latency Spotify changes.
   public static function cron() {
     foreach (eqLogic::byType('mira',true) as $eqLogic) {
       try { $eqLogic->syncGpioStates(); }
       catch (Throwable $e) {
         log::add('mira','warning','[GPIO] Lecture état : '.$e->getMessage());
+      }
+      try {
+        // Avoid multiple sequential HTTP timeouts when the screen is offline.
+        if (trim((string)$eqLogic->getConfiguration('adresseip',''))!=='' &&
+            $eqLogic->GetIndex()!=='Erreur')
+          $eqLogic->refreshPassiveWidgets();
+      } catch (Throwable $e) {
+        log::add('mira','warning','[Refresh] Synchronisation passive : '.$e->getMessage());
       }
     }
   }
@@ -1375,12 +1431,23 @@ class mira extends eqLogic {
           if ($json_index['actions'][$i]['type'] == 'info' || $json_index['actions'][$i]['type'] == 'button'){
           	$name = $json_index['actions'][$i]['nom'];             
           } else if ($json_index['actions'][$i]['type'] == 'list'){
-          	$name = 'Value_'.$json_index['actions'][$i]['nomliste'];            
+          	$name = 'Value_'.$json_index['actions'][$i]['nomliste'];
+          } else if ($json_index['actions'][$i]['type'] == 'range' &&
+                     preg_match('/__(volume_cmd|device_cmd)$/D',
+                       (string)$json_index['actions'][$i]['nom'])) {
+            // Composite Spotify sliders are ACTION commands. The old
+            // Value_... Info mapping silently swallowed volume adjustments,
+            // while button actions like Next continued to work.
+            $name = $json_index['actions'][$i]['nom'];
           } else {
-          	$name = 'Value_'.$json_index['actions'][$i]['nom'];            
+          	$name = 'Value_'.$json_index['actions'][$i]['nom'];
           }
           $info = $this->getCmd(null, $name);
-          $eqLogic = $info->getId();   
+          if (!is_object($info)) {
+            log::add('mira','warning','[Init] Commande Jeedom introuvable : '.$name);
+            continue;
+          }
+          $eqLogic = $info->getId();
           $json_index['actions'][$i]['jeedom'] = $eqLogic;
           log::add(__CLASS__, 'debug', $id.' : '.$eqLogic);	
       }
@@ -1666,6 +1733,7 @@ class mira extends eqLogic {
     // Seules les sorties GPIO locales sont lues depuis l'ecran.
     // Les actionneurs Jeedom classiques gardent Jeedom comme source de verite.
     $this->syncGpioStates();
+    $this->refreshPassiveWidgets();
     return true;
   }
 
@@ -1855,6 +1923,8 @@ class miraCmd extends cmd {
          * les commandes ajoutees depuis la derniere programmation. */
         $eqLogic->postUpdate();
         $eqLogic->syncGpioStates();
+        // Saving/rebuilding the index alone does not resend current Info values.
+        $eqLogic->refreshPassiveWidgets();
       	return;
 	}
    
@@ -2164,7 +2234,9 @@ class miraCmd extends cmd {
                 if ($mapped->getSubType()!=='message') return false;
                 $mapped->execCmd(array('title'=>$list[$index],'message'=>$list[$index]));
               } else if ($field==='volume_cmd') {
-                $level=$_options['slider']??null;
+                // The Jeedom API forwards touchscreen range values via "value"
+                // on some installations. Direct UI actions use "slider".
+                $level=$_options['slider']??($_options['value']??null);
                 if ($level===null) {
                   // A touchscreen action is an ID; fetch the slider value
                   // from the latest ESP32 index, not an assumed percentage.
@@ -2177,12 +2249,21 @@ class miraCmd extends cmd {
                     }
                   }
                 }
-                if (!is_numeric($level)) return false;
+                if (!is_numeric($level)) {
+                  log::add('mira','warning','[MEDIA] Volume non envoyé : valeur absente pour '.$mediaName);
+                  return false;
+                }
                 $level=max(0,min(100,(int)$level));
-                if ($mapped->getSubType()==='slider') $mapped->execCmd(array('slider'=>$level));
-                else if ($mapped->getSubType()==='message')
+                $subtype=(string)$mapped->getSubType();
+                log::add('mira','debug','[MEDIA] Volume '.$level.' % -> '.
+                  (string)$mapped->getName().' (#'.$targetId.', '.$subtype.')');
+                if ($subtype==='slider') $mapped->execCmd(array('slider'=>$level));
+                else if ($subtype==='message')
                   $mapped->execCmd(array('title'=>(string)$level,'message'=>(string)$level));
-                else return false;
+                else {
+                  log::add('mira','warning','[MEDIA] Volume : type de commande non compatible '.$subtype);
+                  return false;
+                }
               } else $mapped->execCmd();
               return true;
             }
