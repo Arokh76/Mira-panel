@@ -1723,6 +1723,8 @@ void MiraPanelUI::createEnergy(uint8_t idx) {
   lv_bar_set_value(b.compositeGauge, 0, LV_ANIM_OFF);
   lv_obj_set_style_bg_color(b.compositeGauge, colorPanel2(), LV_PART_MAIN);
   lv_obj_set_style_bg_color(b.compositeGauge, COL_GREEN, LV_PART_INDICATOR);
+  // Hidden until a real Jeedom/MQTT value explicitly specifies %.
+  lv_obj_add_flag(b.compositeGauge, LV_OBJ_FLAG_HIDDEN);
   lv_obj_set_style_radius(b.compositeGauge, LV_RADIUS_CIRCLE, LV_PART_MAIN);
   lv_obj_set_style_radius(b.compositeGauge, LV_RADIUS_CIRCLE, LV_PART_INDICATOR);
   lv_obj_clear_flag(b.compositeGauge, LV_OBJ_FLAG_CLICKABLE);
