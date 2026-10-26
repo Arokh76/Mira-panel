@@ -2097,6 +2097,11 @@ class miraCmd extends cmd {
             $mapped=cmd::byId($targetId);
             if (is_object($mapped) && $mapped->getType()==='action' &&
                 $mapped->getId()!=$this->getId()) {
+              if ($field==='playpause') {
+                log::add('mira','debug','[MEDIA] Lecture/Pause : lecteur Jeedom '.
+                  (string)$eqLogic->getConfiguration('media_source_eqid',0).
+                  ', commande '.(string)$mapped->getName().' (#'.$targetId.')');
+              }
               if ($field==='device_cmd') {
                 // The native Mira range holds an index, NEVER arbitrary text.
                 // Resolve against the exact names sent to that screen. Validate
@@ -2141,6 +2146,12 @@ class miraCmd extends cmd {
               } else $mapped->execCmd();
               return true;
             }
+          }
+          if ($field==='playpause' && trim((string)$this->getConfiguration('calcul',''))==='') {
+            log::add('mira','warning','[MEDIA] Lecture/Pause non exécutée : '.
+              (string)$this->getConfiguration('mira_media_link_status',
+                'commande Spotify non associée').'. Vérifier le lecteur actif, Play/Pause/Playing.');
+            return false;
           }
         }
         $cmd = $this->getConfiguration('commande');        	
