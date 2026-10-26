@@ -402,6 +402,52 @@ class mira extends eqLogic {
     }
   }
 
+  /**
+   * Safe periodic resync from Jeedom TO Mira. Never executes device actions:
+   * read only Spotify Info sources, evaluate only Jeedom Info expressions.
+   * Source listeners still push Spotify changes immediately when available.
+   * This minute-based path repairs lost events and stale screen displays.
+   */
+  public function refreshPassiveWidgets() {
+    $source=eqLogic::byId((int)$this->getConfiguration('media_source_eqid',0));
+    $count=0;
+    foreach ($this->getCmd() as $target) {
+      if (!is_object($target) || $target->getType()!=='info') continue;
+      $logical=(string)$target->getLogicalId();
+      $sourceId=(int)$target->getConfiguration('mira_media_source_cmd',0);
+      try {
+        if ($sourceId>0) {
+          $sourceCmd=cmd::byId($sourceId);
+          if (!is_object($sourceCmd) || $sourceCmd->getType()!=='info') continue;
+          $value=$sourceCmd->execCmd();
+          if ($value===null || $value==='') continue;
+          if (preg_match('/__progress$/D',$logical) &&
+              (!is_numeric($value) || (float)$value<0 || (float)$value>100)) continue;
+          self::mediaPushInfo($this,$target,$value);
+          $count++;
+        } elseif (preg_match('/__devices$/D',$logical) &&
+                  (int)$target->getConfiguration('mira_media_auto_devices',0)===1) {
+          self::mediaPushInfo($this,$target,implode('|',self::mediaDestinationNames($source)));
+          $count++;
+        } elseif (preg_match('/__device$/D',$logical) &&
+                  (int)$target->getConfiguration('mira_media_auto_reader',0)===1 &&
+                  is_object($source)) {
+          self::mediaPushInfo($this,$target,(string)$source->getName());
+          $count++;
+        } elseif (trim((string)$target->getConfiguration('calcul',''))!=='' &&
+                  $target->getConfiguration('type')==='info') {
+          // execute() here evaluates a passive Info only and forwards its
+          // value; never touch toggle/list/range/action or hardware controls.
+          $target->execute();
+          $count++;
+        }
+      } catch (Throwable $e) {
+        log::add('mira','warning','[Refresh] Info '.$logical.' : '.$e->getMessage());
+      }
+    }
+    return $count;
+  }
+
   /** Saved Jeedom equipment configuration is the source of truth. */
   public function postSave() {
     if (!$this->getId()) return;
@@ -482,12 +528,21 @@ class mira extends eqLogic {
     return $changed;
   }
 
-  // Jeedom's once-a-minute scheduler. A direct Jeedom action still updates immediately.
+  // Jeedom minute scheduler: passive Info refresh is a read of sources,
+  // NOT an action. The source listener handles low-latency Spotify changes.
   public static function cron() {
     foreach (eqLogic::byType('mira',true) as $eqLogic) {
       try { $eqLogic->syncGpioStates(); }
       catch (Throwable $e) {
         log::add('mira','warning','[GPIO] Lecture état : '.$e->getMessage());
+      }
+      try {
+        // Avoid multiple sequential HTTP timeouts when the screen is offline.
+        if (trim((string)$eqLogic->getConfiguration('adresseip',''))!=='' &&
+            $eqLogic->GetIndex()!=='Erreur')
+          $eqLogic->refreshPassiveWidgets();
+      } catch (Throwable $e) {
+        log::add('mira','warning','[Refresh] Synchronisation passive : '.$e->getMessage());
       }
     }
   }
@@ -1677,6 +1732,7 @@ class mira extends eqLogic {
     // Seules les sorties GPIO locales sont lues depuis l'ecran.
     // Les actionneurs Jeedom classiques gardent Jeedom comme source de verite.
     $this->syncGpioStates();
+    $this->refreshPassiveWidgets();
     return true;
   }
 
@@ -1866,6 +1922,8 @@ class miraCmd extends cmd {
          * les commandes ajoutees depuis la derniere programmation. */
         $eqLogic->postUpdate();
         $eqLogic->syncGpioStates();
+        // Saving/rebuilding the index alone does not resend current Info values.
+        $eqLogic->refreshPassiveWidgets();
       	return;
 	}
    
