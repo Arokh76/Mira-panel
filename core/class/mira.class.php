@@ -717,11 +717,16 @@ class mira extends eqLogic {
                     // Jeedom enforces unique (equipment, command name), not only logicalId.
                     // Each composite card must therefore keep its own named Info
                     // commands, even when several Media/Energy widgets coexist.
-                    if (preg_match('/^(.*)__soc([23])$/D',(string)$name,$miraSocNumber)) {
-                      $newName=$miraSocNumber[1].' · SoC batterie '.$miraSocNumber[2];
-                      if (in_array((string)$info->getName(),array((string)$name,
-                          'SoC batterie '.$miraSocNumber[2]),true))
-                        $info->setName($newName);
+                    // Keep stable logical IDs, translate labels only, preserve custom names.
+                    if (preg_match('/^(.*)__(solar|home|grid|battery|soc|soc2|soc3)$/D',(string)$name,$miraEnergyField)) {
+                      $energyNames=array('solar'=>'Solaire','home'=>'Consommation maison',
+                        'grid'=>'Réseau','battery'=>'Batterie','soc'=>'Stockage · SoC',
+                        'soc2'=>'SoC batterie 2','soc3'=>'SoC batterie 3');
+                      $suffix=$miraEnergyField[2];
+                      $oldLabel=preg_match('/^soc([23])$/D',$suffix,$socN) ?
+                        'SoC batterie '.$socN[1] : '';
+                      if (in_array((string)$info->getName(),array((string)$name,$oldLabel),true))
+                        $info->setName($miraEnergyField[1].' · '.$energyNames[$suffix]);
                     }
                     if (preg_match('/^(.*)__(title|artist|album|cover|state|progress|volume|device|devices)$/D',(string)$name,$miraMediaField)) {
                       $names=array('title'=>'Titre','artist'=>'Artiste','album'=>'Album',
