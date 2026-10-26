@@ -668,8 +668,10 @@ class mira extends eqLogic {
           			$info->setConfiguration('commande',$cmd_id);
                     // L'unité Énergie appartient à Jeedom : ne jamais la
                     // remplacer par une valeur imposée depuis le firmware.
-                    if ($unite !== '' || !preg_match('/__(solar|home|grid|battery|soc)$/D',(string)$name))
+                    if ($unite !== '' || !preg_match('/__(solar|home|grid|battery|soc|soc2|soc3)$/D',(string)$name))
                       $info->setUnite($unite);
+                    if (preg_match('/__soc([23])$/D',(string)$name,$miraSocNumber) && $info->getName()===(string)$name)
+                      $info->setName('SoC batterie '.$miraSocNumber[1]);
                     if (preg_match('/__(title|artist|album|state|progress|volume)$/D',(string)$name,$miraMediaField)) {
                       $names=array('title'=>'Titre','artist'=>'Artiste','album'=>'Album',
                                    'state'=>'État de lecture','progress'=>'Progression',
@@ -1578,6 +1580,29 @@ class miraCmd extends cmd {
     return ($out !== false && $code === 200) ? $out : false;
   }
   public function postSave() {
+    // The SOC master row owns the 1..3 battery selector. Clear unused
+    // secondary screen slots without removing Jeedom commands or mappings.
+    if (preg_match('/^(.*)__soc$/D',(string)$this->getLogicalId(),$socMaster)) {
+      $count=(int)$this->getConfiguration('mira_battery_count',1);
+      if ($count<1 || $count>3) $count=1;
+      $eq=$this->getEqLogic();
+      if (is_object($eq)) {
+        $ip=(string)$eq->getConfiguration('adresseip','');
+        $key=(string)$eq->getConfiguration('password','');
+        if (preg_match('/^[A-Za-z0-9.\\-]+$/D',$ip) && $key!=='') {
+          for($n=$count+1;$n<=3;$n++) {
+            $unused=$eq->getCmd(null,$socMaster[1].'__soc'.$n);
+            if (!is_object($unused)) continue;
+            $id=(int)$unused->getConfiguration('commande',-1);
+            if ($id<1) continue;
+            $url='http://'.$ip.'/updatenr?key='.rawurlencode($key).'&info='.$id.'&value=';
+            $ch=curl_init($url);
+            curl_setopt_array($ch,array(CURLOPT_RETURNTRANSFER=>true,CURLOPT_CONNECTTIMEOUT=>1,CURLOPT_TIMEOUT=>2));
+            curl_exec($ch); curl_close($ch);
+          }
+        }
+      }
+    }
     if ($this->getConfiguration('type') === 'camera') {
       // Save URL as a normal Jeedom command setting; do not reprogram LVGL
       // or execute any actions when editing the camera.
@@ -1718,11 +1743,17 @@ class miraCmd extends cmd {
           }
           return '';
         }
+        // Optional SoC 2/3 are not emitted when their battery is disabled.
+        if (preg_match('/^(.*)__soc([23])$/D',(string)$nom,$miraSocInfo)) {
+          $socMaster=$eqLogic->getCmd(null,$miraSocInfo[1].'__soc');
+          $batteryCount=is_object($socMaster) ? (int)$socMaster->getConfiguration('mira_battery_count',1) : 1;
+          if ($batteryCount<(int)$miraSocInfo[2]) return '';
+        }
         if ($this->getConfiguration('calcul') != ''&& $this->getConfiguration('type') == 'info'){
            
           $result = jeedom::evaluateExpression($this->getConfiguration('calcul'));
           $cmd = $this->getConfiguration('commande');
-          if (preg_match('/__(solar|home|grid|battery|soc)$/D',(string)$nom)) {
+          if (preg_match('/__(solar|home|grid|battery|soc|soc2|soc3)$/D',(string)$nom)) {
             // Never impose a unit on energy fields: append only the unit
             // explicitly selected by the Jeedom user.
             $display = (string)$result;
