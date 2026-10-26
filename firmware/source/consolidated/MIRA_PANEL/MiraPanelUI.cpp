@@ -38,7 +38,7 @@ static const lv_color_t COL_RED     = lv_color_hex(0xE36A6A);
 
 // Composite widgets reuse existing Jeedom index types: Info, Button, Range.
 // No special plugin-to-ESP transport and no commands during initial drawing.
-static const char* const MIRA_ENERGY_FIELDS[5] = {"solar", "home", "grid", "battery", "soc"};
+static const char* const MIRA_ENERGY_FIELDS[7] = {"solar", "home", "grid", "battery", "soc", "soc2", "soc3"};
 static const char* const MIRA_MEDIA_FIELDS[6] =
     {"title", "artist", "album", "state", "progress", "volume"};
 static const char* const MIRA_MEDIA_ACTIONS[3] =
@@ -555,7 +555,7 @@ void MiraPanelUI::handleMqttState(const String& topic, const String& rawPayload)
   for (uint8_t i = 0; i < _bindingCount; ++i) {
     Binding& b = _bindings[i];
     if (b.type != W_ENERGY && b.type != W_MEDIA) continue;
-    const uint8_t fields = b.type == W_ENERGY ? 5 : 6;
+    const uint8_t fields = b.type == W_ENERGY ? 7 : 6;
     for (uint8_t f = 0; f < fields; ++f) {
       const char* suffix = b.type == W_ENERGY ? MIRA_ENERGY_FIELDS[f] : MIRA_MEDIA_FIELDS[f];
       if (key != normalizeMqttTopicName(b.name + "__" + suffix)) continue;
@@ -1271,7 +1271,7 @@ void MiraPanelUI::registerAndCreate(JsonObject obj) {
   }
   else if (type == "energy") {
     b.type = W_ENERGY;
-    for (uint8_t i = 0; i < 5; ++i)
+    for (uint8_t i = 0; i < 7; ++i)
       b.compositeIds[i] = _server.IndexAddInfo(name + "__" + MIRA_ENERGY_FIELDS[i], "");
     createEnergy(idx);
   }
@@ -1671,6 +1671,7 @@ void MiraPanelUI::createEnergy(uint8_t idx) {
   const int H = wide ? 344 : (mini ? 294 : 353);
   b.card = makeCard(pageIndex(b.location), H);
   lv_obj_set_size(b.card, W, H);
+  b.energyBaseHeight = H;
   lv_obj_set_layout(b.card, 0);
   lv_obj_set_style_pad_all(b.card, 0, 0);
   lv_obj_clear_flag(b.card, LV_OBJ_FLAG_SCROLLABLE);
@@ -1728,6 +1729,30 @@ void MiraPanelUI::createEnergy(uint8_t idx) {
   lv_obj_set_style_radius(b.compositeGauge, LV_RADIUS_CIRCLE, LV_PART_MAIN);
   lv_obj_set_style_radius(b.compositeGauge, LV_RADIUS_CIRCLE, LV_PART_INDICATOR);
   lv_obj_clear_flag(b.compositeGauge, LV_OBJ_FLAG_CLICKABLE);
+
+  // Two optional independent SOC rows. Their index slots always exist so
+  // Jeedom can configure them without reprogramming the energy widget.
+  // Empty values keep each extra row hidden and preserve old single-SOC UI.
+  for (uint8_t extra = 0; extra < 2; ++extra) {
+    const int y = sectionY + (extra + 1) * 47;
+    b.energyExtraNames[extra] = miraCompositeLabel(b.card,
+        extra == 0 ? "BATTERIE 2" : "BATTERIE 3", pad + 3, y,
+        W - 2 * pad, headingFont, COL_MUTED);
+    b.compositeLabels[5 + extra] = miraCompositeLabel(b.card, "--",
+        W - pad - (mini ? 58 : 72), y - 1, mini ? 55 : 70,
+        infoFont, COL_GREEN, LV_TEXT_ALIGN_RIGHT);
+    b.energyExtraGauges[extra] = lv_bar_create(b.card);
+    lv_obj_set_pos(b.energyExtraGauges[extra], pad + 3, y + (mini ? 29 : 32));
+    lv_obj_set_size(b.energyExtraGauges[extra], W - 2 * pad - 6, mini ? 8 : 11);
+    lv_bar_set_range(b.energyExtraGauges[extra], 0, 100);
+    lv_bar_set_value(b.energyExtraGauges[extra], 0, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(b.energyExtraGauges[extra], colorPanel2(), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(b.energyExtraGauges[extra], COL_GREEN, LV_PART_INDICATOR);
+    lv_obj_clear_flag(b.energyExtraGauges[extra], LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(b.energyExtraNames[extra], LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(b.compositeLabels[5 + extra], LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(b.energyExtraGauges[extra], LV_OBJ_FLAG_HIDDEN);
+  }
 }
 
 // A dedicated Mira media dashboard (not a Home Assistant media-player card).
@@ -1846,7 +1871,7 @@ void MiraPanelUI::updateCompositeInfo(Binding& b, uint8_t field, const String& r
   text.trim();
   if (!text.length()) text = "--";
   if (b.type == W_ENERGY) {
-    if (field >= 5) return;
+    if (field >= 7) return;
     // No hard-coded unit. Jeedom or MQTT may supply W, kW, kWh, A, %, etc.
     // Values without units are rendered without any added suffix.
     if (b.compositeLabels[field])
@@ -1862,6 +1887,32 @@ void MiraPanelUI::updateCompositeInfo(Binding& b, uint8_t field, const String& r
       else lv_obj_add_flag(b.compositeGauge, LV_OBJ_FLAG_HIDDEN);
       lv_bar_set_value(b.compositeGauge,
           hasPercent ? clampInt(raw.toInt(), 0, 100) : 0, LV_ANIM_OFF);
+    }
+    if (field == 5 || field == 6) {
+      const uint8_t extra = field - 5;
+      // Never guess a battery: only explicitly configured, nonempty
+      // Jeedom/MQTT sources activate their own separate SOC row.
+      b.energyExtraActive[extra] = raw.length() > 0 && text != "--";
+      if (b.energyExtraNames[extra]) {
+        if (b.energyExtraActive[extra]) lv_obj_clear_flag(b.energyExtraNames[extra], LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(b.energyExtraNames[extra], LV_OBJ_FLAG_HIDDEN);
+      }
+      if (b.compositeLabels[field]) {
+        if (b.energyExtraActive[extra]) lv_obj_clear_flag(b.compositeLabels[field], LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(b.compositeLabels[field], LV_OBJ_FLAG_HIDDEN);
+      }
+      if (b.energyExtraGauges[extra]) {
+        const bool showGauge = b.energyExtraActive[extra] && raw.indexOf('%') >= 0;
+        if (showGauge) lv_obj_clear_flag(b.energyExtraGauges[extra], LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(b.energyExtraGauges[extra], LV_OBJ_FLAG_HIDDEN);
+        lv_bar_set_value(b.energyExtraGauges[extra],
+            showGauge ? clampInt(raw.toInt(), 0, 100) : 0, LV_ANIM_OFF);
+      }
+      if (b.card && b.energyBaseHeight > 0) {
+        const int extraRows = b.energyExtraActive[1] ? 2 :
+                              (b.energyExtraActive[0] ? 1 : 0);
+        lv_obj_set_height(b.card, b.energyBaseHeight + 47 * extraRows);
+      }
     }
     return;
   }
@@ -3811,7 +3862,7 @@ void MiraPanelUI::updateBindingFromServer(uint8_t idx, int eventId) {
   Binding& b = _bindings[idx];
 
   if (b.type == W_ENERGY || b.type == W_MEDIA) {
-    const uint8_t count = b.type == W_ENERGY ? 5 : 6;
+    const uint8_t count = b.type == W_ENERGY ? 7 : 6;
     for (uint8_t f = 0; f < count; ++f) {
       if (b.compositeIds[f] != eventId) continue;
       updateCompositeInfo(b, f, _server.IndexGetInfo(eventId));
