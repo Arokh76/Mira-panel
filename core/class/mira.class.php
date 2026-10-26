@@ -218,6 +218,9 @@ class mira extends eqLogic {
   }
 
   private static function mediaPushInfo($mira, $cmd, $value) {
+    // Spotify may expose Playing as a native boolean. Preserve OFF as 0,
+    // not an empty string (which can look like missing data on Mira).
+    if (is_bool($value)) $value = $value ? '1' : '0';
     $ip=(string)$mira->getConfiguration('adresseip','');
     $key=(string)$mira->getConfiguration('password','');
     $index=(int)$cmd->getConfiguration('commande',-1);
