@@ -126,10 +126,10 @@ jobs:
           grep -Fq 'lv_img_set_angle(_cameraImage, 0);' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -Fq '_refreshIntervalMs = 250;' firmware/source/work/MIRA_PANEL/MiraCameraBmp.cpp
           grep -Fq '_refreshIntervalMs = ok ? 250 : 2000;' firmware/source/work/MIRA_PANEL/MiraCameraBmp.cpp
-          grep -Fq 'PAGE_COUNT = 5;' firmware/source/work/MIRA_PANEL/MiraPanelUI.h
+          grep -Fq 'PAGE_COUNT = 6;' firmware/source/work/MIRA_PANEL/MiraPanelUI.h
           grep -Fq 'location == "energie"' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -Fq '"Accueil", "Lumières", "Températures", "Paramètres", "Énergie"' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
-          grep -Fq 'page > 4' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
+          grep -Fq '"Accueil", "Lumières", "Températures", "Paramètres", "Énergie", "Multimédia"' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -Fq 'page > 5' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
           ! grep -Fq 'Ajoutez des widgets' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -Fq 'createEnergy(idx);' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
           grep -Fq 'createMedia(idx);' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
