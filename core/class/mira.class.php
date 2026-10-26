@@ -174,6 +174,11 @@ class mira extends eqLogic {
       'next'=>self::findMediaSourceCmd($source,'action',array('Next','Suivant','Piste suivante')),
       'play'=>self::findMediaSourceCmd($source,'action',array('Play','Lecture','Lire','Reprendre')),
       'pause'=>self::findMediaSourceCmd($source,'action',array('Pause','Mettre en pause')),
+      // The selected Spotify Connect source can expose one toggle action.
+      'playpause'=>self::findMediaSourceCmd($source,'action',array(
+        'Play/Pause','Play Pause','PlayPause','Pause/Play','Lecture/Pause',
+        'Lecture / Pause','Lire / Pause','Lecture pause','Toggle Playback',
+        'Toggle Play Pause','Toggle','Play-Pause')),
       'volume_cmd'=>self::findMediaSourceCmd($source,'action',array('Device Volume Set','Volume Set','Régler volume','Volume','Modifier volume','Set Volume'))
     );
 
@@ -200,13 +205,29 @@ class mira extends eqLogic {
           $target->setConfiguration('mira_media_target_cmd',(string)$actions[$field]->getId());
           $target->save(); $configured++;
         } elseif ($field==='playpause') {
+          $toggle = $actions['playpause'];
           $play = $actions['play']; $pause = $actions['pause'];
-          if (is_object($play) && is_object($pause)) {
+          // Prefer the native combined action; no Spotify state info required.
+          if (is_object($toggle)) {
+            $target->setConfiguration('mira_media_target_cmd',(string)$toggle->getId());
+            $target->setConfiguration('mira_media_play_cmd','');
+            $target->setConfiguration('mira_media_pause_cmd','');
+            $target->setConfiguration('mira_media_state_cmd','');
+            $target->save(); $configured++;
+          } elseif (is_object($play) && is_object($pause)) {
+            $target->setConfiguration('mira_media_target_cmd','');
             $target->setConfiguration('mira_media_play_cmd',(string)$play->getId());
             $target->setConfiguration('mira_media_pause_cmd',(string)$pause->getId());
-            if (isset($mapped['state']))
-              $target->setConfiguration('mira_media_state_cmd',(string)$mapped['state']->getId());
+            $target->setConfiguration('mira_media_state_cmd',
+              isset($mapped['state']) ? (string)$mapped['state']->getId() : '');
             $target->save(); $configured++;
+          } else {
+            // Remove stale auto targets if source device changed.
+            $target->setConfiguration('mira_media_target_cmd','');
+            $target->setConfiguration('mira_media_play_cmd','');
+            $target->setConfiguration('mira_media_pause_cmd','');
+            $target->setConfiguration('mira_media_state_cmd','');
+            $target->save();
           }
         } elseif ($field==='volume_cmd' && is_object($actions['volume_cmd'])) {
           $target->setConfiguration('mira_media_target_cmd',(string)$actions['volume_cmd']->getId());
