@@ -1,6 +1,7 @@
 #include "MiraCameraBmp.h"
 #include <WiFi.h>
 #include <WiFiClient.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <new>
 #include <JPEGDEC.h>   // Larry Bank JPEGDEC: RGB565 decoder with 1/2, 1/4, 1/8 scaling
@@ -157,8 +158,10 @@ void MiraCameraBmp::release(Frame& frame) {
   frame = {};
 }
 
-bool MiraCameraBmp::start(const String& bmpUrl, uint16_t maxWidth, uint16_t maxHeight) {
-  if (!bmpUrl.startsWith("http://") || bmpUrl.length() > 768 ||
+bool MiraCameraBmp::start(const String& bmpUrl, uint16_t maxWidth,
+                          uint16_t maxHeight, bool oneShot) {
+  if (!(bmpUrl.startsWith("http://") || bmpUrl.startsWith("https://")) ||
+      bmpUrl.length() > 768 ||
       maxWidth < 40 || maxHeight < 40) return false;
   if (!_mutex) _mutex = xSemaphoreCreateMutex();
   if (!_mutex) return false;
@@ -171,6 +174,8 @@ bool MiraCameraBmp::start(const String& bmpUrl, uint16_t maxWidth, uint16_t maxH
   _maxH = maxHeight;
   _lastRequestAt = 0;
   _refreshIntervalMs = 250;
+  _oneShot = oneShot;
+  _oneShotDone = false;
   _active = true;
   xSemaphoreGive(_mutex);
   if (!_task) {
@@ -215,7 +220,7 @@ void MiraCameraBmp::run() {
     uint16_t w = 0, h = 0;
     uint32_t generation = 0;
     if (_mutex && xSemaphoreTake(_mutex, portMAX_DELAY) == pdTRUE) {
-      if (_active && WiFi.status() == WL_CONNECTED &&
+      if (_active && !_oneShotDone && WiFi.status() == WL_CONNECTED &&
           (!_lastRequestAt || (uint32_t)(millis() - _lastRequestAt) >= _refreshIntervalMs)) {
         _lastRequestAt = millis();
         url = _url;
@@ -242,6 +247,7 @@ void MiraCameraBmp::run() {
       if (_active && generation == _generation) {
         _refreshIntervalMs = ok ? 250 : 2000;
         if (ok) {
+          if (_oneShot) _oneShotDone = true;
           release(_ready);
           _ready = frame;
           frame = {};
@@ -260,11 +266,16 @@ void MiraCameraBmp::run() {
 bool MiraCameraBmp::downloadBmp(const String& url, uint16_t maxW,
                                 uint16_t maxH, Frame& out) {
   WiFiClient client;
+  WiFiClientSecure secureClient;
+  // Artwork is a public JPEG: never send Spotify credentials over TLS.
+  if (url.startsWith("https://")) secureClient.setInsecure();
+  WiFiClient& net = url.startsWith("https://") ?
+                    static_cast<WiFiClient&>(secureClient) : client;
   HTTPClient http;
   http.useHTTP10(true); // prevent chunked transfer in the BMP decoder
   http.setConnectTimeout(3500);
   http.setTimeout(5000);
-  if (!http.begin(client, url)) return false;
+  if (!http.begin(net, url)) return false;
   const int response = http.GET();
   if (response != HTTP_CODE_OK) {
     Serial.printf("[MIRA][CAM] Snapshot HTTP %d\n", response);
