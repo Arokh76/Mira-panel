@@ -278,8 +278,14 @@ class mira extends eqLogic {
       $base=substr((string)$candidate->getLogicalId(),0,-strlen('__devices'));
       $action=$this->getCmd(null,$base.'__device_cmd');
       $enabled=is_object($action) && (int)$action->getConfiguration('mira_media_target_cmd',0)>0;
-      $names=$enabled ? self::mediaDestinationNames() : array();
+      // Speaker discovery is independent of the optional transfer action.
+      // Spotify Connect offers per-device equipments even when none has a
+      // native "Device Name Set": do NOT send an empty menu in that case.
+      $names=self::mediaDestinationNames($source);
       $payload=implode('|',$names);
+      if (!$enabled)
+        log::add('mira','debug','[MEDIA] '.(string)$source->getName().
+          ': '.count($names).' enceintes détectées; transfert automatique indisponible');
       if (is_object($action)) {
         $action->setConfiguration('mira_media_destination_names',$payload);
         $action->save();
@@ -289,18 +295,32 @@ class mira extends eqLogic {
     log::add('mira','debug','[MEDIA] Auto-configuration Spotify: '.$configured.' correspondances pour '.$this->getName());
   }
 
-  private static function mediaDestinationNames() {
+  private static function mediaDestinationNames($source=null) {
     $names=array();
-    foreach (array('spotifyconnect','spotifyConnect','spotify') as $kind) {
+    $seenIds=array();
+    $seenNames=array();
+    $type=is_object($source) ? strtolower((string)$source->getEqType_name()) : '';
+    // Jeedom plugin IDs are not necessarily case-sensitive in byType().
+    // Query each supported family once and deduplicate by actual equipment ID
+    // and normalized device name, avoiding the duplicate entries in Jeedom.
+    $types=in_array($type,array('spotifyconnect','spotify'),true) ?
+      array($type) : array('spotifyconnect','spotify');
+    foreach ($types as $kind) {
       foreach ((array)eqLogic::byType($kind) as $speaker) {
         if (!is_object($speaker) || !$speaker->getIsEnable()) continue;
+        $id=(int)$speaker->getId();
         $name=trim((string)$speaker->getName());
-        if ($name==='' || strlen($name)>96 || preg_match('/[|\\r\\n\\x00-\\x1f]/',$name)) continue;
-        $names[$name]=$name;
-        if (count($names)>=12) break 2; // firmware dropdown limit
+        if ($name==='' || strlen($name)>96 ||
+            preg_match('/[|\\r\\n\\x00-\\x1f]/',$name)) continue;
+        $norm=self::mediaNormalize($name);
+        if (isset($seenIds[$id]) || isset($seenNames[$norm])) continue;
+        $seenIds[$id]=true;
+        $seenNames[$norm]=true;
+        $names[]=$name;
+        if (count($names)>=12) break 2; // 12 choices supported by the UI
       }
     }
-    return array_values($names);
+    return $names;
   }
 
   private static function mediaPushInfo($mira, $cmd, $value) {
@@ -2120,7 +2140,7 @@ class miraCmd extends cmd {
                 if (!is_numeric($selection) || (string)(int)$selection!==trim((string)$selection)) return false;
                 $list=explode('|',(string)$this->getConfiguration('mira_media_destination_names',''));
                 $index=(int)$selection;
-                if ($index<0 || $index>=count($list) || !in_array($list[$index],self::mediaDestinationNames(),true)) return false;
+                if ($index<0 || $index>=count($list) || !in_array($list[$index],self::mediaDestinationNames($eqLogic && (int)$eqLogic->getConfiguration('media_source_eqid',0)>0 ? eqLogic::byId((int)$eqLogic->getConfiguration('media_source_eqid',0)) : null),true)) return false;
                 if ($mapped->getSubType()!=='message') return false;
                 $mapped->execCmd(array('title'=>$list[$index],'message'=>$list[$index]));
               } else if ($field==='volume_cmd') {
