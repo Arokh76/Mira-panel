@@ -1206,6 +1206,22 @@ function miraListOptionKey(optionName) {
   return 'listAction_' + hex
 }
 
+// Energy battery rows are real indexed Mira infos. Preserve their Jeedom
+// mappings when hidden: the selector changes visibility, never deletes a cmd.
+function miraRefreshEnergyBatteryRows() {
+  $('#table_cmd tbody tr[data-mira-logicalid$="__soc"]').each(function(){
+    var master=$(this), name=master.attr('data-mira-logicalid')||'';
+    var base=name.slice(0,-'__soc'.length);
+    var count=parseInt(master.find('.mira-energy-battery-count').val(),10)||1;
+    for(var n=2;n<=3;n++){
+      $('#table_cmd tbody tr[data-mira-logicalid]').filter(function(){
+        return $(this).attr('data-mira-logicalid')===base+'__soc'+n;
+      }).toggle(n<=count);
+    }
+  });
+}
+$('#table_cmd').on('change','.mira-energy-battery-count',miraRefreshEnergyBatteryRows);
+
 function addCmdToTable(_cmd) {
             
                       
@@ -1252,6 +1268,13 @@ function addCmdToTable(_cmd) {
           (_cmd.type === 'info' && _cmd.configuration.type === 'toggle');
       var miraLocalAction = (_cmd.type === 'action' && miraLocalEligible);
       tr += '<td class="num">'
+      if (/__soc$/.test(_cmd.logicalId||'')) {
+        tr += '<select class="cmdAttr mira-energy-battery-count form-control input-sm" ' +
+          'data-l1key="configuration" data-l2key="mira_battery_count" ' +
+          'title="Nombre de batteries à afficher" style="width:94px;min-width:80px">' +
+          '<option value="1">1 batterie</option><option value="2">2 batteries</option>' +
+          '<option value="3">3 batteries</option></select>';
+      }
       if (isMultiMaster) tr += '<select class="cmdAttr mira-multi-trigger form-control input-sm" data-l1key="configuration" data-l2key="multi_trigger" style="min-width:110px"><option value="jeedom">Jeedom</option><option value="gpio">GPIO</option><option value="both">Les deux</option></select>';
       if (miraLocalEligible) tr += '<select class="cmdAttr mira-gpio-source form-control input-sm" data-l1key="configuration" data-l2key="mira_source" style="min-width:85px"><option value="jeedom">Jeedom</option><option value="gpio">GPIO</option></select>';
   	  
@@ -1449,6 +1472,7 @@ function addCmdToTable(_cmd) {
           jeedom.cmd.changeType(tr, init(_cmd.subType))
           miraMultiRefreshRow(tr);
           if (isMultiMaster) miraMultiSourceChanged(tr);
+          if (/__soc(?:2|3)?$/.test(_cmd.logicalId||'')) miraRefreshEnergyBatteryRows();
         }
       })
   
