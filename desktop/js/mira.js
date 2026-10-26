@@ -1367,10 +1367,19 @@ function addCmdToTable(_cmd) {
         tr += '<div style="display: none">'
         tr += _cmd.configuration.calcul;
         tr += '</div>'
-    	tr += '<textarea class="cmdAttr  input-sm" data-l1key="configuration" data-l2key="calcul" style="height:35px;width:85%" placeholder="{{Recevoir de}}"></textarea>'
-      	tr += '<a class="btn btn-default listEquipementInfo " data-input="calcul" style="margin-left:2px; height:35px; width:14%;"><i class="fas fa-list-alt"></i></a>'
+        if (_cmd.configuration.mira_media_source_cmd) {
+          tr += '<span style="color:#45cbb4;display:block;margin:5px 0"><i class="fas fa-link"></i> Spotify · liaison automatique</span>';
+          tr += '<textarea class="cmdAttr" data-l1key="configuration" data-l2key="calcul" style="display:none"></textarea>';
+        } else {
+        tr += '<textarea class="cmdAttr input-sm" data-l1key="configuration" data-l2key="calcul" style="height:35px;width:85%" placeholder="{{Recevoir de}}"></textarea>';
+        tr += '<a class="btn btn-default listEquipementInfo" data-input="calcul" style="margin-left:2px; height:35px; width:14%;"><i class="fas fa-list-alt"></i></a>';
+        }
       }
   	  if (_cmd.type == "action" && !isMultiMaster && !isMultiAction && init(_cmd.logicalId) != 'Redémarrer' && init(_cmd.logicalId) != 'refresh'){
+        if (_cmd.configuration.mira_media_target_cmd || _cmd.configuration.mira_media_play_cmd) {
+          tr += '<span style="color:#45cbb4;display:block;margin:5px 0"><i class="fas fa-link"></i> Spotify · commande automatique</span>';
+          tr += '<textarea class="cmdAttr" data-l1key="configuration" data-l2key="calcul" style="display:none"></textarea>';
+        } else
         if (_cmd.configuration.type == 'list' && init(_cmd.configuration.listValue) != '') {
           // One Jeedom action target per Mira list option.
           var listItems = _cmd.configuration.listValue.split(';')
