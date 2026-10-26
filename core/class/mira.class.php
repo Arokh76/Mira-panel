@@ -42,7 +42,7 @@ class mira extends eqLogic {
     for ($slot = 1; $slot <= 3; ++$slot) {
       $value = (string)$this->getConfiguration('nav_fav' . $slot, $defaults[$slot - 1]);
       if ($value === '') $value = $defaults[$slot - 1]; // existing equipments
-      if (!in_array($value, array('0','1','2','3','4','255'), true)) {
+      if (!in_array($value, array('0','1','2','3','4','5','255'), true)) {
         throw new Exception('Mira favoris : page inconnue sur le raccourci ' . $slot);
       }
       if ($value !== '255' && isset($used[$value])) {
@@ -72,6 +72,32 @@ class mira extends eqLogic {
     return true;
   }
 
+  /** The page list is a visibility filter only: never delete hidden widgets. */
+  public function pushVisiblePages() {
+    $ip = trim((string)$this->getConfiguration('adresseip', ''));
+    $pass = (string)$this->getConfiguration('password', '');
+    if (!preg_match('/^[A-Za-z0-9.\\-]+$/D', $ip) || $pass === '') return false;
+    $mask = 1; // Home cannot be disabled
+    foreach (array(1,2,3,4,5) as $page) {
+      if ((string)$this->getConfiguration('nav_show' . $page, '1') === '1')
+        $mask |= (1 << $page);
+    }
+    $ch = curl_init('http://' . $ip . '/navpages');
+    curl_setopt_array($ch, array(CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => http_build_query(array('key'=>$pass,'mask'=>$mask)),
+        CURLOPT_RETURNTRANSFER => true, CURLOPT_CONNECTTIMEOUT => 2,
+        CURLOPT_TIMEOUT => 4));
+    $out = curl_exec($ch);
+    $status = (int)curl_getinfo($ch,CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if ($out === false || $status !== 200 || trim((string)$out) !== 'OK') {
+      log::add('mira','warning','[NAV] Visibilité des pages non transmise : ' . $status
+          . ' (firmware 0.7.24 beta requis)');
+      return false;
+    }
+    return true;
+  }
+
   /** Saved Jeedom equipment configuration is the source of truth. */
   public function postSave() {
     if (!$this->getId()) return;
@@ -80,6 +106,8 @@ class mira extends eqLogic {
     catch (Exception $e) {
       log::add('mira', 'warning', '[Navigation] ' . $this->getName() . ': ' . $e->getMessage());
     }
+    try { $this->pushVisiblePages(); }
+    catch (Throwable $e) { log::add('mira','warning','[Navigation] Pages : '.$e->getMessage()); }
   }
   
 
