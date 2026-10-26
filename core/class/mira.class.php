@@ -98,6 +98,160 @@ class mira extends eqLogic {
     return true;
   }
 
+  /** Spotify is an optional source, not a hard dependency of Mira.
+   * Map fields by command name/Jeedom logical ID; never guess values. */
+  private static function mediaNormalize($text) {
+    $text = trim((string)$text);
+    if (function_exists('iconv')) {
+      $converted = @iconv('UTF-8','ASCII//TRANSLIT//IGNORE',$text);
+      if ($converted !== false) $text = $converted;
+    }
+    return preg_replace('/[^a-z0-9]/','',strtolower($text));
+  }
+
+  private static function findMediaSourceCmd($source, $type, $names) {
+    if (!is_object($source)) return null;
+    $aliases = array_map(array('mira','mediaNormalize'), $names);
+    foreach ($source->getCmd() as $command) {
+      if (!is_object($command) || $command->getType() !== $type) continue;
+      foreach (array($command->getName(),$command->getLogicalId()) as $candidate) {
+        if (in_array(self::mediaNormalize($candidate),$aliases,true)) return $command;
+      }
+    }
+    return null;
+  }
+
+  /** Configure the Jeedom command references once per multimedia source
+   * instead of asking the user to configure all ten fields. Only changes
+   * fields recognized on the selected Spotify equipment. */
+  public function configureMediaSource() {
+    $sourceId = (int)$this->getConfiguration('media_source_eqid',0);
+    if ($sourceId < 1) return;
+    $source = eqLogic::byId($sourceId);
+    if (!is_object($source)) {
+      log::add('mira','warning','[MEDIA] Équipement Spotify introuvable : '.$sourceId);
+      return;
+    }
+    $aliases = array(
+      'title'=>array('Item Title','Titre','Piste','Track Name','Title'),
+      'artist'=>array('Item Artist','Artiste','Artist','Interprète'),
+      'album'=>array('Item Album','Album'),
+      'state'=>array('Playing','En lecture','Statut lecture','État lecture','Lecture en cours'),
+      'volume'=>array('Device Volume','Volume','Volume statut','Niveau volume'),
+      'progress'=>array('Progression','Position pourcent','Progress','Track progress')
+    );
+    $mapped = array();
+    foreach ($aliases as $field=>$names) {
+      $cmd = self::findMediaSourceCmd($source,'info',$names);
+      if (is_object($cmd)) $mapped[$field] = $cmd;
+    }
+    // 'Progression' is a number between 0 and 100 only. A textual Spotify
+    // track or elapsed-time field cannot be wired into Mira's percentage bar.
+    if (isset($mapped['progress'])) {
+      $progressValue = $mapped['progress']->execCmd();
+      if (!is_numeric($progressValue) || $progressValue < 0 || $progressValue > 100)
+        unset($mapped['progress']);
+    }
+    $actions = array(
+      'previous'=>self::findMediaSourceCmd($source,'action',array('Previous','Précédent','Piste précédente')),
+      'next'=>self::findMediaSourceCmd($source,'action',array('Next','Suivant','Piste suivante')),
+      'play'=>self::findMediaSourceCmd($source,'action',array('Play','Lecture','Lire','Reprendre')),
+      'pause'=>self::findMediaSourceCmd($source,'action',array('Pause','Mettre en pause')),
+      'volume_cmd'=>self::findMediaSourceCmd($source,'action',array('Device Volume Set','Volume Set','Régler volume','Volume','Modifier volume','Set Volume'))
+    );
+
+    $configured = 0;
+    foreach ($this->getCmd() as $target) {
+      if (!is_object($target)) continue;
+      $id = (string)$target->getLogicalId();
+      if (!preg_match('/__(title|artist|album|state|progress|volume|previous|playpause|next|volume_cmd)$/D',$id,$match)) continue;
+      $field = $match[1];
+      if ($target->getType()==='info' && isset($mapped[$field])) {
+        $target->setConfiguration('mira_media_source_cmd',(string)$mapped[$field]->getId());
+        // Keep a normal Jeedom source expression for manual read and fallback.
+        $target->setConfiguration('calcul','#'.$mapped[$field]->getId().'#');
+        $target->save();
+        $configured++;
+      } elseif ($target->getType()==='action') {
+        if (in_array($field,array('previous','next'),true) && is_object($actions[$field])) {
+          $target->setConfiguration('mira_media_target_cmd',(string)$actions[$field]->getId());
+          $target->save(); $configured++;
+        } elseif ($field==='playpause') {
+          $play = $actions['play']; $pause = $actions['pause'];
+          if (is_object($play) && is_object($pause)) {
+            $target->setConfiguration('mira_media_play_cmd',(string)$play->getId());
+            $target->setConfiguration('mira_media_pause_cmd',(string)$pause->getId());
+            if (isset($mapped['state']))
+              $target->setConfiguration('mira_media_state_cmd',(string)$mapped['state']->getId());
+            $target->save(); $configured++;
+          }
+        } elseif ($field==='volume_cmd' && is_object($actions['volume_cmd'])) {
+          $target->setConfiguration('mira_media_target_cmd',(string)$actions['volume_cmd']->getId());
+          $target->save(); $configured++;
+        }
+      }
+    }
+    log::add('mira','debug','[MEDIA] Auto-configuration Spotify: '.$configured.' correspondances pour '.$this->getName());
+  }
+
+  private static function mediaPushInfo($mira, $cmd, $value) {
+    $ip=(string)$mira->getConfiguration('adresseip','');
+    $key=(string)$mira->getConfiguration('password','');
+    $index=(int)$cmd->getConfiguration('commande',-1);
+    if (!preg_match('/^[A-Za-z0-9.\-]+$/D',$ip) || $key==='' || $index<1) return;
+    // The source is the only authority; this is display feedback only.
+    $cmd->event((string)$value);
+    $url='http://'.$ip.'/updatenr?key='.rawurlencode($key).
+        '&info='.$index.'&value='.rawurlencode((string)$value);
+    $ch=curl_init($url);
+    curl_setopt_array($ch,array(CURLOPT_RETURNTRANSFER=>true,
+      CURLOPT_CONNECTTIMEOUT=>1,CURLOPT_TIMEOUT=>2));
+    $out=curl_exec($ch);
+    $status=(int)curl_getinfo($ch,CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if ($out===false || $status!==200)
+      log::add('mira','debug','[MEDIA] Valeur non envoyée à Mira, HTTP '.$status);
+  }
+
+  /** Subscribe only to the exact bound Spotify info IDs, not every Jeedom
+   * command. Listener runs synchronously when Spotify emits a new value. */
+  public static function rebuildMediaListener() {
+    $ids=array();
+    foreach (eqLogic::byType('mira') as $eq) {
+      if (!is_object($eq)) continue;
+      foreach ($eq->getCmd() as $c) {
+        $id=(int)$c->getConfiguration('mira_media_source_cmd',0);
+        if ($id>0) $ids[$id]=true;
+      }
+    }
+    $listener=listener::byClassAndFunction('mira','onMediaSourceEvent');
+    if (!is_object($listener)) $listener=new listener();
+    $listener->setClass('mira');
+    $listener->setFunction('onMediaSourceEvent');
+    $listener->emptyEvent();
+    foreach (array_keys($ids) as $id) $listener->addEvent($id);
+    $listener->setOption(array('background'=>false));
+    if (count($ids)) $listener->save();
+    else if ($listener->getId()) $listener->remove();
+  }
+
+  public static function onMediaSourceEvent($_option) {
+    $sourceId=(int)($_option['event_id']??0);
+    if ($sourceId<1) return;
+    $value=$_option['value']??'';
+    foreach (eqLogic::byType('mira',true) as $eq) {
+      if (!is_object($eq)) continue;
+      foreach ($eq->getCmd() as $cmd) {
+        if ((int)$cmd->getConfiguration('mira_media_source_cmd',0)!==$sourceId) continue;
+        if ($cmd->getType()!=='info') continue;
+        // Never treat text ('Blue Sky', duration) as a progress percentage.
+        if (preg_match('/__progress$/D',$cmd->getLogicalId()) &&
+           (!is_numeric($value) || (float)$value<0 || (float)$value>100)) continue;
+        self::mediaPushInfo($eq,$cmd,$value);
+      }
+    }
+  }
+
   /** Saved Jeedom equipment configuration is the source of truth. */
   public function postSave() {
     if (!$this->getId()) return;
@@ -108,6 +262,8 @@ class mira extends eqLogic {
     }
     try { $this->pushVisiblePages(); }
     catch (Throwable $e) { log::add('mira','warning','[Navigation] Pages : '.$e->getMessage()); }
+    try { $this->configureMediaSource(); self::rebuildMediaListener(); }
+    catch (Throwable $e) { log::add('mira','warning','[MEDIA] Liaison : '.$e->getMessage()); }
   }
   
 
