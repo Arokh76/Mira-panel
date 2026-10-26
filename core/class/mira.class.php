@@ -1689,8 +1689,24 @@ class miraCmd extends cmd {
         }
         if ($this->getConfiguration('calcul') != ''&& $this->getConfiguration('type') == 'info'){
            
-          $result = jeedom::evaluateExpression($this->getConfiguration('calcul'));           
-		  $cmd = $this->getConfiguration('commande');
+          $result = jeedom::evaluateExpression($this->getConfiguration('calcul'));
+          $cmd = $this->getConfiguration('commande');
+          if (preg_match('/__(solar|home|grid|battery|soc)$/D',(string)$nom)) {
+            // Never impose a unit on energy fields: append only the unit
+            // explicitly selected by the Jeedom user.
+            $display = (string)$result;
+            $unit = trim((string)$this->getUnite());
+            if ($unit !== '' && !preg_match('/'.preg_quote($unit,'/').'\\s*$/u',trim($display)))
+              $display .= ' ' . $unit;
+            $url = 'http://'.$eqLogic->getConfiguration('adresseip').
+                   '/updatenr?key='.rawurlencode($eqLogic->getConfiguration('password')).
+                   '&info='.(int)$cmd.'&value='.rawurlencode($display);
+            $ch = curl_init($url);
+            curl_setopt_array($ch,array(CURLOPT_RETURNTRANSFER=>true,
+                   CURLOPT_CONNECTTIMEOUT=>2,CURLOPT_TIMEOUT=>4));
+            curl_exec($ch); curl_close($ch);
+            return $result;
+          }
           $url = 'http://'. $eqLogic->getConfiguration('adresseip') . '/updatenr?key=' . $eqLogic->getConfiguration('password') . '&info=' . $cmd .'&value='.$result; 
           log::add('mira', 'debug', $eqLogic->getName().': INFO: info: ' . $nom .": ".$url);
           $req = 'curl -i -XGET "'.$url.'" ';
