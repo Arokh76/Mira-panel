@@ -79,7 +79,7 @@ try {
                     // One visual Energy card -> five standard Jeedom Info IDs.
                     // Without these signatures autosync times out even though
                     // the ESP32 /getindex was rebuilt successfully.
-                    foreach (array('solar', 'home', 'grid', 'battery', 'soc') as $field) {
+                    foreach (array('solar', 'home', 'grid', 'battery', 'soc', 'soc2', 'soc3') as $field) {
                         $expectedSignatures[] = 'info|' . $name . '__' . $field;
                     }
                     continue;
@@ -88,13 +88,14 @@ try {
                     // Media player: six passive Info values, three touch buttons
                     // and one volume Range. Compare the EXACT signatures:
                     // an old index must never be accepted after reprogramming.
-                    foreach (array('title', 'artist', 'album', 'state', 'progress', 'volume') as $field) {
+                    foreach (array('title', 'artist', 'album', 'state', 'progress', 'volume', 'cover', 'device', 'devices') as $field) {
                         $expectedSignatures[] = 'info|' . $name . '__' . $field;
                     }
                     foreach (array('previous', 'playpause', 'next') as $action) {
                         $expectedSignatures[] = 'button|' . $name . '__' . $action;
                     }
                     $expectedSignatures[] = 'range|' . $name . '__volume_cmd';
+                    $expectedSignatures[] = 'range|' . $name . '__device_cmd';
                     continue;
                 }
                 if ($type === 'thermostat') {
