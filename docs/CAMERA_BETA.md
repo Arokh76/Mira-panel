@@ -99,3 +99,25 @@ Jeedom beta.6.
 Les états Jeedom ou MQTT sont purement informatifs. Les commandes ne sont exécutées que lors d'un geste tactile explicite. Les champs Jeedom peuvent être associés via `calcul` aux capteurs et lecteurs existants. Les informations acceptent aussi le topic MQTT `mira/<ecran>/States/<nom>__<champ>` ; les actions sont publiées vers `mira/<ecran>/Actions/<nom>__<action>`.
 
 Le prototype multimédia utilise encore une illustration LVGL de pochette, pas une image distante, et les courbes historiques ne sont pas encore implémentées. Ce lecteur contrôle un appareil Jeedom/MQTT : il ne lit aucun son sur l'écran.
+
+## Mira 0.7.24 — page Multimédia, masquage des pages et unités Énergie
+
+- Page 5 **Multimédia** accessible dans le menu Pages, avec l'emplacement
+  `multimedia` utilisable par le designer et le programmateur Jeedom.
+- Menu Pages filtré par un masque stocké en NVS `miraui/pageMask`. La
+  nouvelle API authentifiée `POST /navpages` accepte `mask` (entier 1..63
+  avec bit Accueil) et `GET /navpages` renvoie le masque. Aucun widget n'est
+  supprimé par le masquage. Trois favoris indépendants conservés ;
+  un favori vers une page masquée disparaît visuellement.
+- Widget Énergie : **aucun W ni % ajouté automatiquement**. Jeedom peut
+  sélectionner l'unité adaptée (W, kW, kWh, A, etc.) ou aucune unité.
+  L'affichage restitue la valeur reçue textuellement. La barre de stockage
+  est visible uniquement si la valeur précise explicitement le caractère %.
+- Widget Multimédia : état Spotify `true` pris en charge ; un texte
+  de piste ne peut plus être affiché comme « progression % ».
+- Plugin requis pour la navigation : **Jeedom 1.2.28-beta.9**.
+  Le choix de source Spotify et son actualisation événementielle s'effectuent
+  exclusivement sur Jeedom.
+- Régression obligatoire : vérifier caméra JPEG, navigation favoris, absence
+  d'action involontaire pendant une synchronisation, et fonctionnement WT32,
+  Waveshare 4.3C et Nextion 2.8.
