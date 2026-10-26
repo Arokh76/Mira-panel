@@ -29,14 +29,14 @@ $mediaName = 'Salon';
 $media = array();
 foreach (array('title','artist','album','state','progress','volume','cover','device','devices') as $field)
     $media[] = array('type' => 'info', 'nom' => $mediaName . '__' . $field);
-foreach (array('previous','playpause','next') as $field)
+foreach (array('previous','play','pause','next') as $field)
     $media[] = array('type' => 'button', 'nom' => $mediaName . '__' . $field);
 $media[] = array('type' => 'range', 'nom' => $mediaName . '__volume_cmd');
 $media[] = array('type' => 'range', 'nom' => $mediaName . '__device_cmd');
 $mediaWidget = array(array('type' => 'media', 'name' => $mediaName));
 expectMatch($indexMatchesExpected($media, $mediaWidget),
-            'Media card expands to nine info, three buttons and two ranges');
-expectMatch(!$indexMatchesExpected(array_slice($media, 0, 13), $mediaWidget),
+            'Media card expands to nine infos, four actions (two for central button) and two ranges');
+expectMatch(!$indexMatchesExpected(array_slice($media, 0, 14), $mediaWidget),
             'Media: missing device command does not validate');
 expectMatch($indexMatchesExpected(array_merge($energy, $media),
     array_merge($energyWidget, $mediaWidget)),

@@ -42,6 +42,8 @@ jobs:
         run: php tests/test_spotify_source_menu.php
       - name: Check Spotify range routing and read-only refresh
         run: php tests/test_media_volume_routing.php
+      - name: Check separate Play and Pause actions
+        run: php tests/test_media_two_actions.php
       - name: Verify native Multimedia page and Spotify mapping
         shell: bash
         run: |
