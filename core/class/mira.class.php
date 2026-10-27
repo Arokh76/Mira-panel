@@ -121,6 +121,63 @@ class mira extends eqLogic {
     return null;
   }
 
+  /**
+   * Strict media playback normalization. A title/volume/activity status must
+   * never be taken as proof that a track is playing.
+   */
+  private static function mediaPlaybackStateValue($value) {
+    if (is_bool($value)) return $value ? '1' : '0';
+    if (is_int($value) || is_float($value)) {
+      if ((float)$value===1.0) return '1';
+      if ((float)$value===0.0) return '0';
+      return null;
+    }
+    if (!is_string($value)) return null;
+    $v=self::mediaNormalize($value);
+    if (in_array($v,array('1','true','on','playing','isplaying','play',
+      'lecture','enlecture','lectureencours','currentlyplaying','playingmusic'),true)) return '1';
+    if (in_array($v,array('0','false','off','paused','pause','enpause',
+      'pausedplayback','stopped','stop','arret','arrete','notplaying','idle'),true)) return '0';
+    return null;
+  }
+
+  /** Discover a real playback status, optionally exposed as MEDIA_STATE. */
+  private static function findMediaPlaybackStateCmd($source) {
+    if (!is_object($source)) return null;
+    $specific=array('Playing','Is Playing','Item Playing','Play State',
+      'En lecture','Statut lecture','Statut de lecture','État lecture',
+      'État de lecture','Etat lecture','Lecture en cours',
+      'Playback State','Playback Status','Playback status','Player State',
+      'Player Status','Playing Status','Media State','IsPlaying',
+      'is_playing','player_state','playback_state','media_state');
+    $preferred=self::findMediaSourceCmd($source,'info',$specific);
+    if (is_object($preferred)) return $preferred;
+    foreach ($source->getCmd() as $cmd) {
+      if (!is_object($cmd) || $cmd->getType()!=='info') continue;
+      $generic=method_exists($cmd,'getGeneric_type') ?
+        (string)$cmd->getGeneric_type() : '';
+      if ($generic==='MEDIA_STATE') return $cmd;
+    }
+    // A general "Statut" or "État" must explicitly say playing/paused.
+    // Boolean generic equipment status is often just online/offline.
+    $weak=array_map(array('mira','mediaNormalize'),
+      array('Statut','Status','État','Etat','State'));
+    foreach ($source->getCmd() as $cmd) {
+      if (!is_object($cmd) || $cmd->getType()!=='info') continue;
+      $normalizedName=self::mediaNormalize($cmd->getName());
+      $normalizedId=self::mediaNormalize($cmd->getLogicalId());
+      if (!in_array($normalizedName,$weak,true) &&
+          !in_array($normalizedId,$weak,true)) continue;
+      $raw=$cmd->execCmd();
+      if (!is_string($raw)) continue;
+      $normalized=self::mediaNormalize($raw);
+      if (in_array($normalized,array('playing','enlecture','lecture','play',
+        'paused','pause','enpause','pausedplayback','stopped','arret','arrete'),true))
+        return $cmd;
+    }
+    return null;
+  }
+
   /** Configure the Jeedom command references once per multimedia source
    * instead of asking the user to configure all ten fields. Only changes
    * fields recognized on the selected Spotify equipment. */
@@ -158,7 +215,7 @@ class mira extends eqLogic {
       'cover'=>array('Item Image','Item Artwork','Album Image','Album Artwork',
          'Album Art','Cover Art','Cover URL','Image URL','Artwork URL',
          'Cover','Artwork','Pochette','Image','Album Cover','Jaquette'),
-      'state'=>array('Playing','Is Playing','Item Playing','Play State','En lecture','Statut lecture','État lecture','Lecture en cours'),
+      'state'=>array('Playing','Is Playing','Play State','État de lecture'),
       'volume'=>array('Device Volume','Volume','Volume statut','Niveau volume'),
        'device'=>array('Device Name','Nom appareil','Nom du lecteur','Lecteur actif','Appareil actif'),
       'progress'=>array('Progression','Position pourcent','Progress','Track progress')
@@ -167,6 +224,17 @@ class mira extends eqLogic {
     foreach ($aliases as $field=>$names) {
       $cmd = self::findMediaSourceCmd($source,'info',$names);
       if (is_object($cmd)) $mapped[$field] = $cmd;
+    }
+    $playbackInfo=self::findMediaPlaybackStateCmd($source);
+    if (is_object($playbackInfo)) {
+      $mapped['state']=$playbackInfo;
+      log::add('mira','debug','[MEDIA] État Lecture/Pause détecté : '.
+        $source->getName().' / '.$playbackInfo->getName().
+        ' (#'.$playbackInfo->getId().')');
+    } else {
+      unset($mapped['state']);
+      log::add('mira','debug','[MEDIA] Aucun état de lecture fiable trouvé pour '.
+        $source->getName().'; icône basée sur les actions du WT32');
     }
     // On per-speaker Spotify Connect equipment, the screen's dropdown
     // displays the configured reader (the control target). Device Name
@@ -208,7 +276,8 @@ class mira extends eqLogic {
         // Do not leave stale data from the previous room.
         $target->setConfiguration('mira_media_source_cmd','');
         $target->save();
-        self::mediaPushInfo($this,$target,'');
+        self::mediaPushInfo($this,$target,
+          $field==='state' ? 'unknown' : '');
       }
       if ($target->getType()==='info' && isset($mapped[$field])) {
         $target->setConfiguration('mira_media_source_cmd',(string)$mapped[$field]->getId());
@@ -417,6 +486,13 @@ class mira extends eqLogic {
     // Spotify may expose Playing as a native boolean. Preserve OFF as 0,
     // not an empty string (which can look like missing data on Mira).
     if (is_bool($value)) $value = $value ? '1' : '0';
+    if (preg_match('/__state$/D',(string)$cmd->getLogicalId())) {
+      if ($value!=='unknown') {
+        $normalized=self::mediaPlaybackStateValue($value);
+        if ($normalized===null) return; // Unknown != stopped.
+        $value=$normalized;
+      }
+    }
     $ip=(string)$mira->getConfiguration('adresseip','');
     $key=(string)$mira->getConfiguration('password','');
     $index=(int)$cmd->getConfiguration('commande',-1);
