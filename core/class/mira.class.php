@@ -489,6 +489,19 @@ class mira extends eqLogic {
     return true;
   }
 
+  /**
+   * Deduplicate acknowledged screen updates, not source events.
+   * Retry failures promptly and periodically re-send unchanged metadata so a
+   * restarted WT32 can recover even if Spotify never publishes a new track.
+   */
+  private static function mediaRecentlyPushed($cmd, $value, $now = null) {
+    if ($now === null) $now = microtime(true);
+    $lastAt = (float)$cmd->getCache('mira_media_http_at', 0);
+    $lastValue = $cmd->getCache('mira_media_http_value', null);
+    return $lastAt > 0 && $now >= $lastAt && ($now - $lastAt) < 180 &&
+      $lastValue !== null && (string)$lastValue === (string)$value;
+  }
+
   private static function mediaPushInfo($mira, $cmd, $value) {
     // Spotify may expose Playing as a native boolean. Preserve OFF as 0,
     // not an empty string (which can look like missing data on Mira).
@@ -496,26 +509,44 @@ class mira extends eqLogic {
     if (preg_match('/__state$/D',(string)$cmd->getLogicalId())) {
       if ($value!=='unknown') {
         $normalized=self::mediaPlaybackStateValue($value);
-        if ($normalized===null) return; // Unknown != stopped.
+        if ($normalized===null) return false; // Unknown != stopped.
         $value=$normalized;
       }
     }
     $ip=(string)$mira->getConfiguration('adresseip','');
     $key=(string)$mira->getConfiguration('password','');
     $index=(int)$cmd->getConfiguration('commande',-1);
-    if (!preg_match('/^[A-Za-z0-9.\-]+$/D',$ip) || $key==='' || $index<1) return;
-    // The source is the only authority; this is display feedback only.
-    $cmd->event((string)$value);
+    if (!preg_match('/^[A-Za-z0-9.\\-]+$/D',$ip) || $key==='' || $index<1) return false;
+    // Acknowledged values are cached per Mira info, not per Spotify source.
+    // No second HTTP push during an event burst or the minute-based cron.
+    if (self::mediaRecentlyPushed($cmd,$value)) return false;
+
+    // Keep Jeedom's Mira Info up to date even if screen HTTP is unavailable.
+    $oldValue=$cmd->execCmd();
+    if ((string)$oldValue !== (string)$value) $cmd->event((string)$value);
+
     $url='http://'.$ip.'/updatenr?key='.rawurlencode($key).
         '&info='.$index.'&value='.rawurlencode((string)$value);
     $ch=curl_init($url);
     curl_setopt_array($ch,array(CURLOPT_RETURNTRANSFER=>true,
-      CURLOPT_CONNECTTIMEOUT=>1,CURLOPT_TIMEOUT=>2));
+      CURLOPT_CONNECTTIMEOUT_MS=>500,CURLOPT_TIMEOUT_MS=>1500,
+      CURLOPT_NOSIGNAL=>true));
+    $startedAt=microtime(true);
     $out=curl_exec($ch);
     $status=(int)curl_getinfo($ch,CURLINFO_HTTP_CODE);
+    $error=$out===false ? curl_error($ch) : '';
     curl_close($ch);
-    if ($out===false || $status!==200)
-      log::add('mira','debug','[MEDIA] Valeur non envoyée à Mira, HTTP '.$status);
+    $duration=(int)round((microtime(true)-$startedAt)*1000);
+    if ($out===false || $status!==200) {
+      log::add('mira','debug','[MEDIA][HTTP] '.$cmd->getLogicalId().
+        ' : HTTP '.$status.' en '.$duration.' ms '.$error);
+      return false;
+    }
+    $cmd->setCache(array('mira_media_http_value'=>(string)$value,
+      'mira_media_http_at'=>microtime(true)));
+    log::add('mira','debug','[MEDIA][HTTP] '.$cmd->getLogicalId().
+      ' : OK en '.$duration.' ms');
+    return true;
   }
 
   /** Subscribe only to the exact bound Spotify info IDs, not every Jeedom
@@ -545,42 +576,106 @@ class mira extends eqLogic {
     else if ($listener->getId()) $listener->remove();
   }
 
+  /**
+   * Send a fresh snapshot for one Mira screen, title first and cover last.
+   * Reads Jeedom's cached Info values only; does not query Spotify or execute
+   * any transport/action commands. mediaPushInfo skips acknowledged duplicates.
+   */
+  private static function mediaFlushSnapshot($mira) {
+    $order=array('title'=>0,'artist'=>1,'album'=>2,'state'=>3,
+      'progress'=>4,'volume'=>5,'device'=>6,'cover'=>7);
+    $updates=array();
+    foreach ($mira->getCmd() as $cmd) {
+      if ($cmd->getType()!=='info') continue;
+      $sourceId=(int)$cmd->getConfiguration('mira_media_source_cmd',0);
+      if ($sourceId<1) continue;
+      if (!preg_match('/__(title|artist|album|state|progress|volume|device|cover)$/D',
+          (string)$cmd->getLogicalId(),$match)) continue;
+      $sourceCmd=cmd::byId($sourceId);
+      if (!is_object($sourceCmd) || $sourceCmd->getType()!=='info') continue;
+      try {
+        $value=$sourceCmd->execCmd(); // Cached Jeedom Info: no Spotify API call.
+      } catch (Throwable $e) {
+        log::add('mira','debug','[MEDIA][SNAPSHOT] Source #'.$sourceId.
+          ' : '.$e->getMessage());
+        continue;
+      }
+      if ($value===null) continue;
+      if ($match[1]==='progress' &&
+          (!is_numeric($value) || (float)$value<0 || (float)$value>100)) continue;
+      $updates[]=array('order'=>$order[$match[1]],'cmd'=>$cmd,'value'=>$value);
+    }
+    usort($updates,function($a,$b){return $a['order']<=>$b['order'];});
+    $sent=0;
+    foreach ($updates as $update) {
+      if (self::mediaPushInfo($mira,$update['cmd'],$update['value'])) ++$sent;
+    }
+    return $sent;
+  }
+
+  /**
+   * Jeedom launches one background PHP listener for each Spotify Info event.
+   * Mark the screen dirty, then let only one worker per screen send a short,
+   * coalesced snapshot. Contending jobs do not start competing HTTP bursts.
+   * A dirty signal during the send triggers a follow-up snapshot.
+   */
   public static function onMediaSourceEvent($_option) {
     $sourceId=(int)($_option['event_id']??0);
     if ($sourceId<1) return;
-    $value=$_option['value']??'';
-    // Background event jobs can be delayed/reordered. Read the latest
-    // cached Jeedom Info value at delivery time, never the older queued
-    // event payload. No external Spotify query or device action is run.
     $sourceCmd=cmd::byId($sourceId);
     if (!is_object($sourceCmd) || $sourceCmd->getType()!=='info') return;
-    try {
-      $latest=$sourceCmd->execCmd();
-      if ($latest!==null) $value=$latest;
-    } catch (Throwable $e) {
-      log::add('mira','debug','[MEDIA][EVENT] Info source #'.$sourceId.
-        ' : valeur cache indisponible : '.$e->getMessage());
-    }
-    // Visible in the Mira debug log: compare an incoming source event with
-    // the screen update to distinguish slow Spotify polling from Mira relay.
-    $startedAt=microtime(true);
-    $forwarded=0;
+    $screens=array();
     foreach (eqLogic::byType('mira',true) as $eq) {
       if (!is_object($eq)) continue;
       foreach ($eq->getCmd() as $cmd) {
-        if ((int)$cmd->getConfiguration('mira_media_source_cmd',0)!==$sourceId) continue;
-        if ($cmd->getType()!=='info') continue;
-        // Never treat text ('Blue Sky', duration) as a progress percentage.
-        if (preg_match('/__progress$/D',$cmd->getLogicalId()) &&
-           (!is_numeric($value) || (float)$value<0 || (float)$value>100)) continue;
-        self::mediaPushInfo($eq,$cmd,$value);
-        ++$forwarded;
+        if ($cmd->getType()!=='info' ||
+            (int)$cmd->getConfiguration('mira_media_source_cmd',0)!==$sourceId) continue;
+        $screens[(int)$eq->getId()]=$eq;
+        break;
       }
     }
-    if ($forwarded) {
-      log::add('mira','debug','[MEDIA][EVENT] Source #'.$sourceId.
-        ' relayée vers '.$forwarded.' information(s) en '.
-        (int)round((microtime(true)-$startedAt)*1000).' ms');
+    if (!count($screens)) return;
+    $dir=jeedom::getTmpFolder('mira');
+    foreach ($screens as $screenId=>$eq) {
+      $signal=$dir.'/media_'.$screenId.'.signal';
+      $lockPath=$dir.'/media_'.$screenId.'.lock';
+      $token=sprintf('%.6F-%d',microtime(true),getmypid());
+      // Mark pending before acquiring the worker lock, so another event
+      // cannot disappear merely because a previous HTTP send was in flight.
+      if (@file_put_contents($signal,$token,LOCK_EX)===false) {
+        log::add('mira','warning','[MEDIA][BURST] Signal inaccessible : '.$screenId);
+        self::mediaFlushSnapshot($eq);
+        continue;
+      }
+      $lock=@fopen($lockPath,'c');
+      if ($lock===false) {
+        log::add('mira','warning','[MEDIA][BURST] Verrou inaccessible : '.$screenId);
+        self::mediaFlushSnapshot($eq);
+        continue;
+      }
+      if (!flock($lock,LOCK_EX|LOCK_NB)) {
+        fclose($lock); // Existing worker will read the newer signal.
+        continue;
+      }
+      try {
+        $startedAt=microtime(true);
+        $passes=0;
+        $totalSent=0;
+        do {
+          // Gather consecutive Spotify metadata events into one snapshot.
+          usleep($passes===0 ? 180000 : 70000);
+          $seen=@file_get_contents($signal);
+          $totalSent+=self::mediaFlushSnapshot($eq);
+          ++$passes;
+          $latest=@file_get_contents($signal);
+        } while ($latest!==$seen && $passes<4);
+        log::add('mira','debug','[MEDIA][BURST] Écran #'.$screenId.
+          ' : '.$passes.' passe(s), '.$totalSent.' HTTP, '.
+          (int)round((microtime(true)-$startedAt)*1000).' ms');
+      } finally {
+        flock($lock,LOCK_UN);
+        fclose($lock);
+      }
     }
   }
 
