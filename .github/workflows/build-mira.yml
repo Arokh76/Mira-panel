@@ -1,4 +1,4 @@
-name: Build Mira Panel 0.7.32 - WT32 Waveshare Nextion
+name: Build Mira Panel 0.7.33 - WT32 Waveshare Nextion
 
 on:
   workflow_dispatch:
@@ -36,7 +36,7 @@ jobs:
           ref: 44e412f08c1e68c0da826bc5f51436f156a02eea
           path: waveshare-official
 
-      - name: Use committed consolidated 0.7.32 source snapshot
+      - name: Use committed consolidated 0.7.33 source snapshot
         shell: bash
         run: |
           set -euo pipefail
@@ -46,7 +46,7 @@ jobs:
           rm -rf firmware/source/work
           mkdir -p firmware/source/work/MIRA_PANEL
           cp -a firmware/source/consolidated/MIRA_PANEL/. firmware/source/work/MIRA_PANEL/
-          grep -q '"0.7.32"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
+          grep -q '"0.7.33"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
           # Both HOME clocks white; Waveshare uses the identical width/center
           # as its date. The WT32 Montserrat40 & both sleep clocks are intact.
           grep -Fq 'lv_obj_set_style_text_color(_dateTimeLabel, lv_color_white(), 0);' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
@@ -159,7 +159,7 @@ jobs:
           arduino-cli lib install "JPEGDEC@1.8.2"
           arduino-cli lib install "AsyncHTTPRequest_Generic@1.13.0"
 
-      - name: Build WT32-SC01 Plus 0.7.32 firmware
+      - name: Build WT32-SC01 Plus 0.7.33 firmware
         shell: bash
         run: |
           set -euo pipefail
@@ -172,15 +172,15 @@ jobs:
           rm -rf build-wt32 && mkdir build-wt32
           arduino-cli compile             --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,CPUFreq=240,FlashMode=qio,FlashSize=8M,PartitionScheme=default_8MB,PSRAM=enabled,UploadMode=default,USBMode=hwcdc"             --output-dir build-wt32             firmware/source/work/MIRA_PANEL
           test -s build-wt32/MIRA_PANEL.ino.bin
-          strings build-wt32/MIRA_PANEL.ino.bin | grep -Fxq '0.7.32'
+          strings build-wt32/MIRA_PANEL.ino.bin | grep -Fxq '0.7.33'
           strings build-wt32/MIRA_PANEL.ino.bin | grep -Fq 'WT32-SC01 Plus'
 
-      - name: Package WT32-SC01 Plus 0.7.32 OTA preview
+      - name: Package WT32-SC01 Plus 0.7.33 OTA preview
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p package-wt32
-          cp build-wt32/MIRA_PANEL.ino.bin package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.32.bin
+          cp build-wt32/MIRA_PANEL.ino.bin package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.33.bin
           # WT32 USB factory image uses the existing 8 MB partition table.
           test -s build-wt32/MIRA_PANEL.ino.bootloader.bin
           test -s build-wt32/MIRA_PANEL.ino.partitions.bin
@@ -188,34 +188,34 @@ jobs:
           test -s "$BOOTAPP"
           python3 -m pip install --quiet esptool
           python3 -m esptool --chip esp32s3 merge-bin \
-            -o package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.32_FACTORY.bin \
+            -o package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.33_FACTORY.bin \
             --flash-mode dio --flash-freq 80m --flash-size 8MB \
             0x0000 build-wt32/MIRA_PANEL.ino.bootloader.bin \
             0x8000 build-wt32/MIRA_PANEL.ino.partitions.bin \
             0xE000 "$BOOTAPP" \
-            0x10000 package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.32.bin
-          test -s package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.32_FACTORY.bin
+            0x10000 package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.33.bin
+          test -s package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.33_FACTORY.bin
           cat > package-wt32/README.txt <<'EOF'
-          Mira Panel 0.7.32 - WT32-SC01 Plus ESP32-S3 / 8 MB FLASH
-          OTA application firmware: Mira_Panel_WT32_SC01_Plus_0.7.32.bin
+          Mira Panel 0.7.33 - WT32-SC01 Plus ESP32-S3 / 8 MB FLASH
+          OTA application firmware: Mira_Panel_WT32_SC01_Plus_0.7.33.bin
           Compiled using Arduino-ESP32 2.0.17, LVGL 8.3.11.
           WARNING: WT32-specific firmware. Never flash to Waveshare 4.3C.
           This is a preview for hardware testing, not a stable release.
-          USB factory firmware: Mira_Panel_WT32_SC01_Plus_0.7.32_FACTORY.bin
+          USB factory firmware: Mira_Panel_WT32_SC01_Plus_0.7.33_FACTORY.bin
           EOF
-          test -s package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.32.bin
-          strings package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.32.bin | grep -Fxq '0.7.32'
-          sha256sum package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.32.bin
+          test -s package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.33.bin
+          strings package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.33.bin | grep -Fxq '0.7.33'
+          sha256sum package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.33.bin
 
       - name: Upload WT32-SC01 Plus preview
         uses: actions/upload-artifact@v4
         with:
-          name: Mira_Panel_WT32_SC01_Plus_0.7.32_preview
+          name: Mira_Panel_WT32_SC01_Plus_0.7.33_preview
           path: package-wt32/
           if-no-files-found: error
           retention-days: 14
 
-      - name: Build Open Nextion Genius 2.8 (experimental hardware, same 0.7.32)
+      - name: Build Open Nextion Genius 2.8 (experimental hardware, same 0.7.33)
         shell: bash
         run: |
           set -euo pipefail
@@ -228,7 +228,7 @@ jobs:
           cp firmware/source/consolidated/MIRA_PANEL/MiraPartitionsWaveshare16MB.csv build-nextion-src/MIRA_PANEL/partitions.csv
           cp build-nextion-src/MIRA_PANEL/lv_conf.h "$HOME/Arduino/libraries/lv_conf.h"
           test -s build-nextion-src/MIRA_PANEL/MiraNextion28Display.h
-          grep -Fq '"0.7.32"' build-nextion-src/MIRA_PANEL/MIRA_PANEL.ino
+          grep -Fq '"0.7.33"' build-nextion-src/MIRA_PANEL/MIRA_PANEL.ino
           arduino-cli compile \
             --fqbn "esp32:esp32:esp32s3:CDCOnBoot=default,CPUFreq=240,FlashMode=dio,FlashSize=16M,PartitionScheme=default_8MB,PSRAM=opi,UploadMode=default,USBMode=hwcdc" \
             --build-property "compiler.cpp.extra_flags=-DMIRA_TARGET_NEXTION_28=1" \
@@ -236,29 +236,29 @@ jobs:
             --output-dir build-nextion \
             build-nextion-src/MIRA_PANEL
           test -s build-nextion/MIRA_PANEL.ino.bin
-          strings build-nextion/MIRA_PANEL.ino.bin | grep -Fxq '0.7.32'
+          strings build-nextion/MIRA_PANEL.ino.bin | grep -Fxq '0.7.33'
           strings build-nextion/MIRA_PANEL.ino.bin | grep -Fq 'OPEN-NEXTION-GENIUS-2.8'
           PART_TOOL="$(find "$HOME/.arduino15/packages/esp32" -name gen_esp32part.py -type f | head -n1)"
           python3 "$PART_TOOL" build-nextion/MIRA_PANEL.ino.partitions.bin >/tmp/nextion-parts.csv
           grep -q 'ota_0' /tmp/nextion-parts.csv
           grep -q 'ota_1' /tmp/nextion-parts.csv
-          cp build-nextion/MIRA_PANEL.ino.bin package-nextion/Mira_Panel_Nextion_2.8_0.7.32.bin
+          cp build-nextion/MIRA_PANEL.ino.bin package-nextion/Mira_Panel_Nextion_2.8_0.7.33.bin
           BOOTAPP="$(find "$HOME/.arduino15/packages/esp32" -name boot_app0.bin -type f | head -n1)"
           python3 -m pip install --quiet esptool
           python3 -m esptool --chip esp32s3 merge-bin \
-            -o package-nextion/Mira_Panel_Nextion_2.8_0.7.32_FACTORY.bin \
+            -o package-nextion/Mira_Panel_Nextion_2.8_0.7.33_FACTORY.bin \
             --flash-mode dio --flash-freq 40m --flash-size 16MB \
             0x0000 build-nextion/MIRA_PANEL.ino.bootloader.bin \
             0x8000 build-nextion/MIRA_PANEL.ino.partitions.bin \
             0xE000 "$BOOTAPP" \
-            0x10000 package-nextion/Mira_Panel_Nextion_2.8_0.7.32.bin
-          test -s package-nextion/Mira_Panel_Nextion_2.8_0.7.32_FACTORY.bin
+            0x10000 package-nextion/Mira_Panel_Nextion_2.8_0.7.33.bin
+          test -s package-nextion/Mira_Panel_Nextion_2.8_0.7.33_FACTORY.bin
           sha256sum package-nextion/*.bin
 
       - name: Upload Nextion 2.8 build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Mira_Panel_Nextion_2.8_0.7.32_preview
+          name: Mira_Panel_Nextion_2.8_0.7.33_preview
           path: package-nextion/
           retention-days: 14
           if-no-files-found: error
@@ -306,7 +306,7 @@ jobs:
           test -f firmware/source/work/MIRA_PANEL/src/WaveshareOfficial/lvgl_port/lvgl_port.cpp
           test -f firmware/source/work/MIRA_PANEL/src/WaveshareOfficial/rgb_lcd_port/rgb_lcd_port.cpp
 
-          # 0.7.32 performance experiment, Waveshare ONLY:
+          # 0.7.33 performance experiment, Waveshare ONLY:
           # revert to the port's recommended double-buffer + direct-mode
           # and refresh dirty areas instead of the complete 800x480 screen.
           # Keep the 0.7.4 triple-buffer build for hardware A/B and rollback.
@@ -347,7 +347,7 @@ jobs:
             --output-dir build-waveshare \
             firmware/source/work/MIRA_PANEL
           test -s build-waveshare/MIRA_PANEL.ino.bin
-          strings build-waveshare/MIRA_PANEL.ino.bin | grep -Fxq '0.7.32'
+          strings build-waveshare/MIRA_PANEL.ino.bin | grep -Fxq '0.7.33'
           strings build-waveshare/MIRA_PANEL.ino.bin | grep -Fq 'Waveshare ESP32-S3 Touch LCD 4.3C'
           strings build-waveshare/MIRA_PANEL.ino.bin | grep -Fq '[MIRA][WAVESHARE] Port LVGL Waveshare officiel actif'
           PARTTOOL="$(find "$HOME/.arduino15/packages/esp32" -name gen_esp32part.py -type f | head -n1)"
@@ -357,7 +357,7 @@ jobs:
           grep -q 'spiffs' /tmp/partitions-decoded.csv
           ! grep -q 'ffat' /tmp/partitions-decoded.csv
 
-          cp build-waveshare/MIRA_PANEL.ino.bin package-waveshare/Mira_Panel_Waveshare_4.3C_0.7.32.bin
+          cp build-waveshare/MIRA_PANEL.ino.bin package-waveshare/Mira_Panel_Waveshare_4.3C_0.7.33.bin
           cp build-waveshare/MIRA_PANEL.ino.bootloader.bin package-waveshare/bootloader.bin
           cp build-waveshare/MIRA_PANEL.ino.partitions.bin package-waveshare/partitions.bin
           BOOTAPP="$(find "$HOME/.arduino15/packages/esp32" -name boot_app0.bin -type f | head -n1)"
@@ -367,23 +367,23 @@ jobs:
           0x0000  bootloader.bin
           0x8000  partitions.bin
           0xE000  boot_app0.bin
-          0x10000 Mira_Panel_Waveshare_4.3C_0.7.32.bin
+          0x10000 Mira_Panel_Waveshare_4.3C_0.7.33.bin
           EOF
 
           MERGED="$(find build-waveshare -maxdepth 1 -name '*merged.bin' -type f | head -n1 || true)"
           if [ -n "$MERGED" ]; then
-            cp "$MERGED" package-waveshare/Mira_Panel_Waveshare_4.3C_0.7.32_FACTORY.bin
+            cp "$MERGED" package-waveshare/Mira_Panel_Waveshare_4.3C_0.7.33_FACTORY.bin
           else
             python3 -m pip install --quiet esptool
-            python3 -m esptool --chip esp32s3 merge-bin -o package-waveshare/Mira_Panel_Waveshare_4.3C_0.7.32_FACTORY.bin --flash-mode qio --flash-freq 80m --flash-size 16MB 0x0000 package-waveshare/bootloader.bin 0x8000 package-waveshare/partitions.bin 0xE000 package-waveshare/boot_app0.bin 0x10000 package-waveshare/Mira_Panel_Waveshare_4.3C_0.7.32.bin
+            python3 -m esptool --chip esp32s3 merge-bin -o package-waveshare/Mira_Panel_Waveshare_4.3C_0.7.33_FACTORY.bin --flash-mode qio --flash-freq 80m --flash-size 16MB 0x0000 package-waveshare/bootloader.bin 0x8000 package-waveshare/partitions.bin 0xE000 package-waveshare/boot_app0.bin 0x10000 package-waveshare/Mira_Panel_Waveshare_4.3C_0.7.33.bin
           fi
-          test -s package-waveshare/Mira_Panel_Waveshare_4.3C_0.7.32_FACTORY.bin
+          test -s package-waveshare/Mira_Panel_Waveshare_4.3C_0.7.33_FACTORY.bin
           ls -lh package-waveshare/
 
       - name: Upload Waveshare preview package
         uses: actions/upload-artifact@v4
         with:
-          name: Mira_Panel_Waveshare_4.3C_0.7.32_preview
+          name: Mira_Panel_Waveshare_4.3C_0.7.33_preview
           path: package-waveshare/
           if-no-files-found: error
           retention-days: 14
@@ -393,20 +393,20 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/mira-release-check/inputs/wt32 /tmp/mira-release-check/inputs/waveshare
-          cp package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.32*.bin /tmp/mira-release-check/inputs/wt32/
-          cp package-waveshare/Mira_Panel_Waveshare_4.3C_0.7.32*.bin /tmp/mira-release-check/inputs/waveshare/
+          cp package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.33*.bin /tmp/mira-release-check/inputs/wt32/
+          cp package-waveshare/Mira_Panel_Waveshare_4.3C_0.7.33*.bin /tmp/mira-release-check/inputs/waveshare/
           mkdir -p /tmp/mira-release-check/inputs/nextion
-          cp package-nextion/Mira_Panel_Nextion_2.8_0.7.32*.bin /tmp/mira-release-check/inputs/nextion/
+          cp package-nextion/Mira_Panel_Nextion_2.8_0.7.33*.bin /tmp/mira-release-check/inputs/nextion/
           python3 firmware/scripts/publish_multi.py \
             --inputs /tmp/mira-release-check/inputs \
             --repo /tmp/mira-release-check/output \
-            --version 0.7.32
+            --version 0.7.33
           python3 - <<'PY'
           from pathlib import Path
           import json
           p = Path('/tmp/mira-release-check/output/firmware/targets.json')
           data = json.loads(p.read_text())
-          assert data['version'] == '0.7.32'
+          assert data['version'] == '0.7.33'
           assert len(data['targets']) == 3
           # The old untyped OTA feed must stay pinned for older Waveshare.
           # The release generator deliberately does not write it.
@@ -422,11 +422,11 @@ jobs:
           PY
 
   publish_camera_beta:
-    name: Publish faster Spotify artwork beta OTA (all 3 profiles)
+    name: Publish seamless Spotify artwork beta OTA (all 3 profiles)
     needs: build
     if: >-
       github.event_name == 'pull_request' &&
-      github.head_ref == 'fix/mira-fw-0732-faster-album-art-timeouts' &&
+      github.head_ref == 'feature/mira-fw-0733-seamless-album-swap' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       !github.event.pull_request.head.repo.fork
     runs-on: ubuntu-latest
@@ -434,7 +434,7 @@ jobs:
       contents: write
       actions: read
     env:
-      BETA_VERSION: "0.7.32"
+      BETA_VERSION: "0.7.33"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -443,15 +443,15 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: Mira_Panel_WT32_SC01_Plus_0.7.32_preview
+          name: Mira_Panel_WT32_SC01_Plus_0.7.33_preview
           path: /tmp/mira-camera-beta/wt32
       - uses: actions/download-artifact@v4
         with:
-          name: Mira_Panel_Waveshare_4.3C_0.7.32_preview
+          name: Mira_Panel_Waveshare_4.3C_0.7.33_preview
           path: /tmp/mira-camera-beta/waveshare
       - uses: actions/download-artifact@v4
         with:
-          name: Mira_Panel_Nextion_2.8_0.7.32_preview
+          name: Mira_Panel_Nextion_2.8_0.7.33_preview
           path: /tmp/mira-camera-beta/nextion
 
       - name: Stage three verified binaries on the separate beta channel
@@ -476,7 +476,7 @@ jobs:
           import json
           p = Path("firmware/targets.json")
           payload = json.loads(p.read_text())
-          assert payload['version'] == '0.7.32'
+          assert payload['version'] == '0.7.33'
           assert set(payload['targets']) == {
               'wt32-sc01-plus', 'waveshare-esp32s3-touch-lcd-4.3c', 'onx2432g028'
           }
@@ -484,7 +484,7 @@ jobs:
               assert target['otaBytes'] > 500000
               for field in ('ota', 'factory'):
                   url = target[field]
-                  assert '/main/firmware/releases/0.7.32/' in url
+                  assert '/main/firmware/releases/0.7.33/' in url
                   target[field] = url.replace(
                       '/main/firmware/releases/', '/firmware-beta/firmware/releases/'
                   )
