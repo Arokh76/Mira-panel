@@ -1879,8 +1879,8 @@ void MiraPanelUI::createMedia(uint8_t idx) {
       art, LV_SYMBOL_AUDIO, 0, (artW - 28) / 2, artW,
       &lv_font_montserrat_28, colorAccent(), LV_TEXT_ALIGN_CENTER);
   b.mediaArtworkImage = lv_img_create(art);
-  lv_obj_set_style_radius(b.mediaArtworkImage, 15, 0);
-  lv_obj_set_style_clip_corner(b.mediaArtworkImage, true, 0);
+  // Rounded clipping happens once on the artwork parent, not twice:
+  // important for LVGL performance on the WT32.
   lv_obj_align(b.mediaArtworkImage, LV_ALIGN_CENTER, 0, 0);
   lv_obj_add_flag(b.mediaArtworkImage, LV_OBJ_FLAG_HIDDEN);
   lv_obj_clear_flag(b.mediaArtworkImage, LV_OBJ_FLAG_CLICKABLE);
