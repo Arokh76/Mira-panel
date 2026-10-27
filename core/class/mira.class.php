@@ -469,6 +469,13 @@ class mira extends eqLogic {
     $previous=(int)$source->getId();
     $next=(int)$target->getId();
     if ($next!==$previous) {
+      // Clear local optimistic Play/Pause state before binding the new room.
+      // A genuine new playback-state Info overrides this immediately.
+      foreach ($this->getCmd() as $mediaCmd) {
+        if (!is_object($mediaCmd) || $mediaCmd->getType()!=='info') continue;
+        if (preg_match('/__state$/D',(string)$mediaCmd->getLogicalId()))
+          self::mediaPushInfo($this,$mediaCmd,'unknown');
+      }
       $this->setConfiguration('media_source_eqid',$next);
       // postSave() rebinds the existing widget IDs and event listener.
       $this->save();
