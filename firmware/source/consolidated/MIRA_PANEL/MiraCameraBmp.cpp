@@ -29,14 +29,15 @@ uint32_t read32(const uint8_t* p) {
   return uint32_t(p[0]) | (uint32_t(p[1]) << 8) |
          (uint32_t(p[2]) << 16) | (uint32_t(p[3]) << 24);
 }
-bool receiveBytes(Stream& stream, uint8_t* out, size_t count) {
+bool receiveBytes(Stream& stream, uint8_t* out, size_t count,
+                  uint32_t idleTimeoutMs = 5000UL) {
   size_t done = 0;
-  uint32_t deadline = millis() + 5000UL;
+  uint32_t deadline = millis() + idleTimeoutMs;
   while (done < count && (int32_t)(millis() - deadline) < 0) {
     const size_t got = stream.readBytes(out + done, count - done);
     if (got) {
       done += got;
-      deadline = millis() + 5000UL;
+      deadline = millis() + idleTimeoutMs;
     } else {
       vTaskDelay(pdMS_TO_TICKS(10));
     }
@@ -251,7 +252,7 @@ void MiraCameraBmp::run() {
       xSemaphoreTake(_mutex, portMAX_DELAY);
       if (oneShotArtwork)
         Serial.printf("[MIRA][ART] %s en %lu ms%s\n",
-          ok ? "Pochette telechargee/decoder" : "Echec pochette",
+          ok ? "Pochette chargee et decodee" : "Echec pochette",
           (unsigned long)elapsedMs,
           generation == _generation ? "" : " (obsolete)");
       if (_active && generation == _generation) {
@@ -303,7 +304,8 @@ bool MiraCameraBmp::downloadBmp(const String& url, uint16_t maxW,
   Stream& stream = http.getStream();
   stream.setTimeout(oneShotArtwork ? 1600 : 2000);
   uint8_t header[54];
-  if (!receiveBytes(stream, header, sizeof(header))) {
+  if (!receiveBytes(stream, header, sizeof(header),
+                    oneShotArtwork ? 2500UL : 5000UL)) {
     http.end();
     return false;
   }
