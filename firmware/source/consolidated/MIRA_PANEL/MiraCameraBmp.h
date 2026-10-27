@@ -2,6 +2,7 @@
 // Mira camera beta: fetch RGB24 BMP snapshots without blocking LVGL.
 // UI never runs network operations; producer only writes PSRAM pixels.
 #include <Arduino.h>
+#include <atomic>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/semphr.h>
@@ -21,14 +22,16 @@ private:
   static void taskThunk(void* arg);
   void run();
   static bool downloadBmp(const String& url, uint16_t maxW, uint16_t maxH,
-                          Frame& out, bool oneShotArtwork);
+                          Frame& out, bool oneShotArtwork,
+                          const std::atomic<uint32_t>* currentGeneration,
+                          uint32_t requestGeneration);
   static void release(Frame& frame);
   SemaphoreHandle_t _mutex = nullptr;
   TaskHandle_t _task = nullptr;
   String _url;
   uint16_t _maxW = 0;
   uint16_t _maxH = 0;
-  uint32_t _generation = 0;
+  std::atomic<uint32_t> _generation{0}; // cancel stale HTTPS/JPEG transfers safely
   uint32_t _lastRequestAt = 0;
   uint32_t _refreshIntervalMs = 250; // fast snapshots; slow down on fetch failures
   bool _active = false;
