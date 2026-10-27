@@ -168,6 +168,11 @@ class mira extends eqLogic {
       $cmd = self::findMediaSourceCmd($source,'info',$names);
       if (is_object($cmd)) $mapped[$field] = $cmd;
     }
+    // On per-speaker Spotify Connect equipment, the screen's dropdown
+    // displays the configured reader (the control target). Device Name
+    // may instead describe the current Spotify playback elsewhere.
+    if (strtolower((string)$source->getEqType_name())==='spotifyconnect')
+      unset($mapped['device']);
     // 'Progression' is a number between 0 and 100 only. A textual Spotify
     // track or elapsed-time field cannot be wired into Mira's percentage bar.
     if (isset($mapped['progress'])) {
