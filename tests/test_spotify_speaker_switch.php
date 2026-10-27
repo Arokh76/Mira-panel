@@ -32,6 +32,7 @@ $harness='class TestMiraController {
   public function configureMediaSource(){$this->rebuilt++;}
   public static function rebuildMediaListener(){}
   public function refreshPassiveWidgets(){$this->refreshes++;}
+  public function getCmd(){return array();} // no state Info configured in this isolated mock
   private static function mediaDestinationNames($source) {
     $names=array();$seen=array();
     foreach(eqLogic::byType("spotifyconnect") as $item){
