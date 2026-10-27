@@ -549,6 +549,18 @@ class mira extends eqLogic {
     $sourceId=(int)($_option['event_id']??0);
     if ($sourceId<1) return;
     $value=$_option['value']??'';
+    // Background event jobs can be delayed/reordered. Read the latest
+    // cached Jeedom Info value at delivery time, never the older queued
+    // event payload. No external Spotify query or device action is run.
+    $sourceCmd=cmd::byId($sourceId);
+    if (!is_object($sourceCmd) || $sourceCmd->getType()!=='info') return;
+    try {
+      $latest=$sourceCmd->execCmd();
+      if ($latest!==null) $value=$latest;
+    } catch (Throwable $e) {
+      log::add('mira','debug','[MEDIA][EVENT] Info source #'.$sourceId.
+        ' : valeur cache indisponible : '.$e->getMessage());
+    }
     // Visible in the Mira debug log: compare an incoming source event with
     // the screen update to distinguish slow Spotify polling from Mira relay.
     $startedAt=microtime(true);
