@@ -68,7 +68,8 @@ static int miraJpegDraw(JPEGDRAW* draw) {
 static bool miraDownloadJpeg(Stream& stream, int contentLength,
                              const uint8_t* first, size_t firstCount,
                              uint16_t maxW, uint16_t maxH,
-                             MiraCameraBmp::Frame& output) {
+                             MiraCameraBmp::Frame& output,
+                             uint32_t jpegIdleTimeoutMs) {
   if (contentLength > (int)MIRA_JPEG_MAX_BYTES) {
     Serial.println("[MIRA][CAM] JPEG trop volumineux"); return false;
   }
@@ -81,7 +82,7 @@ static bool miraDownloadJpeg(Stream& stream, int contentLength,
   size_t used = firstCount;
   uint32_t lastData = millis();
   bool complete = false;
-  while (used < capacity && (uint32_t)(millis() - lastData) < 4500UL) {
+  while (used < capacity && (uint32_t)(millis() - lastData) < jpegIdleTimeoutMs) {
     // An HTTP/1.0 snapshot normally provides Content-Length. If not, the
     // JPEG EOI marker terminates the stream without waiting for keep-alive.
     if (contentLength < 0 && used >= 2 &&
@@ -219,6 +220,7 @@ void MiraCameraBmp::run() {
     String url;
     uint16_t w = 0, h = 0;
     uint32_t generation = 0;
+    bool oneShotArtwork = false;
     if (_mutex && xSemaphoreTake(_mutex, portMAX_DELAY) == pdTRUE) {
       if (_active && !_oneShotDone && WiFi.status() == WL_CONNECTED &&
           (!_lastRequestAt || (uint32_t)(millis() - _lastRequestAt) >= _refreshIntervalMs)) {
@@ -227,6 +229,7 @@ void MiraCameraBmp::run() {
         w = _maxW;
         h = _maxH;
         generation = _generation;
+        oneShotArtwork = _oneShot;
       }
       xSemaphoreGive(_mutex);
     }
@@ -242,8 +245,15 @@ void MiraCameraBmp::run() {
         url += "w=" + String(w) + "&h=" + String(h);
       }
       Frame frame;
-      const bool ok = downloadBmp(url, w, h, frame);
+      const uint32_t beganAt = millis();
+      const bool ok = downloadBmp(url, w, h, frame, oneShotArtwork);
+      const uint32_t elapsedMs = millis() - beganAt;
       xSemaphoreTake(_mutex, portMAX_DELAY);
+      if (oneShotArtwork)
+        Serial.printf("[MIRA][ART] %s en %lu ms%s\n",
+          ok ? "Pochette telechargee/decoder" : "Echec pochette",
+          (unsigned long)elapsedMs,
+          generation == _generation ? "" : " (obsolete)");
       if (_active && generation == _generation) {
         _refreshIntervalMs = ok ? 250 : 2000;
         if (ok) {
@@ -264,7 +274,8 @@ void MiraCameraBmp::run() {
 }
 
 bool MiraCameraBmp::downloadBmp(const String& url, uint16_t maxW,
-                                uint16_t maxH, Frame& out) {
+                                uint16_t maxH, Frame& out,
+                                bool oneShotArtwork) {
   WiFiClient client;
   WiFiClientSecure secureClient;
   // Artwork is a public JPEG: never send Spotify credentials over TLS.
@@ -273,25 +284,37 @@ bool MiraCameraBmp::downloadBmp(const String& url, uint16_t maxW,
                     static_cast<WiFiClient&>(secureClient) : client;
   HTTPClient http;
   http.useHTTP10(true); // prevent chunked transfer in the BMP decoder
-  http.setConnectTimeout(3500);
-  http.setTimeout(5000);
+  // Album artwork is a one-shot Spotify CDN request. Avoid keeping the
+  // sole artwork worker busy on an obsolete HTTPS fetch for many seconds
+  // after the user changes tracks. Camera streams retain their timeouts.
+  http.setConnectTimeout(oneShotArtwork ? 2500 : 3500);
+  http.setTimeout(oneShotArtwork ? 3500 : 5000);
   if (!http.begin(net, url)) return false;
+  const uint32_t requestAt = millis();
   const int response = http.GET();
+  if (oneShotArtwork)
+    Serial.printf("[MIRA][ART] Reponse HTTPS %d en %lu ms\n",
+      response, (unsigned long)(millis() - requestAt));
   if (response != HTTP_CODE_OK) {
     Serial.printf("[MIRA][CAM] Snapshot HTTP %d\n", response);
     http.end();
     return false;
   }
   Stream& stream = http.getStream();
-  stream.setTimeout(2000);
+  stream.setTimeout(oneShotArtwork ? 1600 : 2000);
   uint8_t header[54];
   if (!receiveBytes(stream, header, sizeof(header))) {
     http.end();
     return false;
   }
   if (header[0] == 0xff && header[1] == 0xd8) {
+    const uint32_t jpegAt = millis();
     const bool ok = miraDownloadJpeg(stream, http.getSize(), header,
-                        sizeof(header), maxW, maxH, out);
+                        sizeof(header), maxW, maxH, out,
+                        oneShotArtwork ? 2500UL : 4500UL);
+    if (oneShotArtwork)
+      Serial.printf("[MIRA][ART] Flux JPEG + decodage %s en %lu ms\n",
+        ok ? "OK" : "ECHEC", (unsigned long)(millis() - jpegAt));
     http.end();
     return ok;
   }
