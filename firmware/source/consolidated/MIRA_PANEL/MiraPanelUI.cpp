@@ -2085,6 +2085,10 @@ void MiraPanelUI::updateCompositeInfo(Binding& b, uint8_t field, const String& r
     String url = raw;
     url.trim();
     if (url == _albumUrl) return;
+    // Timing marker: compare Spotify's title update to arrival of the
+    // cover URL, then compare the following HTTPS and JPEG timings.
+    Serial.printf("[MIRA][ART] Nouvelle pochette recue a %lu ms\n",
+                  (unsigned long)millis());
     clearAlbumArtwork();
     const bool safe = url.startsWith("https://i.scdn.co/image/") ||
                       url.startsWith("https://mosaic.scdn.co/");
