@@ -13,6 +13,10 @@
 #include <esp_heap_caps.h>
 
 namespace {
+static inline bool miraOldImageRequest(const std::atomic<uint32_t>* current,
+                                       uint32_t requestGeneration) {
+  return current && current->load(std::memory_order_acquire) != requestGeneration;
+}
 // LV_IMG_CF_TRUE_COLOR consumes exactly the pixel layout configured by
 // LV_COLOR_16_SWAP. WT32/Nextion use swapped RGB565 (1), while Waveshare
 // uses native RGB565 (0). The original JPEG decoder always generated LE,
@@ -30,10 +34,13 @@ uint32_t read32(const uint8_t* p) {
          (uint32_t(p[2]) << 16) | (uint32_t(p[3]) << 24);
 }
 bool receiveBytes(Stream& stream, uint8_t* out, size_t count,
-                  uint32_t idleTimeoutMs = 5000UL) {
+                  uint32_t idleTimeoutMs = 5000UL,
+                  const std::atomic<uint32_t>* current = nullptr,
+                  uint32_t requestGeneration = 0) {
   size_t done = 0;
   uint32_t deadline = millis() + idleTimeoutMs;
   while (done < count && (int32_t)(millis() - deadline) < 0) {
+    if (miraOldImageRequest(current, requestGeneration)) return false;
     const size_t got = stream.readBytes(out + done, count - done);
     if (got) {
       done += got;
@@ -70,7 +77,9 @@ static bool miraDownloadJpeg(Stream& stream, int contentLength,
                              const uint8_t* first, size_t firstCount,
                              uint16_t maxW, uint16_t maxH,
                              MiraCameraBmp::Frame& output,
-                             uint32_t jpegIdleTimeoutMs) {
+                             uint32_t jpegIdleTimeoutMs,
+                             const std::atomic<uint32_t>* current,
+                             uint32_t requestGeneration) {
   if (contentLength > (int)MIRA_JPEG_MAX_BYTES) {
     Serial.println("[MIRA][CAM] JPEG trop volumineux"); return false;
   }
@@ -84,6 +93,10 @@ static bool miraDownloadJpeg(Stream& stream, int contentLength,
   uint32_t lastData = millis();
   bool complete = false;
   while (used < capacity && (uint32_t)(millis() - lastData) < jpegIdleTimeoutMs) {
+    if (miraOldImageRequest(current, requestGeneration)) {
+      heap_caps_free(compressed);
+      return false; // the new track's JPEG should start immediately
+    }
     // An HTTP/1.0 snapshot normally provides Content-Length. If not, the
     // JPEG EOI marker terminates the stream without waiting for keep-alive.
     if (contentLength < 0 && used >= 2 &&
@@ -100,6 +113,10 @@ static bool miraDownloadJpeg(Stream& stream, int contentLength,
     } else {
       vTaskDelay(pdMS_TO_TICKS(10));
     }
+  }
+  if (miraOldImageRequest(current, requestGeneration)) {
+    heap_caps_free(compressed);
+    return false;
   }
   if (contentLength >= 0) complete = used == (size_t)contentLength;
   else if (used >= 2 && compressed[used-2] == 0xff && compressed[used-1] == 0xd9)
@@ -247,12 +264,14 @@ void MiraCameraBmp::run() {
       }
       Frame frame;
       const uint32_t beganAt = millis();
-      const bool ok = downloadBmp(url, w, h, frame, oneShotArtwork);
+      const bool ok = downloadBmp(url, w, h, frame, oneShotArtwork,
+                                   &_generation, generation);
       const uint32_t elapsedMs = millis() - beganAt;
       xSemaphoreTake(_mutex, portMAX_DELAY);
       if (oneShotArtwork)
         Serial.printf("[MIRA][ART] %s en %lu ms%s\n",
-          ok ? "Pochette chargee et decodee" : "Echec pochette",
+          generation != _generation ? "Requete annulee (nouvelle piste)" :
+          (ok ? "Pochette chargee et decodee" : "Echec pochette"),
           (unsigned long)elapsedMs,
           generation == _generation ? "" : " (obsolete)");
       if (_active && generation == _generation) {
@@ -276,7 +295,9 @@ void MiraCameraBmp::run() {
 
 bool MiraCameraBmp::downloadBmp(const String& url, uint16_t maxW,
                                 uint16_t maxH, Frame& out,
-                                bool oneShotArtwork) {
+                                bool oneShotArtwork,
+                                const std::atomic<uint32_t>* current,
+                                uint32_t requestGeneration) {
   WiFiClient client;
   WiFiClientSecure secureClient;
   // Artwork is a public JPEG: never send Spotify credentials over TLS.
@@ -293,6 +314,10 @@ bool MiraCameraBmp::downloadBmp(const String& url, uint16_t maxW,
   if (!http.begin(net, url)) return false;
   const uint32_t requestAt = millis();
   const int response = http.GET();
+  if (miraOldImageRequest(current, requestGeneration)) {
+    http.end();
+    return false;
+  }
   if (oneShotArtwork)
     Serial.printf("[MIRA][ART] Reponse HTTPS %d en %lu ms\n",
       response, (unsigned long)(millis() - requestAt));
@@ -305,7 +330,8 @@ bool MiraCameraBmp::downloadBmp(const String& url, uint16_t maxW,
   stream.setTimeout(oneShotArtwork ? 1600 : 2000);
   uint8_t header[54];
   if (!receiveBytes(stream, header, sizeof(header),
-                    oneShotArtwork ? 2500UL : 5000UL)) {
+                    oneShotArtwork ? 2500UL : 5000UL,
+                    current, requestGeneration)) {
     http.end();
     return false;
   }
@@ -313,7 +339,8 @@ bool MiraCameraBmp::downloadBmp(const String& url, uint16_t maxW,
     const uint32_t jpegAt = millis();
     const bool ok = miraDownloadJpeg(stream, http.getSize(), header,
                         sizeof(header), maxW, maxH, out,
-                        oneShotArtwork ? 2500UL : 4500UL);
+                        oneShotArtwork ? 2500UL : 4500UL,
+                        current, requestGeneration);
     if (oneShotArtwork)
       Serial.printf("[MIRA][ART] Flux JPEG + decodage %s en %lu ms\n",
         ok ? "OK" : "ECHEC", (unsigned long)(millis() - jpegAt));
