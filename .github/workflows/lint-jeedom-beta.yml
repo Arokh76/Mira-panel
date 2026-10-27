@@ -50,6 +50,8 @@ jobs:
         run: php tests/test_spotify_playback_state.php
       - name: Check asynchronous Spotify event listener
         run: php tests/test_media_async_listener.php
+      - name: Check Spotify burst coalescing and changed-only delivery
+        run: php tests/test_media_burst_delivery.php
       - name: Verify native Multimedia page and Spotify mapping
         shell: bash
         run: |
