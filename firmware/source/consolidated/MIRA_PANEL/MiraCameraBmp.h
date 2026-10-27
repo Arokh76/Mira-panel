@@ -20,7 +20,8 @@ public:
 private:
   static void taskThunk(void* arg);
   void run();
-  static bool downloadBmp(const String& url, uint16_t maxW, uint16_t maxH, Frame& out);
+  static bool downloadBmp(const String& url, uint16_t maxW, uint16_t maxH,
+                          Frame& out, bool oneShotArtwork);
   static void release(Frame& frame);
   SemaphoreHandle_t _mutex = nullptr;
   TaskHandle_t _task = nullptr;
