@@ -2263,6 +2263,28 @@ class miraCmd extends cmd {
         $mediaName=(string)$this->getLogicalId();
         if (preg_match('/__(previous|playpause|play|pause|next|volume_cmd|device_cmd)$/D',$mediaName,$mediaAction)) {
           $field=$mediaAction[1];
+          if ($field==='device_cmd') {
+            // Rebind Mira to the selected per-speaker Jeedom equipment.
+            // This does not depend on Spotify's unsupported Device Name Set.
+            $selection=$_options['slider']??($_options['value']??null);
+            if ($selection===null) {
+              $indexActions=$eqLogic->GetIndex();
+              if (is_array($indexActions)) foreach ($indexActions as $a) {
+                if (($a['type']??'')==='range' &&
+                    (int)($a['id']??-1)===(int)$this->getConfiguration('commande',-1)) {
+                  $selection=$a['value']??null;
+                  break;
+                }
+              }
+            }
+            if ($selection===null) {
+              log::add('mira','warning','[MEDIA] Choix enceinte sans index');
+              return false;
+            }
+            return $eqLogic->selectMediaReaderFromPicker(
+              $selection,
+              (string)$this->getConfiguration('mira_media_destination_names',''));
+          }
           $targetId=(int)$this->getConfiguration('mira_media_target_cmd',0);
           if ($field==='playpause') {
             $playId=(int)$this->getConfiguration('mira_media_play_cmd',0);
