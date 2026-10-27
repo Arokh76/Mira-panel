@@ -535,7 +535,12 @@ class mira extends eqLogic {
     $listener->setFunction('onMediaSourceEvent');
     $listener->emptyEvent();
     foreach (array_keys($ids) as $id) $listener->addEvent($id);
-    $listener->setOption(array('background'=>false));
+    // Never perform a network push to Mira synchronously inside the
+    // Spotify plugin's command event. A slow WT32 HTTP request otherwise
+    // blocks the source plugin while it is still publishing title, artist,
+    // album and cover events, visibly delaying the complete track update.
+    // Jeedom executes the listener in its own short-lived PHP process.
+    $listener->setOption(array('background'=>true));
     if (count($ids)) $listener->save();
     else if ($listener->getId()) $listener->remove();
   }
@@ -544,6 +549,10 @@ class mira extends eqLogic {
     $sourceId=(int)($_option['event_id']??0);
     if ($sourceId<1) return;
     $value=$_option['value']??'';
+    // Visible in the Mira debug log: compare an incoming source event with
+    // the screen update to distinguish slow Spotify polling from Mira relay.
+    $startedAt=microtime(true);
+    $forwarded=0;
     foreach (eqLogic::byType('mira',true) as $eq) {
       if (!is_object($eq)) continue;
       foreach ($eq->getCmd() as $cmd) {
@@ -553,7 +562,13 @@ class mira extends eqLogic {
         if (preg_match('/__progress$/D',$cmd->getLogicalId()) &&
            (!is_numeric($value) || (float)$value<0 || (float)$value>100)) continue;
         self::mediaPushInfo($eq,$cmd,$value);
+        ++$forwarded;
       }
+    }
+    if ($forwarded) {
+      log::add('mira','debug','[MEDIA][EVENT] Source #'.$sourceId.
+        ' relayée vers '.$forwarded.' information(s) en '.
+        (int)round((microtime(true)-$startedAt)*1000).' ms');
     }
   }
 
