@@ -1832,7 +1832,7 @@ void MiraPanelUI::createMedia(uint8_t idx) {
   // Jeedom Spotify Connect tile: vertically centered album artwork,
   // track info and 3 actions. Keep Mira's original volume slider as-is.
   miraCompositeLabel(b.card,
-      b.displayName.length() ? b.displayName : String("Multimédia"),
+      miraMediaDisplayText(b.displayName.length() ? b.displayName : String("Multimédia")),
       pad, 7, W - 2 * pad, &mira_font_fr_16, COL_TEXT,
       LV_TEXT_ALIGN_CENTER);
 
@@ -1981,8 +1981,9 @@ void MiraPanelUI::refreshMediaDeviceDropdown(Binding& b) {
     uint16_t selected = 0;
     for (uint8_t i = 0; i < b.mediaDeviceCount; ++i) {
       options += "\n";
-      options += b.mediaDeviceNames[i];
-      if (b.mediaDeviceNames[i] == b.mediaActiveDevice) selected = i + 1;
+      options += miraMediaDisplayText(b.mediaDeviceNames[i]);
+      if (miraMediaDisplayText(b.mediaDeviceNames[i]) == b.mediaActiveDevice)
+        selected = i + 1;
     }
     lv_dropdown_set_options(b.mediaDeviceDropdown, options.c_str());
     lv_dropdown_set_selected(b.mediaDeviceDropdown, selected);
@@ -2047,7 +2048,7 @@ void MiraPanelUI::updateCompositeInfo(Binding& b, uint8_t field, const String& r
   }
   if (b.type != W_MEDIA || field >= 9) return;
   if (field == 7) {
-    b.mediaActiveDevice = raw;
+    b.mediaActiveDevice = miraMediaDisplayText(raw);
     b.mediaActiveDevice.trim();
     refreshMediaDeviceDropdown(b);
     return;
