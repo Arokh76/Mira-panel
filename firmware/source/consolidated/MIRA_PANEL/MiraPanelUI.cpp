@@ -2085,20 +2085,33 @@ void MiraPanelUI::updateCompositeInfo(Binding& b, uint8_t field, const String& r
     String url = raw;
     url.trim();
     if (url == _albumUrl) return;
-    // Timing marker: compare Spotify's title update to arrival of the
-    // cover URL, then compare the following HTTPS and JPEG timings.
-    Serial.printf("[MIRA][ART] Nouvelle pochette recue a %lu ms\n",
-                  (unsigned long)millis());
-    clearAlbumArtwork();
+    // Invalid or empty artwork is a genuine absence of cover: clear it.
+    // Only trusted Spotify image URLs may start an HTTPS request.
     const bool safe = url.startsWith("https://i.scdn.co/image/") ||
                       url.startsWith("https://mosaic.scdn.co/");
-    if (!safe || url.length() > 768) return;
-    _albumTargetIdx = (int16_t)(&b - _bindings);
-    _albumUrl = url;
-    // JPEGDEC only scales by 1/2, 1/4 or 1/8. Decode up to 160px,
-    // then fit LVGL into 65/86/112px thumbnails even on Nextion.
-    if (!_albumFeed.start(url,160,160,true)) {
+    if (!safe || url.length() > 768) {
       clearAlbumArtwork();
+      return;
+    }
+    const int16_t nextIdx = (int16_t)(&b - _bindings);
+    // A different media widget must not inherit this widget's cover.
+    // For the SAME widget, leave the last decoded image visible while
+    // the next JPEG is downloaded on the background worker.
+    if (_albumTargetIdx >= 0 && _albumTargetIdx != nextIdx)
+      clearAlbumArtwork();
+    _albumTargetIdx = nextIdx;
+    _albumUrl = url;
+    _albumRequestedAtMs = millis();
+    Serial.printf("[MIRA][ART] Nouvelle pochette recue a %lu ms; ancienne image conservee\n",
+                  (unsigned long)_albumRequestedAtMs);
+    // start() invalidates any queued OLD frame and switches the worker's
+    // generation. The currently displayed LVGL pixels remain untouched.
+    if (!_albumFeed.start(url,160,160,true)) {
+      // Keep the previous cover if the worker couldn't start, while allowing
+      // the next Jeedom metadata refresh to retry this same URL.
+      _albumUrl = "";
+      _albumRequestedAtMs = 0;
+      Serial.println("[MIRA][ART] Worker indisponible, ancienne image conservee");
     }
     return;
   }
@@ -2176,6 +2189,7 @@ void MiraPanelUI::clearAlbumArtwork() {
   _albumDescriptor = {};
   _albumUrl = "";
   _albumTargetIdx = -1;
+  _albumRequestedAtMs = 0;
 }
 
 void MiraPanelUI::serviceAlbumArtwork() {
@@ -2188,6 +2202,10 @@ void MiraPanelUI::serviceAlbumArtwork() {
     return;
   }
   Binding& b = _bindings[_albumTargetIdx];
+  // Atomic-looking handover on the LVGL/UI thread: detach the old image
+  // BEFORE freeing its PSRAM pixels, then attach the fully decoded frame.
+  // The album background worker never manipulates LVGL or the old frame.
+  lv_img_set_src(b.mediaArtworkImage, nullptr);
   if (_albumPixels) heap_caps_free(_albumPixels);
   _albumPixels = frame.pixels;
   _albumDescriptor = {};
@@ -2209,6 +2227,10 @@ void MiraPanelUI::serviceAlbumArtwork() {
   lv_obj_clear_flag(b.mediaArtworkImage, LV_OBJ_FLAG_HIDDEN);
   if (b.mediaArtworkPlaceholder)
     lv_obj_add_flag(b.mediaArtworkPlaceholder, LV_OBJ_FLAG_HIDDEN);
+  if (_albumRequestedAtMs)
+    Serial.printf("[MIRA][ART] Nouvelle pochette affichee en %lu ms (sans ecran bleu)\n",
+                  (unsigned long)(millis() - _albumRequestedAtMs));
+  _albumRequestedAtMs = 0;
 }
 
 // Same compact action row as ordinary Mira buttons. No thumbnail, no
