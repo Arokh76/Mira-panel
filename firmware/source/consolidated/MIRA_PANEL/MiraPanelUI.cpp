@@ -1810,6 +1810,17 @@ static String miraMediaDisplayText(String text) {
     {"U\xCC\x82", "\xC3\x9B"}
   };
   for (const Accent& accent : accents) text.replace(accent.from, accent.to);
+  // Spotify often uses typographic apostrophes/quotation marks which are
+  // not present in the compact LVGL French bitmap font. ASCII equivalents
+  // retain the correct text instead of an empty square.
+  text.replace("\xE2\x80\x99", "'"); // RIGHT SINGLE QUOTATION MARK
+  text.replace("\xE2\x80\x98", "'"); // LEFT SINGLE QUOTATION MARK
+  text.replace("\xCA\xBC", "'");     // MODIFIER LETTER APOSTROPHE
+  text.replace("\xE2\x80\x9C", "\""); // LEFT DOUBLE QUOTATION MARK
+  text.replace("\xE2\x80\x9D", "\""); // RIGHT DOUBLE QUOTATION MARK
+  text.replace("\xE2\x80\x93", "-");  // EN DASH
+  text.replace("\xE2\x80\x94", "-");  // EM DASH
+  text.replace("\xC2\xA0", " ");     // NO-BREAK SPACE
   return text;
 }
 
@@ -2096,7 +2107,17 @@ void MiraPanelUI::updateCompositeInfo(Binding& b, uint8_t field, const String& r
                          state == "0" || state == "off" ||
                          state == "false" || state == "en pause" ||
                          state == "stopped" || state == "arrêt");
-    if (!playing && !paused) return; // Ignore missing/unknown status.
+    if (!playing && !paused) {
+      if (state == "unknown") {
+        // A new speaker with no actual playback state must not keep the
+        // old room's Pause icon. Do not claim that playback is stopped.
+        b.mediaPlaybackPlaying = false;
+        if (b.stateLabel) lv_label_set_text(b.stateLabel, LV_SYMBOL_PLAY);
+        if (b.compositeLabels[3])
+          lv_label_set_text(b.compositeLabels[3], "État non disponible");
+      }
+      return;
+    }
     b.mediaPlaybackPlaying = playing;
     if (b.stateLabel)
       lv_label_set_text(b.stateLabel, playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
