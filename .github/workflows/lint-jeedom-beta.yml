@@ -48,6 +48,8 @@ jobs:
         run: php tests/test_spotify_speaker_switch.php
       - name: Check Spotify playback-state discovery
         run: php tests/test_spotify_playback_state.php
+      - name: Check asynchronous Spotify event listener
+        run: php tests/test_media_async_listener.php
       - name: Verify native Multimedia page and Spotify mapping
         shell: bash
         run: |
