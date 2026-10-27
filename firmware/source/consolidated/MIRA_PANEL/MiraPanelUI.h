@@ -212,6 +212,7 @@ private:
   uint16_t* _albumPixels = nullptr;
   int16_t _albumTargetIdx = -1;
   String _albumUrl;
+  uint32_t _albumRequestedAtMs = 0; // diagnostics: URL received -> JPEG displayed
 
   lv_obj_t* _dateTimeLabel = nullptr;
   lv_obj_t* _dateSubLabel = nullptr;
