@@ -1787,6 +1787,32 @@ void MiraPanelUI::createEnergy(uint8_t idx) {
   }
 }
 
+// Spotify sometimes supplies decomposed UTF-8 (NFD): e.g. "i" + U+0302
+// instead of the precomposed "î" (U+00EE). The custom Mira French fonts
+// already contain the precomposed glyph, but not combining mark U+0302.
+// Normalize only display text; never alter metadata sources or cover URLs.
+static String miraMediaDisplayText(String text) {
+  struct Accent { const char* from; const char* to; };
+  static const Accent accents[] = {
+    {"a\\xCC\\x80", "\\xC3\\xA0"}, {"a\\xCC\\x81", "\\xC3\\xA1"},
+    {"a\\xCC\\x82", "\\xC3\\xA2"}, {"a\\xCC\\x88", "\\xC3\\xA4"},
+    {"e\\xCC\\x80", "\\xC3\\xA8"}, {"e\\xCC\\x81", "\\xC3\\xA9"},
+    {"e\\xCC\\x82", "\\xC3\\xAA"}, {"e\\xCC\\x88", "\\xC3\\xAB"},
+    {"i\\xCC\\x81", "\\xC3\\xAD"}, {"i\\xCC\\x82", "\\xC3\\xAE"},
+    {"i\\xCC\\x88", "\\xC3\\xAF"},
+    {"o\\xCC\\x81", "\\xC3\\xB3"}, {"o\\xCC\\x82", "\\xC3\\xB4"},
+    {"o\\xCC\\x88", "\\xC3\\xB6"},
+    {"u\\xCC\\x80", "\\xC3\\xB9"}, {"u\\xCC\\x81", "\\xC3\\xBA"},
+    {"u\\xCC\\x82", "\\xC3\\xBB"}, {"u\\xCC\\x88", "\\xC3\\xBC"},
+    {"c\\xCC\\xA7", "\\xC3\\xA7"}, {"n\\xCC\\x83", "\\xC3\\xB1"},
+    {"A\\xCC\\x82", "\\xC3\\x82"}, {"E\\xCC\\x82", "\\xC3\\x8A"},
+    {"I\\xCC\\x82", "\\xC3\\x8E"}, {"O\\xCC\\x82", "\\xC3\\x94"},
+    {"U\\xCC\\x82", "\\xC3\\x9B"}
+  };
+  for (const Accent& accent : accents) text.replace(accent.from, accent.to);
+  return text;
+}
+
 // A dedicated Mira media dashboard (not a Home Assistant media-player card).
 // Three explicit commands are linked through the existing Jeedom Button
 // mechanism; the volume slider is a standard indexed Range action.
@@ -1812,15 +1838,39 @@ void MiraPanelUI::createMedia(uint8_t idx) {
 
   const int artW = wide ? 230 : (mini ? 114 : 154);
   const int artY = wide ? 38 : (mini ? 31 : 32);
+  const int artX = (W - artW) / 2;
+  // Jeedom-inspired sleeve stack: subtle offset cards and shadow rather
+  // than a rigid, bright cyan picture border. No duplicate JPEG buffers.
+  const int stackOffset = mini ? 10 : (wide ? 24 : 18);
+  for (int side = -1; side <= 1; side += 2) {
+    lv_obj_t* sleeve = lv_obj_create(b.card);
+    lv_obj_set_pos(sleeve, artX + side * stackOffset, artY + 7);
+    lv_obj_set_size(sleeve, artW - 5, artW - 5);
+    lv_obj_set_style_radius(sleeve, 15, 0);
+    lv_obj_set_style_bg_color(sleeve, lv_color_hex(0x244463), 0);
+    lv_obj_set_style_bg_grad_color(sleeve, lv_color_hex(0x101C34), 0);
+    lv_obj_set_style_bg_grad_dir(sleeve, LV_GRAD_DIR_VER, 0);
+    lv_obj_set_style_bg_opa(sleeve, LV_OPA_70, 0);
+    lv_obj_set_style_border_width(sleeve, 0, 0);
+    lv_obj_set_style_shadow_width(sleeve, 8, 0);
+    lv_obj_set_style_shadow_opa(sleeve, LV_OPA_20, 0);
+    lv_obj_set_style_pad_all(sleeve, 0, 0);
+    lv_obj_clear_flag(sleeve, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(sleeve, LV_OBJ_FLAG_SCROLLABLE);
+  }
   lv_obj_t* art = lv_obj_create(b.card);
   lv_obj_set_size(art, artW, artW);
-  lv_obj_set_pos(art, (W - artW) / 2, artY);
-  lv_obj_set_style_radius(art, 11, 0);
+  lv_obj_set_pos(art, artX, artY);
+  lv_obj_set_style_radius(art, 15, 0);
+  lv_obj_set_style_clip_corner(art, true, 0);
   lv_obj_set_style_bg_color(art, lv_color_hex(0x132A47), 0);
   lv_obj_set_style_bg_grad_color(art, lv_color_hex(0x315C87), 0);
   lv_obj_set_style_bg_grad_dir(art, LV_GRAD_DIR_VER, 0);
-  lv_obj_set_style_border_color(art, colorAccent(), 0);
-  lv_obj_set_style_border_width(art, 1, 0);
+  lv_obj_set_style_border_width(art, 0, 0);
+  lv_obj_set_style_shadow_color(art, lv_color_hex(0x050B16), 0);
+  lv_obj_set_style_shadow_width(art, 16, 0);
+  lv_obj_set_style_shadow_ofs_y(art, 5, 0);
+  lv_obj_set_style_shadow_opa(art, LV_OPA_50, 0);
   lv_obj_set_style_pad_all(art, 0, 0);
   lv_obj_clear_flag(art, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_clear_flag(art, LV_OBJ_FLAG_SCROLLABLE);
@@ -1829,6 +1879,8 @@ void MiraPanelUI::createMedia(uint8_t idx) {
       art, LV_SYMBOL_AUDIO, 0, (artW - 28) / 2, artW,
       &lv_font_montserrat_28, colorAccent(), LV_TEXT_ALIGN_CENTER);
   b.mediaArtworkImage = lv_img_create(art);
+  lv_obj_set_style_radius(b.mediaArtworkImage, 15, 0);
+  lv_obj_set_style_clip_corner(b.mediaArtworkImage, true, 0);
   lv_obj_align(b.mediaArtworkImage, LV_ALIGN_CENTER, 0, 0);
   lv_obj_add_flag(b.mediaArtworkImage, LV_OBJ_FLAG_HIDDEN);
   lv_obj_clear_flag(b.mediaArtworkImage, LV_OBJ_FLAG_CLICKABLE);
@@ -1838,8 +1890,7 @@ void MiraPanelUI::createMedia(uint8_t idx) {
   const int stateY = wide ? 340 : (mini ? 194 : 245);
   b.compositeLabels[0] = miraCompositeLabel(
       b.card, "Aucune lecture", pad, titleY, W - 2 * pad,
-      wide ? &lv_font_montserrat_20 : &mira_font_fr_16,
-      COL_TEXT, LV_TEXT_ALIGN_CENTER);
+      &mira_font_fr_16, COL_TEXT, LV_TEXT_ALIGN_CENTER);
   b.compositeLabels[1] = miraCompositeLabel(
       b.card, "", pad, artistY, W - 2 * pad,
       &mira_font_fr_14, COL_MUTED, LV_TEXT_ALIGN_CENTER);
@@ -2075,8 +2126,12 @@ void MiraPanelUI::updateCompositeInfo(Binding& b, uint8_t field, const String& r
       _suppressEvents = false;
     }
   }
-  if (b.compositeLabels[field])
+  if (b.compositeLabels[field]) {
+    // Normalize decomposed Spotify accents so precomposed French glyphs
+    // (especially î / U+00EE) are used rather than a replacement square.
+    if (field <= 2) text = miraMediaDisplayText(text);
     lv_label_set_text(b.compositeLabels[field], text.c_str());
+  }
 }
 
 void MiraPanelUI::clearAlbumArtwork() {
