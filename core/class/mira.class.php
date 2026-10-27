@@ -378,8 +378,7 @@ class mira extends eqLogic {
     if (!is_object($source)) return false;
     $names=self::mediaDestinationNames($source);
     $sent=explode('|',(string)$savedList);
-    if ($index>=count($sent) || $index>=count($names) ||
-        $sent[$index]!==$names[$index]) {
+    if ($sent!==$names || $index>=count($names)) {
       log::add('mira','warning','[MEDIA] Sélection refusée : liste de lecteurs modifiée');
       return false;
     }
