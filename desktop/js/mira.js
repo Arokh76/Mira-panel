@@ -1400,7 +1400,8 @@ function addCmdToTable(_cmd) {
       }
   	  if (_cmd.type == "action" && !isMultiMaster && !isMultiAction && init(_cmd.logicalId) != 'Redémarrer' && init(_cmd.logicalId) != 'refresh'){
         if (_cmd.configuration.mira_media_link_status) {
-          var mediaOk = !!(_cmd.configuration.mira_media_target_cmd || _cmd.configuration.mira_media_play_cmd);
+          var mediaOk = !!(_cmd.configuration.mira_media_target_cmd || _cmd.configuration.mira_media_play_cmd) ||
+            /__device_cmd$/.test(_cmd.logicalId || '');
           var mediaStatus = $('<span>').text(_cmd.configuration.mira_media_link_status).html();
           tr += '<span style="color:' + (mediaOk ? '#45cbb4' : '#f4b66a') + ';display:block;margin:5px 0">' +
             '<i class="fas fa-' + (mediaOk ? 'link' : 'exclamation-triangle') + '"></i> Spotify · ' + mediaStatus + '</span>';

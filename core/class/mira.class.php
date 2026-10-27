@@ -168,6 +168,11 @@ class mira extends eqLogic {
       $cmd = self::findMediaSourceCmd($source,'info',$names);
       if (is_object($cmd)) $mapped[$field] = $cmd;
     }
+    // On per-speaker Spotify Connect equipment, the screen's dropdown
+    // displays the configured reader (the control target). Device Name
+    // may instead describe the current Spotify playback elsewhere.
+    if (strtolower((string)$source->getEqType_name())==='spotifyconnect')
+      unset($mapped['device']);
     // 'Progression' is a number between 0 and 100 only. A textual Spotify
     // track or elapsed-time field cannot be wired into Mira's percentage bar.
     if (isset($mapped['progress'])) {
@@ -195,8 +200,19 @@ class mira extends eqLogic {
       $id = (string)$target->getLogicalId();
       if (!preg_match('/__(title|artist|album|cover|state|progress|volume|device|devices|previous|playpause|next|volume_cmd|device_cmd|play|pause)$/D',$id,$match)) continue;
       $field = $match[1];
+      if ($target->getType()==='info' &&
+          in_array($field,array('title','artist','album','cover','state',
+                                'progress','volume','device'),true) &&
+          !isset($mapped[$field]) &&
+          (int)$target->getConfiguration('mira_media_source_cmd',0)>0) {
+        // Do not leave stale data from the previous room.
+        $target->setConfiguration('mira_media_source_cmd','');
+        $target->save();
+        self::mediaPushInfo($this,$target,'');
+      }
       if ($target->getType()==='info' && isset($mapped[$field])) {
         $target->setConfiguration('mira_media_source_cmd',(string)$mapped[$field]->getId());
+        $target->setConfiguration('mira_media_auto_reader','0');
         // Do not use a shell-backed Jeedom expression for Spotify strings.
         // The event listener will push updates safely through encoded HTTP.
         $target->setConfiguration('calcul','');
@@ -264,15 +280,12 @@ class mira extends eqLogic {
             $target->save();
           }
         } elseif ($field==='device_cmd') {
-          // Only use an explicit native transfer command; never guess that
-          // playing on another Jeedom equipment transfers the Spotify session.
-          $cmd=$actions['device_cmd'];
-          $target->setConfiguration('mira_media_target_cmd',is_object($cmd)?(string)$cmd->getId():'');
-          $target->setConfiguration('mira_media_link_status',is_object($cmd) ?
-            'Sélection d’enceinte : Device Name Set associé' :
-            'Transfert non disponible : Device Name Set introuvable');
+          // Select an existing per-speaker Jeedom source; no Spotify transfer.
+          $target->setConfiguration('mira_media_target_cmd','');
+          $target->setConfiguration('mira_media_link_status',
+            'Sélection du lecteur Mira disponible');
           $target->save();
-          if (is_object($cmd)) $configured++;
+          $configured++;
         } elseif ($field==='volume_cmd') {
           $cmd=$actions['volume_cmd'];
           $target->setConfiguration('mira_media_target_cmd',is_object($cmd)?(string)$cmd->getId():'');
@@ -290,15 +303,14 @@ class mira extends eqLogic {
       if (!preg_match('/__devices$/D',(string)$candidate->getLogicalId())) continue;
       $base=substr((string)$candidate->getLogicalId(),0,-strlen('__devices'));
       $action=$this->getCmd(null,$base.'__device_cmd');
-      $enabled=is_object($action) && (int)$action->getConfiguration('mira_media_target_cmd',0)>0;
+      $enabled=is_object($action);
       // Speaker discovery is independent of the optional transfer action.
       // Spotify Connect offers per-device equipments even when none has a
       // native "Device Name Set": do NOT send an empty menu in that case.
       $names=self::mediaDestinationNames($source);
       $payload=implode('|',$names);
       if (!$enabled)
-        log::add('mira','debug','[MEDIA] '.(string)$source->getName().
-          ': '.count($names).' enceintes détectées; transfert automatique indisponible');
+        log::add('mira','warning','[MEDIA] Sélecteur du lecteur non créé');
       if (is_object($action)) {
         $action->setConfiguration('mira_media_destination_names',$payload);
         $action->save();
@@ -352,6 +364,53 @@ class mira extends eqLogic {
       }
     }
     return $names;
+  }
+
+  /**
+   * Switch the Mira controller to an already-enabled Jeedom Spotify speaker.
+   * This does not transfer the Spotify stream or start playback.
+   */
+  public function selectMediaReaderFromPicker($index, $savedList) {
+    $indexText=trim((string)$index);
+    if (!preg_match('/^(0|[1-9][0-9]?)$/D',$indexText)) return false;
+    $index=(int)$indexText;
+    $source=eqLogic::byId((int)$this->getConfiguration('media_source_eqid',0));
+    if (!is_object($source)) return false;
+    $names=self::mediaDestinationNames($source);
+    $sent=explode('|',(string)$savedList);
+    if ($sent!==$names || $index>=count($names)) {
+      log::add('mira','warning','[MEDIA] Sélection refusée : liste de lecteurs modifiée');
+      return false;
+    }
+    $wanted=$names[$index];
+    $family=strtolower((string)$source->getEqType_name());
+    $types=$family==='spotifyconnect' ? array('spotifyconnect','spotifyConnect') :
+          ($family==='spotify' ? array('spotify') : array());
+    if (!count($types)) return false;
+    $target=null;
+    foreach ($types as $type) {
+      foreach ((array)eqLogic::byType($type) as $speaker) {
+        if (!is_object($speaker) || !$speaker->getIsEnable()) continue;
+        if ((string)$speaker->getName()===$wanted) {
+          $target=$speaker; break 2;
+        }
+      }
+    }
+    if (!is_object($target)) return false;
+    $previous=(int)$source->getId();
+    $next=(int)$target->getId();
+    if ($next!==$previous) {
+      $this->setConfiguration('media_source_eqid',$next);
+      // postSave() rebinds the existing widget IDs and event listener.
+      $this->save();
+    } else {
+      $this->configureMediaSource();
+      self::rebuildMediaListener();
+    }
+    $this->refreshPassiveWidgets();
+    log::add('mira','info','[MEDIA] Lecteur piloté : '.$source->getName().
+      ' -> '.$target->getName().' ('.($next===$previous?'actualisé':'modifié').')');
+    return true;
   }
 
   private static function mediaPushInfo($mira, $cmd, $value) {
@@ -2208,6 +2267,28 @@ class miraCmd extends cmd {
         $mediaName=(string)$this->getLogicalId();
         if (preg_match('/__(previous|playpause|play|pause|next|volume_cmd|device_cmd)$/D',$mediaName,$mediaAction)) {
           $field=$mediaAction[1];
+          if ($field==='device_cmd') {
+            // Rebind Mira to the selected per-speaker Jeedom equipment.
+            // This does not depend on Spotify's unsupported Device Name Set.
+            $selection=$_options['slider']??($_options['value']??null);
+            if ($selection===null) {
+              $indexActions=$eqLogic->GetIndex();
+              if (is_array($indexActions)) foreach ($indexActions as $a) {
+                if (($a['type']??'')==='range' &&
+                    (int)($a['id']??-1)===(int)$this->getConfiguration('commande',-1)) {
+                  $selection=$a['value']??null;
+                  break;
+                }
+              }
+            }
+            if ($selection===null) {
+              log::add('mira','warning','[MEDIA] Choix enceinte sans index');
+              return false;
+            }
+            return $eqLogic->selectMediaReaderFromPicker(
+              $selection,
+              (string)$this->getConfiguration('mira_media_destination_names',''));
+          }
           $targetId=(int)$this->getConfiguration('mira_media_target_cmd',0);
           if ($field==='playpause') {
             $playId=(int)$this->getConfiguration('mira_media_play_cmd',0);

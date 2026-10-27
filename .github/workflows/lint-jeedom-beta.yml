@@ -44,6 +44,8 @@ jobs:
         run: php tests/test_media_volume_routing.php
       - name: Check separate Play and Pause actions
         run: php tests/test_media_two_actions.php
+      - name: Check runtime Spotify speaker switching
+        run: php tests/test_spotify_speaker_switch.php
       - name: Verify native Multimedia page and Spotify mapping
         shell: bash
         run: |
