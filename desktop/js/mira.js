@@ -1412,7 +1412,8 @@ function addCmdToTable(_cmd) {
       tr += '<td style="width:138px;vertical-align:middle">'
       if (isMultiAction) {
         tr += '<select class="cmdAttr mira-multi-kind form-control input-sm" data-l1key="configuration" data-l2key="multi_mode" style="width:125px;max-width:100%">' +
-          '<option value="none">Aucune</option><option value="scenario">Scénario</option><option value="light">Lumière</option></select>'
+          '<option value="none">Aucune</option><option value="scenario">Scénario</option><option value="light">Lumière</option>' +
+          '<optgroup label="Options avancées"><option value="command">Commande Jeedom</option></optgroup></select>'
       }
       tr += '</td>'
 
@@ -1464,9 +1465,9 @@ function addCmdToTable(_cmd) {
           if(Number(entry.active)!==1)label+=' (désactivé)';
           tr+='<option value="'+id+'">'+$('<div>').text(label).html()+'</option>';
         });
-        tr+='</select><div class="mira-multi-scenario-legacy">'+
-          '<small>Ou commande Action existante (ancien fonctionnement) :</small>'+
-          multiField('calcul','action','Envoyer vers')+'</div></div>';
+        tr+='</select></div>';
+        tr += '<div class="mira-multi-command" style="display:none">'+
+          multiField('calcul','action','Commande Action Jeedom à exécuter')+'</div>';
         tr += '<div class="mira-multi-light" style="display:none">'+
           multiField('multi_state','info','Recevoir de (état)')+
           multiField('multi_off','action','Envoyer vers OFF')+
@@ -1576,6 +1577,14 @@ function addCmdToTable(_cmd) {
         success: function (result) {
           tr.find('.cmdAttr[data-l1key=value]').append(result)
           tr.setValues(_cmd, '.cmdAttr');
+          // Old multi-action rows used mode=scenario + calcul for Action
+          // commands. Show them under Commande Jeedom without discarding
+          // either the original mode or target until the user saves.
+          if (isMultiAction && _cmd.configuration.multi_mode === 'scenario' &&
+              String(_cmd.configuration.calcul || '').trim() !== '' &&
+              String(_cmd.configuration.multi_scenario_id || '').trim() === '') {
+            tr.find('.mira-multi-kind').val('command');
+          }
           miraRefreshGpioParams(tr);
           jeedom.cmd.changeType(tr, init(_cmd.subType))
           miraMultiRefreshRow(tr);
@@ -2231,8 +2240,7 @@ function miraMultiRefreshRow(tr) {
   var mode=tr.find('.mira-multi-kind').val();
   if (!mode)return;
   tr.find('.mira-multi-scenario').toggle(mode==='scenario');
-  tr.find('.mira-multi-scenario-legacy').toggle(
-    mode==='scenario' && !tr.find('.mira-multi-scenario-select').val());
+  tr.find('.mira-multi-command').toggle(mode==='command');
   tr.find('.mira-multi-light').toggle(mode==='light');
 }
 function miraMultiSourceChanged(tr){
@@ -2247,7 +2255,4 @@ $(document).off('change.mira_multi_kind','#table_cmd .mira-multi-kind')
   .on('change.mira_multi_kind','#table_cmd .mira-multi-kind',function(){
     miraMultiRefreshRow($(this).closest('tr'));
   });
-$(document).off('change.mira_multi_scenario','#table_cmd .mira-multi-scenario-select')
-  .on('change.mira_multi_scenario','#table_cmd .mira-multi-scenario-select',function(){
-    miraMultiRefreshRow($(this).closest('tr'));
-  });
+// No extra scenario-field display logic: each mode has its own field.
