@@ -229,6 +229,8 @@ private:
 
   lv_obj_t* _sleepOverlay = nullptr;
   lv_obj_t* _sleepClock = nullptr;
+  lv_obj_t* _sleepDate = nullptr;
+  lv_obj_t* _sleepTemperature = nullptr;
 
   bool _suppressEvents = false;
   bool _ntpStarted = false;
@@ -396,6 +398,7 @@ private:
   void enterSleep();
   void wakeFromSleep();
   void updateSleepClock();
+  String firstSleepTemperature() const;
 
   lv_color_t colorBg() const;
   lv_color_t colorPanel() const;
