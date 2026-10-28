@@ -160,6 +160,9 @@ static lv_obj_t* miraCreateInfoGlyph(lv_obj_t* card, const String& kind,
 #if defined(MIRA_TARGET_WAVESHARE_43C)
 LV_FONT_DECLARE(mira_sleep_montserrat_120);
 LV_FONT_DECLARE(mira_home_montserrat_96);
+#elif !defined(MIRA_TARGET_NEXTION_28)
+// Native Montserrat 84px: WT32-only; small Nextion keeps LVGL 48px.
+LV_FONT_DECLARE(mira_sleep_montserrat_84);
 #endif
 
 static String roundRangeDisplayValue(int value, const String& unit) {
@@ -896,17 +899,43 @@ void MiraPanelUI::begin() {
   lv_obj_set_style_border_width(_sleepOverlay, 0, 0);
   lv_obj_set_style_radius(_sleepOverlay, 0, 0);
 
+  // Clock/date/temperature are three read-only labels on a black overlay.
+  // Native font raster for WT32 avoids the blurry bitmap zoom experiment.
   _sleepClock = lv_label_create(_sleepOverlay);
   lv_label_set_text(_sleepClock, "--:--");
-  lv_obj_set_style_text_color(_sleepClock, COL_MUTED, 0);
+  lv_obj_set_width(_sleepClock, MIRA_DISPLAY_WIDTH - 16);
+  lv_label_set_long_mode(_sleepClock, LV_LABEL_LONG_CLIP);
+  lv_obj_set_style_text_color(_sleepClock, lv_color_white(), 0);
 #if defined(MIRA_TARGET_WAVESHARE_43C)
   lv_obj_set_style_text_font(_sleepClock, &mira_sleep_montserrat_120, 0);
-#else
-  // WT32: unchanged original Montserrat 48, no stretching.
+#elif defined(MIRA_TARGET_NEXTION_28)
   lv_obj_set_style_text_font(_sleepClock, &lv_font_montserrat_48, 0);
+#else
+  // WT32: 84px instead of 48px (+75%); 5 digits still fit a 320px panel.
+  lv_obj_set_style_text_font(_sleepClock, &mira_sleep_montserrat_84, 0);
 #endif
   lv_obj_set_style_text_align(_sleepClock, LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_align(_sleepClock, LV_ALIGN_CENTER, 0, -48);
+  lv_obj_align(_sleepClock, LV_ALIGN_CENTER, 0, -56);
+
+  _sleepDate = lv_label_create(_sleepOverlay);
+  lv_label_set_text(_sleepDate, "");
+  lv_obj_set_width(_sleepDate, MIRA_DISPLAY_WIDTH - 12);
+  lv_label_set_long_mode(_sleepDate, LV_LABEL_LONG_CLIP);
+  lv_obj_set_style_text_color(_sleepDate, COL_MUTED, 0);
+  lv_obj_set_style_text_font(_sleepDate, MIRA_DISPLAY_WIDTH <= 240 ?
+      &mira_font_fr_14 : &mira_font_fr_16, 0);
+  lv_obj_set_style_text_align(_sleepDate, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_align(_sleepDate, LV_ALIGN_CENTER, 0, 31);
+
+  _sleepTemperature = lv_label_create(_sleepOverlay);
+  lv_label_set_text(_sleepTemperature, "");
+  lv_obj_set_width(_sleepTemperature, MIRA_DISPLAY_WIDTH - 16);
+  lv_obj_set_style_text_color(_sleepTemperature, lv_color_white(), 0);
+  lv_obj_set_style_text_font(_sleepTemperature, MIRA_DISPLAY_WIDTH <= 240 ?
+      &lv_font_montserrat_20 : &lv_font_montserrat_28, 0);
+  lv_obj_set_style_text_align(_sleepTemperature, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_align(_sleepTemperature, LV_ALIGN_CENTER, 0, 72);
+  lv_obj_add_flag(_sleepTemperature, LV_OBJ_FLAG_HIDDEN);
 
   lv_obj_add_flag(_sleepOverlay, LV_OBJ_FLAG_HIDDEN);
 
@@ -4584,33 +4613,89 @@ void MiraPanelUI::wakeFromSleep() {
   Serial.println("[MIRA][DISPLAY] Reveil");
 }
 
+// The standby temperature is the first configured temperature Info on Home,
+// or the first such Info elsewhere when Home has none. It reads the SAME
+// Jeedom/MQTT Info index as the tile; it never creates an extra command.
+String MiraPanelUI::firstSleepTemperature() const {
+  for (uint8_t pass = 0; pass < 2; ++pass) {
+    for (uint8_t i = 0; i < _bindingCount; ++i) {
+      const Binding& b = _bindings[i];
+      if (b.type != W_INFO || b.id < 0) continue;
+      if (pass == 0 && b.location != "accueil") continue;
+      if (pass == 1 && b.location == "accueil") continue;
+      if (miraResolveInfoIcon(b.icon, b.name, b.unit) != "temperature")
+        continue;
+      String raw = _server.IndexGetInfo(b.id);
+      raw.trim();
+      String numeric = raw;
+      numeric.replace(",", ".");
+      // Do not display placeholders ("null", "--", empty) as a real sensor.
+      char* end = nullptr;
+      double degrees = strtod(numeric.c_str(), &end);
+      if (end == numeric.c_str() || !isfinite(degrees) ||
+          degrees < -80.0 || degrees > 100.0) return "";
+      // The unit is always °C for the selected temperature Info tile.
+      return String(degrees, 1) + " °C";
+    }
+  }
+  return "";
+}
+
 void MiraPanelUI::updateSleepClock() {
   if (!_sleeping || !_clockInSleep || !_sleepClock) return;
-
   const uint32_t now = millis();
 
-  // Mise a jour de l'heure chaque seconde. La date n'est volontairement
-  // plus affichee : la veille officielle montre l'heure comme element dominant.
+  // The system clock and the current Info value remain independent.
+  // Never trigger a Jeedom refresh or heating action from the screensaver.
   if (now - _lastSleepClockUpdate >= 1000 || _lastSleepClockUpdate == 0) {
     _lastSleepClockUpdate = now;
     struct tm t;
     if (getLocalTime(&t, 10)) {
       char buf[8];
       strftime(buf, sizeof(buf), "%H:%M", &t);
-      lv_label_set_text(_sleepClock, buf);
+      if (strcmp(lv_label_get_text(_sleepClock), buf) != 0)
+        lv_label_set_text(_sleepClock, buf);
+
+      if (_sleepDate) {
+        static const char* const jours[] = {
+            "dimanche","lundi","mardi","mercredi","jeudi","vendredi","samedi"};
+        static const char* const mois[] = {
+            "janvier","février","mars","avril","mai","juin",
+            "juillet","août","septembre","octobre","novembre","décembre"};
+        char fullDate[72];
+        snprintf(fullDate, sizeof(fullDate), "%s %u %s %u",
+                 jours[t.tm_wday], (unsigned)t.tm_mday,
+                 mois[t.tm_mon], (unsigned)(t.tm_year + 1900));
+        if (strcmp(lv_label_get_text(_sleepDate), fullDate) != 0)
+          lv_label_set_text(_sleepDate, fullDate);
+      }
+    }
+
+    if (_sleepTemperature) {
+      const String temperature = firstSleepTemperature();
+      const bool available = temperature.length() > 0;
+      if (available) {
+        if (strcmp(lv_label_get_text(_sleepTemperature), temperature.c_str()) != 0)
+          lv_label_set_text(_sleepTemperature, temperature.c_str());
+        lv_obj_clear_flag(_sleepTemperature, LV_OBJ_FLAG_HIDDEN);
+      } else {
+        lv_obj_add_flag(_sleepTemperature, LV_OBJ_FLAG_HIDDEN);
+      }
     }
   }
 
-  // Anti-burn : toutes les 60 s, l'heure se decale de quelques pixels
-  // autour du centre. Les neuf positions evitent de marquer toujours la meme zone.
+  // Anti-burn: shift all three labels together every 60 seconds.
   if (now - _lastSleepClockMove >= 60000UL) {
     static const int8_t offsetX[9] = {-12, 0, 12, -12, 0, 12, -12, 0, 12};
-    static const int8_t offsetY[9] = { -8,-8, -8,   0, 0,  0,   8, 8,  8};
-
+    static const int8_t offsetY[9] = {-8, -8, -8, 0, 0, 0, 8, 8, 8};
     _lastSleepClockMove = now;
     _sleepClockPosition = (_sleepClockPosition + 1) % 9;
-    lv_obj_align(_sleepClock, LV_ALIGN_CENTER,
-                 offsetX[_sleepClockPosition], -48 + offsetY[_sleepClockPosition]);
+    const int8_t x = offsetX[_sleepClockPosition];
+    const int8_t y = offsetY[_sleepClockPosition];
+    lv_obj_align(_sleepClock, LV_ALIGN_CENTER, x, -56 + y);
+    if (_sleepDate) lv_obj_align(_sleepDate, LV_ALIGN_CENTER, x, 31 + y);
+    if (_sleepTemperature)
+      lv_obj_align(_sleepTemperature, LV_ALIGN_CENTER, x, 72 + y);
   }
 }
 
