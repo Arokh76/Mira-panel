@@ -1206,8 +1206,9 @@ function miraListOptionKey(optionName) {
   return 'listAction_' + hex
 }
 
-// Media configuration stays an equipment setting, not an alternate command
-// list. Only hide/show rows: never remove a Jeedom command or change its ID.
+// Media rows stay real Jeedom commands (full columns, IDs and associations).
+// Spotify displays its principal fields and expands other existing rows inline;
+// manual mode keeps only the controls useful for a generic player.
 function miraMediaPrefixes(rows) {
   var fields={};
   rows.each(function(){
@@ -1226,60 +1227,59 @@ function miraMediaFieldForRow(logicalId,prefixes) {
   if(!match || prefixes.indexOf(match[2])<0) return '';
   return match[3];
 }
+function miraMediaRowVisible(field,auto,expanded) {
+  if (!field) return false;
+  if (auto) return !!expanded || ['title','artist','cover'].indexOf(field)>=0;
+  return ['title','artist','cover','state','volume',
+    'previous','playpause','play','pause','next','volume_cmd'].indexOf(field)>=0;
+}
+var miraMediaExpanded={};
 function miraRefreshMediaCommandRows() {
   var rows=$('#table_cmd tbody tr[data-mira-logicalid]');
   var prefixes=miraMediaPrefixes(rows);
   var auto=!!$('#miraMediaSourceEq').val();
-  var showAll=$('#miraMediaShowTechnical').prop('checked');
-  // Smaller default manual view: enough for track display and simple player
-  // controls. Optional commands remain available under "avancées".
-  var manualFields=['title','artist','cover','volume',
-    'previous','playpause','play','pause','next','volume_cmd'];
-  var count=0,details=[];
   rows.each(function(){
     var tr=$(this), id=tr.attr('data-mira-logicalid')||'';
     var field=miraMediaFieldForRow(id,prefixes);
-    if(!field) return;
-    ++count;
+    if(!field) return; // Do not change other widgets or hidden technical rows.
+    var prefix=id.slice(0,id.length-field.length-2).replace(/^Value_/,'');
+    var expanded=!!miraMediaExpanded[prefix];
     var originallyHidden=tr.attr('data-mira-origin-hidden')==='1';
-    // Do not reveal entries hidden by Jeedom's existing visible_cmd flag.
-    var visible=!originallyHidden && (showAll || (!auto && manualFields.indexOf(field)>=0));
-    tr.toggle(visible);
-    tr.find('.mira-media-automatic-message').toggle(auto);
+    tr.toggle(!originallyHidden && miraMediaRowVisible(field,auto,expanded));
     tr.find('.mira-media-manual-field').toggle(!auto);
-    var detail=tr.attr('data-mira-link-status')||'';
-    var sourceId=tr.attr('data-mira-source-id')||'';
-    var targetId=tr.attr('data-mira-target-id')||'';
-    if(auto && (detail || sourceId || targetId)) {
-      var fragments=[id];
-      if(sourceId) fragments.push('Info #'+sourceId);
-      if(targetId) fragments.push('Action #'+targetId);
-      if(detail) fragments.push(detail);
-      details.push(fragments.join(' — '));
+    // The Spotify indicator on the title row becomes an inline disclosure:
+    // the other Jeedom command rows expand directly below in the same table.
+    tr.find('.mira-media-automatic-message').toggle(auto && field!=='title');
+    if(field==='title') {
+      var toggle=tr.find('.mira-media-toggle-links');
+      if(!toggle.length) {
+        toggle=$('<button type="button" class="mira-media-toggle-links"></button>')
+          .appendTo(tr.children('td').eq(8));
+      }
+      toggle.attr('data-mira-prefix',prefix)
+        .attr('aria-expanded',expanded?'true':'false')
+        .text(expanded ?
+          'Spotify · liaison automatique ▲ Masquer les autres commandes' :
+          'Spotify · liaison automatique ▼ Voir les autres commandes')
+        .toggle(auto);
     }
   });
-  var selected=$('#miraMediaSourceEq option:selected');
-  var readerId=$('#miraMediaSourceEq').val();
-  var readerName=(selected.text()||'').trim();
-  var summary=auto ? readerName+' — ID Jeedom #'+readerId :
-    'Lecteur générique — association manuelle des commandes essentielles';
-  $('#miraMediaSelectedReader').text(summary).toggle(auto);
-  $('#miraMediaAutoDetails').toggle(auto);
-  var detailList=$('#miraMediaAutoBindings').empty();
-  if(auto) {
-    if(!details.length) detailList.text('Liaisons calculées après enregistrement de l’équipement.');
-    else details.forEach(function(line){ $('<div>').text(line).appendTo(detailList); });
-  }
-  $('#miraMediaCommandBar').toggle(count>0);
-  $('#miraMediaCommandSummary').text(summary);
-  $('#miraMediaModeHelp').text(auto ?
-    'Les liaisons Spotify Connect restent actives et accessibles dans les paramètres ci-dessous.' :
-    'Associez les commandes ci-dessous à votre lecteur Jeedom. Les options secondaires restent disponibles dans les commandes avancées.');
 }
+// Selecting a reader switches presentation immediately. Jeedom postSave()
+// already links its commands automatically when the equipment is saved.
 $(document).off('change.mira_media','#miraMediaSourceEq')
-  .on('change.mira_media','#miraMediaSourceEq',miraRefreshMediaCommandRows);
-$(document).off('change.mira_media_technical','#miraMediaShowTechnical')
-  .on('change.mira_media_technical','#miraMediaShowTechnical',miraRefreshMediaCommandRows);
+  .on('change.mira_media','#miraMediaSourceEq',function(){
+    miraMediaExpanded={};
+    miraRefreshMediaCommandRows();
+  });
+$('#table_cmd').off('click.mira_media','.mira-media-toggle-links')
+  .on('click.mira_media','.mira-media-toggle-links',function(event){
+    event.preventDefault();
+    var prefix=$(this).attr('data-mira-prefix')||'';
+    if(!prefix) return;
+    miraMediaExpanded[prefix]=!miraMediaExpanded[prefix];
+    miraRefreshMediaCommandRows();
+  });
 
 // Energy battery rows are real indexed Mira infos. Preserve their Jeedom
 // mappings when hidden: the selector changes visibility, never deletes a cmd.
