@@ -52,6 +52,8 @@ jobs:
         run: php tests/test_media_async_listener.php
       - name: Check Spotify burst coalescing and changed-only delivery
         run: php tests/test_media_burst_delivery.php
+      - name: Check thermostat passive state synchronization
+        run: php tests/test_thermostat_passive_resync.php
       - name: Verify native Multimedia page and Spotify mapping
         shell: bash
         run: |
