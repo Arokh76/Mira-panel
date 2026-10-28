@@ -165,6 +165,16 @@ LV_FONT_DECLARE(mira_home_montserrat_96);
 LV_FONT_DECLARE(mira_sleep_montserrat_84);
 #endif
 
+// Keep the 0.7.34 sleep layout on Waveshare/Nextion. On the WT32 the date
+// sits closer to the clock and the larger temperature stays comfortably below.
+#if defined(MIRA_TARGET_WAVESHARE_43C) || defined(MIRA_TARGET_NEXTION_28)
+static constexpr int16_t MIRA_SLEEP_DATE_OFFSET_Y = 31;
+static constexpr int16_t MIRA_SLEEP_TEMP_OFFSET_Y = 72;
+#else
+static constexpr int16_t MIRA_SLEEP_DATE_OFFSET_Y = 15;
+static constexpr int16_t MIRA_SLEEP_TEMP_OFFSET_Y = 70;
+#endif
+
 static String roundRangeDisplayValue(int value, const String& unit) {
   String out = String(value);
   if (unit.startsWith("°")) {
@@ -925,16 +935,21 @@ void MiraPanelUI::begin() {
   lv_obj_set_style_text_font(_sleepDate, MIRA_DISPLAY_WIDTH <= 240 ?
       &mira_font_fr_14 : &mira_font_fr_16, 0);
   lv_obj_set_style_text_align(_sleepDate, LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_align(_sleepDate, LV_ALIGN_CENTER, 0, 31);
+  lv_obj_align(_sleepDate, LV_ALIGN_CENTER, 0, MIRA_SLEEP_DATE_OFFSET_Y);
 
   _sleepTemperature = lv_label_create(_sleepOverlay);
   lv_label_set_text(_sleepTemperature, "");
   lv_obj_set_width(_sleepTemperature, MIRA_DISPLAY_WIDTH - 16);
   lv_obj_set_style_text_color(_sleepTemperature, lv_color_white(), 0);
+  #if defined(MIRA_TARGET_WAVESHARE_43C) || defined(MIRA_TARGET_NEXTION_28)
   lv_obj_set_style_text_font(_sleepTemperature, MIRA_DISPLAY_WIDTH <= 240 ?
       &lv_font_montserrat_20 : &lv_font_montserrat_28, 0);
+#else
+  // WT32: 40px instead of 28px (+43%) for the Jeedom Info temperature.
+  lv_obj_set_style_text_font(_sleepTemperature, &lv_font_montserrat_40, 0);
+#endif
   lv_obj_set_style_text_align(_sleepTemperature, LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_align(_sleepTemperature, LV_ALIGN_CENTER, 0, 72);
+  lv_obj_align(_sleepTemperature, LV_ALIGN_CENTER, 0, MIRA_SLEEP_TEMP_OFFSET_Y);
   lv_obj_add_flag(_sleepTemperature, LV_OBJ_FLAG_HIDDEN);
 
   lv_obj_add_flag(_sleepOverlay, LV_OBJ_FLAG_HIDDEN);
@@ -4693,9 +4708,9 @@ void MiraPanelUI::updateSleepClock() {
     const int8_t x = offsetX[_sleepClockPosition];
     const int8_t y = offsetY[_sleepClockPosition];
     lv_obj_align(_sleepClock, LV_ALIGN_CENTER, x, -56 + y);
-    if (_sleepDate) lv_obj_align(_sleepDate, LV_ALIGN_CENTER, x, 31 + y);
+    if (_sleepDate) lv_obj_align(_sleepDate, LV_ALIGN_CENTER, x, MIRA_SLEEP_DATE_OFFSET_Y + y);
     if (_sleepTemperature)
-      lv_obj_align(_sleepTemperature, LV_ALIGN_CENTER, x, 72 + y);
+      lv_obj_align(_sleepTemperature, LV_ALIGN_CENTER, x, MIRA_SLEEP_TEMP_OFFSET_Y + y);
   }
 }
 
