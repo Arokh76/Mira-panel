@@ -54,6 +54,8 @@ jobs:
         run: php tests/test_media_burst_delivery.php
       - name: Check thermostat passive state synchronization
         run: php tests/test_thermostat_passive_resync.php
+      - name: Check compact media/camera editor
+        run: node tests/test_media_command_ui.js
       - name: Verify native Multimedia page and Spotify mapping
         shell: bash
         run: |
