@@ -712,9 +712,17 @@ class mira extends eqLogic {
           self::mediaPushInfo($this,$target,(string)$source->getName());
           $count++;
         } elseif (trim((string)$target->getConfiguration('calcul',''))!=='' &&
-                  $target->getConfiguration('type')==='info') {
-          // execute() here evaluates a passive Info only and forwards its
-          // value; never touch toggle/list/range/action or hardware controls.
+                  ($target->getConfiguration('type')==='info' ||
+                   // Thermostat feedback (not a heater command): a saved
+                   // Jeedom Info source drives its setpoint and mode. These
+                   // are Value_* INFO commands, despite type 'range'/'list'.
+                   (preg_match('/^Value_.+__(consigne|mode)$/D',$logical) &&
+                    (($target->getConfiguration('type')==='range' &&
+                      substr($logical,-10)==='__consigne') ||
+                     ($target->getConfiguration('type')==='list' &&
+                      substr($logical,-6)==='__mode'))))) {
+          // Only Info command objects pass the outer getType() guard.
+          // Never execute the paired thermostat slider or mode action.
           $value=$target->execute();
           if ($value!==null && is_scalar($value)) $target->event((string)$value);
           $count++;
@@ -2027,6 +2035,27 @@ class mira extends eqLogic {
 
 
 class miraCmd extends cmd {
+  /** Null-like values are not real sensor measurements or setpoints. */
+  private static function missingPassiveValue($value) {
+    if ($value === null || !is_scalar($value)) return true;
+    $v=strtolower(trim((string)$value));
+    return $v==='' || in_array($v,array('null','undefined','nan','erreur'),true);
+  }
+
+  /**
+   * A broken Jeedom expression must not appear as a valid measured value.
+   * Keep the diagnostic log bounded; the source binding still needs fixing.
+   */
+  private function reportMissingPassiveValue() {
+    $now=time();
+    $previous=(int)$this->getCache('mira_passive_missing_at',0);
+    if ($now-$previous>=900) {
+      log::add('mira','warning','[PASSIVE] Source Jeedom absente ou invalide : '.
+        (string)$this->getLogicalId().' (vérifier Recevoir de)');
+      $this->setCache('mira_passive_missing_at',$now);
+    }
+  }
+
   /**
    * Round Mira energy output only; original source commands are untouched.
    * Non-numeric readings are forwarded verbatim, without imposing units.
@@ -2251,6 +2280,20 @@ class miraCmd extends cmd {
            
           $result = jeedom::evaluateExpression($this->getConfiguration('calcul'));
           $cmd = $this->getConfiguration('commande');
+          if (self::missingPassiveValue($result)) {
+            $this->reportMissingPassiveValue();
+            // An unavailable sensor should display "--", not literal "null".
+            // This is display feedback only (never a heating/action request).
+            $url='http://'.$eqLogic->getConfiguration('adresseip').
+              '/updatenr?key='.rawurlencode((string)$eqLogic->getConfiguration('password')).
+              '&info='.(int)$cmd.'&value=--';
+            $ch=curl_init($url);
+            curl_setopt_array($ch,array(CURLOPT_RETURNTRANSFER=>true,
+              CURLOPT_CONNECTTIMEOUT=>1,CURLOPT_TIMEOUT=>2));
+            curl_exec($ch);
+            curl_close($ch);
+            return null;
+          }
           if (preg_match('/__(solar|home|grid|battery|soc|soc2|soc3)$/D',(string)$nom)) {
             // Never impose a unit on energy fields: append only the unit
             // explicitly selected by the Jeedom user.
@@ -2296,6 +2339,10 @@ class miraCmd extends cmd {
           // thermostat never refreshed. The ESP already exposes /listvalue,
           // which resolves the option NAME into the correct Mira ID.
           $result = jeedom::evaluateExpression($this->getConfiguration('calcul'));
+          if (self::missingPassiveValue($result)) {
+            $this->reportMissingPassiveValue();
+            return null;
+          }
           $listName = (string)$this->getConfiguration('listname');
           $selected = trim((string)$result);
           $paramName = 'listvalue';
@@ -2382,14 +2429,32 @@ class miraCmd extends cmd {
           // not the screen-specific numeric command ID returned by /listvalue).
           return $result;
 
-        }else if ($this->getConfiguration('calcul') != ''&& $this->getConfiguration('type') == 'range'){           
-          $result = jeedom::evaluateExpression($this->getConfiguration('calcul'));           
-		  $cmd = $this->getConfiguration('commande');
-          $url = 'http://'. $eqLogic->getConfiguration('adresseip') . '/updatenr?key=' . $eqLogic->getConfiguration('password') . '&range=' . $cmd .'&value='.$result;              
-          log::add('mira', 'debug', $eqLogic->getName().': INFO: range: ' . $nom .": ".$url);
-          $req = 'curl -i -XGET "'.$url.'" ';
-          $output = shell_exec($req);          	
-          return $result;            
+        }else if ($this->getConfiguration('calcul') != ''&& $this->getConfiguration('type') == 'range'){
+          $result=jeedom::evaluateExpression($this->getConfiguration('calcul'));
+          if (self::missingPassiveValue($result) || !is_numeric($result) ||
+              !is_finite((float)$result)) {
+            $this->reportMissingPassiveValue();
+            return null;
+          }
+          $cmd=(int)$this->getConfiguration('commande');
+          if ($cmd<1) return null;
+          // /updatenr?range updates the WT32 display only. Do NOT execute
+          // the paired slider action, which could command real heating.
+          $url='http://'.$eqLogic->getConfiguration('adresseip').
+            '/updatenr?key='.rawurlencode((string)$eqLogic->getConfiguration('password')).
+            '&range='.$cmd.'&value='.rawurlencode((string)$result);
+          $ch=curl_init($url);
+          curl_setopt_array($ch,array(CURLOPT_RETURNTRANSFER=>true,
+            CURLOPT_CONNECTTIMEOUT=>1,CURLOPT_TIMEOUT=>3));
+          $out=curl_exec($ch);
+          $status=(int)curl_getinfo($ch,CURLINFO_HTTP_CODE);
+          curl_close($ch);
+          if ($out===false || $status!==200 || trim((string)$out)==='Erreur') {
+            log::add('mira','warning','[PASSIVE] Consigne/curseur non synchronisé : '.
+              $nom.' (HTTP '.$status.')');
+            return null;
+          }
+          return $result;
         
         }else if ($this->getConfiguration('calcul') != ''&& $this->getConfiguration('type') == 'color'){           
           $result = jeedom::evaluateExpression($this->getConfiguration('calcul'));           
