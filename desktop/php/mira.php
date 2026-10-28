@@ -452,12 +452,7 @@ log::add('mira', 'debug', "Lancement script");
                                   }
                                   ?>
                                 </select>
-                                <small id="miraMediaModeHelp" class="help-block">{{Sélectionnez Spotify Connect pour la liaison automatique, ou Configuration manuelle pour un autre lecteur Jeedom.}}</small>
-                                <div id="miraMediaSelectedReader" class="mira-media-selected-reader" style="display:none" aria-live="polite"></div>
-                                <details id="miraMediaAutoDetails" class="mira-media-auto-details" style="display:none">
-                                  <summary><i class="fas fa-cogs"></i> {{Paramètres des liaisons automatiques}}</summary>
-                                  <div id="miraMediaAutoBindings" class="mira-media-auto-bindings"></div>
-                                </details>
+                                <small id="miraMediaModeHelp" class="help-block">{{Choisissez un lecteur Spotify pour associer automatiquement ses commandes lors de l’enregistrement, ou Configuration manuelle pour utiliser un lecteur générique.}}</small>
                               </div>
                             </div>
 
@@ -509,13 +504,7 @@ log::add('mira', 'debug', "Lancement script");
 				</div>
 				<br>
                 <p style="color : #4894E1;">{{Vous pouvez réorganiser les lignes en cliquant sur l'entête des colonnes}}</p>   <!-- ' -->
-                <div id="miraMediaCommandBar" class="mira-media-command-bar" style="display:none">
-                  <div id="miraMediaCommandSummary" aria-live="polite"></div>
-                  <label class="checkbox-inline">
-                    <input id="miraMediaShowTechnical" type="checkbox"> {{Afficher les commandes multimédia avancées}}
-                  </label>
-                  <small class="help-block">{{L'affichage seul change : les commandes et identifiants Jeedom restent conservés.}}</small>
-                </div>                
+
 				<div class="table-responsive">
 					<table id="table_cmd" class="sortable table table-bordered table-condensed">
 						<thead>
