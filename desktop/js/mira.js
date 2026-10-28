@@ -1413,7 +1413,7 @@ function addCmdToTable(_cmd) {
       if (isMultiAction) {
         tr += '<select class="cmdAttr mira-multi-kind form-control input-sm" data-l1key="configuration" data-l2key="multi_mode" style="width:125px;max-width:100%">' +
           '<option value="none">Aucune</option><option value="scenario">Scénario</option><option value="light">Lumière</option>' +
-          '<optgroup label="Options avancées"><option value="command">Commande Jeedom</option></optgroup></select>'
+          '<option value="command">Avancé</option></select>'
       }
       tr += '</td>'
 
