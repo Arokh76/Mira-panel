@@ -2541,6 +2541,9 @@ class miraCmd extends cmd {
               $selectedScenario->launch();
               return true;
             }
+            // Compatibility with legacy saved rows (scenario + calcul).
+            $target=trim((string)$this->getConfiguration('calcul'));
+          } else if ($mode==='command') {
             $target=trim((string)$this->getConfiguration('calcul'));
           } else return false;
           if ($target==='') return true;
