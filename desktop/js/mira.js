@@ -1206,6 +1206,81 @@ function miraListOptionKey(optionName) {
   return 'listAction_' + hex
 }
 
+// Media configuration stays an equipment setting, not an alternate command
+// list. Only hide/show rows: never remove a Jeedom command or change its ID.
+function miraMediaPrefixes(rows) {
+  var fields={};
+  rows.each(function(){
+    var id=$(this).attr('data-mira-logicalid')||'';
+    var match=id.match(/^(.+)__(title|artist|cover)$/);
+    if (!match) return;
+    if (!fields[match[1]]) fields[match[1]]={};
+    fields[match[1]][match[2]]=true;
+  });
+  return Object.keys(fields).filter(function(name){
+    return fields[name].title && fields[name].artist;
+  });
+}
+function miraMediaFieldForRow(logicalId,prefixes) {
+  var match=(logicalId||'').match(/^(Value_)?(.+)__(title|artist|album|cover|state|progress|volume|device|devices|previous|playpause|play|pause|next|volume_cmd|device_cmd)$/);
+  if(!match || prefixes.indexOf(match[2])<0) return '';
+  return match[3];
+}
+function miraRefreshMediaCommandRows() {
+  var rows=$('#table_cmd tbody tr[data-mira-logicalid]');
+  var prefixes=miraMediaPrefixes(rows);
+  var auto=!!$('#miraMediaSourceEq').val();
+  var showAll=$('#miraMediaShowTechnical').prop('checked');
+  // Smaller default manual view: enough for track display and simple player
+  // controls. Optional commands remain available under "avancées".
+  var manualFields=['title','artist','cover','volume',
+    'previous','playpause','play','pause','next','volume_cmd'];
+  var count=0,details=[];
+  rows.each(function(){
+    var tr=$(this), id=tr.attr('data-mira-logicalid')||'';
+    var field=miraMediaFieldForRow(id,prefixes);
+    if(!field) return;
+    ++count;
+    var originallyHidden=tr.attr('data-mira-origin-hidden')==='1';
+    // Do not reveal entries hidden by Jeedom's existing visible_cmd flag.
+    var visible=!originallyHidden && (showAll || (!auto && manualFields.indexOf(field)>=0));
+    tr.toggle(visible);
+    tr.find('.mira-media-automatic-message').toggle(auto);
+    tr.find('.mira-media-manual-field').toggle(!auto);
+    var detail=tr.attr('data-mira-link-status')||'';
+    var sourceId=tr.attr('data-mira-source-id')||'';
+    var targetId=tr.attr('data-mira-target-id')||'';
+    if(auto && (detail || sourceId || targetId)) {
+      var fragments=[id];
+      if(sourceId) fragments.push('Info #'+sourceId);
+      if(targetId) fragments.push('Action #'+targetId);
+      if(detail) fragments.push(detail);
+      details.push(fragments.join(' — '));
+    }
+  });
+  var selected=$('#miraMediaSourceEq option:selected');
+  var readerId=$('#miraMediaSourceEq').val();
+  var readerName=(selected.text()||'').trim();
+  var summary=auto ? readerName+' — ID Jeedom #'+readerId :
+    'Lecteur générique — association manuelle des commandes essentielles';
+  $('#miraMediaSelectedReader').text(summary).toggle(auto);
+  $('#miraMediaAutoDetails').toggle(auto);
+  var detailList=$('#miraMediaAutoBindings').empty();
+  if(auto) {
+    if(!details.length) detailList.text('Liaisons calculées après enregistrement de l’équipement.');
+    else details.forEach(function(line){ $('<div>').text(line).appendTo(detailList); });
+  }
+  $('#miraMediaCommandBar').toggle(count>0);
+  $('#miraMediaCommandSummary').text(summary);
+  $('#miraMediaModeHelp').text(auto ?
+    'Les liaisons Spotify Connect restent actives et accessibles dans les paramètres ci-dessous.' :
+    'Associez les commandes ci-dessous à votre lecteur Jeedom. Les options secondaires restent disponibles dans les commandes avancées.');
+}
+$(document).off('change.mira_media','#miraMediaSourceEq')
+  .on('change.mira_media','#miraMediaSourceEq',miraRefreshMediaCommandRows);
+$(document).off('change.mira_media_technical','#miraMediaShowTechnical')
+  .on('change.mira_media_technical','#miraMediaShowTechnical',miraRefreshMediaCommandRows);
+
 // Energy battery rows are real indexed Mira infos. Preserve their Jeedom
 // mappings when hidden: the selector changes visibility, never deletes a cmd.
 function miraRefreshEnergyBatteryRows() {
@@ -1352,12 +1427,14 @@ function addCmdToTable(_cmd) {
       }
 
       if (_cmd.configuration.type === 'camera') {
-        tr += '<input type="url" class="cmdAttr form-control input-sm mira-camera-url" ' +
+        // Same charcoal text field and left alignment as Recevoir de.
+        // The native form-control input used a different light background.
+        tr += '<textarea class="cmdAttr input-sm mira-camera-url" ' +
           'data-l1key="configuration" data-l2key="camera_url" ' +
           'placeholder="http://IP_CAMERA/snapshot.jpg" ' +
-          'title="URL du flux image caméra (JPEG ou BMP)" ' +
-          'aria-label="URL de la caméra (JPEG ou BMP)" maxlength="768" ' +
-          'style="width:100%;min-width:180px">';
+          'title="URL de l’image caméra (JPEG ou BMP)" ' +
+          'aria-label="URL de la caméra (JPEG ou BMP)" maxlength="768" rows="1" ' +
+          'style="height:35px;width:85%;resize:vertical;vertical-align:middle"></textarea>';
       }
       if (isMultiAction) {
         // Same sizing/alignment as the regular Jeedom command selector above.
@@ -1391,25 +1468,27 @@ function addCmdToTable(_cmd) {
         tr += _cmd.configuration.calcul;
         tr += '</div>'
         if (_cmd.configuration.mira_media_source_cmd) {
-          tr += '<span style="color:#45cbb4;display:block;margin:5px 0"><i class="fas fa-link"></i> Spotify · liaison automatique</span>';
-          tr += '<textarea class="cmdAttr" data-l1key="configuration" data-l2key="calcul" style="display:none"></textarea>';
-        } else {
-        tr += '<textarea class="cmdAttr input-sm" data-l1key="configuration" data-l2key="calcul" style="height:35px;width:85%" placeholder="{{Recevoir de}}"></textarea>';
-        tr += '<a class="btn btn-default listEquipementInfo" data-input="calcul" style="margin-left:2px; height:35px; width:14%;"><i class="fas fa-list-alt"></i></a>';
+          tr += '<span class="mira-media-automatic-message" style="color:#45cbb4;display:block;margin:5px 0"><i class="fas fa-link"></i> Spotify · liaison automatique</span>';
         }
+        tr += '<span class="mira-media-manual-field" style="display:block;white-space:nowrap">' +
+          '<textarea class="cmdAttr input-sm" data-l1key="configuration" data-l2key="calcul" style="height:35px;width:85%;vertical-align:middle" placeholder="{{Recevoir de}}"></textarea>' +
+          '<a class="btn btn-default listEquipementInfo" data-input="calcul" style="margin-left:2px;height:35px;width:14%;vertical-align:middle"><i class="fas fa-list-alt"></i></a></span>';
       }
   	  if (_cmd.type == "action" && !isMultiMaster && !isMultiAction && init(_cmd.logicalId) != 'Redémarrer' && init(_cmd.logicalId) != 'refresh'){
         if (_cmd.configuration.mira_media_link_status) {
           var mediaOk = !!(_cmd.configuration.mira_media_target_cmd || _cmd.configuration.mira_media_play_cmd) ||
             /__device_cmd$/.test(_cmd.logicalId || '');
           var mediaStatus = $('<span>').text(_cmd.configuration.mira_media_link_status).html();
-          tr += '<span style="color:' + (mediaOk ? '#45cbb4' : '#f4b66a') + ';display:block;margin:5px 0">' +
+          tr += '<span class="mira-media-automatic-message" style="color:' + (mediaOk ? '#45cbb4' : '#f4b66a') + ';display:block;margin:5px 0">' +
             '<i class="fas fa-' + (mediaOk ? 'link' : 'exclamation-triangle') + '"></i> Spotify · ' + mediaStatus + '</span>';
-          if (mediaOk) tr += '<textarea class="cmdAttr" data-l1key="configuration" data-l2key="calcul" style="display:none"></textarea>';
-          else tr += '<textarea class="cmdAttr input-sm" data-l1key="configuration" data-l2key="calcul" style="height:35px;width:85%" placeholder="{{Commande Jeedom manuelle}}"></textarea>';
+          tr += '<span class="mira-media-manual-field" style="display:block;white-space:nowrap">' +
+            '<textarea class="cmdAttr input-sm" data-l1key="configuration" data-l2key="calcul" style="height:35px;width:85%;vertical-align:middle" placeholder="{{Envoyer vers}}"></textarea>' +
+            '<a class="btn btn-default listEquipementAction" data-input="calcul" style="margin-left:2px;height:35px;width:14%;vertical-align:middle"><i class="fas fa-list-alt"></i></a></span>';
         } else if (_cmd.configuration.mira_media_target_cmd || _cmd.configuration.mira_media_play_cmd) {
-          tr += '<span style="color:#45cbb4;display:block;margin:5px 0"><i class="fas fa-link"></i> Spotify · commande automatique</span>';
-          tr += '<textarea class="cmdAttr" data-l1key="configuration" data-l2key="calcul" style="display:none"></textarea>';
+          tr += '<span class="mira-media-automatic-message" style="color:#45cbb4;display:block;margin:5px 0"><i class="fas fa-link"></i> Spotify · commande automatique</span>';
+          tr += '<span class="mira-media-manual-field" style="display:block;white-space:nowrap">' +
+            '<textarea class="cmdAttr input-sm" data-l1key="configuration" data-l2key="calcul" style="height:35px;width:85%;vertical-align:middle" placeholder="{{Envoyer vers}}"></textarea>' +
+            '<a class="btn btn-default listEquipementAction" data-input="calcul" style="margin-left:2px;height:35px;width:14%;vertical-align:middle"><i class="fas fa-list-alt"></i></a></span>';
         } else
         if (_cmd.configuration.type == 'list' && init(_cmd.configuration.listValue) != '') {
           // One Jeedom action target per Mira list option.
@@ -1466,6 +1545,10 @@ function addCmdToTable(_cmd) {
       var tr = $('#table_cmd tbody tr').last()
       // Command identity stored safely on DOM; never embed names into HTML attributes.
       tr.attr('data-mira-logicalid',_cmd.logicalId || '');
+      tr.attr('data-mira-origin-hidden',_cmd.configuration.visible_cmd == '1' ? '0' : '1');
+      tr.attr('data-mira-source-id',_cmd.configuration.mira_media_source_cmd || '');
+      tr.attr('data-mira-target-id',_cmd.configuration.mira_media_target_cmd || _cmd.configuration.mira_media_play_cmd || '');
+      tr.attr('data-mira-link-status',_cmd.configuration.mira_media_link_status || '');
       if (isMultiAction) tr.attr('data-mira-parent',_cmd.configuration.multi_parent || '');
       jeedom.eqLogic.buildSelectCmd({
         id: $('.eqLogicAttr[data-l1key=id]').value(),
@@ -1481,6 +1564,7 @@ function addCmdToTable(_cmd) {
           miraMultiRefreshRow(tr);
           if (isMultiMaster) miraMultiSourceChanged(tr);
           if (/__soc(?:2|3)?$/.test(_cmd.logicalId||'')) miraRefreshEnergyBatteryRows();
+          miraRefreshMediaCommandRows();
         }
       })
   
