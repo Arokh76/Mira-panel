@@ -6,6 +6,18 @@ if (!isConnect('admin')) {
 $plugin = plugin::byId('mira');
 sendVarToJS('eqType', $plugin->getId());
 $eqLogics = eqLogic::byType($plugin->getId());
+// Expose only scenario ID/name/status to the admin editor; never expose
+// scenario definitions, triggers or configuration to the display firmware.
+$miraScenarioOptions = array();
+foreach (scenario::all() as $miraScenario) {
+    if (!is_object($miraScenario)) continue;
+    $miraScenarioOptions[] = array(
+        'id' => (int)$miraScenario->getId(),
+        'name' => (string)$miraScenario->getHumanName(),
+        'active' => (int)$miraScenario->getIsActive()
+    );
+}
+sendVarToJS('miraScenarioOptions', $miraScenarioOptions);
 log::add('mira', 'debug', "Lancement script");
           
 ?>

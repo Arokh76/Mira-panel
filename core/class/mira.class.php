@@ -2521,6 +2521,26 @@ class miraCmd extends cmd {
             }
             $target=$isOn ? $off : $on;
           } else if ($mode==='scenario') {
+            // A direct Jeedom scenario selection takes priority. The legacy
+            // Action command remains supported for existing configurations.
+            $rawScenarioId=trim((string)$this->getConfiguration('multi_scenario_id',''));
+            if ($rawScenarioId!=='') {
+              if (!ctype_digit($rawScenarioId) || (int)$rawScenarioId<1) {
+                log::add('mira','warning','[MULTI] ID scénario invalide : '.$nom);
+                return false;
+              }
+              $selectedScenario=scenario::byId((int)$rawScenarioId);
+              if (!is_object($selectedScenario)) {
+                log::add('mira','warning','[MULTI] Scénario introuvable : '.$nom.' (#'.$rawScenarioId.')');
+                return false;
+              }
+              if ((int)$selectedScenario->getIsActive()!==1) {
+                log::add('mira','warning','[MULTI] Scénario désactivé : '.$nom.' (#'.$rawScenarioId.')');
+                return false;
+              }
+              $selectedScenario->launch();
+              return true;
+            }
             $target=trim((string)$this->getConfiguration('calcul'));
           } else return false;
           if ($target==='') return true;

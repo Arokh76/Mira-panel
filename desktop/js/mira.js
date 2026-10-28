@@ -1449,7 +1449,24 @@ function addCmdToTable(_cmd) {
             '<i class="fas fa-list-alt"></i></a></div>';
           return html;
         }
-        tr += '<div class="mira-multi-scenario">'+multiField('calcul','action','Envoyer vers')+'</div>';
+        // Scenario chooser is native to Jeedom: only the ID is saved on
+        // this Mira gesture command. Existing Action mappings still work.
+        var availableScenarios=(typeof miraScenarioOptions!=='undefined' &&
+          Array.isArray(miraScenarioOptions)) ? miraScenarioOptions : [];
+        tr += '<div class="mira-multi-scenario"><select class="cmdAttr mira-multi-scenario-select form-control input-sm" '+
+          'data-l1key="configuration" data-l2key="multi_scenario_id" '+
+          'aria-label="Scénario Jeedom à lancer" style="width:100%;margin-bottom:5px;">'+
+          '<option value="">-- Choisir un scénario Jeedom --</option>';
+        availableScenarios.forEach(function(entry) {
+          var id=parseInt(entry.id,10);
+          if(!Number.isSafeInteger(id) || id<=0)return;
+          var label=String(entry.name||('Scénario #'+id));
+          if(Number(entry.active)!==1)label+=' (désactivé)';
+          tr+='<option value="'+id+'">'+$('<div>').text(label).html()+'</option>';
+        });
+        tr+='</select><div class="mira-multi-scenario-legacy">'+
+          '<small>Ou commande Action existante (ancien fonctionnement) :</small>'+
+          multiField('calcul','action','Envoyer vers')+'</div></div>';
         tr += '<div class="mira-multi-light" style="display:none">'+
           multiField('multi_state','info','Recevoir de (état)')+
           multiField('multi_off','action','Envoyer vers OFF')+
@@ -2214,6 +2231,8 @@ function miraMultiRefreshRow(tr) {
   var mode=tr.find('.mira-multi-kind').val();
   if (!mode)return;
   tr.find('.mira-multi-scenario').toggle(mode==='scenario');
+  tr.find('.mira-multi-scenario-legacy').toggle(
+    mode==='scenario' && !tr.find('.mira-multi-scenario-select').val());
   tr.find('.mira-multi-light').toggle(mode==='light');
 }
 function miraMultiSourceChanged(tr){
@@ -2226,5 +2245,9 @@ $(document).off('change.mira_multi','#table_cmd .mira-multi-trigger')
   });
 $(document).off('change.mira_multi_kind','#table_cmd .mira-multi-kind')
   .on('change.mira_multi_kind','#table_cmd .mira-multi-kind',function(){
+    miraMultiRefreshRow($(this).closest('tr'));
+  });
+$(document).off('change.mira_multi_scenario','#table_cmd .mira-multi-scenario-select')
+  .on('change.mira_multi_scenario','#table_cmd .mira-multi-scenario-select',function(){
     miraMultiRefreshRow($(this).closest('tr'));
   });
