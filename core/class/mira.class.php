@@ -2582,6 +2582,47 @@ class miraCmd extends cmd {
               $selection,
               (string)$this->getConfiguration('mira_media_destination_names',''));
           }
+          // In manual mode Google Cast (or any Jeedom media player) is bound
+          // through 'calcul', not mira_media_target_cmd. Touchscreen callbacks
+          // carry a command ID, not necessarily a slider parameter: read the
+          // current WT32 range before forwarding it to the Jeedom Action.
+          if ($field==='volume_cmd' &&
+              (int)$this->getConfiguration('mira_media_target_cmd',0)<1 &&
+              trim((string)$this->getConfiguration('calcul',''))!=='') {
+            $level=$_options['slider']??($_options['value']??null);
+            if ($level===null) {
+              $actions=$eqLogic->GetIndex();
+              if (is_array($actions)) foreach ($actions as $action) {
+                if (($action['type']??'')==='range' &&
+                    (int)($action['id']??-1)===(int)$this->getConfiguration('commande',-1)) {
+                  $level=$action['value']??null;
+                  break;
+                }
+              }
+            }
+            if (!is_numeric($level) || !is_finite((float)$level) ||
+                (float)$level<0 || (float)$level>100) {
+              log::add('mira','warning','[MEDIA][MANUEL] Volume invalide ou absent : '.$mediaName);
+              return false;
+            }
+            $level=(int)round((float)$level);
+            $mapped=cmd::byString(trim((string)$this->getConfiguration('calcul','')));
+            if (!is_object($mapped) || $mapped->getType()!=='action' ||
+                (int)$mapped->getId()===(int)$this->getId()) {
+              log::add('mira','warning','[MEDIA][MANUEL] Action volume Jeedom introuvable : '.$mediaName);
+              return false;
+            }
+            $subtype=(string)$mapped->getSubType();
+            if ($subtype==='slider') $mapped->execCmd(array('slider'=>$level));
+            else if ($subtype==='message')
+              $mapped->execCmd(array('title'=>(string)$level,'message'=>(string)$level));
+            else {
+              log::add('mira','warning','[MEDIA][MANUEL] Action volume de type non compatible : '.$subtype);
+              return false;
+            }
+            log::add('mira','debug','[MEDIA][MANUEL] Volume '.$level.' % -> '.$mapped->getName());
+            return true;
+          }
           $targetId=(int)$this->getConfiguration('mira_media_target_cmd',0);
           if ($field==='playpause') {
             $playId=(int)$this->getConfiguration('mira_media_play_cmd',0);
