@@ -2,7 +2,7 @@
 // Thermostat passive feedback: verify only Info state commands can update
 // the screen, never an ACTION command that could drive heating.
 $source=file_get_contents(__DIR__.'/../core/class/mira.class.php');
-$start=strpos($source,'public function refreshPassiveWidgets() {');
+$start=strpos($source,'public function refreshPassiveWidgets(');
 $end=strpos($source,'/** Saved Jeedom equipment',$start);
 if($start===false||$end===false)throw new RuntimeException('Passive refresh missing');
 $method=substr($source,$start,$end-$start);
