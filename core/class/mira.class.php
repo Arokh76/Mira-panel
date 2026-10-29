@@ -494,16 +494,10 @@ class mira extends eqLogic {
    * Retry failures promptly and periodically re-send unchanged metadata so a
    * restarted WT32 can recover even if Spotify never publishes a new track.
    */
-  private static function mediaRecentlyPushed($cmd, $value, $now = null) {
+  private static function mediaRecentlyPushed($cmd, $value, $now = null, $ttl = 180) {
     if ($now === null) $now = microtime(true);
     $lastAt = (float)$cmd->getCache('mira_media_http_at', 0);
     $lastValue = $cmd->getCache('mira_media_http_value', null);
-    // Weather is only pushed periodically. A 180s duplicate cache can
-    // keep a freshly restarted WT32 without its weather overlay for minutes.
-    // Re-send unchanged Weather values on the next one-minute cron, while
-    // leaving Spotify's 180s deduplication untouched.
-    $logical=(string)$cmd->getLogicalId();
-    $ttl=strpos($logical,'__mira_weather_')===0 ? 45 : 180;
     return $lastAt > 0 && $now >= $lastAt && ($now - $lastAt) < $ttl &&
       $lastValue !== null && (string)$lastValue === (string)$value;
   }
@@ -523,9 +517,11 @@ class mira extends eqLogic {
     $key=(string)$mira->getConfiguration('password','');
     $index=(int)$cmd->getConfiguration('commande',-1);
     if (!preg_match('/^[A-Za-z0-9.\\-]+$/D',$ip) || $key==='' || $index<1) return false;
-    // Acknowledged values are cached per Mira info, not per Spotify source.
-    // No second HTTP push during an event burst or the minute-based cron.
-    if (!$force && self::mediaRecentlyPushed($cmd,$value)) return false;
+    // Weather needs a new snapshot promptly after WT32 restart; Spotify
+    // retains its normal 180s event-burst deduplication. The optional TTL
+    // also keeps the existing standalone cache regression test compatible.
+    $ttl=strpos((string)$cmd->getLogicalId(),'__mira_weather_')===0 ? 45 : 180;
+    if (!$force && self::mediaRecentlyPushed($cmd,$value,null,$ttl)) return false;
 
     // Keep Jeedom's Mira Info up to date even if screen HTTP is unavailable.
     $oldValue=$cmd->execCmd();
