@@ -4660,7 +4660,7 @@ void MiraPanelUI::updateClock() {
     char* end = nullptr;
     const float degrees = strtof(raw.c_str(), &end);
     const bool valid = raw.length() && end != raw.c_str() &&
-                       *end == '\\0' && isfinite(degrees) &&
+                       *end == '\0' && isfinite(degrees) &&
                        degrees >= -80.0f && degrees <= 70.0f;
     if (valid != _clockWeatherShown) {
       _clockWeatherShown = valid;
