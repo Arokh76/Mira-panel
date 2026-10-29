@@ -802,6 +802,52 @@ class mira extends eqLogic {
     return $count;
   }
 
+  /**
+   * Restore Jeedom light-switch states after WT32 boot without touching
+   * their On/Off ACTION commands. /updatenr?toggle would fire a real action,
+   * so use the dedicated firmware state-only endpoint instead.
+   */
+  public function refreshLightToggleStates() {
+    $ip=trim((string)$this->getConfiguration('adresseip',''));
+    $key=(string)$this->getConfiguration('password','');
+    if (!filter_var($ip,FILTER_VALIDATE_IP,FILTER_FLAG_IPV4) || $key==='') return 0;
+    $sent=0;
+    foreach ($this->getCmd('info') as $stateCmd) {
+      if (!is_object($stateCmd) ||
+          $stateCmd->getType()!=='info' ||
+          $stateCmd->getConfiguration('type')!=='toggle' ||
+          $stateCmd->getConfiguration('mira_source','jeedom')==='gpio') continue;
+      $expression=trim((string)$stateCmd->getConfiguration('calcul',''));
+      if ($expression==='') continue;
+      try {
+        // Evaluate ONLY an Info expression. Never execute On_/Off_ commands.
+        $raw=jeedom::evaluateExpression($expression);
+        if (!is_scalar($raw)) continue;
+        $value=strtolower(trim((string)$raw));
+        if (is_numeric($value)) $on=(float)$value>0;
+        else if (in_array($value,array('on','true','allumé','allumée','actif','active','ouvert'),true)) $on=true;
+        else if (in_array($value,array('off','false','éteint','eteint','éteinte','eteinte','inactif','inactive','fermé','ferme'),true)) $on=false;
+        else continue; // Unknown state: never invent OFF.
+        $toggleId=(int)$stateCmd->getConfiguration($on?'id_1':'id_0',0);
+        if ($toggleId<1) continue;
+        $url='http://'.$ip.'/sync/toggle?key='.rawurlencode($key).'&id='.$toggleId;
+        $ch=curl_init($url);
+        curl_setopt_array($ch,array(CURLOPT_RETURNTRANSFER=>true,
+          CURLOPT_CONNECTTIMEOUT_MS=>500,CURLOPT_TIMEOUT_MS=>1500,
+          CURLOPT_NOSIGNAL=>true));
+        $out=curl_exec($ch);
+        $status=(int)curl_getinfo($ch,CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($out!==false && $status===200) ++$sent;
+        else log::add('mira','debug','[BOOT][TOGGLE] Etat non synchronise : '.
+                      $stateCmd->getLogicalId().' (HTTP '.$status.')');
+      } catch (Throwable $e) {
+        log::add('mira','warning','[BOOT][TOGGLE] '.$stateCmd->getLogicalId().' : '.$e->getMessage());
+      }
+    }
+    return $sent;
+  }
+
   /** Saved Jeedom equipment configuration is the source of truth. */
   public function postSave() {
     if (!$this->getId()) return;
@@ -2319,6 +2365,7 @@ class miraCmd extends cmd {
         // Saving/rebuilding the index alone does not resend current Info values.
         $eqLogic->refreshPassiveWidgets();
         $eqLogic->refreshClockWeather(true);
+        $eqLogic->refreshLightToggleStates();
       	return;
 	}
    
@@ -2331,6 +2378,7 @@ class miraCmd extends cmd {
         try {
           $eqLogic->refreshPassiveWidgets(true);
           $eqLogic->refreshClockWeather(true);
+          $eqLogic->refreshLightToggleStates();
         } catch (Throwable $e) {
           log::add('mira','warning','[BOOT] Reprise des infos écran : '.$e->getMessage());
         }
