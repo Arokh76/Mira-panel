@@ -172,7 +172,12 @@ public:
 
 
 private:
-  volatile int _pendingPassiveToggleEvent = -1;
+  // One producer (HTTP callback), one consumer (LVGL loop). A small queue
+  // prevents losing earlier light states when several are replayed at boot.
+  static constexpr uint8_t PASSIVE_TOGGLE_QUEUE_SIZE = 32;
+  int _passiveToggleEvents[PASSIVE_TOGGLE_QUEUE_SIZE] = {};
+  volatile uint8_t _passiveToggleHead = 0;
+  volatile uint8_t _passiveToggleTail = 0;
   bool initPA();
   bool initWiFi();
   bool ReInitWiFi();
