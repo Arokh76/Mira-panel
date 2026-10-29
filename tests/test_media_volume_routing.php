@@ -25,7 +25,7 @@ foreach ($cases as $case) {
  echo 'PASS '.$case[0].' '.$case[1].' -> '.$name."\n";
 }
 // Passive refresh must not ever call action commands.
-$marker='public function refreshPassiveWidgets() {';
+$marker='public function refreshPassiveWidgets(';
 $start=strpos($source,$marker);
 $end=strpos($source,'/** Saved Jeedom equipment',$start);
 if($start===false||$end===false) throw new RuntimeException('Passive refresh absent');
