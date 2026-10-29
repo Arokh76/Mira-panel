@@ -680,6 +680,72 @@ class mira extends eqLogic {
   }
 
   /**
+   * Optional weather source for the existing date/time widget.
+   * A single enabled Jeedom Weather equipment is selected automatically.
+   * When several exist, the screen setting chooses which one to use.
+   * No action commands or extra per-widget configuration are needed.
+   */
+  private function clockWeatherSource() {
+    $configuredId = (int)$this->getConfiguration('weather_eqid', 0);
+    if ($configuredId > 0) {
+      $candidate = eqLogic::byId($configuredId);
+      return is_object($candidate) &&
+             $candidate->getEqType_name() === 'weather' &&
+             (int)$candidate->getIsEnable() === 1 ? $candidate : null;
+    }
+    $sources = eqLogic::byType('weather', true);
+    return is_array($sources) && count($sources) === 1 ? reset($sources) : null;
+  }
+
+  /**
+   * Send passive Weather infos via Mira's existing indexed Info transport.
+   * Invalid or unavailable data clears the optional overlay; time stays visible.
+   */
+  public function refreshClockWeather() {
+    $fields = array(
+      '__mira_weather_temperature' => 'temperature',
+      '__mira_weather_condition' => 'condition',
+      '__mira_weather_code' => 'condition_id'
+    );
+    $targets = array();
+    foreach ($fields as $logical => $sourceLogical) {
+      $target = $this->getCmd(null, $logical);
+      if (is_object($target) && $target->getType() === 'info') $targets[$logical] = $target;
+    }
+    if (!isset($targets['__mira_weather_temperature'])) return 0;
+
+    $source = $this->clockWeatherSource();
+    $values = array_fill_keys(array_keys($fields), '');
+    if (is_object($source)) {
+      foreach ($fields as $logical => $sourceLogical) {
+        $command = $source->getCmd(null, $sourceLogical);
+        if (!is_object($command) || $command->getType() !== 'info') continue;
+        $value = $command->execCmd();
+        if (is_scalar($value)) $values[$logical] = trim((string)$value);
+      }
+      $temperature = str_replace(',', '.', $values['__mira_weather_temperature']);
+      if (!is_numeric($temperature) || (float)$temperature < -80 ||
+          (float)$temperature > 70) {
+        $values = array_fill_keys(array_keys($fields), '');
+      } else {
+        $values['__mira_weather_temperature'] = number_format((float)$temperature, 1, '.', '');
+        $values['__mira_weather_condition'] = mb_strcut($values['__mira_weather_condition'], 0, 45, 'UTF-8');
+        $code = $values['__mira_weather_code'];
+        $values['__mira_weather_code'] = preg_match('/^\\d{3,4}$/D', $code) ? $code : '';
+      }
+    }
+
+    $sent = 0;
+    foreach ($targets as $logical => $target) {
+      $value = $values[$logical];
+      // There is nothing to clear on a newly programmed screen.
+      if ($value === '' && (string)$target->execCmd() === '') continue;
+      if (self::mediaPushInfo($this, $target, $value)) ++$sent;
+    }
+    return $sent;
+  }
+
+  /**
    * Safe periodic resync from Jeedom TO Mira. Never executes device actions:
    * read only Spotify Info sources, evaluate only Jeedom Info expressions.
    * Source listeners still push Spotify changes immediately when available.
@@ -827,6 +893,7 @@ class mira extends eqLogic {
         if (trim((string)$eqLogic->getConfiguration('adresseip',''))!=='' &&
             $eqLogic->GetIndex()!=='Erreur')
           $eqLogic->refreshPassiveWidgets();
+        $eqLogic->refreshClockWeather();
       } catch (Throwable $e) {
         log::add('mira','warning','[Refresh] Synchronisation passive : '.$e->getMessage());
       }
@@ -1099,6 +1166,12 @@ class mira extends eqLogic {
                         $info->setConfiguration('visible_cmd',"1");
                     }
                   
+                    if (strpos($name, '__mira_weather_') === 0) {
+                        // Internal, read-only clock data; never exposes another widget.
+                        $info->setIsVisible(0);
+                        $info->setConfiguration('visible_cmd', '0');
+                        $info->setConfiguration('mira_weather_auto', '1');
+                    }
                     if ($isCamera) {
                         $info->setName('Caméra : ' . substr($name, strlen('Camera_')));
                         $info->setType('info');
@@ -1660,6 +1733,8 @@ class mira extends eqLogic {
 
             }
           	$this->Init_mira_Module();
+            try { $this->refreshClockWeather(); }
+            catch (Throwable $e) { log::add('mira','warning','[WEATHER] Initialisation : '.$e->getMessage()); }
             try { $this->configureMediaSource(); self::rebuildMediaListener(); }
             catch (Throwable $e) {
               log::add('mira','warning','[MEDIA] Liaison : '.$e->getMessage());

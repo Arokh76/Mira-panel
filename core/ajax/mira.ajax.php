@@ -64,7 +64,15 @@ try {
                 $name = isset($widget['name']) ? trim((string)$widget['name']) : '';
                 $value = isset($widget['value']) ? (string)$widget['value'] : '';
 
-                if ($type == '' || $type == 'datetime') continue;
+                if ($type === 'datetime') {
+                    // Clock's three passive Weather infos are indexed by the
+                    // firmware, even though the editor exposes only one clock.
+                    foreach (array('temperature', 'condition', 'code') as $field) {
+                        $expectedSignatures[] = 'info|__mira_weather_' . $field;
+                    }
+                    continue;
+                }
+                if ($type == '') continue;
                 if ($type === 'camera') {
                     $expectedSignatures[] = 'info|Camera_' . $name;
                     continue;

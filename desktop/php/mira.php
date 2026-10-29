@@ -439,6 +439,22 @@ log::add('mira', 'debug', "Lancement script");
                                 echo '</div></div>';
                             }
                             ?>
+                            <legend><i class="fas fa-cloud-sun"></i> {{Météo de l'horloge}}</legend>
+                            <div class="form-group">
+                                <label class="col-sm-3 control-label">{{Source Weather}}</label>
+                                <div class="col-sm-7">
+                                  <select class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="weather_eqid">
+                                    <option value="">{{Automatique (si un seul équipement Weather)}}</option>
+                                    <?php
+                                    foreach (eqLogic::byType('weather', true) as $weatherEq) {
+                                      echo '<option value="' . (int)$weatherEq->getId() . '">' .
+                                        htmlspecialchars($weatherEq->getHumanName(), ENT_QUOTES, 'UTF-8') . '</option>';
+                                    }
+                                    ?>
+                                  </select>
+                                  <small class="help-block">{{Facultatif : si Weather est absent, l'horloge reste centrée. Plusieurs équipements ? Choisissez celui à afficher.}}</small>
+                                </div>
+                            </div>
                             <legend><i class="fab fa-spotify"></i> {{Lecteur multimédia}}</legend>
                             <div class="form-group">
                               <label class="col-sm-4 control-label">{{Lecteur Jeedom à associer}}</label>
