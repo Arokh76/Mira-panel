@@ -3000,11 +3000,15 @@ void MiraPanelUI::createDateTime(uint8_t idx) {
     lv_obj_add_flag(_clockWeatherTemperature, LV_OBJ_FLAG_HIDDEN);
 
     _clockWeatherCondition = lv_label_create(b.card);
-    lv_obj_set_width(_clockWeatherCondition, 126);
-    lv_obj_set_pos(_clockWeatherCondition, 178, 43);
+    // The WT32's right-hand weather column is narrower than long phrases
+    // such as "Partiellement nuageux". Wrap onto two lines and abbreviate
+    // anything longer instead of letting the last word leave the screen.
+    lv_obj_set_size(_clockWeatherCondition, 116, 34);
+    lv_obj_set_pos(_clockWeatherCondition, 178, 42);
     lv_obj_set_style_text_font(_clockWeatherCondition, &mira_font_fr_12, 0);
     lv_obj_set_style_text_color(_clockWeatherCondition, COL_MUTED, 0);
-    lv_label_set_long_mode(_clockWeatherCondition, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_align(_clockWeatherCondition, LV_TEXT_ALIGN_LEFT, 0);
+    lv_label_set_long_mode(_clockWeatherCondition, LV_LABEL_LONG_DOT);
     lv_label_set_text(_clockWeatherCondition, "");
     lv_obj_add_flag(_clockWeatherCondition, LV_OBJ_FLAG_HIDDEN);
   }
