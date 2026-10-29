@@ -93,6 +93,11 @@ void loop() {
   int miraEvent = Serveur.IndexGetEvent();
   if (miraEvent >= 0) Interface.handleMiraEvent(miraEvent);
 
+  // State-only feedback from Jeedom is kept separate from command events.
+  // Repaint a light switch without calling JeedomCmd or toggling any relay.
+  int passiveToggleEvent = Serveur.IndexGetPassiveToggleEvent();
+  if (passiveToggleEvent >= 0) Interface.handleMiraEvent(passiveToggleEvent);
+
   // Evenements de programmation Mira : remove/add/save de la liste LVGL.
   int paramEvent = Serveur.ParamGetEvent();
   if (paramEvent >= 0) Interface.handleParamEvent(paramEvent);
