@@ -753,7 +753,7 @@ class mira extends eqLogic {
    * Source listeners still push Spotify changes immediately when available.
    * This minute-based path repairs lost events and stale screen displays.
    */
-  public function refreshPassiveWidgets() {
+  public function refreshPassiveWidgets($force=false) {
     $source=eqLogic::byId((int)$this->getConfiguration('media_source_eqid',0));
     $count=0;
     foreach ($this->getCmd() as $target) {
@@ -768,16 +768,16 @@ class mira extends eqLogic {
           if ($value===null || $value==='') continue;
           if (preg_match('/__progress$/D',$logical) &&
               (!is_numeric($value) || (float)$value<0 || (float)$value>100)) continue;
-          self::mediaPushInfo($this,$target,$value);
+          self::mediaPushInfo($this,$target,$value,$force);
           $count++;
         } elseif (preg_match('/__devices$/D',$logical) &&
                   (int)$target->getConfiguration('mira_media_auto_devices',0)===1) {
-          self::mediaPushInfo($this,$target,implode('|',self::mediaDestinationNames($source)));
+          self::mediaPushInfo($this,$target,implode('|',self::mediaDestinationNames($source)),$force);
           $count++;
         } elseif (preg_match('/__device$/D',$logical) &&
                   (int)$target->getConfiguration('mira_media_auto_reader',0)===1 &&
                   is_object($source)) {
-          self::mediaPushInfo($this,$target,(string)$source->getName());
+          self::mediaPushInfo($this,$target,(string)$source->getName(),$force);
           $count++;
         } elseif (trim((string)$target->getConfiguration('calcul',''))!=='' &&
                   ($target->getConfiguration('type')==='info' ||
@@ -2323,7 +2323,17 @@ class miraCmd extends cmd {
 	}
    
    	if ($this->getLogicalId() == 'init_cmd') {
+        // The WT32 calls this command on startup. Rebuilding the Jeedom ID
+        // mapping alone leaves all passive Infos blank until the user runs a
+        // manual resynchronization. Restore read-only Info snapshots after
+        // the screen has registered its IDs, without executing any actions.
 		$eqLogic->Init_mira_Module();
+        try {
+          $eqLogic->refreshPassiveWidgets(true);
+          $eqLogic->refreshClockWeather(true);
+        } catch (Throwable $e) {
+          log::add('mira','warning','[BOOT] Reprise des infos écran : '.$e->getMessage());
+        }
 		return;
 	}
     
