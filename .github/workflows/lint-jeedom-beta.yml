@@ -6,6 +6,7 @@ on:
       - "core/**"
       - "desktop/**"
       - "plugin_info/**"
+      - "tests/**"
       - ".github/workflows/lint-jeedom-beta.yml"
   pull_request:
     branches: [beta]
@@ -13,6 +14,7 @@ on:
       - "core/**"
       - "desktop/**"
       - "plugin_info/**"
+      - "tests/**"
       - ".github/workflows/lint-jeedom-beta.yml"
   workflow_dispatch:
 permissions:
