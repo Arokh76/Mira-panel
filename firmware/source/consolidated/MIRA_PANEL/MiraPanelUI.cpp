@@ -130,6 +130,19 @@ static lv_obj_t* miraCreateInfoGlyph(lv_obj_t* card, const String& kind,
     miraGlyphPart(root, d/2-stroke/2, d*4/5, stroke, d/5, false, 2, accent);
     miraGlyphPart(root, 0, d/2-stroke/2, d/5, stroke, false, 2, accent);
     miraGlyphPart(root, d*4/5, d/2-stroke/2, d/5, stroke, false, 2, accent);
+  } else if (kind == "cloud" || kind == "rain") {
+    // Weather glyphs are drawn with LVGL shapes: no external icon font needed.
+    miraGlyphPart(root, d/9, d*43/100, d*45/100, d*38/100,
+                  false, LV_RADIUS_CIRCLE, accent);
+    miraGlyphPart(root, d*31/100, d/4, d*45/100, d*49/100,
+                  false, LV_RADIUS_CIRCLE, accent);
+    miraGlyphPart(root, d*52/100, d*45/100, d*38/100, d*32/100,
+                  false, LV_RADIUS_CIRCLE, accent);
+    miraGlyphPart(root, d/8, d*57/100, d*3/4, d/5, false, 4, accent);
+    if (kind == "rain") {
+      miraGlyphPart(root, d/4, d*82/100, stroke, d/6, false, 1, accent);
+      miraGlyphPart(root, d*62/100, d*82/100, stroke, d/6, false, 1, accent);
+    }
   } else if (kind == "pressure") {
     miraGlyphPart(root, d/7, d/6, d*5/7, d*5/7, true,
                   LV_RADIUS_CIRCLE, accent);
@@ -1085,6 +1098,15 @@ void MiraPanelUI::clearDynamicPages() {
   _dateSubLabel = nullptr;
   _clockStatusLabel = nullptr;
   _clockStatusCache = "";
+  _weatherTemperatureId = -1;
+  _weatherConditionId = -1;
+  _weatherCodeId = -1;
+  _clockWeatherTemperature = nullptr;
+  _clockWeatherCondition = nullptr;
+  _clockWeatherSunIcon = nullptr;
+  _clockWeatherCloudIcon = nullptr;
+  _clockWeatherRainIcon = nullptr;
+  _clockWeatherShown = false;
 }
 
 void MiraPanelUI::reloadFromMiraJson() {
@@ -1337,6 +1359,13 @@ void MiraPanelUI::registerAndCreate(JsonObject obj) {
   }
   else if (type == "datetime") {
     b.type = W_DATETIME;
+    // Internal Infos: Jeedom auto-binds the Weather plugin. The existing
+    // datetime widget remains the only visible/editor-configurable widget.
+    if (_weatherTemperatureId < 0) {
+      _weatherTemperatureId = _server.IndexAddInfo("__mira_weather_temperature", "°C");
+      _weatherConditionId = _server.IndexAddInfo("__mira_weather_condition", "");
+      _weatherCodeId = _server.IndexAddInfo("__mira_weather_code", "");
+    }
     createDateTime(idx);
   }
   else {
@@ -2945,6 +2974,40 @@ void MiraPanelUI::createDateTime(uint8_t idx) {
   lv_obj_align(_dateSubLabel, LV_ALIGN_TOP_MID, 0, 47);
 
   if (!_dateTimeLabel) _dateTimeLabel = b.valueLabel;
+
+  // On WT32, the 82px clock header has room for two columns. Weather
+  // labels remain hidden until a valid Jeedom temperature arrives.
+  // Nextion 240px and Waveshare-wide retain their existing layout.
+  if (MIRA_DISPLAY_WIDTH > 240 && MIRA_DISPLAY_WIDTH < 800) {
+    _clockWeatherSunIcon = miraCreateInfoGlyph(b.card, "light", 25, lv_color_hex(0xF5C451));
+    _clockWeatherCloudIcon = miraCreateInfoGlyph(b.card, "cloud", 25, COL_MUTED);
+    _clockWeatherRainIcon = miraCreateInfoGlyph(b.card, "rain", 25, colorAccent());
+    lv_obj_set_pos(_clockWeatherSunIcon, 177, 9);
+    lv_obj_set_pos(_clockWeatherCloudIcon, 177, 9);
+    lv_obj_set_pos(_clockWeatherRainIcon, 177, 9);
+    lv_obj_add_flag(_clockWeatherSunIcon, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(_clockWeatherCloudIcon, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(_clockWeatherRainIcon, LV_OBJ_FLAG_HIDDEN);
+
+    _clockWeatherTemperature = lv_label_create(b.card);
+    lv_obj_set_width(_clockWeatherTemperature, 100);
+    lv_obj_set_pos(_clockWeatherTemperature, 207, 6);
+    lv_obj_set_style_text_font(_clockWeatherTemperature, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(_clockWeatherTemperature, COL_TEXT, 0);
+    lv_obj_set_style_text_align(_clockWeatherTemperature, LV_TEXT_ALIGN_LEFT, 0);
+    lv_label_set_long_mode(_clockWeatherTemperature, LV_LABEL_LONG_CLIP);
+    lv_label_set_text(_clockWeatherTemperature, "");
+    lv_obj_add_flag(_clockWeatherTemperature, LV_OBJ_FLAG_HIDDEN);
+
+    _clockWeatherCondition = lv_label_create(b.card);
+    lv_obj_set_width(_clockWeatherCondition, 126);
+    lv_obj_set_pos(_clockWeatherCondition, 178, 43);
+    lv_obj_set_style_text_font(_clockWeatherCondition, &mira_font_fr_12, 0);
+    lv_obj_set_style_text_color(_clockWeatherCondition, COL_MUTED, 0);
+    lv_label_set_long_mode(_clockWeatherCondition, LV_LABEL_LONG_CLIP);
+    lv_label_set_text(_clockWeatherCondition, "");
+    lv_obj_add_flag(_clockWeatherCondition, LV_OBJ_FLAG_HIDDEN);
+  }
 }
 void MiraPanelUI::createUnsupported(uint8_t idx, const String& originalType) {
   Binding& b = _bindings[idx];
@@ -4588,6 +4651,61 @@ void MiraPanelUI::updateClock() {
       lv_label_set_text(_clockStatusLabel, value.c_str());
     }
   }
+  // Weather is read from the existing indexed Infos (same transport as
+  // standard widgets). Never poll an external service from the ESP32.
+  if (_clockWeatherTemperature && _weatherTemperatureId >= 0) {
+    String raw = _server.IndexGetInfo(_weatherTemperatureId);
+    raw.trim();
+    raw.replace(",", ".");
+    char* end = nullptr;
+    const float degrees = strtof(raw.c_str(), &end);
+    const bool valid = raw.length() && end != raw.c_str() &&
+                       *end == '\\0' && isfinite(degrees) &&
+                       degrees >= -80.0f && degrees <= 70.0f;
+    if (valid != _clockWeatherShown) {
+      _clockWeatherShown = valid;
+      // Only the presence of data changes the geometry. No weather => the
+      // original centered time and full-width date are restored.
+      lv_obj_set_align(_dateTimeLabel, valid ? LV_ALIGN_TOP_LEFT : LV_ALIGN_TOP_MID);
+      lv_obj_set_width(_dateTimeLabel, valid ? 171 : MIRA_CARD_FULL);
+      lv_obj_set_pos(_dateTimeLabel, valid ? 0 : 0, -2);
+      lv_obj_set_align(_dateSubLabel, valid ? LV_ALIGN_TOP_LEFT : LV_ALIGN_TOP_MID);
+      lv_obj_set_width(_dateSubLabel, valid ? 170 : 300);
+      lv_obj_set_pos(_dateSubLabel, valid ? 2 : 0, 47);
+      if (valid) {
+        lv_obj_add_flag(_clockWeatherTemperature, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(_clockWeatherTemperature, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(_clockWeatherCondition, LV_OBJ_FLAG_HIDDEN);
+      } else {
+        lv_obj_add_flag(_clockWeatherTemperature, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(_clockWeatherCondition, LV_OBJ_FLAG_HIDDEN);
+      }
+    }
+    if (valid) {
+      const String temperatureText = String(degrees, 1) + "°C";
+      if (temperatureText != String(lv_label_get_text(_clockWeatherTemperature)))
+        lv_label_set_text(_clockWeatherTemperature, temperatureText.c_str());
+      String condition = _server.IndexGetInfo(_weatherConditionId);
+      condition.trim();
+      if (!condition.length()) condition = "Météo";
+      if (condition != String(lv_label_get_text(_clockWeatherCondition)))
+        lv_label_set_text(_clockWeatherCondition, condition.c_str());
+    }
+    if (_clockWeatherSunIcon && _clockWeatherCloudIcon && _clockWeatherRainIcon) {
+      const int code = _server.IndexGetInfo(_weatherCodeId).toInt();
+      const bool cloudy = code == 1003 || code == 1006 || code == 1009 ||
+                          code == 1030 || code == 1135 || code == 1147;
+      const bool sunny = code == 1000;
+      lv_obj_t* activeIcon = sunny ? _clockWeatherSunIcon :
+                             cloudy || code == 0 ? _clockWeatherCloudIcon :
+                             _clockWeatherRainIcon;
+      lv_obj_t* icons[] = {_clockWeatherSunIcon, _clockWeatherCloudIcon, _clockWeatherRainIcon};
+      for (lv_obj_t* icon : icons) {
+        if (valid && icon == activeIcon) lv_obj_clear_flag(icon, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(icon, LV_OBJ_FLAG_HIDDEN);
+      }
+    }
+  }
   if (!getLocalTime(&t, 10)) return;
   char timeBuf[8];
   strftime(timeBuf, sizeof(timeBuf), "%H:%M", &t);
@@ -4597,7 +4715,14 @@ void MiraPanelUI::updateClock() {
     static const char* jours[] = {"Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"};
     static const char* mois[] = {"Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"};
     char dateBuf[64];
-    snprintf(dateBuf, sizeof(dateBuf), "%s, %02d %s %04d", jours[t.tm_wday], t.tm_mday, mois[t.tm_mon], t.tm_year + 1900);
+    if (_clockWeatherShown) {
+      // Keep the date readable in the left half of a 320px WT32 clock.
+      static const char* joursCourts[] = {"Dim.", "Lun.", "Mar.", "Mer.", "Jeu.", "Ven.", "Sam."};
+      static const char* moisCourts[] = {"Jan.", "Fév.", "Mar.", "Avr.", "Mai", "Juin", "Juil.", "Août", "Sep.", "Oct.", "Nov.", "Déc."};
+      snprintf(dateBuf, sizeof(dateBuf), "%s %02d %s", joursCourts[t.tm_wday], t.tm_mday, moisCourts[t.tm_mon]);
+    } else {
+      snprintf(dateBuf, sizeof(dateBuf), "%s, %02d %s %04d", jours[t.tm_wday], t.tm_mday, mois[t.tm_mon], t.tm_year + 1900);
+    }
     lv_label_set_text(_dateSubLabel, dateBuf);
   }
 }
