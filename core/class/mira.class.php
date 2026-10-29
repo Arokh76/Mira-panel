@@ -498,11 +498,17 @@ class mira extends eqLogic {
     if ($now === null) $now = microtime(true);
     $lastAt = (float)$cmd->getCache('mira_media_http_at', 0);
     $lastValue = $cmd->getCache('mira_media_http_value', null);
-    return $lastAt > 0 && $now >= $lastAt && ($now - $lastAt) < 180 &&
+    // Weather is only pushed periodically. A 180s duplicate cache can
+    // keep a freshly restarted WT32 without its weather overlay for minutes.
+    // Re-send unchanged Weather values on the next one-minute cron, while
+    // leaving Spotify's 180s deduplication untouched.
+    $logical=(string)$cmd->getLogicalId();
+    $ttl=strpos($logical,'__mira_weather_')===0 ? 45 : 180;
+    return $lastAt > 0 && $now >= $lastAt && ($now - $lastAt) < $ttl &&
       $lastValue !== null && (string)$lastValue === (string)$value;
   }
 
-  private static function mediaPushInfo($mira, $cmd, $value) {
+  private static function mediaPushInfo($mira, $cmd, $value, $force=false) {
     // Spotify may expose Playing as a native boolean. Preserve OFF as 0,
     // not an empty string (which can look like missing data on Mira).
     if (is_bool($value)) $value = $value ? '1' : '0';
@@ -519,7 +525,7 @@ class mira extends eqLogic {
     if (!preg_match('/^[A-Za-z0-9.\\-]+$/D',$ip) || $key==='' || $index<1) return false;
     // Acknowledged values are cached per Mira info, not per Spotify source.
     // No second HTTP push during an event burst or the minute-based cron.
-    if (self::mediaRecentlyPushed($cmd,$value)) return false;
+    if (!$force && self::mediaRecentlyPushed($cmd,$value)) return false;
 
     // Keep Jeedom's Mira Info up to date even if screen HTTP is unavailable.
     $oldValue=$cmd->execCmd();
@@ -701,7 +707,7 @@ class mira extends eqLogic {
    * Send passive Weather infos via Mira's existing indexed Info transport.
    * Invalid or unavailable data clears the optional overlay; time stays visible.
    */
-  public function refreshClockWeather() {
+  public function refreshClockWeather($force=false) {
     $fields = array(
       '__mira_weather_temperature' => 'temperature',
       '__mira_weather_condition' => 'condition',
@@ -740,7 +746,7 @@ class mira extends eqLogic {
       $value = $values[$logical];
       // There is nothing to clear on a newly programmed screen.
       if ($value === '' && (string)$target->execCmd() === '') continue;
-      if (self::mediaPushInfo($this, $target, $value)) ++$sent;
+      if (self::mediaPushInfo($this, $target, $value, $force)) ++$sent;
     }
     return $sent;
   }
@@ -1733,7 +1739,7 @@ class mira extends eqLogic {
 
             }
           	$this->Init_mira_Module();
-            try { $this->refreshClockWeather(); }
+            try { $this->refreshClockWeather(true); }
             catch (Throwable $e) { log::add('mira','warning','[WEATHER] Initialisation : '.$e->getMessage()); }
             try { $this->configureMediaSource(); self::rebuildMediaListener(); }
             catch (Throwable $e) {
@@ -2102,6 +2108,8 @@ class mira extends eqLogic {
     // Les actionneurs Jeedom classiques gardent Jeedom comme source de verite.
     $this->syncGpioStates();
     $this->refreshPassiveWidgets();
+    // Explicit screen refresh must restore weather even if unchanged.
+    $this->refreshClockWeather(true);
     return true;
   }
 
@@ -2314,6 +2322,7 @@ class miraCmd extends cmd {
         $eqLogic->syncGpioStates();
         // Saving/rebuilding the index alone does not resend current Info values.
         $eqLogic->refreshPassiveWidgets();
+        $eqLogic->refreshClockWeather(true);
       	return;
 	}
    
