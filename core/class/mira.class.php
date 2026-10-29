@@ -729,7 +729,7 @@ class mira extends eqLogic {
         $values = array_fill_keys(array_keys($fields), '');
       } else {
         $values['__mira_weather_temperature'] = number_format((float)$temperature, 1, '.', '');
-        $values['__mira_weather_condition'] = mb_substr($values['__mira_weather_condition'], 0, 48, 'UTF-8');
+        $values['__mira_weather_condition'] = mb_strcut($values['__mira_weather_condition'], 0, 45, 'UTF-8');
         $code = $values['__mira_weather_code'];
         $values['__mira_weather_code'] = preg_match('/^\\d{3,4}$/D', $code) ? $code : '';
       }
