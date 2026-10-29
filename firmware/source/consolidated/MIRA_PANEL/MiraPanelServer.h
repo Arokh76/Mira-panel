@@ -121,6 +121,8 @@ public:
 
   //Loop
   int IndexGetEvent();
+  // Passive state-only toggle sync, never routed to JeedomCmd/IndexSetEvent.
+  int IndexGetPassiveToggleEvent();
   //Ajouter HANDLE
 
   //Autre
@@ -170,6 +172,7 @@ public:
 
 
 private:
+  volatile int _pendingPassiveToggleEvent = -1;
   bool initPA();
   bool initWiFi();
   bool ReInitWiFi();
