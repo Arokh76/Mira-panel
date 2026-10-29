@@ -4661,7 +4661,8 @@ void MiraPanelUI::updateClock() {
     const float degrees = strtof(raw.c_str(), &end);
     const bool valid = raw.length() && end != raw.c_str() &&
                        *end == '\0' && isfinite(degrees) &&
-                       degrees >= -80.0f && degrees <= 70.0f;
+                       degrees >= -80.0f && degrees <= 70.0f &&
+                       lv_obj_get_width(lv_obj_get_parent(_dateTimeLabel)) >= 280;
     if (valid != _clockWeatherShown) {
       _clockWeatherShown = valid;
       // Only the presence of data changes the geometry. No weather => the
@@ -4695,9 +4696,18 @@ void MiraPanelUI::updateClock() {
       const int code = _server.IndexGetInfo(_weatherCodeId).toInt();
       const bool cloudy = code == 1003 || code == 1006 || code == 1009 ||
                           code == 1030 || code == 1135 || code == 1147;
-      const bool sunny = code == 1000;
+      String hint = _server.IndexGetInfo(_weatherConditionId);
+      hint.toLowerCase();
+      const bool sunny = code == 1000 ||
+                         (code == 0 && (hint.indexOf("soleil") >= 0 ||
+                                         hint.indexOf("ensoleill") >= 0 ||
+                                         hint.indexOf("clair") >= 0));
+      const bool wet = code == 0 && (hint.indexOf("pluie") >= 0 ||
+                                    hint.indexOf("averse") >= 0 ||
+                                    hint.indexOf("neige") >= 0 ||
+                                    hint.indexOf("orage") >= 0);
       lv_obj_t* activeIcon = sunny ? _clockWeatherSunIcon :
-                             cloudy || code == 0 ? _clockWeatherCloudIcon :
+                             cloudy || (code == 0 && !wet) ? _clockWeatherCloudIcon :
                              _clockWeatherRainIcon;
       lv_obj_t* icons[] = {_clockWeatherSunIcon, _clockWeatherCloudIcon, _clockWeatherRainIcon};
       for (lv_obj_t* icon : icons) {
