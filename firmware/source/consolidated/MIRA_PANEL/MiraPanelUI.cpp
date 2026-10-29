@@ -2124,15 +2124,16 @@ void MiraPanelUI::updateCompositeInfo(Binding& b, uint8_t field, const String& r
     return;
   }
   if (field == 6) {
-    // Optional cover URL; Spotify CDN only. A media Info must never trigger
+    // Optional cover URL; trusted Spotify and Google Cast image hosts only. A media Info must never trigger
     // an arbitrary device/LAN HTTP request or leak Jeedom credentials.
     String url = raw;
     url.trim();
     if (url == _albumUrl) return;
     // Invalid or empty artwork is a genuine absence of cover: clear it.
-    // Only trusted Spotify image URLs may start an HTTPS request.
+    // Only trusted media artwork hosts may start an HTTPS request.
     const bool safe = url.startsWith("https://i.scdn.co/image/") ||
-                      url.startsWith("https://mosaic.scdn.co/");
+                      url.startsWith("https://mosaic.scdn.co/") ||
+                      url.startsWith("https://yt3.googleusercontent.com/");
     if (!safe || url.length() > 768) {
       clearAlbumArtwork();
       return;
