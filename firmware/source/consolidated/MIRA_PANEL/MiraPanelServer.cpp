@@ -1257,8 +1257,14 @@ void MiraPanelServer::ServeurStation() {
     if (!found) {
       request->send(404, "text/plain", "Interrupteur inconnu"); return;
     }
+    const uint8_t nextTail =
+        uint8_t((_passiveToggleTail + 1) % PASSIVE_TOGGLE_QUEUE_SIZE);
+    if (nextTail == _passiveToggleHead) {
+      request->send(503, "text/plain", "File d'etats pleine"); return;
+    }
     IndexSetToggle(toggleId);
-    _pendingPassiveToggleEvent = toggleId;
+    _passiveToggleEvents[_passiveToggleTail] = toggleId;
+    _passiveToggleTail = nextTail;
     request->send(200, "text/plain", "OK");
   });
 
@@ -5356,8 +5362,10 @@ void MiraPanelServer::IndexResetEvent() {
 }
 
 int MiraPanelServer::IndexGetPassiveToggleEvent() {
-  const int pending = _pendingPassiveToggleEvent;
-  _pendingPassiveToggleEvent = -1;
+  if (_passiveToggleHead == _passiveToggleTail) return -1;
+  const int pending = _passiveToggleEvents[_passiveToggleHead];
+  _passiveToggleHead =
+      uint8_t((_passiveToggleHead + 1) % PASSIVE_TOGGLE_QUEUE_SIZE);
   return pending;
 }
 
