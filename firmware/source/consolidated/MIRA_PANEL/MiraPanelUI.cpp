@@ -36,6 +36,14 @@ static const lv_color_t COL_ACCENT2 = lv_color_hex(0x18637A);
 static const lv_color_t COL_GREEN   = lv_color_hex(0x62D6A7);
 static const lv_color_t COL_RED     = lv_color_hex(0xE36A6A);
 
+// Composite widgets reuse existing Jeedom index types: Info, Button, Range.
+// No special plugin-to-ESP transport and no commands during initial drawing.
+static const char* const MIRA_ENERGY_FIELDS[7] = {"solar", "home", "grid", "battery", "soc", "soc2", "soc3"};
+static const char* const MIRA_MEDIA_FIELDS[9] =
+    {"title", "artist", "album", "state", "progress", "volume", "cover", "device", "devices"};
+static const char* const MIRA_MEDIA_ACTIONS[3] =
+    {"previous", "play", "next"};
+
 // Automatic widget grid from screen geometry, without affecting free layout.
 // 800px page - 12px margins = 788px; 4*192+3*6 = 2*390+6 = 786px.
 static constexpr lv_coord_t MIRA_CARD_AUTO = MIRA_DISPLAY_WIDTH >= 800 ? 390 : (MIRA_DISPLAY_WIDTH <= 240 ? 224 : 304);
@@ -152,6 +160,19 @@ static lv_obj_t* miraCreateInfoGlyph(lv_obj_t* card, const String& kind,
 #if defined(MIRA_TARGET_WAVESHARE_43C)
 LV_FONT_DECLARE(mira_sleep_montserrat_120);
 LV_FONT_DECLARE(mira_home_montserrat_96);
+#elif !defined(MIRA_TARGET_NEXTION_28)
+// Native Montserrat 84px: WT32-only; small Nextion keeps LVGL 48px.
+LV_FONT_DECLARE(mira_sleep_montserrat_84);
+#endif
+
+// Keep the 0.7.34 sleep layout on Waveshare/Nextion. On the WT32 the date
+// sits closer to the clock and the larger temperature stays comfortably below.
+#if defined(MIRA_TARGET_WAVESHARE_43C) || defined(MIRA_TARGET_NEXTION_28)
+static constexpr int16_t MIRA_SLEEP_DATE_OFFSET_Y = 31;
+static constexpr int16_t MIRA_SLEEP_TEMP_OFFSET_Y = 72;
+#else
+static constexpr int16_t MIRA_SLEEP_DATE_OFFSET_Y = 15;
+static constexpr int16_t MIRA_SLEEP_TEMP_OFFSET_Y = 70;
 #endif
 
 static String roundRangeDisplayValue(int value, const String& unit) {
@@ -372,6 +393,8 @@ bool MiraPanelUI::touchStartedOnAnalogControl(uint16_t x, uint16_t y) const {
     if (obj == _brightnessSlider) return true;
     for (uint8_t i = 0; i < _bindingCount; ++i) {
       const Binding& b = _bindings[i];
+      // Media volume is a real draggable slider, not a navigation swipe.
+      if (b.type == W_MEDIA && b.mediaVolumeSlider == obj) return true;
       if (b.control != obj) continue;
       if (b.type == W_RANGE || b.type == W_ROUNDRANGE ||
           b.type == W_THERMOSTAT || b.type == W_COLOR) return true;
@@ -540,6 +563,21 @@ void MiraPanelUI::publishMqttAction(const Binding& b, const String& payload) {
 }
 
 void MiraPanelUI::handleMqttState(const String& topic, const String& rawPayload) {
+  // Composite data topics are strictly display-only (never Jeedom actions).
+  const String key = normalizeMqttTopicName(topic);
+  for (uint8_t i = 0; i < _bindingCount; ++i) {
+    Binding& b = _bindings[i];
+    if (b.type != W_ENERGY && b.type != W_MEDIA) continue;
+    const uint8_t fields = b.type == W_ENERGY ? 7 : 9;
+    for (uint8_t f = 0; f < fields; ++f) {
+      const char* suffix = b.type == W_ENERGY ? MIRA_ENERGY_FIELDS[f] : MIRA_MEDIA_FIELDS[f];
+      if (key != normalizeMqttTopicName(b.name + "__" + suffix)) continue;
+      const String value = mqttPayloadValue(rawPayload);
+      _server.IndexSetInfo(b.compositeIds[f], value);
+      updateCompositeInfo(b, f, value);
+      return;
+    }
+  }
   // Thermostat exposes 3 independent state topics. Always display-only.
   // Example: mira/<screen>/States/Thermostat salon__temperature
   for (uint8_t t = 0; t < _bindingCount; ++t) {
@@ -709,6 +747,7 @@ void MiraPanelUI::begin() {
   _theme = savedTheme <= THEME_GLASS ? savedTheme : THEME_DARK;
   _returnHomeEnabled = _prefs.getBool("home", true);
   loadFavorites();
+  _visiblePageMask = _prefs.getUChar("pageMask", 0x3F) | 0x01;
   _sleepEnabled = _prefs.getBool("sleep", true);
   _clockInSleep = _prefs.getBool("clock", true);
 
@@ -770,8 +809,8 @@ void MiraPanelUI::begin() {
       lv_obj_set_flex_flow(_pages[i], LV_FLEX_FLOW_ROW_WRAP);
       lv_obj_set_flex_align(_pages[i], LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     } else {
-      if (i == 1 || i == 2) lv_obj_set_style_pad_top(_pages[i], 8, 0);
-      if (MIRA_DISPLAY_WIDTH >= 800 && (i == 1 || i == 2)) {
+      if (i == 1 || i == 2 || i == 4 || i == 5) lv_obj_set_style_pad_top(_pages[i], 8, 0);
+      if (MIRA_DISPLAY_WIDTH >= 800 && (i == 1 || i == 2 || i == 4 || i == 5)) {
         lv_obj_set_flex_flow(_pages[i], LV_FLEX_FLOW_ROW_WRAP);
         lv_obj_set_flex_align(_pages[i], LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
       } else {
@@ -852,6 +891,7 @@ void MiraPanelUI::begin() {
 
   buildSettingsPage();
   buildPagePicker();
+  refreshPagePickerVisibility();
   refreshFavoriteNav();
 
 #if defined(MIRA_TARGET_WAVESHARE_43C)
@@ -869,17 +909,48 @@ void MiraPanelUI::begin() {
   lv_obj_set_style_border_width(_sleepOverlay, 0, 0);
   lv_obj_set_style_radius(_sleepOverlay, 0, 0);
 
+  // Clock/date/temperature are three read-only labels on a black overlay.
+  // Native font raster for WT32 avoids the blurry bitmap zoom experiment.
   _sleepClock = lv_label_create(_sleepOverlay);
   lv_label_set_text(_sleepClock, "--:--");
-  lv_obj_set_style_text_color(_sleepClock, COL_MUTED, 0);
+  lv_obj_set_width(_sleepClock, MIRA_DISPLAY_WIDTH - 16);
+  lv_label_set_long_mode(_sleepClock, LV_LABEL_LONG_CLIP);
+  lv_obj_set_style_text_color(_sleepClock, lv_color_white(), 0);
 #if defined(MIRA_TARGET_WAVESHARE_43C)
   lv_obj_set_style_text_font(_sleepClock, &mira_sleep_montserrat_120, 0);
-#else
-  // WT32: unchanged original Montserrat 48, no stretching.
+#elif defined(MIRA_TARGET_NEXTION_28)
   lv_obj_set_style_text_font(_sleepClock, &lv_font_montserrat_48, 0);
+#else
+  // WT32: 84px instead of 48px (+75%); 5 digits still fit a 320px panel.
+  lv_obj_set_style_text_font(_sleepClock, &mira_sleep_montserrat_84, 0);
 #endif
   lv_obj_set_style_text_align(_sleepClock, LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_align(_sleepClock, LV_ALIGN_CENTER, 0, -48);
+  lv_obj_align(_sleepClock, LV_ALIGN_CENTER, 0, -56);
+
+  _sleepDate = lv_label_create(_sleepOverlay);
+  lv_label_set_text(_sleepDate, "");
+  lv_obj_set_width(_sleepDate, MIRA_DISPLAY_WIDTH - 12);
+  lv_label_set_long_mode(_sleepDate, LV_LABEL_LONG_CLIP);
+  lv_obj_set_style_text_color(_sleepDate, COL_MUTED, 0);
+  lv_obj_set_style_text_font(_sleepDate, MIRA_DISPLAY_WIDTH <= 240 ?
+      &mira_font_fr_14 : &mira_font_fr_16, 0);
+  lv_obj_set_style_text_align(_sleepDate, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_align(_sleepDate, LV_ALIGN_CENTER, 0, MIRA_SLEEP_DATE_OFFSET_Y);
+
+  _sleepTemperature = lv_label_create(_sleepOverlay);
+  lv_label_set_text(_sleepTemperature, "");
+  lv_obj_set_width(_sleepTemperature, MIRA_DISPLAY_WIDTH - 16);
+  lv_obj_set_style_text_color(_sleepTemperature, lv_color_white(), 0);
+  #if defined(MIRA_TARGET_WAVESHARE_43C) || defined(MIRA_TARGET_NEXTION_28)
+  lv_obj_set_style_text_font(_sleepTemperature, MIRA_DISPLAY_WIDTH <= 240 ?
+      &lv_font_montserrat_20 : &lv_font_montserrat_28, 0);
+#else
+  // WT32: 40px instead of 28px (+43%) for the Jeedom Info temperature.
+  lv_obj_set_style_text_font(_sleepTemperature, &lv_font_montserrat_40, 0);
+#endif
+  lv_obj_set_style_text_align(_sleepTemperature, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_align(_sleepTemperature, LV_ALIGN_CENTER, 0, MIRA_SLEEP_TEMP_OFFSET_Y);
+  lv_obj_add_flag(_sleepTemperature, LV_OBJ_FLAG_HIDDEN);
 
   lv_obj_add_flag(_sleepOverlay, LV_OBJ_FLAG_HIDDEN);
 
@@ -916,6 +987,8 @@ uint8_t MiraPanelUI::addBinding() {
 uint8_t MiraPanelUI::pageIndex(const String& location) const {
   if (location == "lumieres") return 1;
   if (location == "temperatures") return 2;
+  if (location == "energie" || location == "energy") return 4;
+  if (location == "multimedia" || location == "media") return 5;
   return 0;
 }
 
@@ -996,10 +1069,14 @@ void MiraPanelUI::makeNameLabel(lv_obj_t* parent, const String& text) {
 }
 
 void MiraPanelUI::clearDynamicPages() {
+  clearAlbumArtwork();
+  closeCamera(); // never keep a camera request alive after Jeedom reprograms pages
 #if defined(MIRA_TARGET_WAVESHARE_43C)
   resetScrollCache(); // release images and PSRAM BEFORE deleting cards
 #endif
-  for (uint8_t i = 0; i < 3; ++i) lv_obj_clean(_pages[i]);
+  for (uint8_t i = 0; i < PAGE_COUNT; ++i) {
+    if (i != 3) lv_obj_clean(_pages[i]); // Paramètres is static
+  }
   _bindingCount = 0;
   _homeStandardInfoTotal = 0;
   _homeStandardInfoCreated = 0;
@@ -1149,6 +1226,14 @@ void MiraPanelUI::registerAndCreate(JsonObject obj) {
     b.multiLongId = _server.IndexAddButton(String("Multi_Long_") + name);
     if (_server.WT32MultiVisible(name)) createButton(idx);
   }
+  else if (type == "camera") {
+    b.type = W_CAMERA;
+    // Register as a standard Mira info command so Jeedom auto-sync creates
+    // Caméra : <name> under the specific screen's Commandes tab.
+    b.id = _server.IndexAddInfo(String("Camera_") + name, "");
+    b.cameraUrl = _server.GetCameraUrl(name);
+    createCamera(idx);
+  }
   else if (type == "toggle") {
     b.type = W_TOGGLE;
     int* ids = _server.IndexAddToggle(name, "Off", "On", "Off");
@@ -1228,6 +1313,27 @@ void MiraPanelUI::registerAndCreate(JsonObject obj) {
       b.listCount = 1;
     }
     createThermostat(idx);
+  }
+  else if (type == "energy") {
+    b.type = W_ENERGY;
+    for (uint8_t i = 0; i < 7; ++i)
+      b.compositeIds[i] = _server.IndexAddInfo(name + "__" + MIRA_ENERGY_FIELDS[i], "");
+    createEnergy(idx);
+  }
+  else if (type == "media") {
+    b.type = W_MEDIA;
+    for (uint8_t i = 0; i < 9; ++i)
+      b.compositeIds[i] = _server.IndexAddInfo(name + "__" + MIRA_MEDIA_FIELDS[i],
+                                                 i == 4 || i == 5 ? "%" : "");
+    for (uint8_t i = 0; i < 3; ++i)
+      b.mediaActionIds[i] = _server.IndexAddButton(name + "__" + MIRA_MEDIA_ACTIONS[i]);
+    // The one central touchscreen control dispatches TWO genuine Jeedom
+    // actions. No "Playing" Info is required by Spotify Connect.
+    b.mediaPauseCmdId = _server.IndexAddButton(name + "__pause");
+    b.mediaPlaybackPlaying = false;
+    b.mediaVolumeCmdId = _server.IndexAddRange(name + "__volume_cmd", 0, 100, 40);
+    b.mediaDeviceCmdId = _server.IndexAddRange(name + "__device_cmd", 0, 11, 0);
+    createMedia(idx);
   }
   else if (type == "datetime") {
     b.type = W_DATETIME;
@@ -1589,6 +1695,747 @@ void MiraPanelUI::createButton(uint8_t idx) {
   lv_obj_set_style_text_font(lbl, compact ? &mira_font_fr_14 : &mira_font_fr_16, 0);
   lv_obj_center(lbl);
 }
+
+// Small fixed-layout helpers. Composite widgets keep the Mira palette and
+// remain entirely LVGL-native (no images, external UI frameworks or GPU).
+static lv_obj_t* miraCompositeLabel(lv_obj_t* parent, const String& text,
+                                     int x, int y, int width,
+                                     const lv_font_t* font, lv_color_t color,
+                                     lv_text_align_t align = LV_TEXT_ALIGN_LEFT) {
+  lv_obj_t* label = lv_label_create(parent);
+  lv_label_set_text(label, text.c_str());
+  lv_obj_set_width(label, width);
+  lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+  lv_obj_set_style_text_font(label, font, 0);
+  lv_obj_set_style_text_color(label, color, 0);
+  lv_obj_set_style_text_align(label, align, 0);
+  lv_obj_set_pos(label, x, y);
+  return label;
+}
+
+// The WT32 energy cells are only ~135px wide. LV_LABEL_LONG_DOT used to
+// elide the unit of e.g. "10.1 kW". Measure the complete value AND unit,
+// reduce the font when needed, and wrap as a last resort. No unit is added.
+static void miraFitEnergyPowerLabel(lv_obj_t* label, const String& text) {
+  if (!label) return;
+  const lv_font_t* fonts[] = {
+    &lv_font_montserrat_20, &mira_font_fr_16,
+    &mira_font_fr_14, &mira_font_fr_12
+  };
+  const lv_coord_t width = lv_obj_get_width(label);
+  const lv_coord_t spacing = lv_obj_get_style_text_letter_space(label, LV_PART_MAIN);
+  const lv_font_t* chosen = fonts[3];
+  bool fits = false;
+  for (const lv_font_t* font : fonts) {
+    if (lv_txt_get_width(text.c_str(), text.length(), font,
+                         spacing, LV_TEXT_FLAG_NONE) <= width) {
+      chosen = font;
+      fits = true;
+      break;
+    }
+  }
+  lv_obj_set_style_text_font(label, chosen, 0);
+  lv_label_set_long_mode(label, fits ? LV_LABEL_LONG_DOT : LV_LABEL_LONG_WRAP);
+  lv_label_set_text(label, text.c_str());
+}
+
+void MiraPanelUI::createEnergy(uint8_t idx) {
+  Binding& b = _bindings[idx];
+  const bool mini = MIRA_DISPLAY_WIDTH <= 240;
+  const bool wide = MIRA_DISPLAY_WIDTH >= 800;
+  const int W = MIRA_CARD_FULL;
+  const int H = wide ? 344 : (mini ? 294 : 353);
+  b.card = makeCard(pageIndex(b.location), H);
+  lv_obj_set_size(b.card, W, H);
+  b.energyBaseHeight = H;
+  lv_obj_set_layout(b.card, 0);
+  lv_obj_set_style_pad_all(b.card, 0, 0);
+  lv_obj_clear_flag(b.card, LV_OBJ_FLAG_SCROLLABLE);
+
+  const int pad = mini ? 9 : 13;
+  const int gap = 8;
+  const int boxW = (W - 2 * pad - gap) / 2;
+  const int boxH = mini ? 77 : 91;
+  const int y1 = mini ? 39 : 50;
+  const int y2 = y1 + boxH + gap;
+  const lv_font_t* infoFont = mini ? &mira_font_fr_14 : &lv_font_montserrat_20;
+  const lv_font_t* headingFont = mini ? &mira_font_fr_12 : &mira_font_fr_14;
+
+  miraCompositeLabel(b.card,
+      b.displayName.length() ? b.displayName : String("Énergie"),
+      pad, 9, W - 2 * pad, &mira_font_fr_16, COL_TEXT);
+  const char* const titles[4] = {"SOLAIRE", "MAISON", "RÉSEAU", "BATTERIE"};
+  const uint32_t tints[4] = {0xF6BF49, 0xFF9F61, 0x42C7EE, 0x55DAAB};
+  for (uint8_t n = 0; n < 4; ++n) {
+    const int x = pad + (n % 2) * (boxW + gap);
+    const int y = y1 + (n / 2) * (boxH + gap);
+    lv_obj_t* cell = lv_obj_create(b.card);
+    lv_obj_set_pos(cell, x, y);
+    lv_obj_set_size(cell, boxW, boxH);
+    lv_obj_set_style_pad_all(cell, 0, 0);
+    lv_obj_set_style_radius(cell, 11, 0);
+    lv_obj_set_style_bg_color(cell, colorPanel2(), 0);
+    lv_obj_set_style_bg_opa(cell, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(cell, lv_color_hex(tints[n]), 0);
+    lv_obj_set_style_border_width(cell, 1, 0);
+    lv_obj_clear_flag(cell, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(cell, LV_OBJ_FLAG_CLICKABLE);
+    miraCompositeLabel(cell, titles[n], 10, 9, boxW - 20,
+                       headingFont, COL_MUTED);
+    b.compositeLabels[n] =
+        miraCompositeLabel(cell, "--", 10, mini ? 34 : 38,
+                           boxW - 18, infoFont, lv_color_hex(tints[n]));
+  }
+
+  const int sectionY = y2 + boxH + (mini ? 9 : 17);
+  miraCompositeLabel(b.card, "STOCKAGE", pad + 3, sectionY,
+                     W - 2 * pad, &mira_font_fr_14, COL_MUTED);
+  b.compositeLabels[4] = miraCompositeLabel(
+      b.card, "--", W - pad - (mini ? 58 : 72), sectionY - 1,
+      mini ? 55 : 70, infoFont, COL_GREEN, LV_TEXT_ALIGN_RIGHT);
+  b.compositeGauge = lv_bar_create(b.card);
+  lv_obj_set_pos(b.compositeGauge, pad + 3, sectionY + (mini ? 29 : 32));
+  lv_obj_set_size(b.compositeGauge, W - 2 * pad - 6, mini ? 8 : 11);
+  lv_bar_set_range(b.compositeGauge, 0, 100);
+  lv_bar_set_value(b.compositeGauge, 0, LV_ANIM_OFF);
+  lv_obj_set_style_bg_color(b.compositeGauge, colorPanel2(), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(b.compositeGauge, COL_GREEN, LV_PART_INDICATOR);
+  // Hidden until a real Jeedom/MQTT value explicitly specifies %.
+  lv_obj_add_flag(b.compositeGauge, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_style_radius(b.compositeGauge, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+  lv_obj_set_style_radius(b.compositeGauge, LV_RADIUS_CIRCLE, LV_PART_INDICATOR);
+  lv_obj_clear_flag(b.compositeGauge, LV_OBJ_FLAG_CLICKABLE);
+
+  // Two optional independent SOC rows. Their index slots always exist so
+  // Jeedom can configure them without reprogramming the energy widget.
+  // Empty values keep each extra row hidden and preserve old single-SOC UI.
+  for (uint8_t extra = 0; extra < 2; ++extra) {
+    const int y = sectionY + (extra + 1) * 47;
+    b.energyExtraNames[extra] = miraCompositeLabel(b.card,
+        extra == 0 ? "BATTERIE 2" : "BATTERIE 3", pad + 3, y,
+        W - 2 * pad, headingFont, COL_MUTED);
+    b.compositeLabels[5 + extra] = miraCompositeLabel(b.card, "--",
+        W - pad - (mini ? 58 : 72), y - 1, mini ? 55 : 70,
+        infoFont, COL_GREEN, LV_TEXT_ALIGN_RIGHT);
+    b.energyExtraGauges[extra] = lv_bar_create(b.card);
+    lv_obj_set_pos(b.energyExtraGauges[extra], pad + 3, y + (mini ? 29 : 32));
+    lv_obj_set_size(b.energyExtraGauges[extra], W - 2 * pad - 6, mini ? 8 : 11);
+    lv_bar_set_range(b.energyExtraGauges[extra], 0, 100);
+    lv_bar_set_value(b.energyExtraGauges[extra], 0, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(b.energyExtraGauges[extra], colorPanel2(), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(b.energyExtraGauges[extra], COL_GREEN, LV_PART_INDICATOR);
+    lv_obj_clear_flag(b.energyExtraGauges[extra], LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(b.energyExtraNames[extra], LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(b.compositeLabels[5 + extra], LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(b.energyExtraGauges[extra], LV_OBJ_FLAG_HIDDEN);
+  }
+}
+
+// Spotify sometimes supplies decomposed UTF-8 (NFD): e.g. "i" + U+0302
+// instead of the precomposed "î" (U+00EE). The custom Mira French fonts
+// already contain the precomposed glyph, but not combining mark U+0302.
+// Normalize only display text; never alter metadata sources or cover URLs.
+static String miraMediaDisplayText(String text) {
+  struct Accent { const char* from; const char* to; };
+  static const Accent accents[] = {
+    {"a\xCC\x80", "\xC3\xA0"}, {"a\xCC\x81", "\xC3\xA1"},
+    {"a\xCC\x82", "\xC3\xA2"}, {"a\xCC\x88", "\xC3\xA4"},
+    {"e\xCC\x80", "\xC3\xA8"}, {"e\xCC\x81", "\xC3\xA9"},
+    {"e\xCC\x82", "\xC3\xAA"}, {"e\xCC\x88", "\xC3\xAB"},
+    {"i\xCC\x81", "\xC3\xAD"}, {"i\xCC\x82", "\xC3\xAE"},
+    {"i\xCC\x88", "\xC3\xAF"},
+    {"o\xCC\x81", "\xC3\xB3"}, {"o\xCC\x82", "\xC3\xB4"},
+    {"o\xCC\x88", "\xC3\xB6"},
+    {"u\xCC\x80", "\xC3\xB9"}, {"u\xCC\x81", "\xC3\xBA"},
+    {"u\xCC\x82", "\xC3\xBB"}, {"u\xCC\x88", "\xC3\xBC"},
+    {"c\xCC\xA7", "\xC3\xA7"}, {"n\xCC\x83", "\xC3\xB1"},
+    {"A\xCC\x82", "\xC3\x82"}, {"E\xCC\x82", "\xC3\x8A"},
+    {"I\xCC\x82", "\xC3\x8E"}, {"O\xCC\x82", "\xC3\x94"},
+    {"U\xCC\x82", "\xC3\x9B"}
+  };
+  for (const Accent& accent : accents) text.replace(accent.from, accent.to);
+  // Spotify often uses typographic apostrophes/quotation marks which are
+  // not present in the compact LVGL French bitmap font. ASCII equivalents
+  // retain the correct text instead of an empty square.
+  text.replace("\xE2\x80\x99", "'"); // RIGHT SINGLE QUOTATION MARK
+  text.replace("\xE2\x80\x98", "'"); // LEFT SINGLE QUOTATION MARK
+  text.replace("\xCA\xBC", "'");     // MODIFIER LETTER APOSTROPHE
+  text.replace("\xE2\x80\x9C", "\""); // LEFT DOUBLE QUOTATION MARK
+  text.replace("\xE2\x80\x9D", "\""); // RIGHT DOUBLE QUOTATION MARK
+  text.replace("\xE2\x80\x93", "-");  // EN DASH
+  text.replace("\xE2\x80\x94", "-");  // EM DASH
+  text.replace("\xC2\xA0", " ");     // NO-BREAK SPACE
+  return text;
+}
+
+// A dedicated Mira media dashboard (not a Home Assistant media-player card).
+// Three explicit commands are linked through the existing Jeedom Button
+// mechanism; the volume slider is a standard indexed Range action.
+void MiraPanelUI::createMedia(uint8_t idx) {
+  Binding& b = _bindings[idx];
+  const bool mini = MIRA_DISPLAY_WIDTH <= 240;
+  const bool wide = MIRA_DISPLAY_WIDTH >= 800;
+  const int W = MIRA_CARD_FULL;
+  const int H = wide ? 558 : (mini ? 368 : 417);
+  const int pad = mini ? 9 : (wide ? 22 : 13);
+  b.card = makeCard(pageIndex(b.location), H);
+  lv_obj_set_size(b.card, W, H);
+  lv_obj_set_layout(b.card, 0);
+  lv_obj_set_style_pad_all(b.card, 0, 0);
+  lv_obj_clear_flag(b.card, LV_OBJ_FLAG_SCROLLABLE);
+
+  // Jeedom Spotify Connect tile: vertically centered album artwork,
+  // track info and 3 actions. Keep Mira's original volume slider as-is.
+  miraCompositeLabel(b.card,
+      miraMediaDisplayText(b.displayName.length() ? b.displayName : String("Multimédia")),
+      pad, 7, W - 2 * pad, &mira_font_fr_16, COL_TEXT,
+      LV_TEXT_ALIGN_CENTER);
+
+  const int artW = wide ? 230 : (mini ? 114 : 154);
+  const int artY = wide ? 38 : (mini ? 31 : 32);
+  const int artX = (W - artW) / 2;
+  // Jeedom-inspired sleeve stack: subtle offset cards and shadow rather
+  // than a rigid, bright cyan picture border. No duplicate JPEG buffers.
+  const int stackOffset = mini ? 10 : (wide ? 24 : 18);
+  for (int side = -1; side <= 1; side += 2) {
+    lv_obj_t* sleeve = lv_obj_create(b.card);
+    lv_obj_set_pos(sleeve, artX + side * stackOffset, artY + 7);
+    lv_obj_set_size(sleeve, artW - 5, artW - 5);
+    lv_obj_set_style_radius(sleeve, 15, 0);
+    lv_obj_set_style_bg_color(sleeve, lv_color_hex(0x244463), 0);
+    lv_obj_set_style_bg_grad_color(sleeve, lv_color_hex(0x101C34), 0);
+    lv_obj_set_style_bg_grad_dir(sleeve, LV_GRAD_DIR_VER, 0);
+    lv_obj_set_style_bg_opa(sleeve, LV_OPA_70, 0);
+    lv_obj_set_style_border_width(sleeve, 0, 0);
+    lv_obj_set_style_shadow_width(sleeve, 8, 0);
+    lv_obj_set_style_shadow_opa(sleeve, LV_OPA_20, 0);
+    lv_obj_set_style_pad_all(sleeve, 0, 0);
+    lv_obj_clear_flag(sleeve, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(sleeve, LV_OBJ_FLAG_SCROLLABLE);
+  }
+  lv_obj_t* art = lv_obj_create(b.card);
+  lv_obj_set_size(art, artW, artW);
+  lv_obj_set_pos(art, artX, artY);
+  lv_obj_set_style_radius(art, 15, 0);
+  lv_obj_set_style_clip_corner(art, true, 0);
+  lv_obj_set_style_bg_color(art, lv_color_hex(0x132A47), 0);
+  lv_obj_set_style_bg_grad_color(art, lv_color_hex(0x315C87), 0);
+  lv_obj_set_style_bg_grad_dir(art, LV_GRAD_DIR_VER, 0);
+  lv_obj_set_style_border_width(art, 0, 0);
+  lv_obj_set_style_shadow_color(art, lv_color_hex(0x050B16), 0);
+  lv_obj_set_style_shadow_width(art, 16, 0);
+  lv_obj_set_style_shadow_ofs_y(art, 5, 0);
+  lv_obj_set_style_shadow_opa(art, LV_OPA_50, 0);
+  lv_obj_set_style_pad_all(art, 0, 0);
+  lv_obj_clear_flag(art, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_clear_flag(art, LV_OBJ_FLAG_SCROLLABLE);
+  b.mediaArtworkSize = artW;
+  b.mediaArtworkPlaceholder = miraCompositeLabel(
+      art, LV_SYMBOL_AUDIO, 0, (artW - 28) / 2, artW,
+      &lv_font_montserrat_28, colorAccent(), LV_TEXT_ALIGN_CENTER);
+  b.mediaArtworkImage = lv_img_create(art);
+  // Rounded clipping happens once on the artwork parent, not twice:
+  // important for LVGL performance on the WT32.
+  lv_obj_align(b.mediaArtworkImage, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_add_flag(b.mediaArtworkImage, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_clear_flag(b.mediaArtworkImage, LV_OBJ_FLAG_CLICKABLE);
+
+  const int titleY = wide ? 279 : (mini ? 151 : 197);
+  const int artistY = wide ? 314 : (mini ? 176 : 224);
+  const int stateY = wide ? 340 : (mini ? 194 : 245);
+  b.compositeLabels[0] = miraCompositeLabel(
+      b.card, "Aucune lecture", pad, titleY, W - 2 * pad,
+      &mira_font_fr_16, COL_TEXT, LV_TEXT_ALIGN_CENTER);
+  b.compositeLabels[1] = miraCompositeLabel(
+      b.card, "", pad, artistY, W - 2 * pad,
+      &mira_font_fr_14, COL_MUTED, LV_TEXT_ALIGN_CENTER);
+  // The album metadata and progress remain available in Jeedom / MQTT
+  // for compatibility but are not shown in the compact Jeedom-style tile.
+  b.compositeLabels[3] = miraCompositeLabel(
+      b.card, "À l'arrêt", pad, stateY, W - 2 * pad,
+      &mira_font_fr_12, COL_MUTED, LV_TEXT_ALIGN_CENTER);
+
+  const int actionsY = wide ? 380 : (mini ? 219 : 273);
+  const int buttonW = mini ? 52 : (wide ? 72 : 62);
+  const int buttonGap = mini ? 11 : (wide ? 24 : 20);
+  const int buttonH = mini ? 42 : (wide ? 57 : 50);
+  const int firstX = (W - 3 * buttonW - 2 * buttonGap) / 2;
+  const char* symbols[3] = {LV_SYMBOL_PREV, LV_SYMBOL_PLAY, LV_SYMBOL_NEXT};
+  for (uint8_t i = 0; i < 3; ++i) {
+    lv_obj_t* btn = lv_btn_create(b.card);
+    lv_obj_set_pos(btn, firstX + i * (buttonW + buttonGap), actionsY);
+    lv_obj_set_size(btn, buttonW, buttonH);
+    lv_obj_set_style_radius(btn, 12, 0);
+    lv_obj_set_style_bg_color(btn, i == 1 ? colorAccent2() : colorPanel2(), 0);
+    lv_obj_set_style_border_color(btn, colorAccent(), 0);
+    lv_obj_set_style_border_width(btn, 1, 0);
+    lv_obj_set_style_shadow_width(btn, 0, 0);
+    lv_obj_set_style_pad_all(btn, 0, 0);
+    lv_obj_clear_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(btn, onMediaAction, LV_EVENT_CLICKED, makeContext(idx, i));
+    lv_obj_t* glyph = miraCompositeLabel(
+        btn, symbols[i], 0, mini ? 9 : (wide ? 16 : 13),
+        buttonW, &lv_font_montserrat_20, COL_TEXT, LV_TEXT_ALIGN_CENTER);
+    if (i == 1) b.stateLabel = glyph;
+  }
+
+  // Center volume icon, slider track and value on one horizontal baseline.
+  // Keep the original 0..100 Jeedom range action and LV_EVENT_RELEASED.
+  const int volY = wide ? 468 : (mini ? 279 : 344);
+  const int volCenterY = volY + 13;
+  const int volIconW = 26;
+  const int volValueW = mini ? 45 : 49;
+  const int volSliderX = pad + volIconW + 12;
+  const int volSliderW = W - 2 * pad - volIconW - 12 - volValueW - 9;
+  const int volSliderH = wide ? 18 : 16;
+  miraCompositeLabel(b.card, LV_SYMBOL_VOLUME_MAX, pad, volCenterY - 12,
+                     volIconW, &lv_font_montserrat_20, colorAccent());
+  b.compositeLabels[5] = miraCompositeLabel(
+      b.card, "-- %", W - pad - volValueW, volCenterY - 9,
+      volValueW, &mira_font_fr_14, COL_TEXT, LV_TEXT_ALIGN_RIGHT);
+  b.mediaVolumeSlider = lv_slider_create(b.card);
+  lv_obj_set_pos(b.mediaVolumeSlider, volSliderX, volCenterY - volSliderH / 2);
+  lv_obj_set_size(b.mediaVolumeSlider, volSliderW, volSliderH);
+  lv_slider_set_range(b.mediaVolumeSlider, 0, 100);
+  lv_slider_set_value(b.mediaVolumeSlider, 40, LV_ANIM_OFF);
+  lv_obj_set_style_bg_color(b.mediaVolumeSlider, lv_color_hex(0x244563), LV_PART_MAIN);
+  lv_obj_set_style_radius(b.mediaVolumeSlider, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(b.mediaVolumeSlider, colorAccent(), LV_PART_INDICATOR);
+  lv_obj_set_style_radius(b.mediaVolumeSlider, LV_RADIUS_CIRCLE, LV_PART_INDICATOR);
+  lv_obj_set_style_bg_color(b.mediaVolumeSlider, COL_TEXT, LV_PART_KNOB);
+  lv_obj_set_style_pad_all(b.mediaVolumeSlider, 3, LV_PART_KNOB);
+  lv_obj_set_ext_click_area(b.mediaVolumeSlider, 13);
+  lv_obj_add_event_cb(b.mediaVolumeSlider, onMediaVolume,
+                      LV_EVENT_RELEASED, makeContext(idx));
+
+  // Speaker menu directly below volume, aligned to the card's outer edges.
+  const int dropY = wide ? 508 : (mini ? 320 : 377);
+  b.mediaDeviceDropdown = lv_dropdown_create(b.card);
+  lv_obj_set_pos(b.mediaDeviceDropdown, pad, dropY);
+  lv_obj_set_size(b.mediaDeviceDropdown, W - 2 * pad, wide ? 42 : (mini ? 36 : 35));
+  lv_obj_set_style_radius(b.mediaDeviceDropdown, 9, 0);
+  lv_obj_set_style_bg_color(b.mediaDeviceDropdown, colorPanel2(), 0);
+  lv_obj_set_style_border_color(b.mediaDeviceDropdown, colorAccent(), 0);
+  lv_obj_set_style_border_width(b.mediaDeviceDropdown, 1, 0);
+  lv_obj_set_style_text_color(b.mediaDeviceDropdown, COL_TEXT, 0);
+  lv_obj_set_style_text_font(b.mediaDeviceDropdown, &mira_font_fr_14, 0);
+  lv_dropdown_set_options(b.mediaDeviceDropdown, "Aucune enceinte disponible");
+  lv_obj_add_state(b.mediaDeviceDropdown, LV_STATE_DISABLED);
+  lv_obj_add_event_cb(b.mediaDeviceDropdown, onMediaDeviceSelected,
+                      LV_EVENT_VALUE_CHANGED, makeContext(idx));
+}
+
+void MiraPanelUI::refreshMediaDeviceDropdown(Binding& b) {
+  if (!b.mediaDeviceDropdown) return;
+  _suppressEvents = true;
+  if (!b.mediaDeviceCount) {
+    lv_dropdown_set_options(b.mediaDeviceDropdown, "Aucune enceinte disponible");
+    lv_obj_add_state(b.mediaDeviceDropdown, LV_STATE_DISABLED);
+  } else {
+    String options = "Choisir une enceinte";
+    uint16_t selected = 0;
+    for (uint8_t i = 0; i < b.mediaDeviceCount; ++i) {
+      options += "\n";
+      options += miraMediaDisplayText(b.mediaDeviceNames[i]);
+      if (miraMediaDisplayText(b.mediaDeviceNames[i]) == b.mediaActiveDevice)
+        selected = i + 1;
+    }
+    lv_dropdown_set_options(b.mediaDeviceDropdown, options.c_str());
+    lv_dropdown_set_selected(b.mediaDeviceDropdown, selected);
+    lv_obj_clear_state(b.mediaDeviceDropdown, LV_STATE_DISABLED);
+  }
+  _suppressEvents = false;
+}
+
+// Common passive view update for Jeedom /updatenr and MQTT States. It never
+// executes actions or publishes MQTT and hence cannot move a physical device.
+void MiraPanelUI::updateCompositeInfo(Binding& b, uint8_t field, const String& raw) {
+  String text = raw;
+  text.trim();
+  if (!text.length()) text = "--";
+  if (b.type == W_ENERGY) {
+    if (field >= 7) return;
+    // No hard-coded unit. Jeedom or MQTT may supply W, kW, kWh, A, %, etc.
+    // Values without units are rendered without any added suffix.
+    if (b.compositeLabels[field]) {
+      if (field < 4) miraFitEnergyPowerLabel(b.compositeLabels[field], text);
+      else lv_label_set_text(b.compositeLabels[field], text.c_str());
+    }
+    // SoC is a numeric gauge only when the selected Jeedom reading is
+    // actually a percentage. For a differently configured unit, leave
+    // the gauge empty; always show the source value unchanged above it.
+    if (field == 4 && b.compositeGauge) {
+      // A gauge is meaningful for battery percentage only. If Jeedom
+      // uses V, Ah, kWh or no unit, hide it instead of pretending 0..100 %.
+      const bool hasPercent = raw.indexOf('%') >= 0;
+      if (hasPercent) lv_obj_clear_flag(b.compositeGauge, LV_OBJ_FLAG_HIDDEN);
+      else lv_obj_add_flag(b.compositeGauge, LV_OBJ_FLAG_HIDDEN);
+      lv_bar_set_value(b.compositeGauge,
+          hasPercent ? clampInt(raw.toInt(), 0, 100) : 0, LV_ANIM_OFF);
+    }
+    if (field == 5 || field == 6) {
+      const uint8_t extra = field - 5;
+      // Never guess a battery: only explicitly configured, nonempty
+      // Jeedom/MQTT sources activate their own separate SOC row.
+      b.energyExtraActive[extra] = raw.length() > 0 && text != "--";
+      if (b.energyExtraNames[extra]) {
+        if (b.energyExtraActive[extra]) lv_obj_clear_flag(b.energyExtraNames[extra], LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(b.energyExtraNames[extra], LV_OBJ_FLAG_HIDDEN);
+      }
+      if (b.compositeLabels[field]) {
+        if (b.energyExtraActive[extra]) lv_obj_clear_flag(b.compositeLabels[field], LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(b.compositeLabels[field], LV_OBJ_FLAG_HIDDEN);
+      }
+      if (b.energyExtraGauges[extra]) {
+        const bool showGauge = b.energyExtraActive[extra] && raw.indexOf('%') >= 0;
+        if (showGauge) lv_obj_clear_flag(b.energyExtraGauges[extra], LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(b.energyExtraGauges[extra], LV_OBJ_FLAG_HIDDEN);
+        lv_bar_set_value(b.energyExtraGauges[extra],
+            showGauge ? clampInt(raw.toInt(), 0, 100) : 0, LV_ANIM_OFF);
+      }
+      if (b.card && b.energyBaseHeight > 0) {
+        const int extraRows = b.energyExtraActive[1] ? 2 :
+                              (b.energyExtraActive[0] ? 1 : 0);
+        lv_obj_set_height(b.card, b.energyBaseHeight + 47 * extraRows);
+      }
+    }
+    return;
+  }
+  if (b.type != W_MEDIA || field >= 9) return;
+  if (field == 7) {
+    b.mediaActiveDevice = miraMediaDisplayText(raw);
+    b.mediaActiveDevice.trim();
+    refreshMediaDeviceDropdown(b);
+    return;
+  }
+  if (field == 8) {
+    b.mediaDeviceCount = 0;
+    int pos = 0;
+    while (pos < (int)raw.length() && b.mediaDeviceCount < 12) {
+      int sep = raw.indexOf('|', pos);
+      String item = sep < 0 ? raw.substring(pos) : raw.substring(pos,sep);
+      item.trim();
+      if (item.length() && item.length() < 97 && item.indexOf('\n') < 0)
+        b.mediaDeviceNames[b.mediaDeviceCount++] = item;
+      if (sep < 0) break;
+      pos = sep + 1;
+    }
+    refreshMediaDeviceDropdown(b);
+    return;
+  }
+  if (field == 6) {
+    // Optional cover URL; trusted Spotify and Google Cast image hosts only. A media Info must never trigger
+    // an arbitrary device/LAN HTTP request or leak Jeedom credentials.
+    String url = raw;
+    url.trim();
+    if (url == _albumUrl) return;
+    // Invalid or empty artwork is a genuine absence of cover: clear it.
+    // Only trusted media artwork hosts may start an HTTPS request.
+    const bool safe = url.startsWith("https://i.scdn.co/image/") ||
+                      url.startsWith("https://mosaic.scdn.co/") ||
+                      url.startsWith("https://yt3.googleusercontent.com/");
+    if (!safe || url.length() > 768) {
+      clearAlbumArtwork();
+      return;
+    }
+    const int16_t nextIdx = (int16_t)(&b - _bindings);
+    // A different media widget must not inherit this widget's cover.
+    // For the SAME widget, leave the last decoded image visible while
+    // the next JPEG is downloaded on the background worker.
+    if (_albumTargetIdx >= 0 && _albumTargetIdx != nextIdx)
+      clearAlbumArtwork();
+    _albumTargetIdx = nextIdx;
+    _albumUrl = url;
+    _albumRequestedAtMs = millis();
+    Serial.printf("[MIRA][ART] Nouvelle pochette recue a %lu ms; ancienne image conservee\n",
+                  (unsigned long)_albumRequestedAtMs);
+    // start() invalidates any queued OLD frame and switches the worker's
+    // generation. The currently displayed LVGL pixels remain untouched.
+    if (!_albumFeed.start(url,160,160,true)) {
+      // Keep the previous cover if the worker couldn't start, while allowing
+      // the next Jeedom metadata refresh to retry this same URL.
+      _albumUrl = "";
+      _albumRequestedAtMs = 0;
+      Serial.println("[MIRA][ART] Worker indisponible, ancienne image conservee");
+    }
+    return;
+  }
+  if (field == 3) {
+    String state = raw; state.toLowerCase(); state.trim();
+    const bool playing = (state == "playing" || state == "lecture" ||
+                          state == "play" || state == "1" || state == "on" ||
+                          state == "true" || state == "en lecture");
+    const bool paused = (state == "paused" || state == "pause" ||
+                         state == "0" || state == "off" ||
+                         state == "false" || state == "en pause" ||
+                         state == "stopped" || state == "arrêt");
+    if (!playing && !paused) {
+      if (state == "unknown") {
+        // A new speaker with no actual playback state must not keep the
+        // old room's Pause icon. Do not claim that playback is stopped.
+        b.mediaPlaybackPlaying = false;
+        if (b.stateLabel) lv_label_set_text(b.stateLabel, LV_SYMBOL_PLAY);
+        if (b.compositeLabels[3])
+          lv_label_set_text(b.compositeLabels[3], "État non disponible");
+      }
+      return;
+    }
+    b.mediaPlaybackPlaying = playing;
+    if (b.stateLabel)
+      lv_label_set_text(b.stateLabel, playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
+    text = playing ? "En lecture" : "En pause";
+  } else if (field == 4 || field == 5) {
+    if (field == 4) {
+      // A Spotify track name/duration is NOT a percentage. Ignore stale
+      // mappings rather than displaying nonsense like "Blue Sky %".
+      bool numeric = raw.length() > 0;
+      for (size_t i = 0; i < raw.length(); ++i) {
+        const char ch = raw[i];
+        if (!isDigit(ch) && ch != '.' && ch != ',' && ch != ' ') {
+          numeric = false; break;
+        }
+      }
+      if (!numeric || raw.toFloat() < 0 || raw.toFloat() > 100) {
+        text = "--";
+      }
+    }
+    if (text != "--" && text.indexOf('%') < 0) text += " %";
+    if (field == 4 && b.compositeGauge)
+      lv_bar_set_value(b.compositeGauge,
+          text == "--" ? 0 : clampInt(raw.toInt(), 0, 100), LV_ANIM_OFF);
+    if (field == 5 && b.mediaVolumeSlider) {
+      _suppressEvents = true;
+      lv_slider_set_value(b.mediaVolumeSlider, clampInt(raw.toInt(), 0, 100),
+                          LV_ANIM_OFF);
+      _suppressEvents = false;
+    }
+  }
+  if (b.compositeLabels[field]) {
+    // Normalize decomposed Spotify accents so precomposed French glyphs
+    // (especially î / U+00EE) are used rather than a replacement square.
+    if (field <= 2) text = miraMediaDisplayText(text);
+    lv_label_set_text(b.compositeLabels[field], text.c_str());
+  }
+}
+
+void MiraPanelUI::clearAlbumArtwork() {
+  _albumFeed.stop();
+  if (_albumTargetIdx >= 0 && _albumTargetIdx < _bindingCount) {
+    Binding& old = _bindings[_albumTargetIdx];
+    if (old.mediaArtworkImage) {
+      lv_img_set_src(old.mediaArtworkImage, nullptr);
+      lv_obj_add_flag(old.mediaArtworkImage, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (old.mediaArtworkPlaceholder)
+      lv_obj_clear_flag(old.mediaArtworkPlaceholder, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (_albumPixels) heap_caps_free(_albumPixels);
+  _albumPixels = nullptr;
+  _albumDescriptor = {};
+  _albumUrl = "";
+  _albumTargetIdx = -1;
+  _albumRequestedAtMs = 0;
+}
+
+void MiraPanelUI::serviceAlbumArtwork() {
+  MiraCameraBmp::Frame frame;
+  if (!_albumFeed.take(frame)) return;
+  if (_albumTargetIdx < 0 || _albumTargetIdx >= _bindingCount ||
+      !_bindings[_albumTargetIdx].mediaArtworkImage || !frame.pixels ||
+      !frame.width || !frame.height) {
+    if (frame.pixels) heap_caps_free(frame.pixels);
+    return;
+  }
+  Binding& b = _bindings[_albumTargetIdx];
+  // Atomic-looking handover on the LVGL/UI thread: detach the old image
+  // BEFORE freeing its PSRAM pixels, then attach the fully decoded frame.
+  // The album background worker never manipulates LVGL or the old frame.
+  lv_img_set_src(b.mediaArtworkImage, nullptr);
+  if (_albumPixels) heap_caps_free(_albumPixels);
+  _albumPixels = frame.pixels;
+  _albumDescriptor = {};
+  _albumDescriptor.header.always_zero = 0;
+  _albumDescriptor.header.cf = LV_IMG_CF_TRUE_COLOR;
+  _albumDescriptor.header.w = frame.width;
+  _albumDescriptor.header.h = frame.height;
+  _albumDescriptor.data_size = uint32_t(frame.width) * frame.height * 2;
+  _albumDescriptor.data = reinterpret_cast<const uint8_t*>(_albumPixels);
+  lv_img_set_src(b.mediaArtworkImage, &_albumDescriptor);
+  // JPEGDEC reduces large covers to an integer scale; fit the thumbnail.
+  const uint32_t zoomW = (uint32_t(b.mediaArtworkSize) * 256U) / frame.width;
+  const uint32_t zoomH = (uint32_t(b.mediaArtworkSize) * 256U) / frame.height;
+  uint32_t zoom = zoomW < zoomH ? zoomW : zoomH;
+  if (zoom > 2048) zoom = 2048;
+  if (zoom < 1) zoom = 1;
+  lv_img_set_zoom(b.mediaArtworkImage, (uint16_t)zoom);
+  lv_obj_align(b.mediaArtworkImage, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_clear_flag(b.mediaArtworkImage, LV_OBJ_FLAG_HIDDEN);
+  if (b.mediaArtworkPlaceholder)
+    lv_obj_add_flag(b.mediaArtworkPlaceholder, LV_OBJ_FLAG_HIDDEN);
+  if (_albumRequestedAtMs)
+    Serial.printf("[MIRA][ART] Nouvelle pochette affichee en %lu ms (sans ecran bleu)\n",
+                  (unsigned long)(millis() - _albumRequestedAtMs));
+  _albumRequestedAtMs = 0;
+}
+
+// Same compact action row as ordinary Mira buttons. No thumbnail, no
+// snapshot requests and no preview on the page: icon + camera name only.
+// The network worker starts strictly when the user opens the fullscreen view.
+void MiraPanelUI::createCamera(uint8_t idx) {
+  Binding& b = _bindings[idx];
+  const bool compact = b.style == "compact";
+  b.card = makeCard(pageIndex(b.location), compact ? 44 : 54);
+  lv_obj_clear_flag(b.card, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_bg_opa(b.card, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(b.card, 0, 0);
+  lv_obj_set_style_shadow_width(b.card, 0, 0);
+  lv_obj_set_style_pad_all(b.card, 0, 0);
+
+  b.control = lv_btn_create(b.card);
+  const lv_coord_t btnW = MIRA_DISPLAY_WIDTH >= 800 ? (compact ? 344 : 360) :
+                         (MIRA_DISPLAY_WIDTH <= 240 ? 206 : (compact ? 230 : 288));
+  lv_obj_set_size(b.control, btnW, compact ? 34 : 44);
+  lv_obj_center(b.control);
+  lv_obj_clear_flag(b.control, LV_OBJ_FLAG_SCROLLABLE);
+  // Reuse the normal Mira button colors, pressed feedback, border and radius.
+  lv_obj_set_style_bg_color(b.control, colorPanel2(), 0);
+  lv_obj_set_style_bg_opa(b.control, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_color(b.control, colorAccent2(), 0);
+  lv_obj_set_style_border_opa(b.control, LV_OPA_70, 0);
+  lv_obj_set_style_border_width(b.control, 1, 0);
+  lv_obj_set_style_bg_color(b.control, colorAccent(), LV_STATE_PRESSED);
+  lv_obj_set_style_border_color(b.control, lv_color_hex(0x7DEEFF), LV_STATE_PRESSED);
+  lv_obj_set_style_border_width(b.control, 1, LV_STATE_PRESSED);
+  lv_obj_set_style_radius(b.control, 13, 0);
+  lv_obj_set_style_shadow_color(b.control, lv_color_hex(0x000000), 0);
+  lv_obj_set_style_shadow_opa(b.control, LV_OPA_20, 0);
+  lv_obj_set_style_shadow_width(b.control, 4, 0);
+  lv_obj_set_style_shadow_ofs_y(b.control, 2, 0);
+  lv_obj_set_style_pad_all(b.control, 0, 0);
+
+  // Tiny native LVGL camera pictogram (body, shutter bump and lens).
+  // No font icon dependency, so the three display profiles render alike.
+  lv_obj_t* cameraIcon = lv_obj_create(b.control);
+  lv_obj_set_size(cameraIcon, 26, 24);
+  lv_obj_align(cameraIcon, LV_ALIGN_LEFT_MID, 12, 0);
+  lv_obj_clear_flag(cameraIcon, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_clear_flag(cameraIcon, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_style_bg_opa(cameraIcon, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(cameraIcon, 0, 0);
+  lv_obj_set_style_pad_all(cameraIcon, 0, 0);
+  miraGlyphPart(cameraIcon, 1, 7, 24, 16, true, 4, colorAccent());
+  miraGlyphPart(cameraIcon, 5, 4, 9, 5, false, 2, colorAccent());
+  miraGlyphPart(cameraIcon, 9, 11, 8, 8, true, LV_RADIUS_CIRCLE, colorAccent());
+
+  lv_obj_t* name = lv_label_create(b.control);
+  lv_label_set_text(name, (b.displayName.length() ? b.displayName : b.name).c_str());
+  lv_obj_set_width(name, btnW - 56);
+  lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
+  lv_obj_set_style_text_color(name, COL_TEXT, 0);
+  lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_LEFT, 0);
+  lv_obj_set_style_text_font(name, compact ? &mira_font_fr_14 : &mira_font_fr_16, 0);
+  lv_obj_align(name, LV_ALIGN_LEFT_MID, 48, 0);
+
+  EventContext* ctx = makeContext(idx);
+  lv_obj_add_event_cb(b.control, onCameraTile, LV_EVENT_CLICKED, ctx);
+}
+
+void MiraPanelUI::openCamera(uint8_t idx) {
+  if (idx >= _bindingCount || _bindings[idx].type != W_CAMERA) return;
+  if (_cameraOverlay) closeCamera();
+  const Binding& b = _bindings[idx];
+  _cameraOverlay = lv_obj_create(lv_layer_top());
+  lv_obj_set_size(_cameraOverlay, MIRA_DISPLAY_WIDTH, MIRA_DISPLAY_HEIGHT);
+  lv_obj_align(_cameraOverlay, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_clear_flag(_cameraOverlay, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_bg_color(_cameraOverlay, lv_color_black(), 0);
+  lv_obj_set_style_bg_opa(_cameraOverlay, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(_cameraOverlay, 0, 0);
+  lv_obj_set_style_radius(_cameraOverlay, 0, 0);
+  lv_obj_set_style_pad_all(_cameraOverlay, 0, 0);
+  _cameraImage = lv_img_create(_cameraOverlay);
+  lv_obj_align(_cameraImage, LV_ALIGN_CENTER, 0, 18);
+  _cameraStatus = lv_label_create(_cameraOverlay);
+  lv_obj_set_width(_cameraStatus, MIRA_DISPLAY_WIDTH - 22);
+  lv_label_set_long_mode(_cameraStatus, LV_LABEL_LONG_WRAP);
+  lv_obj_set_style_text_color(_cameraStatus, lv_color_white(), 0);
+  lv_obj_set_style_text_align(_cameraStatus, LV_TEXT_ALIGN_CENTER, 0);
+  lv_label_set_text(_cameraStatus, "Chargement camera...");
+  lv_obj_align(_cameraStatus, LV_ALIGN_CENTER, 0, 10);
+  lv_obj_t* back = lv_btn_create(_cameraOverlay);
+  lv_obj_set_size(back, 56, 34);
+  lv_obj_align(back, LV_ALIGN_TOP_LEFT, 4, 4);
+  lv_obj_set_style_radius(back, 10, 0);
+  lv_obj_add_event_cb(back, onCameraBack, LV_EVENT_CLICKED, this);
+  lv_obj_t* arrow = lv_label_create(back);
+  lv_label_set_text(arrow, LV_SYMBOL_LEFT);
+  lv_obj_center(arrow);
+  lv_obj_t* title = lv_label_create(_cameraOverlay);
+  lv_obj_set_width(title, MIRA_DISPLAY_WIDTH - 70);
+  lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
+  lv_label_set_text(title, (b.displayName.length() ? b.displayName : b.name).c_str());
+  lv_obj_set_style_text_color(title, lv_color_white(), 0);
+  lv_obj_set_style_text_font(title, &mira_font_fr_14, 0);
+  lv_obj_align(title, LV_ALIGN_TOP_LEFT, 66, 12);
+  _cameraOpenedAt = millis();
+  const String cameraUrl = _server.GetCameraUrl(b.name);
+  if (!_cameraFeed.start(cameraUrl, MIRA_DISPLAY_WIDTH,
+                          MIRA_DISPLAY_HEIGHT - 50)) {
+    lv_label_set_text(_cameraStatus, "Configurer URL dans Jeedom > Mira > Commandes");
+  }
+}
+
+void MiraPanelUI::closeCamera() {
+  _cameraFeed.stop();
+  if (_cameraOverlay) lv_obj_del(_cameraOverlay);
+  _cameraOverlay = nullptr;
+  _cameraImage = nullptr;
+  _cameraStatus = nullptr;
+  if (_cameraPixels) heap_caps_free(_cameraPixels);
+  _cameraPixels = nullptr;
+  _cameraDescriptor = {};
+}
+
+void MiraPanelUI::serviceCamera() {
+  if (!_cameraOverlay) return;
+  if (_sleeping) { closeCamera(); return; }
+  MiraCameraBmp::Frame frame;
+  if (_cameraFeed.take(frame)) {
+    if (_cameraImage) lv_img_set_src(_cameraImage, nullptr);
+    if (_cameraPixels) heap_caps_free(_cameraPixels);
+    _cameraPixels = frame.pixels;
+    _cameraDescriptor = {};
+    _cameraDescriptor.header.always_zero = 0;
+    _cameraDescriptor.header.cf = LV_IMG_CF_TRUE_COLOR;
+    _cameraDescriptor.header.w = frame.width;
+    _cameraDescriptor.header.h = frame.height;
+    _cameraDescriptor.data_size = uint32_t(frame.width) * frame.height * 2;
+    _cameraDescriptor.data = reinterpret_cast<const uint8_t*>(_cameraPixels);
+    lv_img_set_src(_cameraImage, &_cameraDescriptor);
+    // Fit the full landscape frame to the portrait screen: no 90-degree
+    // rotation, cropping or aspect-ratio distortion. JPEGDEC downsizes in
+    // powers of two; LVGL then fills the spare width exactly (e.g. 256 -> 316).
+    // Reserve 50 px for the back button/title and a small bottom margin.
+    const uint32_t viewportW = MIRA_DISPLAY_WIDTH - 4;
+    const uint32_t viewportH = MIRA_DISPLAY_HEIGHT - 66;
+    const uint32_t zoomW = (viewportW * 256UL) / frame.width;
+    const uint32_t zoomH = (viewportH * 256UL) / frame.height;
+    uint32_t zoom = zoomW < zoomH ? zoomW : zoomH;
+    if (zoom > 2048) zoom = 2048; // LVGL 8 image zoom maximum, 8x
+    if (zoom < 1) zoom = 1;
+    lv_img_set_pivot(_cameraImage, frame.width / 2, frame.height / 2);
+    lv_img_set_angle(_cameraImage, 0);  // camera must stay horizontal
+    lv_img_set_zoom(_cameraImage, (uint16_t)zoom);
+    // Center within the area below the header, not over the back button.
+    lv_obj_align(_cameraImage, LV_ALIGN_CENTER, 0, 20);
+    if (_cameraStatus) lv_obj_add_flag(_cameraStatus, LV_OBJ_FLAG_HIDDEN);
+    _cameraOpenedAt = millis();
+  } else if (!_cameraPixels && (uint32_t)(millis() - _cameraOpenedAt) > 12000UL) {
+    if (_cameraStatus) lv_label_set_text(_cameraStatus,
+                        "Image indisponible : verifier URL / JPEG ou BMP");
+  }
+}
+
 void MiraPanelUI::createToggle(uint8_t idx) {
   Binding& b = _bindings[idx];
   const bool compact = b.style == "compact";
@@ -2132,7 +2979,7 @@ void MiraPanelUI::buildPagePicker() {
   const bool compactPicker = MIRA_DISPLAY_WIDTH <= 240;
   lv_obj_set_size(_pagePickerCard,
                   compactPicker ? 224 : (wide ? 460 : 298),
-                  compactPicker ? 244 : 290);
+                  compactPicker ? 260 : 376);
   lv_obj_set_style_radius(_pagePickerCard, 16, 0);
   lv_obj_set_style_bg_color(_pagePickerCard, colorPanel2(), 0);
   lv_obj_set_style_bg_opa(_pagePickerCard, LV_OPA_COVER, 0);
@@ -2149,17 +2996,17 @@ void MiraPanelUI::buildPagePicker() {
   lv_obj_align(heading, LV_ALIGN_TOP_MID, 0, compactPicker ? 11 : 13);
 
   const char* names[PAGE_COUNT] = {
-    "Accueil", "Lumières", "Températures", "Paramètres"
+    "Accueil", "Lumières", "Températures", "Paramètres", "Énergie", "Multimédia"
   };
-  const uint8_t order[PAGE_COUNT] = {0, 1, 2, 3};
+  const uint8_t order[PAGE_COUNT] = {0, 1, 2, 4, 5, 3};
   for (uint8_t row = 0; row < PAGE_COUNT; ++row) {
     uint8_t page = order[row];
     lv_obj_t* btn = lv_btn_create(_pagePickerCard);
     _pagePickerButtons[page] = btn;
     lv_obj_set_size(btn, compactPicker ? 204 : (wide ? 420 : 268),
-                        compactPicker ? 40 : 47);
+                        compactPicker ? 32 : 43);
     lv_obj_set_pos(btn, compactPicker ? 10 : (wide ? 20 : 15),
-                   compactPicker ? 43 + row * 48 : 46 + row * 58);
+                   compactPicker ? 34 + row * 37 : 47 + row * 54);
     lv_obj_set_style_radius(btn, 9, 0);
     lv_obj_set_style_bg_color(btn, colorPanel(), 0);
     lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
@@ -2181,6 +3028,32 @@ void MiraPanelUI::buildPagePicker() {
 
   }
   lv_obj_add_flag(_pagePicker, LV_OBJ_FLAG_HIDDEN);
+}
+
+void MiraPanelUI::refreshPagePickerVisibility() {
+  if (!_pagePickerCard) return;
+  // Keep Home in the menu; Settings remains configurable. Favorite slots are
+  // independent shortcuts and their persisted IDs are never remapped.
+  const bool mini = MIRA_DISPLAY_WIDTH <= 240;
+  const bool wide = MIRA_DISPLAY_WIDTH >= 800;
+  const uint8_t order[PAGE_COUNT] = {0, 1, 2, 4, 5, 3};
+  uint8_t row = 0;
+  for (uint8_t i = 0; i < PAGE_COUNT; ++i) {
+    const uint8_t page = order[i];
+    lv_obj_t* btn = _pagePickerButtons[page];
+    if (!btn) continue;
+    if (!(_visiblePageMask & (1 << page))) {
+      lv_obj_add_flag(btn, LV_OBJ_FLAG_HIDDEN);
+      continue;
+    }
+    lv_obj_clear_flag(btn, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_pos(btn, mini ? 10 : (wide ? 20 : 15),
+                   mini ? 34 + row * 37 : 47 + row * 54);
+    ++row;
+  }
+  lv_obj_set_height(_pagePickerCard, mini ? 39 + row * 37 :
+                                          52 + row * 54);
+  lv_obj_center(_pagePickerCard);
 }
 
 void MiraPanelUI::setPagePickerVisible(bool visible) {
@@ -2437,6 +3310,14 @@ void MiraPanelUI::pollFavorites() {
   // modifications of UI objects, and no effect on widget programmation.
   if ((uint32_t)(millis() - _lastFavoritesPollMs) < 1000UL) return;
   _lastFavoritesPollMs = millis();
+  const uint8_t newMask = _prefs.getUChar("pageMask", 0x3F) | 0x01;
+  if (newMask != _visiblePageMask) {
+    _visiblePageMask = newMask;
+    refreshPagePickerVisibility();
+    refreshFavoriteNav();
+    if (_currentPage != 0 && !(_visiblePageMask & (1 << _currentPage)))
+      showPage(0);
+  }
   uint8_t incoming[FAVORITE_SLOTS];
   bool valid = true;
   for (uint8_t slot = 0; slot < FAVORITE_SLOTS; ++slot) {
@@ -2472,6 +3353,12 @@ void MiraPanelUI::refreshFavoriteNav() {
     if (!btn) continue;
     lv_obj_clean(btn);
     const uint8_t page = _favoritePages[slot];
+    // Hidden pages must not leave dead favorite buttons on the nav bar.
+    if (page != NO_FAVORITE && !(_visiblePageMask & (1 << page))) {
+      lv_obj_add_flag(btn, LV_OBJ_FLAG_HIDDEN);
+      continue;
+    }
+    lv_obj_clear_flag(btn, LV_OBJ_FLAG_HIDDEN);
     if (page == 1 || page == 2) {
       if (page == 1) makeBulbIcon(btn);
       else makeThermometerIcon(btn);
@@ -2479,10 +3366,12 @@ void MiraPanelUI::refreshFavoriteNav() {
     }
     lv_obj_t* glyph = lv_label_create(btn);
     lv_label_set_text(glyph, page == 0 ? LV_SYMBOL_HOME :
-                          page == 3 ? LV_SYMBOL_SETTINGS : LV_SYMBOL_PLUS);
+                          page == 3 ? LV_SYMBOL_SETTINGS :
+                          page == 4 ? LV_SYMBOL_CHARGE :
+                          page == 5 ? LV_SYMBOL_AUDIO : LV_SYMBOL_PLUS);
     // Home glyph has a heavier visual weight than the custom nav pictograms.
     lv_obj_set_style_text_font(glyph,
-        page == 0 ? &lv_font_montserrat_16 : &lv_font_montserrat_20, 0);
+        (page == 0 || page == 4) ? &lv_font_montserrat_16 : &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_color(glyph,
         page == NO_FAVORITE ? COL_MUTED : colorAccent(), 0);
     lv_obj_center(glyph);
@@ -2517,7 +3406,7 @@ void MiraPanelUI::setNavActive(uint8_t index) {
 }
 
 void MiraPanelUI::showPage(uint8_t index) {
-  if (index >= PAGE_COUNT) return;
+  if (index >= PAGE_COUNT || !(_visiblePageMask & (1 << index))) return;
 #if defined(MIRA_TARGET_WAVESHARE_43C)
   setScrollCacheActive(false);
 #endif
@@ -2832,6 +3721,94 @@ void MiraPanelUI::onButton(lv_event_t* e) {
   }
   ui._server.IndexSetEvent(b.id);
   ui.publishMqttAction(b, "1");
+}
+
+
+void MiraPanelUI::onCameraTile(lv_event_t* e) {
+  EventContext* ctx = static_cast<EventContext*>(lv_event_get_user_data(e));
+  if (!ctx || !ctx->ui || ctx->ui->touchBlocksAction(false)) return;
+  if (ctx->ui->_suppressEvents || ctx->bindingIndex >= ctx->ui->_bindingCount) return;
+  ctx->ui->noteActivity();
+  ctx->ui->openCamera(ctx->bindingIndex);
+}
+
+void MiraPanelUI::onCameraBack(lv_event_t* e) {
+  MiraPanelUI* ui = static_cast<MiraPanelUI*>(lv_event_get_user_data(e));
+  if (!ui) return;
+  ui->noteActivity();
+  ui->closeCamera();
+}
+
+void MiraPanelUI::onMediaAction(lv_event_t* e) {
+  EventContext* ctx = static_cast<EventContext*>(lv_event_get_user_data(e));
+  if (!ctx || !ctx->ui || ctx->itemIndex < 0 || ctx->itemIndex > 2) return;
+  MiraPanelUI& ui = *ctx->ui;
+  if (ui._suppressEvents || ui.touchBlocksAction(false) ||
+      ctx->bindingIndex >= ui._bindingCount) return;
+  Binding& b = ui._bindings[ctx->bindingIndex];
+  if (b.type != W_MEDIA) return;
+  const uint8_t action = (uint8_t)ctx->itemIndex;
+  int cmdId = b.mediaActionIds[action];
+  String suffix = MIRA_MEDIA_ACTIONS[action];
+  if (action == 1) {
+    // Optimistic fallback when Spotify Connect has no Playing Info.
+    // Next press chooses the opposite independent Jeedom action.
+    const bool sendPause = b.mediaPlaybackPlaying;
+    if (sendPause) {
+      cmdId = b.mediaPauseCmdId;
+      suffix = "pause";
+    }
+  }
+  if (cmdId < 0) return;
+  ui.noteActivity();
+  ui._server.IndexSetEvent(cmdId);
+  if (ui._mqtt && ui._mqtt->enabled())
+    ui._mqtt->publishAction(b.name + "__" + suffix, "1");
+  if (action == 1) {
+    b.mediaPlaybackPlaying = !b.mediaPlaybackPlaying;
+    if (b.stateLabel)
+      lv_label_set_text(b.stateLabel,
+                        b.mediaPlaybackPlaying ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
+    if (b.compositeLabels[3])
+      lv_label_set_text(b.compositeLabels[3],
+                        b.mediaPlaybackPlaying ? "Lecture demandée" : "Pause demandée");
+  }
+}
+
+void MiraPanelUI::onMediaDeviceSelected(lv_event_t* e) {
+  EventContext* ctx = static_cast<EventContext*>(lv_event_get_user_data(e));
+  if (!ctx || !ctx->ui) return;
+  MiraPanelUI& ui = *ctx->ui;
+  if (ui._suppressEvents || ui.touchBlocksAction(false) ||
+      ctx->bindingIndex >= ui._bindingCount) return;
+  Binding& b = ui._bindings[ctx->bindingIndex];
+  if (b.type != W_MEDIA || !b.mediaDeviceDropdown || b.mediaDeviceCmdId < 0) return;
+  const uint16_t selection = lv_dropdown_get_selected(b.mediaDeviceDropdown);
+  if (selection == 0 || selection > b.mediaDeviceCount) return;
+  ui.noteActivity();
+  // Index of the EXACT device-name list received from Jeedom. The plugin
+  // validates the index against its current list before transferring playback.
+  ui._server.IndexSetRange(b.mediaDeviceCmdId, selection - 1);
+  ui._server.IndexSetEvent(b.mediaDeviceCmdId);
+}
+
+void MiraPanelUI::onMediaVolume(lv_event_t* e) {
+  EventContext* ctx = static_cast<EventContext*>(lv_event_get_user_data(e));
+  if (!ctx || !ctx->ui) return;
+  MiraPanelUI& ui = *ctx->ui;
+  if (ui._suppressEvents || ui.touchBlocksAction(true) ||
+      ctx->bindingIndex >= ui._bindingCount) return;
+  Binding& b = ui._bindings[ctx->bindingIndex];
+  if (b.type != W_MEDIA || !b.mediaVolumeSlider || b.mediaVolumeCmdId < 0) return;
+  const int volume = lv_slider_get_value(b.mediaVolumeSlider);
+  ui.noteActivity();
+  b.localInputUntilMs = millis() + 350; // do not undo local drag immediately
+  ui._server.IndexSetRange(b.mediaVolumeCmdId, volume);
+  ui._server.IndexSetEvent(b.mediaVolumeCmdId);
+  if (ui._mqtt && ui._mqtt->enabled())
+    ui._mqtt->publishAction(b.name + "__volume_cmd", String(volume));
+  if (b.compositeLabels[5])
+    lv_label_set_text_fmt(b.compositeLabels[5], "%d %%", volume);
 }
 
 void MiraPanelUI::onMultiTouch(lv_event_t* e) {
@@ -3244,6 +4221,26 @@ void MiraPanelUI::updateBindingFromServer(uint8_t idx, int eventId) {
 
   Binding& b = _bindings[idx];
 
+  if (b.type == W_ENERGY || b.type == W_MEDIA) {
+    const uint8_t count = b.type == W_ENERGY ? 7 : 9;
+    for (uint8_t f = 0; f < count; ++f) {
+      if (b.compositeIds[f] != eventId) continue;
+      updateCompositeInfo(b, f, _server.IndexGetInfo(eventId));
+      return;
+    }
+    if (b.type == W_MEDIA && eventId == b.mediaVolumeCmdId) {
+      if (b.mediaVolumeSlider) {
+        _suppressEvents = true;
+        lv_slider_set_value(b.mediaVolumeSlider,
+                            clampInt(_server.IndexGetRange(eventId), 0, 100),
+                            LV_ANIM_OFF);
+        _suppressEvents = false;
+      }
+      return;
+    }
+    return;
+  }
+
   if (b.type == W_THERMOSTAT) {
     _suppressEvents = true;
     if (eventId == b.thermostatTempId) {
@@ -3632,33 +4629,89 @@ void MiraPanelUI::wakeFromSleep() {
   Serial.println("[MIRA][DISPLAY] Reveil");
 }
 
+// The standby temperature is the first configured temperature Info on Home,
+// or the first such Info elsewhere when Home has none. It reads the SAME
+// Jeedom/MQTT Info index as the tile; it never creates an extra command.
+String MiraPanelUI::firstSleepTemperature() const {
+  for (uint8_t pass = 0; pass < 2; ++pass) {
+    for (uint8_t i = 0; i < _bindingCount; ++i) {
+      const Binding& b = _bindings[i];
+      if (b.type != W_INFO || b.id < 0) continue;
+      if (pass == 0 && b.location != "accueil") continue;
+      if (pass == 1 && b.location == "accueil") continue;
+      if (miraResolveInfoIcon(b.icon, b.name, b.unit) != "temperature")
+        continue;
+      String raw = _server.IndexGetInfo(b.id);
+      raw.trim();
+      String numeric = raw;
+      numeric.replace(",", ".");
+      // Do not display placeholders ("null", "--", empty) as a real sensor.
+      char* end = nullptr;
+      double degrees = strtod(numeric.c_str(), &end);
+      if (end == numeric.c_str() || !isfinite(degrees) ||
+          degrees < -80.0 || degrees > 100.0) return "";
+      // The unit is always °C for the selected temperature Info tile.
+      return String(degrees, 1) + " °C";
+    }
+  }
+  return "";
+}
+
 void MiraPanelUI::updateSleepClock() {
   if (!_sleeping || !_clockInSleep || !_sleepClock) return;
-
   const uint32_t now = millis();
 
-  // Mise a jour de l'heure chaque seconde. La date n'est volontairement
-  // plus affichee : la veille officielle montre l'heure comme element dominant.
+  // The system clock and the current Info value remain independent.
+  // Never trigger a Jeedom refresh or heating action from the screensaver.
   if (now - _lastSleepClockUpdate >= 1000 || _lastSleepClockUpdate == 0) {
     _lastSleepClockUpdate = now;
     struct tm t;
     if (getLocalTime(&t, 10)) {
       char buf[8];
       strftime(buf, sizeof(buf), "%H:%M", &t);
-      lv_label_set_text(_sleepClock, buf);
+      if (strcmp(lv_label_get_text(_sleepClock), buf) != 0)
+        lv_label_set_text(_sleepClock, buf);
+
+      if (_sleepDate) {
+        static const char* const jours[] = {
+            "dimanche","lundi","mardi","mercredi","jeudi","vendredi","samedi"};
+        static const char* const mois[] = {
+            "janvier","février","mars","avril","mai","juin",
+            "juillet","août","septembre","octobre","novembre","décembre"};
+        char fullDate[72];
+        snprintf(fullDate, sizeof(fullDate), "%s %u %s %u",
+                 jours[t.tm_wday], (unsigned)t.tm_mday,
+                 mois[t.tm_mon], (unsigned)(t.tm_year + 1900));
+        if (strcmp(lv_label_get_text(_sleepDate), fullDate) != 0)
+          lv_label_set_text(_sleepDate, fullDate);
+      }
+    }
+
+    if (_sleepTemperature) {
+      const String temperature = firstSleepTemperature();
+      const bool available = temperature.length() > 0;
+      if (available) {
+        if (strcmp(lv_label_get_text(_sleepTemperature), temperature.c_str()) != 0)
+          lv_label_set_text(_sleepTemperature, temperature.c_str());
+        lv_obj_clear_flag(_sleepTemperature, LV_OBJ_FLAG_HIDDEN);
+      } else {
+        lv_obj_add_flag(_sleepTemperature, LV_OBJ_FLAG_HIDDEN);
+      }
     }
   }
 
-  // Anti-burn : toutes les 60 s, l'heure se decale de quelques pixels
-  // autour du centre. Les neuf positions evitent de marquer toujours la meme zone.
+  // Anti-burn: shift all three labels together every 60 seconds.
   if (now - _lastSleepClockMove >= 60000UL) {
     static const int8_t offsetX[9] = {-12, 0, 12, -12, 0, 12, -12, 0, 12};
-    static const int8_t offsetY[9] = { -8,-8, -8,   0, 0,  0,   8, 8,  8};
-
+    static const int8_t offsetY[9] = {-8, -8, -8, 0, 0, 0, 8, 8, 8};
     _lastSleepClockMove = now;
     _sleepClockPosition = (_sleepClockPosition + 1) % 9;
-    lv_obj_align(_sleepClock, LV_ALIGN_CENTER,
-                 offsetX[_sleepClockPosition], -48 + offsetY[_sleepClockPosition]);
+    const int8_t x = offsetX[_sleepClockPosition];
+    const int8_t y = offsetY[_sleepClockPosition];
+    lv_obj_align(_sleepClock, LV_ALIGN_CENTER, x, -56 + y);
+    if (_sleepDate) lv_obj_align(_sleepDate, LV_ALIGN_CENTER, x, MIRA_SLEEP_DATE_OFFSET_Y + y);
+    if (_sleepTemperature)
+      lv_obj_align(_sleepTemperature, LV_ALIGN_CENTER, x, MIRA_SLEEP_TEMP_OFFSET_Y + y);
   }
 }
 
@@ -3674,6 +4727,8 @@ void MiraPanelUI::loop() {
 #endif
 
   pollFavorites();
+  serviceCamera();
+  serviceAlbumArtwork();
 
   // Multi-actions on the screen: same timings as the physical contact.
   // A single click waits briefly to distinguish a double or triple click.
