@@ -1,8 +1,11 @@
 // LVGL 9.6 RGB565 smoke test -- WAVESHARE ESP32-S3 TOUCH LCD 4.3C ONLY.
-// Not the Mira firmware. Do not flash until a human has reviewed it.
+// Standalone LVGL 9.6 smooth-scroll A/B trial, not the Jeedom application.
 // Same RGB wiring, 12 MHz PCLK, dual PSRAM RGB framebuffers as Mira 0.7.37.
 #include <Arduino.h>
 #include <Wire.h>
+#include <WiFi.h>
+#include <WebServer.h>
+#include <Update.h>
 #include <lvgl.h>
 #include "esp_err.h"
 #include "esp_timer.h"
@@ -19,6 +22,72 @@ static TaskHandle_t render_task = nullptr;
 static volatile uint32_t frames = 0;
 static volatile uint32_t vsync_timeout = 0;
 static uint8_t gt911_addr = 0x5D;
+static WebServer http(80);
+static lv_obj_t *card_list = nullptr;
+static lv_obj_t *fps_label = nullptr;
+static lv_obj_t *auto_button_label = nullptr;
+static bool auto_scroll = true;
+static bool scroll_down = true;
+static volatile uint32_t last_fps_tenths = 0;
+static bool update_failed = false;
+static constexpr const char* AP_NAME = "Mira-LVGL9-Test";
+static constexpr const char* AP_PASS = "MiraLVGL9-2026";
+
+static void recovery_http_task(void *) {
+  for (;;) {
+    http.handleClient();
+    vTaskDelay(pdMS_TO_TICKS(5));
+  }
+}
+static void setup_recovery_ap() {
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(AP_NAME, AP_PASS, 6, false, 2);
+  http.on("/", HTTP_GET, []() {
+    http.send(200, "text/html; charset=utf-8",
+      "<!doctype html><html lang='fr'><meta name='viewport' content='width=device-width,initial-scale=1'>"
+      "<title>Mira LVGL 9.6 - Retour firmware</title>"
+      "<h2>LVGL 9.6 - Banc d'essai Waveshare 4.3C</h2>"
+      "<p>Cette application n'est pas Mira. Chargez ici le fichier <b>.bin OTA</b> "
+      "de Mira 0.7.37 pour revenir au firmware d'origine (sans effacer SPIFFS).</p>"
+      "<form method='POST' action='/update' enctype='multipart/form-data'>"
+      "<input name='firmware' type='file' accept='.bin' required>"
+      "<button type='submit'>Reflasher et redemarrer</button></form>"
+      "<p>Mesures: <a href='/perf'>/perf</a></p></html>");
+  });
+  http.on("/perf", HTTP_GET, []() {
+    char buf[160];
+    snprintf(buf, sizeof(buf),
+      "{\"frames\":%lu,\"fps_tenths\":%lu,\"vsync_timeouts\":%lu,\"uptime_ms\":%lu}",
+      (unsigned long)frames, (unsigned long)last_fps_tenths,
+      (unsigned long)vsync_timeout, (unsigned long)millis());
+    http.send(200, "application/json", buf);
+  });
+  http.on("/update", HTTP_POST, []() {
+    bool ok = !update_failed && !Update.hasError();
+    http.send(ok ? 200 : 500, "text/plain",
+      ok ? "Firmware installe. Redemarrage..." : "Echec OTA. Reessayez.");
+    if (ok) {
+      vTaskDelay(pdMS_TO_TICKS(500));
+      ESP.restart();
+    }
+  }, []() {
+    HTTPUpload &up = http.upload();
+    if (up.status == UPLOAD_FILE_START) {
+      update_failed = !Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH);
+    } else if (up.status == UPLOAD_FILE_WRITE) {
+      if (!update_failed && Update.write(up.buf, up.currentSize) != up.currentSize)
+        update_failed = true;
+    } else if (up.status == UPLOAD_FILE_END) {
+      if (!update_failed && !Update.end(true)) update_failed = true;
+    } else if (up.status == UPLOAD_FILE_ABORTED) {
+      Update.abort();
+      update_failed = true;
+    }
+  });
+  http.begin();
+  xTaskCreatePinnedToCore(recovery_http_task, "mira_recovery", 6144, nullptr, 1, nullptr, 0);
+  Serial.printf("[MIRA-LVGL9-PROBE] Recovery AP: %s / 192.168.4.1\n", AP_NAME);
+}
 
 static void expander_write(uint8_t command, uint8_t value) {
   Wire.beginTransmission(0x24);
@@ -113,12 +182,34 @@ static void init_rgb() {
   callbacks.on_bounce_frame_finish = on_vsync;
   ESP_ERROR_CHECK(esp_lcd_rgb_panel_register_event_callbacks(panel, &callbacks, nullptr));
 }
+static void toggle_auto(lv_event_t *) {
+  auto_scroll = !auto_scroll;
+  if (auto_button_label) lv_label_set_text(auto_button_label, auto_scroll ? "AUTO: ON" : "AUTO: OFF");
+}
+static void scroll_tick(lv_timer_t *) {
+  if (!auto_scroll || !card_list) return;
+  if (scroll_down && lv_obj_get_scroll_bottom(card_list) <= 3) scroll_down = false;
+  if (!scroll_down && lv_obj_get_scroll_top(card_list) <= 3) scroll_down = true;
+  lv_obj_scroll_by(card_list, 0, scroll_down ? -6 : 6, LV_ANIM_OFF);
+}
 static void make_scene() {
   lv_obj_t *root = lv_screen_active();
   lv_obj_set_style_bg_color(root, lv_color_hex(0x071421), 0);
+  fps_label = lv_label_create(root);
+  lv_obj_set_style_text_color(fps_label, lv_color_hex(0x86EEAD), 0);
+  lv_obj_set_pos(fps_label, 22, 16);
+  lv_label_set_text(fps_label, "LVGL 9.6  |  FPS: --");
+  lv_obj_t *btn = lv_button_create(root);
+  lv_obj_set_pos(btn, 630, 5);
+  lv_obj_set_size(btn, 155, 45);
+  lv_obj_add_event_cb(btn, toggle_auto, LV_EVENT_CLICKED, nullptr);
+  auto_button_label = lv_label_create(btn);
+  lv_label_set_text(auto_button_label, "AUTO: ON");
+  lv_obj_center(auto_button_label);
   lv_obj_t *column = lv_obj_create(root);
-  lv_obj_set_pos(column, 18, 10);
-  lv_obj_set_size(column, 764, 454);
+  lv_obj_set_pos(column, 18, 58);
+  lv_obj_set_size(column, 764, 407);
+  card_list = column;
   lv_obj_set_flex_flow(column, LV_FLEX_FLOW_COLUMN);
   lv_obj_set_style_pad_all(column, 8, 0);
   lv_obj_set_style_pad_row(column, 8, 0);
@@ -141,10 +232,13 @@ static void make_scene() {
     lv_obj_set_style_text_color(description, lv_color_hex(0x92B6CA), 0);
     lv_obj_align(description, LV_ALIGN_TOP_LEFT, 12, 34);
   }
+  lv_timer_create(scroll_tick, 16, nullptr);
 }
 void setup() {
   Serial.begin(115200);
   delay(300);
+  // Start recovery first. It runs independently on core 0 even while LVGL is busy.
+  setup_recovery_ap();
   Wire.begin(8, 9, 400000);
   expander_write(0x02, 0xFF);
   expander_write(0x03, 0xFF);
@@ -178,11 +272,19 @@ void loop() {
   static uint32_t last = millis(), prev = 0;
   lv_timer_handler();
   uint32_t now = millis();
-  if (now-last >= 5000) {
-    Serial.printf("[MIRA-LVGL9-PROBE] frames/5s=%lu vsync_timeouts=%lu heap=%u psram=%u\n",
-         (unsigned long)(frames-prev), (unsigned long)vsync_timeout,
+  if (now-last >= 1000) {
+    uint32_t new_frames = frames;
+    uint32_t dt = now - last;
+    last_fps_tenths = (new_frames-prev) * 10000UL / (dt ? dt : 1);
+    if (fps_label) lv_label_set_text_fmt(fps_label, "LVGL 9.6  |  FPS: %lu.%01lu",
+                  (unsigned long)(last_fps_tenths/10),
+                  (unsigned long)(last_fps_tenths%10));
+    Serial.printf("[MIRA-LVGL9-PROBE] fps=%lu.%01lu vsync_timeouts=%lu heap=%u psram=%u\n",
+         (unsigned long)(last_fps_tenths/10),(unsigned long)(last_fps_tenths%10),
+         (unsigned long)vsync_timeout,
          (unsigned)ESP.getFreeHeap(),(unsigned)ESP.getFreePsram());
-    prev=frames; last=now;
+    prev=new_frames;
+    last=now;
   }
   vTaskDelay(pdMS_TO_TICKS(2));
 }
