@@ -1098,13 +1098,25 @@ class mira extends eqLogic {
             }
           
           	$json_count = count($json_index);
-          	if ($json_count == 0){
-                /* Un index vide est valide : l'utilisateur peut vouloir supprimer
-                 * tous les widgets. GetIndex() a deja distingue ce cas d'une erreur
-                 * de communication via la valeur "Erreur". */
-                log::add(__CLASS__, 'debug', '[SyncCmd] index ecran vide : suppression de tous les widgets Jeedom');
+          	if ($json_count == 0) {
+                // An OTA can briefly return a blank index even when all
+                // Jeedom commands remain configured. Never prune them.
+                $hasSavedWidgets=false;
+                foreach ($this->getCmd() as $savedCmd) {
+                  if (!is_object($savedCmd)) continue;
+                  if (in_array((string)$savedCmd->getConfiguration('type',''),
+                      array('info','camera','toggle','range','list','button','color',
+                            'multi_master','multi_action'),true)) {
+                    $hasSavedWidgets=true; break;
+                  }
+                }
+                if ($hasSavedWidgets) {
+                  log::add('mira','warning',
+                    '[SyncCmd] index ecran vide : conservation des commandes existantes');
+                  return;
+                }
             }
-          
+
           	$ordre = 0;
           log::add(__CLASS__, 'debug', "DEBUT");
               
@@ -1615,74 +1627,16 @@ class mira extends eqLogic {
                 }
             }
 
-            /* Synchronisation destructive des commandes Jeedom avec l'index de
-             * l'ecran. Jusqu'ici postUpdate() ne faisait qu'ajouter/mettre a jour :
-             * supprimer un widget sur Mira Panel laissait donc ses anciennes
-             * commandes dans Jeedom.
-             *
-             * On reconstruit la liste exacte des logicalId attendus a partir du
-             * nouvel /getindex, puis on retire uniquement les commandes de widgets
-             * gerees par Mira qui n'existent plus. Les commandes systeme
-             * (refresh, init_cmd, Redemarrer, Statut) ne sont jamais concernees.
+            /*
+             * A partial /getindex after firmware migration is not evidence
+             * that an absent widget was intentionally deleted. Never prune
+             * Jeedom commands during automatic sync, including on refresh.
+             * Removing obsolete commands must be an explicit operation.
+             * This preserves calcul, media bindings and user command IDs.
              */
-            $expectedLogicalIds = array(
-                'refresh' => true,
-                'init_cmd' => true,
-                'Redémarrer' => true,
-                'Statut' => true
-            );
+            log::add('mira','debug',
+              '[SyncCmd] Synchronisation non destructive : commandes conservees');
 
-            for ($i = 0; $i < $json_count; $i++) {
-                if (!isset($json_index[$i]['type'])) continue;
-                $widgetType = (string)$json_index[$i]['type'];
-
-                if ($widgetType == 'button' && preg_match('/^Multi_(Clic|Double|Triple|Long)_(.+)$/u',(string)($json_index[$i]['nom'] ?? ''),$parts)) {
-                    $expectedLogicalIds[(string)$json_index[$i]['nom']]=true;
-                    $expectedLogicalIds['Multi_'.$parts[2]]=true;
-                } else if ($widgetType == 'info' || $widgetType == 'button') {
-                    if (isset($json_index[$i]['nom'])) {
-                        $expectedLogicalIds[(string)$json_index[$i]['nom']] = true;
-                    }
-                } else if ($widgetType == 'toggle') {
-                    if (isset($json_index[$i]['nom'])) {
-                        $widgetName = (string)$json_index[$i]['nom'];
-                        $expectedLogicalIds[$widgetName] = true;
-                        $expectedLogicalIds['Off_'.$widgetName] = true;
-                        $expectedLogicalIds['On_'.$widgetName] = true;
-                    }
-                } else if ($widgetType == 'range' || $widgetType == 'color') {
-                    if (isset($json_index[$i]['nom'])) {
-                        $widgetName = (string)$json_index[$i]['nom'];
-                        $expectedLogicalIds['Value_'.$widgetName] = true;
-                        $expectedLogicalIds[$widgetName] = true;
-                    }
-                } else if ($widgetType == 'list') {
-                    if (isset($json_index[$i]['nomliste'])) {
-                        $listName = (string)$json_index[$i]['nomliste'];
-                        $expectedLogicalIds['Value_'.$listName] = true;
-                        $expectedLogicalIds[$listName] = true;
-                    }
-                }
-            }
-
-            $managedWidgetTypes = array('info', 'camera', 'toggle', 'range', 'list', 'button', 'color', 'multi_master', 'multi_action');
-            $removedCommands = 0;
-            foreach ($this->getCmd() as $existingCmd) {
-                if (!is_object($existingCmd)) continue;
-                $logicalId = (string)$existingCmd->getLogicalId();
-                $managedType = (string)$existingCmd->getConfiguration('type', '');
-
-                if (in_array($managedType, $managedWidgetTypes, true)
-                    && !isset($expectedLogicalIds[$logicalId])) {
-                    log::add(__CLASS__, 'debug', '[SyncCmd] suppression commande obsolete: '.$logicalId);
-                    $existingCmd->remove();
-                    $removedCommands++;
-                }
-            }
-            if ($removedCommands > 0) {
-                log::add(__CLASS__, 'debug', '[SyncCmd] '.$removedCommands.' commande(s) obsolete(s) supprimee(s)');
-            }
-                
           	//Mise a jour SPIFFS mira
           	$mira_plugin = mira::GetParam('Jeedom');
             log::add(__CLASS__, 'debug', 'Toggle Jeedom: '.$mira_plugin);
@@ -1793,6 +1747,75 @@ class mira extends eqLogic {
     }
   }
 
+    /**
+     * The screen's /getindex IDs are transport addresses, not Jeedom
+     * associations. An OTA or LVGL reload can renumber them.
+     */
+    public static function screenTransportBindings($actions) {
+      $bindings=array();
+      $ambiguous=array();
+      if (!is_array($actions)) return $bindings;
+      $add=function($logical,$field,$rawId) use (&$bindings,&$ambiguous) {
+        $logical=trim((string)$logical);
+        if ($logical==='' || !preg_match('/^[1-9][0-9]*$/D',(string)$rawId)) return;
+        $id=(int)$rawId;
+        if ($id<1 || $id>65535) return;
+        if (isset($bindings[$logical][$field]) && $bindings[$logical][$field]!==$id) {
+          $ambiguous[$logical]=true;
+          return;
+        }
+        $bindings[$logical][$field]=$id;
+      };
+      foreach ($actions as $action) {
+        if (!is_array($action)) continue;
+        $type=(string)($action['type']??'');
+        $name=(string)($action['nom']??'');
+        if ($name==='') continue;
+        if ($type==='info' || $type==='button') {
+          $add($name,'commande',$action['id']??null);
+        } elseif ($type==='toggle') {
+          $id0=$action['id0']??null;
+          $id1=$action['id1']??null;
+          if (!preg_match('/^[1-9][0-9]*$/D',(string)$id0) ||
+              !preg_match('/^[1-9][0-9]*$/D',(string)$id1) ||
+              (int)$id0===(int)$id1) continue;
+          $add($name,'commande',$id0);
+          $add($name,'id_0',$id0);
+          $add($name,'id_1',$id1);
+          $add('Off_'.$name,'commande',$id0);
+          $add('On_'.$name,'commande',$id1);
+        } elseif ($type==='range' || $type==='color') {
+          $add('Value_'.$name,'commande',$action['id']??null);
+          $add($name,'commande',$action['id']??null);
+        }
+        // List options can have multiple IDs for one list name. Do not
+        // overwrite their per-option associations with one arbitrary ID.
+      }
+      foreach ($ambiguous as $logical=>$ignored) unset($bindings[$logical]);
+      return $bindings;
+    }
+
+    public function repairScreenTransportIds($actions) {
+      $bindings=self::screenTransportBindings($actions);
+      $changed=0;
+      foreach ($bindings as $logical=>$fields) {
+        $cmd=$this->getCmd(null,$logical);
+        if (!is_object($cmd)) continue; // No deletion or re-creation on boot.
+        $dirty=false;
+        foreach ($fields as $field=>$id) {
+          if ((int)$cmd->getConfiguration($field,-1)===$id) continue;
+          $cmd->setConfiguration($field,$id);
+          $dirty=true;
+        }
+        if (!$dirty) continue;
+        $cmd->save();
+        ++$changed;
+      }
+      if ($changed) log::add('mira','info','[BOOT][REMAP] '.
+        $changed.' commande(s) reindexee(s) sans modifier les associations Jeedom');
+      return $changed;
+    }
+
     public function Init_mira_Module() {
     
     $json_index = $this->GetIndex(true);
@@ -1829,6 +1852,10 @@ class mira extends eqLogic {
       return true;
     }
 
+    // Repair changed numeric IDs before resending Jeedom Info values.
+    // Never touch user-selected command expressions or run ON/OFF actions.
+    $this->repairScreenTransportIds($json_index['actions']);
+
     log::add(__CLASS__, 'debug', $json_count);	
     for ($i = 0; $i < $json_count; $i++) {
       if ($json_index['actions'][$i]['type'] == 'toggle'){					
@@ -1836,6 +1863,10 @@ class mira extends eqLogic {
           $name = $json_index['actions'][$i]['nom'];                    
           $info_on = $this->getCmd(null, 'On_'.$name);
           $info_off = $this->getCmd(null, 'Off_'.$name);
+          if (!is_object($info_on) || !is_object($info_off)) {
+            log::add('mira','warning','[Init] Toggle Jeedom incomplet : '.$name);
+            continue;
+          }
           $eqLogic_on = $info_on->getId();        	
           $eqLogic_off = $info_off->getId();
           $json_index['actions'][$i]['jeedom0'] = $eqLogic_off;
@@ -2146,6 +2177,9 @@ class mira extends eqLogic {
       return false;
     }
     $this->checkAndUpdateCmd('Statut', '1');
+    // Non-destructive recovery even if the screen boot index was transiently
+    // incomplete: each refresh rechecks the live screen transport IDs.
+    $this->repairScreenTransportIds($json_index);
     // Seules les sorties GPIO locales sont lues depuis l'ecran.
     // Les actionneurs Jeedom classiques gardent Jeedom comme source de verite.
     $this->syncGpioStates();
