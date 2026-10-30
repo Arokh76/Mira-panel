@@ -363,6 +363,18 @@ jobs:
                           '  // TOUCH10_RENDER10: no idle snapshots of card widgets.')
           print('[MIRA][TOUCH10_RENDER10] input=10ms, render=10ms, task_min=2ms, no cache, stable LCD')
           PY
+          # PERF diagnostic A/B (NO_COMPLEX): no physical LCD, PSRAM or VSYNC changes.
+          python3 - <<'PY'
+          from pathlib import Path
+          conf = Path('waveshare-official/examples/arduino/libraries/lv_conf.h')
+          data = conf.read_text()
+          old = '#define LV_DRAW_COMPLEX 1'
+          new = '#define LV_DRAW_COMPLEX 0'
+          if data.count(old) != 1:
+              raise SystemExit('LVGL NO_COMPLEX: expected one '+repr(old)+', got '+str(data.count(old)))
+          conf.write_text(data.replace(old, new, 1))
+          print('[MIRA][WAVESHARE] NO_COMPLEX LVGL performance trial, LCD driver unchanged')
+          PY
           # Measurement-only firmware: no changes to RGB/VSYNC or UI scheduling.
           python3 - <<'PY'
           from pathlib import Path
@@ -501,12 +513,21 @@ jobs:
           Compare with http://IP-OF-WAVESHARE/mira-health for free memory.
           No stable OTA publication. Not for WT32 or Nextion.
           EOF
+          cat > package-waveshare/README-NO_COMPLEX.txt <<'EOF'
+          EXPERIMENTAL ONLY - WAVESHARE 4.3C - 0.7.37 NO_COMPLEX
+          Coupe temporairement ombres, gradients, masques et coins arrondis complexes; diagnostique uniquement, changement d'apparence volontaire.
+          Based on F+PERF_DIAG: /mira-perf is available for A/B measurement.
+          Unchanged RGB pixel clock 12MHz, 2 PSRAM framebuffers and VSYNC.
+          OTA bin for update page only; factory for full flash.
+          Keep original stable 0.7.37 for rollback.
+          DO NOT install on WT32/Nextion or publish to stable.
+          EOF
           ls -lh package-waveshare/
 
       - name: Upload Waveshare preview package
         uses: actions/upload-artifact@v4
         with:
-          name: Mira_Panel_Waveshare_4.3C_0.7.37_PERF_DIAG_TEST
+          name: Mira_Panel_Waveshare_4.3C_0.7.37_NO_COMPLEX_TEST
           path: package-waveshare/
           if-no-files-found: error
           retention-days: 14
