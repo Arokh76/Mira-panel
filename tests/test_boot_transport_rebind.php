@@ -63,5 +63,13 @@ if(isset($ambiguous['Duplicate']))
   throw new RuntimeException('Ambiguous names must not be rebound');
 if(strpos($source,'[SyncCmd] index ecran vide : conservation des commandes existantes')===false)
   throw new RuntimeException('Empty-index destructive sync guard missing');
+$syncStart=strpos($source,'  public function postUpdate() {');
+$syncEnd=strpos($source,'    public function Init_mira_Module() {',$syncStart);
+if($syncStart===false || $syncEnd===false) throw new RuntimeException('Cannot inspect postUpdate');
+$postUpdate=substr($source,$syncStart,$syncEnd-$syncStart);
+if(strpos($postUpdate,'$existingCmd->remove()')!==false)
+  throw new RuntimeException('Automatic sync must never prune existing Jeedom commands');
+if(strpos($postUpdate,'[SyncCmd] Synchronisation non destructive')===false)
+  throw new RuntimeException('Non-destructive sync mode not found');
 echo "PASS: boot remaps numeric screen IDs without changing Jeedom associations\n";
 echo "PASS: toggle, media, weather, empty-index, ambiguity and idempotence checks\n";
