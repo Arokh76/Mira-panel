@@ -1627,74 +1627,16 @@ class mira extends eqLogic {
                 }
             }
 
-            /* Synchronisation destructive des commandes Jeedom avec l'index de
-             * l'ecran. Jusqu'ici postUpdate() ne faisait qu'ajouter/mettre a jour :
-             * supprimer un widget sur Mira Panel laissait donc ses anciennes
-             * commandes dans Jeedom.
-             *
-             * On reconstruit la liste exacte des logicalId attendus a partir du
-             * nouvel /getindex, puis on retire uniquement les commandes de widgets
-             * gerees par Mira qui n'existent plus. Les commandes systeme
-             * (refresh, init_cmd, Redemarrer, Statut) ne sont jamais concernees.
+            /*
+             * A partial /getindex after firmware migration is not evidence
+             * that an absent widget was intentionally deleted. Never prune
+             * Jeedom commands during automatic sync, including on refresh.
+             * Removing obsolete commands must be an explicit operation.
+             * This preserves calcul, media bindings and user command IDs.
              */
-            $expectedLogicalIds = array(
-                'refresh' => true,
-                'init_cmd' => true,
-                'Redémarrer' => true,
-                'Statut' => true
-            );
+            log::add('mira','debug',
+              '[SyncCmd] Synchronisation non destructive : commandes conservees');
 
-            for ($i = 0; $i < $json_count; $i++) {
-                if (!isset($json_index[$i]['type'])) continue;
-                $widgetType = (string)$json_index[$i]['type'];
-
-                if ($widgetType == 'button' && preg_match('/^Multi_(Clic|Double|Triple|Long)_(.+)$/u',(string)($json_index[$i]['nom'] ?? ''),$parts)) {
-                    $expectedLogicalIds[(string)$json_index[$i]['nom']]=true;
-                    $expectedLogicalIds['Multi_'.$parts[2]]=true;
-                } else if ($widgetType == 'info' || $widgetType == 'button') {
-                    if (isset($json_index[$i]['nom'])) {
-                        $expectedLogicalIds[(string)$json_index[$i]['nom']] = true;
-                    }
-                } else if ($widgetType == 'toggle') {
-                    if (isset($json_index[$i]['nom'])) {
-                        $widgetName = (string)$json_index[$i]['nom'];
-                        $expectedLogicalIds[$widgetName] = true;
-                        $expectedLogicalIds['Off_'.$widgetName] = true;
-                        $expectedLogicalIds['On_'.$widgetName] = true;
-                    }
-                } else if ($widgetType == 'range' || $widgetType == 'color') {
-                    if (isset($json_index[$i]['nom'])) {
-                        $widgetName = (string)$json_index[$i]['nom'];
-                        $expectedLogicalIds['Value_'.$widgetName] = true;
-                        $expectedLogicalIds[$widgetName] = true;
-                    }
-                } else if ($widgetType == 'list') {
-                    if (isset($json_index[$i]['nomliste'])) {
-                        $listName = (string)$json_index[$i]['nomliste'];
-                        $expectedLogicalIds['Value_'.$listName] = true;
-                        $expectedLogicalIds[$listName] = true;
-                    }
-                }
-            }
-
-            $managedWidgetTypes = array('info', 'camera', 'toggle', 'range', 'list', 'button', 'color', 'multi_master', 'multi_action');
-            $removedCommands = 0;
-            foreach ($this->getCmd() as $existingCmd) {
-                if (!is_object($existingCmd)) continue;
-                $logicalId = (string)$existingCmd->getLogicalId();
-                $managedType = (string)$existingCmd->getConfiguration('type', '');
-
-                if (in_array($managedType, $managedWidgetTypes, true)
-                    && !isset($expectedLogicalIds[$logicalId])) {
-                    log::add(__CLASS__, 'debug', '[SyncCmd] suppression commande obsolete: '.$logicalId);
-                    $existingCmd->remove();
-                    $removedCommands++;
-                }
-            }
-            if ($removedCommands > 0) {
-                log::add(__CLASS__, 'debug', '[SyncCmd] '.$removedCommands.' commande(s) obsolete(s) supprimee(s)');
-            }
-                
           	//Mise a jour SPIFFS mira
           	$mira_plugin = mira::GetParam('Jeedom');
             log::add(__CLASS__, 'debug', 'Toggle Jeedom: '.$mira_plugin);
