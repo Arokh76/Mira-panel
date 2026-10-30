@@ -714,7 +714,7 @@ void MiraPanelServer::ServeurStation() {
           b = (long)B;
 
           String SValue = "#000000";
-          char CValue[7];
+          char CValue[8];
           sprintf(CValue, "#%02x%02x%02x", r, g, b);
 
           events.send(CValue, CNom, millis());
@@ -919,7 +919,7 @@ void MiraPanelServer::ServeurStation() {
             b = (long)B;
 
             String SValue = "#000000";
-            char CValue[7];
+            char CValue[8];
             sprintf(CValue, "#%02x%02x%02x", r, g, b);
 
             events.send(CValue, CNom, millis());
@@ -1116,7 +1116,7 @@ void MiraPanelServer::ServeurStation() {
             b = (long)B;
 
             String SValue = "#000000";
-            char CValue[7];
+            char CValue[8];
             sprintf(CValue, "#%02x%02x%02x", r, g, b);
 
             events.send(CValue, CNom, millis());
@@ -1217,6 +1217,55 @@ void MiraPanelServer::ServeurStation() {
         request->send(200, "text/plain", "Paramètre mis à jour");
       }
     }
+  });
+
+  // Jeedom may replay an ON/OFF state after a WT32 restart. This endpoint
+  // changes only the screen's stored toggle state and LVGL presentation:
+  // it never touches Action, JeedomCmd or any real actuator.
+  server.on("/sync/toggle", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    AsyncWebParameter* key = request->getParam("key");
+    AsyncWebParameter* idParam = request->getParam("id");
+    if (!key || key->value() != Uncrypt_Pass) {
+      request->send(403, "text/plain", "Cle invalide"); return;
+    }
+    if (!idParam) {
+      request->send(400, "text/plain", "ID manquant"); return;
+    }
+    String idText = idParam->value();
+    if (idText.isEmpty() || idText.length() > 6) {
+      request->send(400, "text/plain", "ID invalide"); return;
+    }
+    for (size_t i = 0; i < idText.length(); ++i) {
+      if (idText[i] < '0' || idText[i] > '9') {
+        request->send(400, "text/plain", "ID invalide"); return;
+      }
+    }
+    const int toggleId = idText.toInt();
+    if (toggleId < 1) {
+      request->send(400, "text/plain", "ID invalide"); return;
+    }
+    bool found = false;
+    JsonArray actions = SPIFFS_Config_Actions["actions"];
+    for (int i = 0; i < actions.size(); ++i) {
+      if (actions[i]["type"].as<String>() != "toggle") continue;
+      if (actions[i]["id0"].as<String>() == idText ||
+          actions[i]["id1"].as<String>() == idText) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      request->send(404, "text/plain", "Interrupteur inconnu"); return;
+    }
+    const uint8_t nextTail =
+        uint8_t((_passiveToggleTail + 1) % PASSIVE_TOGGLE_QUEUE_SIZE);
+    if (nextTail == _passiveToggleHead) {
+      request->send(503, "text/plain", "File d'etats pleine"); return;
+    }
+    IndexSetToggle(toggleId);
+    _passiveToggleEvents[_passiveToggleTail] = toggleId;
+    _passiveToggleTail = nextTail;
+    request->send(200, "text/plain", "OK");
   });
 
   server.on("/updatenr", HTTP_GET, [](AsyncWebServerRequest* request) {
@@ -1349,7 +1398,7 @@ void MiraPanelServer::ServeurStation() {
             b = (long)B;
 
             String SValue = "#000000";
-            char CValue[7];
+            char CValue[8];
             sprintf(CValue, "#%02x%02x%02x", r, g, b);
 
             events.send(CValue, CNom, millis());
@@ -3880,7 +3929,7 @@ void MiraPanelServer::IndexSetColor(int ID, int R, int G, int B) {
       b = (long)B;
 
       String SValue = "#000000";
-      char CValue[7];
+      char CValue[8];
       sprintf(CValue, "#%02x%02x%02x", r, g, b);
 
       events.send(CValue, CNom, millis());
@@ -5312,6 +5361,14 @@ void MiraPanelServer::IndexResetEvent() {
   //Action = -1;
 }
 
+int MiraPanelServer::IndexGetPassiveToggleEvent() {
+  if (_passiveToggleHead == _passiveToggleTail) return -1;
+  const int pending = _passiveToggleEvents[_passiveToggleHead];
+  _passiveToggleHead =
+      uint8_t((_passiveToggleHead + 1) % PASSIVE_TOGGLE_QUEUE_SIZE);
+  return pending;
+}
+
 int MiraPanelServer::ParamGetEvent() {
   int memoireparamEvent = paramEvent;
   paramEvent = -1;
@@ -5527,7 +5584,7 @@ void MiraPanelServer::JeedomCmd(int ID) {
           int R = (SPIFFS_Config_Actions["actions"][i]["r"].as<String>()).toInt();
           int G = (SPIFFS_Config_Actions["actions"][i]["g"].as<String>()).toInt();
           int B = (SPIFFS_Config_Actions["actions"][i]["b"].as<String>()).toInt();
-          char hexArray[6] = { 0 };
+          char hexArray[7] = { 0 };
           sprintf(hexArray, "%02X%02X%02X", R, G, B);
           Jeedom_Value = "%23";
           Jeedom_Value += hexArray;
@@ -5615,7 +5672,7 @@ void MiraPanelServer::GenericCmd(int ID) {
           int R = (SPIFFS_Config_Actions["actions"][i]["r"].as<String>()).toInt();
           int G = (SPIFFS_Config_Actions["actions"][i]["g"].as<String>()).toInt();
           int B = (SPIFFS_Config_Actions["actions"][i]["b"].as<String>()).toInt();
-          char hexArray[6] = { 0 };
+          char hexArray[7] = { 0 };
           sprintf(hexArray, "%02X%02X%02X", R, G, B);
           GenericValue = "%23";
           GenericValue += hexArray;
