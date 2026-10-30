@@ -363,6 +363,18 @@ jobs:
                           '  // TOUCH10_RENDER10: no idle snapshots of card widgets.')
           print('[MIRA][TOUCH10_RENDER10] input=10ms, render=10ms, task_min=2ms, no cache, stable LCD')
           PY
+          # PERF diagnostic A/B (MEMCPY_STD): no physical LCD, PSRAM or VSYNC changes.
+          python3 - <<'PY'
+          from pathlib import Path
+          conf = Path('waveshare-official/examples/arduino/libraries/lv_conf.h')
+          data = conf.read_text()
+          old = '#define LV_MEMCPY_MEMSET_STD 0'
+          new = '#define LV_MEMCPY_MEMSET_STD 1'
+          if data.count(old) != 1:
+              raise SystemExit('LVGL MEMCPY_STD: expected one '+repr(old)+', got '+str(data.count(old)))
+          conf.write_text(data.replace(old, new, 1))
+          print('[MIRA][WAVESHARE] MEMCPY_STD LVGL performance trial, LCD driver unchanged')
+          PY
           # Measurement-only firmware: no changes to RGB/VSYNC or UI scheduling.
           python3 - <<'PY'
           from pathlib import Path
@@ -501,12 +513,21 @@ jobs:
           Compare with http://IP-OF-WAVESHARE/mira-health for free memory.
           No stable OTA publication. Not for WT32 or Nextion.
           EOF
+          cat > package-waveshare/README-MEMCPY_STD.txt <<'EOF'
+          EXPERIMENTAL ONLY - WAVESHARE 4.3C - 0.7.37 MEMCPY_STD
+          Mêmes graphismes que F/PERF, teste uniquement memcpy/memset standard optimisés.
+          Based on F+PERF_DIAG: /mira-perf is available for A/B measurement.
+          Unchanged RGB pixel clock 12MHz, 2 PSRAM framebuffers and VSYNC.
+          OTA bin for update page only; factory for full flash.
+          Keep original stable 0.7.37 for rollback.
+          DO NOT install on WT32/Nextion or publish to stable.
+          EOF
           ls -lh package-waveshare/
 
       - name: Upload Waveshare preview package
         uses: actions/upload-artifact@v4
         with:
-          name: Mira_Panel_Waveshare_4.3C_0.7.37_PERF_DIAG_TEST
+          name: Mira_Panel_Waveshare_4.3C_0.7.37_MEMCPY_STD_TEST
           path: package-waveshare/
           if-no-files-found: error
           retention-days: 14
