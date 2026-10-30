@@ -12,6 +12,21 @@
 
 #include <Update.h>
 #include <esp_heap_caps.h>
+#if defined(MIRA_TARGET_WAVESHARE_43C)
+// Instrumentation exported by the official Waveshare LVGL port on this
+// experimental build ONLY. No measurements or extra tasks on other targets.
+extern volatile uint32_t miraPerfHandlerCount;
+extern volatile uint32_t miraPerfHandlerLastUs;
+extern volatile uint32_t miraPerfHandlerMaxUs;
+extern volatile uint32_t miraPerfWaitCount;
+extern volatile uint32_t miraPerfWaitLastUs;
+extern volatile uint32_t miraPerfWaitMaxUs;
+extern volatile uint32_t miraPerfFrameCount;
+extern volatile uint32_t miraPerfRefrCount;
+extern volatile uint32_t miraPerfRefrLastMs;
+extern volatile uint32_t miraPerfRefrMaxMs;
+extern volatile uint32_t miraPerfRefrLastPx;
+#endif
 #include <WiFiClientSecure.h>
 #include <Preferences.h>  // persisted Jeedom-controlled navigation
 
@@ -668,6 +683,31 @@ void MiraPanelServer::ServeurStation() {
     response->addHeader("Cache-Control", "no-store");
     request->send(response);
   });
+
+#if defined(MIRA_TARGET_WAVESHARE_43C)
+  // Read-only LVGL performance probe for experimental Waveshare firmware.
+  // Sampling this endpoint does not lock or modify LVGL; compare two
+  // samples a few seconds apart during idle and during a long scroll.
+  server.on("/mira-perf", HTTP_GET, [](AsyncWebServerRequest* request) {
+    char body[512];
+    snprintf(body, sizeof(body),
+      "{\"uptime_ms\":%lu,\"frames\":%lu,"
+      "\"handler_calls\":%lu,\"handler_last_us\":%lu,\"handler_max_us\":%lu,"
+      "\"vsync_calls\":%lu,\"vsync_last_us\":%lu,\"vsync_max_us\":%lu,"
+      "\"refresh_calls\":%lu,\"refresh_last_ms\":%lu,"
+      "\"refresh_max_ms\":%lu,\"refresh_last_pixels\":%lu}",
+      (unsigned long)millis(), (unsigned long)miraPerfFrameCount,
+      (unsigned long)miraPerfHandlerCount, (unsigned long)miraPerfHandlerLastUs,
+      (unsigned long)miraPerfHandlerMaxUs, (unsigned long)miraPerfWaitCount,
+      (unsigned long)miraPerfWaitLastUs, (unsigned long)miraPerfWaitMaxUs,
+      (unsigned long)miraPerfRefrCount, (unsigned long)miraPerfRefrLastMs,
+      (unsigned long)miraPerfRefrMaxMs, (unsigned long)miraPerfRefrLastPx);
+    AsyncWebServerResponse* response =
+      request->beginResponse(200, "application/json", body);
+    response->addHeader("Cache-Control", "no-store");
+    request->send(response);
+  });
+#endif
 
   server.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
     char CPass[50];
