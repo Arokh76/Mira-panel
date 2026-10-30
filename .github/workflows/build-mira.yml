@@ -372,7 +372,14 @@ jobs:
           new = '#define LV_DRAW_COMPLEX 0'
           if data.count(old) != 1:
               raise SystemExit('LVGL NO_COMPLEX: expected one '+repr(old)+', got '+str(data.count(old)))
-          conf.write_text(data.replace(old, new, 1))
+          # LVGL 8.4's optional meter widget rejects LV_DRAW_COMPLEX=0 at
+          # preprocess time. Mira does not use lv_meter; disable it solely
+          # for this diagnostic build rather than patching upstream widgets.
+          meter = '#define LV_USE_METER      1'
+          if data.count(meter) != 1:
+              raise SystemExit('LVGL NO_COMPLEX expected unused meter macro exactly once')
+          data = data.replace(old, new, 1).replace(meter, '#define LV_USE_METER      0', 1)
+          conf.write_text(data)
           print('[MIRA][WAVESHARE] NO_COMPLEX LVGL performance trial, LCD driver unchanged')
           PY
           # Measurement-only firmware: no changes to RGB/VSYNC or UI scheduling.
