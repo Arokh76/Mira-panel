@@ -714,7 +714,7 @@ void MiraPanelServer::ServeurStation() {
           b = (long)B;
 
           String SValue = "#000000";
-          char CValue[7];
+          char CValue[8];
           sprintf(CValue, "#%02x%02x%02x", r, g, b);
 
           events.send(CValue, CNom, millis());
@@ -919,7 +919,7 @@ void MiraPanelServer::ServeurStation() {
             b = (long)B;
 
             String SValue = "#000000";
-            char CValue[7];
+            char CValue[8];
             sprintf(CValue, "#%02x%02x%02x", r, g, b);
 
             events.send(CValue, CNom, millis());
@@ -1116,7 +1116,7 @@ void MiraPanelServer::ServeurStation() {
             b = (long)B;
 
             String SValue = "#000000";
-            char CValue[7];
+            char CValue[8];
             sprintf(CValue, "#%02x%02x%02x", r, g, b);
 
             events.send(CValue, CNom, millis());
@@ -1349,7 +1349,7 @@ void MiraPanelServer::ServeurStation() {
             b = (long)B;
 
             String SValue = "#000000";
-            char CValue[7];
+            char CValue[8];
             sprintf(CValue, "#%02x%02x%02x", r, g, b);
 
             events.send(CValue, CNom, millis());
@@ -3880,7 +3880,7 @@ void MiraPanelServer::IndexSetColor(int ID, int R, int G, int B) {
       b = (long)B;
 
       String SValue = "#000000";
-      char CValue[7];
+      char CValue[8];
       sprintf(CValue, "#%02x%02x%02x", r, g, b);
 
       events.send(CValue, CNom, millis());
@@ -5527,7 +5527,7 @@ void MiraPanelServer::JeedomCmd(int ID) {
           int R = (SPIFFS_Config_Actions["actions"][i]["r"].as<String>()).toInt();
           int G = (SPIFFS_Config_Actions["actions"][i]["g"].as<String>()).toInt();
           int B = (SPIFFS_Config_Actions["actions"][i]["b"].as<String>()).toInt();
-          char hexArray[6] = { 0 };
+          char hexArray[7] = { 0 };
           sprintf(hexArray, "%02X%02X%02X", R, G, B);
           Jeedom_Value = "%23";
           Jeedom_Value += hexArray;
@@ -5615,7 +5615,7 @@ void MiraPanelServer::GenericCmd(int ID) {
           int R = (SPIFFS_Config_Actions["actions"][i]["r"].as<String>()).toInt();
           int G = (SPIFFS_Config_Actions["actions"][i]["g"].as<String>()).toInt();
           int B = (SPIFFS_Config_Actions["actions"][i]["b"].as<String>()).toInt();
-          char hexArray[6] = { 0 };
+          char hexArray[7] = { 0 };
           sprintf(hexArray, "%02X%02X%02X", R, G, B);
           GenericValue = "%23";
           GenericValue += hexArray;
