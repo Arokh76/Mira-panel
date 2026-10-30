@@ -363,6 +363,63 @@ jobs:
                           '  // TOUCH10_RENDER10: no idle snapshots of card widgets.')
           print('[MIRA][TOUCH10_RENDER10] input=10ms, render=10ms, task_min=2ms, no cache, stable LCD')
           PY
+          # Measurement-only firmware: no changes to RGB/VSYNC or UI scheduling.
+          python3 - <<'PY'
+          from pathlib import Path
+          port = Path('firmware/source/work/MIRA_PANEL/src/WaveshareOfficial/lvgl_port/lvgl_port.cpp')
+          src = port.read_text()
+          def replace_once(old, new):
+              global src
+              if src.count(old) != 1:
+                  raise SystemExit(f'[MIRA][PERF] Expected unique Waveshare port code: {old!r}; found {src.count(old)}')
+              src = src.replace(old, new)
+          globals_code = '\n'.join([
+              'volatile uint32_t miraPerfHandlerCount = 0;',
+              'volatile uint32_t miraPerfHandlerLastUs = 0;',
+              'volatile uint32_t miraPerfHandlerMaxUs = 0;',
+              'volatile uint32_t miraPerfWaitCount = 0;',
+              'volatile uint32_t miraPerfWaitLastUs = 0;',
+              'volatile uint32_t miraPerfWaitMaxUs = 0;',
+              'volatile uint32_t miraPerfFrameCount = 0;',
+              'volatile uint32_t miraPerfRefrCount = 0;',
+              'volatile uint32_t miraPerfRefrLastMs = 0;',
+              'volatile uint32_t miraPerfRefrMaxMs = 0;',
+              'volatile uint32_t miraPerfRefrLastPx = 0;',
+          ])
+          replace_once('#include "esp_timer.h"', '#include "esp_timer.h"\n' + globals_code)
+          monitor_code = '\n'.join([
+              'static void mira_perf_monitor(lv_disp_drv_t *drv, uint32_t ms, uint32_t px) {',
+              '    (void)drv;',
+              '    miraPerfRefrLastMs = ms;',
+              '    miraPerfRefrLastPx = px;',
+              '    miraPerfRefrCount++;',
+              '    if (ms > miraPerfRefrMaxMs) miraPerfRefrMaxMs = ms;',
+              '}',
+              ''
+          ])
+          replace_once('static lv_disp_t *display_init(esp_lcd_panel_handle_t panel_handle)',
+                       monitor_code + 'static lv_disp_t *display_init(esp_lcd_panel_handle_t panel_handle)')
+          replace_once('    disp_drv.flush_cb = flush_callback; // Set the flush callback',
+                       '    disp_drv.flush_cb = flush_callback; // Set the flush callback\n    disp_drv.monitor_cb = mira_perf_monitor; // Read-only refresh timing diagnostics')
+          replace_once('            task_delay_ms = lv_timer_handler(); // Handle LVGL timer events',
+                       '            const int64_t mira_t0 = esp_timer_get_time();\n'
+                       '            task_delay_ms = lv_timer_handler(); // Handle LVGL timer events\n'
+                       '            const uint32_t mira_us = (uint32_t)(esp_timer_get_time() - mira_t0);\n'
+                       '            miraPerfHandlerCount++; miraPerfHandlerLastUs = mira_us;\n'
+                       '            if (mira_us > miraPerfHandlerMaxUs) miraPerfHandlerMaxUs = mira_us;')
+          replace_once('    /* Action after last area refresh */\n    if (lv_disp_flush_is_last(drv)) {\n        /* Switch the current RGB frame buffer to `color_map` */',
+                       '    /* Action after last area refresh */\n    if (lv_disp_flush_is_last(drv)) {\n        miraPerfFrameCount++;\n        /* Switch the current RGB frame buffer to `color_map` */')
+          replace_once('        /* Wait for the last frame buffer to complete transmission */\n        ulTaskNotifyValueClear(NULL, ULONG_MAX);\n        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);',
+                       '        /* Wait for the last frame buffer to complete transmission */\n'
+                       '        const int64_t mira_wait_t0 = esp_timer_get_time();\n'
+                       '        ulTaskNotifyValueClear(NULL, ULONG_MAX);\n'
+                       '        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);\n'
+                       '        const uint32_t mira_wait_us = (uint32_t)(esp_timer_get_time() - mira_wait_t0);\n'
+                       '        miraPerfWaitCount++; miraPerfWaitLastUs = mira_wait_us;\n'
+                       '        if (mira_wait_us > miraPerfWaitMaxUs) miraPerfWaitMaxUs = mira_wait_us;')
+          port.write_text(src)
+          print('[MIRA][PERF] instrumentation enabled: handler, VSYNC, display refresh metrics; /mira-perf')
+          PY
 
           # Keep the 0.6.38 proven adjustment: change ONLY RGB PCLK
           # from the official 16 MHz to 12 MHz; do not change validated
@@ -433,12 +490,23 @@ jobs:
           User touch, scrolling, HTTP and rendering must be verified on hardware.
           Do not merge to stable or flash on WT32/Nextion.
           EOF
+          cat > package-waveshare/README-PERF-DIAG.txt <<'EOF'
+          Experimental Waveshare 4.3C only. 0.7.37 (based on F TOUCH10+RENDER10).
+          Measures LVGL and VSYNC in the official RGB driver without changing
+          frame buffer sizes, PCLK, VSYNC operation, or UI behavior.
+          Open http://IP-OF-WAVESHARE/mira-perf and sample twice while scrolling.
+          Counters: frames, refresh_calls, handler_calls, vsync_calls.
+          Latencies: handler_last_us/max_us, vsync_last_us/max_us;
+          refresh_last_ms/max_ms and refresh_last_pixels.
+          Compare with http://IP-OF-WAVESHARE/mira-health for free memory.
+          No stable OTA publication. Not for WT32 or Nextion.
+          EOF
           ls -lh package-waveshare/
 
       - name: Upload Waveshare preview package
         uses: actions/upload-artifact@v4
         with:
-          name: Mira_Panel_Waveshare_4.3C_0.7.37_TOUCH10_RENDER10_TEST
+          name: Mira_Panel_Waveshare_4.3C_0.7.37_PERF_DIAG_TEST
           path: package-waveshare/
           if-no-files-found: error
           retention-days: 14
