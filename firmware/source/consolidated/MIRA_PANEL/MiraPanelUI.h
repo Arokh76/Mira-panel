@@ -7,6 +7,7 @@
 #include "MiraPanelServer.h"
 #include "MiraHardware.h"
 #include "MiraDisplayProfile.h"
+#include "MiraCameraBmp.h"
 
 class MiraMqtt;
 
@@ -40,7 +41,7 @@ private:
   static constexpr uint8_t MAX_BINDINGS = 40;
   static constexpr uint8_t MAX_LIST_ITEMS = 12;
   static constexpr uint8_t MAX_EVENT_CONTEXTS = 96;
-  static constexpr uint8_t PAGE_COUNT = 4;  // Accueil, Lumières, Températures, Paramètres
+  static constexpr uint8_t PAGE_COUNT = 6;  // 0 Accueil, 1 Lumières, 2 Températures, 3 Paramètres, 4 Énergie, 5 Multimédia
   static constexpr uint8_t FAVORITE_SLOTS = 3;
   static constexpr uint8_t NAV_BUTTON_COUNT = FAVORITE_SLOTS + 1;  // + Pages
   static constexpr uint8_t NO_FAVORITE = 0xFF;
@@ -63,6 +64,9 @@ private:
     W_COLOR,
     W_DATETIME,
     W_THERMOSTAT,
+    W_CAMERA,
+    W_ENERGY,
+    W_MEDIA,
     W_UNSUPPORTED
   };
 
@@ -76,6 +80,7 @@ private:
     String labelMode = "auto";
     String icon = "auto";
     String displayName = "";
+    String cameraUrl; // HTTP BMP snapshot URL; no fetch until opened
     int layoutX = -1;
     int layoutY = -1;
     int layoutW = -1;
@@ -94,6 +99,30 @@ private:
     bool multiTouchLongSent = false;
     uint32_t multiTouchPressAt = 0;
     uint32_t multiTouchReleasedAt = 0;
+    // Composite widgets: ordinary indexed Jeedom Info and action commands.
+    // Energy: solar/home/grid/battery power + battery SoC.
+    // Media: title/artist/album/state/progress + volume.
+    // 7 energy fields (4 powers + up to 3 SoCs); 6 multimedia fields.
+    int compositeIds[9] = {-1, -1, -1, -1, -1, -1, -1, -1, -1};
+    lv_obj_t* compositeLabels[9] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+    lv_obj_t* compositeGauge = nullptr;
+    lv_obj_t* energyExtraNames[2] = {nullptr, nullptr};
+    lv_obj_t* energyExtraGauges[2] = {nullptr, nullptr};
+    bool energyExtraActive[2] = {false, false};
+    int energyBaseHeight = 0;
+    int mediaActionIds[3] = {-1, -1, -1}; // previous/play/next
+    int mediaPauseCmdId = -1;          // separate Pause Jeedom action
+    bool mediaPlaybackPlaying = false; // last accepted state or local button intent
+    int mediaVolumeCmdId = -1;
+    int mediaDeviceCmdId = -1;
+    lv_obj_t* mediaDeviceDropdown = nullptr;
+    String mediaDeviceNames[12];
+    uint8_t mediaDeviceCount = 0;
+    String mediaActiveDevice;
+    lv_obj_t* mediaVolumeSlider = nullptr;
+    lv_obj_t* mediaArtworkImage = nullptr;
+    lv_obj_t* mediaArtworkPlaceholder = nullptr;
+    uint16_t mediaArtworkSize = 0;
     int thermostatTempId = -1;
     float thermostatSetpoint = 20.0f;
     lv_obj_t* thermostatTemperatureLabel = nullptr;
@@ -140,6 +169,7 @@ private:
   lv_obj_t* _screen = nullptr;
   lv_obj_t* _nav = nullptr;
   lv_obj_t* _pages[PAGE_COUNT] = {nullptr};
+  uint8_t _visiblePageMask = 0x3F; // home+5 pages visible on first install
   uint8_t _favoritePages[FAVORITE_SLOTS] = {0, 1, 2};  // fixed slots, 0xFF = free
   lv_obj_t* _favoriteButtons[FAVORITE_SLOTS] = {nullptr};
   lv_obj_t* _navPagesButton = nullptr;
@@ -170,6 +200,20 @@ private:
   bool _scrollCacheActive = false;
 
 #endif
+  MiraCameraBmp _cameraFeed;
+  MiraCameraBmp _albumFeed;  // independent one-shot artwork worker
+  lv_obj_t* _cameraOverlay = nullptr;
+  lv_obj_t* _cameraImage = nullptr;
+  lv_obj_t* _cameraStatus = nullptr;
+  lv_img_dsc_t _cameraDescriptor = {};
+  uint16_t* _cameraPixels = nullptr;
+  uint32_t _cameraOpenedAt = 0;
+  lv_img_dsc_t _albumDescriptor = {};
+  uint16_t* _albumPixels = nullptr;
+  int16_t _albumTargetIdx = -1;
+  String _albumUrl;
+  uint32_t _albumRequestedAtMs = 0; // diagnostics: URL received -> JPEG displayed
+
   lv_obj_t* _dateTimeLabel = nullptr;
   lv_obj_t* _dateSubLabel = nullptr;
   lv_obj_t* _clockStatusLabel = nullptr;
@@ -185,6 +229,8 @@ private:
 
   lv_obj_t* _sleepOverlay = nullptr;
   lv_obj_t* _sleepClock = nullptr;
+  lv_obj_t* _sleepDate = nullptr;
+  lv_obj_t* _sleepTemperature = nullptr;
 
   bool _suppressEvents = false;
   bool _ntpStarted = false;
@@ -265,6 +311,11 @@ private:
   static void onNav(lv_event_t* e);
   static void onPagePick(lv_event_t* e);
   static void onButton(lv_event_t* e);
+  static void onCameraTile(lv_event_t* e);
+  static void onCameraBack(lv_event_t* e);
+  static void onMediaAction(lv_event_t* e);
+  static void onMediaVolume(lv_event_t* e);
+  static void onMediaDeviceSelected(lv_event_t* e);
   static void onMultiTouch(lv_event_t* e);
   static void onToggle(lv_event_t* e);
   static void onRange(lv_event_t* e);
@@ -294,6 +345,7 @@ private:
   void setNavActive(uint8_t index);
   void loadFavorites();
   void refreshFavoriteNav();
+  void refreshPagePickerVisibility();
   void pollFavorites();
   void setPagePickerVisible(bool visible);
   void buildPagePicker();
@@ -306,6 +358,16 @@ private:
   void createInfo(uint8_t idx);
   void decorateInfo(uint8_t idx);
   void createButton(uint8_t idx);
+  void createCamera(uint8_t idx);
+  void createEnergy(uint8_t idx);
+  void createMedia(uint8_t idx);
+  void refreshMediaDeviceDropdown(Binding& b);
+  void serviceAlbumArtwork();
+  void clearAlbumArtwork();
+  void updateCompositeInfo(Binding& b, uint8_t field, const String& value);
+  void openCamera(uint8_t idx);
+  void closeCamera();
+  void serviceCamera();
   void createToggle(uint8_t idx);
   void createRange(uint8_t idx);
   void createRoundRange(uint8_t idx);
@@ -336,6 +398,7 @@ private:
   void enterSleep();
   void wakeFromSleep();
   void updateSleepClock();
+  String firstSleepTemperature() const;
 
   lv_color_t colorBg() const;
   lv_color_t colorPanel() const;

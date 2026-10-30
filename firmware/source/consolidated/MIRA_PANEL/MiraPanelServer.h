@@ -43,6 +43,7 @@ public:
 
   void miraLvgl(bool mira_lvgl = true);
   String GetJsonLvgl();
+  String GetCameraUrl(const String& name); // Jeedom Commandes: persistent camera URL
   int ParamGetEvent();
   // Reconstruction WT32: remet a zero uniquement la table des actions dynamiques
   // afin de reconstruire l'interface LVGL sans redemarrer le module.
