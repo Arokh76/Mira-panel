@@ -1,33 +1,33 @@
 {
   "project": "Mira Panel",
-  "version": "0.7.35",
+  "version": "0.7.37",
   "targets": {
     "wt32-sc01-plus": {
       "label": "WT32-SC01 Plus",
       "flashMB": 8,
-      "ota": "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/releases/0.7.35/wt32-sc01-plus/ota.bin",
-      "factory": "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/releases/0.7.35/wt32-sc01-plus/factory.bin",
-      "otaSha256": "7f0151af0bccdd3cf9a02fb0d846098c830c5e40822bdebfbb0d6c4caf32b7dd",
-      "factorySha256": "d148de52e86e0fc15adcd052e023998b69470010dfe6c92165b34cbb826ef03f",
-      "otaBytes": 1864448
+      "ota": "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/releases/0.7.37/wt32-sc01-plus/ota.bin",
+      "factory": "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/releases/0.7.37/wt32-sc01-plus/factory.bin",
+      "otaSha256": "a477fc30c18fe1ec157e2001f581d80e6cbbff69f1768f1534aa7a8294107849",
+      "factorySha256": "0984f478e5c674efaab24a85978735c14acdfceee0c21547eea083756c769465",
+      "otaBytes": 1870432
     },
     "onx2432g028": {
       "label": "Open Nextion Genius 2.8",
       "flashMB": 16,
-      "ota": "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/releases/0.7.35/onx2432g028/ota.bin",
-      "factory": "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/releases/0.7.35/onx2432g028/factory.bin",
-      "otaSha256": "f6c7fb1ccaa9b2b0807d3d6be503a8dc36682001dd731aeedbffb2265c85b98d",
-      "factorySha256": "620823d440a9d371162f853efbad3376a0220a463c33469e7fc10f2206b0eab8",
-      "otaBytes": 1942832
+      "ota": "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/releases/0.7.37/onx2432g028/ota.bin",
+      "factory": "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/releases/0.7.37/onx2432g028/factory.bin",
+      "otaSha256": "e412562d17d9b19fa2399d2558d81cb999c3d11a9346864d620990efadd6259e",
+      "factorySha256": "e1aead79138c76a7bd96119946ee3f51cca2cf6542d7cdff0833e3dd15aa5ba1",
+      "otaBytes": 1948000
     },
     "waveshare-esp32s3-touch-lcd-4.3c": {
       "label": "Waveshare ESP32-S3 Touch LCD 4.3C",
       "flashMB": 16,
-      "ota": "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/releases/0.7.35/waveshare-esp32s3-touch-lcd-4.3c/ota.bin",
-      "factory": "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/releases/0.7.35/waveshare-esp32s3-touch-lcd-4.3c/factory.bin",
-      "otaSha256": "f1b788b1032889b9e2559d949d811f8f7bc5e9cd83aba5c47ef8e6eae6e463c4",
-      "factorySha256": "9f1c7f972c2dc665f0bab9e1ac95453287f8ba1083acc9f70fb7c862448563bd",
-      "otaBytes": 2044544
+      "ota": "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/releases/0.7.37/waveshare-esp32s3-touch-lcd-4.3c/ota.bin",
+      "factory": "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/releases/0.7.37/waveshare-esp32s3-touch-lcd-4.3c/factory.bin",
+      "otaSha256": "18e4709bfc5d965b49a354dab40da0a2d66425fe952c48aa2947f7f6390be619",
+      "factorySha256": "8e8fa01af7abac6cba2662210a3c79ed15003382c525ca386f18fde0ea154d6b",
+      "otaBytes": 2050016
     }
   }
 }

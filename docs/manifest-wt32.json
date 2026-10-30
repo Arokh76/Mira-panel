@@ -1,6 +1,6 @@
 {
   "name": "Mira Panel - WT32-SC01 Plus",
-  "version": "0.7.35",
+  "version": "0.7.37",
   "new_install_prompt_erase": true,
   "builds": [
     {
