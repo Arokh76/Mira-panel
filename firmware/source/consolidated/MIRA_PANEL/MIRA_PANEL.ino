@@ -45,7 +45,7 @@ void setup() {
   Serveur.SetupModule(
     "Mira Panel",
     MIRA_HARDWARE_NAME,
-    "0.7.36",
+    "0.7.37",
     "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/",
     "LVGL"
   );
@@ -62,7 +62,7 @@ void setup() {
   }
 
   Serial.println();
-  Serial.println("[MIRA] Firmware 0.7.36 VEILLE AJUSTEE BETA initialise");
+  Serial.println("[MIRA] Firmware 0.7.37 VEILLE AJUSTEE BETA initialise");
   Serial.printf("[MIRA][HW] Flash : %.1f MB\n", ESP.getFlashChipSize() / 1048576.0f);
   Serial.printf("[MIRA][HW] PSRAM : %.1f MB\n", ESP.getPsramSize() / 1048576.0f);
   Serial.println("[MIRA] Interface HTTP, LVGL et MQTT pretes");
@@ -92,6 +92,11 @@ void loop() {
   // Evenements commandes : /updatenr et interactions de l'ecran.
   int miraEvent = Serveur.IndexGetEvent();
   if (miraEvent >= 0) Interface.handleMiraEvent(miraEvent);
+
+  // State-only feedback from Jeedom is kept separate from command events.
+  // Repaint a light switch without calling JeedomCmd or toggling any relay.
+  int passiveToggleEvent = Serveur.IndexGetPassiveToggleEvent();
+  if (passiveToggleEvent >= 0) Interface.handleMiraEvent(passiveToggleEvent);
 
   // Evenements de programmation Mira : remove/add/save de la liste LVGL.
   int paramEvent = Serveur.ParamGetEvent();
