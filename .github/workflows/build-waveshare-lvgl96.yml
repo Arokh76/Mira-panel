@@ -64,7 +64,7 @@ jobs:
       - name: Upload unvalidated hardware test (not a Mira update)
         uses: actions/upload-artifact@v4
         with:
-          name: Mira_Waveshare_43C_LVGL_9.6.0_RGB565_POC_UNVALIDATED
+          name: Mira_Waveshare_43C_LVGL96_SRAM20L_PARTIAL_TEST
           path: build-lvgl9/LVGL9Probe.ino.bin
           retention-days: 7
           if-no-files-found: error
