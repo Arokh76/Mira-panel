@@ -1,6 +1,7 @@
 // LVGL 9.6 RGB565 smoke test -- WAVESHARE ESP32-S3 TOUCH LCD 4.3C ONLY.
 // Standalone LVGL 9.6 smooth-scroll A/B trial, not the Jeedom application.
-// Same RGB wiring, 12 MHz PCLK, dual PSRAM RGB framebuffers as Mira 0.7.37.
+// Partial mode: 2 x 20-line INTERNAL SRAM draw buffers; RGB panel retains dual PSRAM framebuffers.
+// Same RGB wiring, 12 MHz PCLK, LVGL9 semantics and Wi-Fi OTA recovery as direct-mode probe.
 #include <Arduino.h>
 #include <Wire.h>
 #include <WiFi.h>
@@ -16,6 +17,9 @@
 #include "freertos/task.h"
 
 static constexpr int W = 800, H = 480;
+static constexpr int TILE_LINES = 20;
+static constexpr size_t TILE_BYTES = W * TILE_LINES * 2;
+static uint8_t *tile_a = nullptr, *tile_b = nullptr;
 static esp_lcd_panel_handle_t panel = nullptr;
 static lv_display_t *display = nullptr;
 static TaskHandle_t render_task = nullptr;
@@ -30,6 +34,8 @@ static bool auto_scroll = true;
 static bool scroll_down = true;
 static volatile uint32_t last_fps_tenths = 0;
 static bool update_failed = false;
+static volatile uint32_t flush_calls = 0;
+static volatile uint32_t flush_last_us = 0;
 static constexpr const char* AP_NAME = "Mira-LVGL9-Test";
 static constexpr const char* AP_PASS = "MiraLVGL9-2026";
 
@@ -57,9 +63,10 @@ static void setup_recovery_ap() {
   http.on("/perf", HTTP_GET, []() {
     char buf[160];
     snprintf(buf, sizeof(buf),
-      "{\"frames\":%lu,\"fps_tenths\":%lu,\"vsync_timeouts\":%lu,\"uptime_ms\":%lu}",
+      "{\"frames\":%lu,\"fps_tenths\":%lu,\"vsync_timeouts\":%lu,\"uptime_ms\":%lu,\"flush_calls\":%lu,\"flush_last_us\":%lu}",
       (unsigned long)frames, (unsigned long)last_fps_tenths,
-      (unsigned long)vsync_timeout, (unsigned long)millis());
+      (unsigned long)vsync_timeout, (unsigned long)millis(),
+      (unsigned long)flush_calls, (unsigned long)flush_last_us);
     http.send(200, "application/json", buf);
   });
   http.on("/update", HTTP_POST, []() {
@@ -136,15 +143,18 @@ static bool IRAM_ATTR on_vsync(esp_lcd_panel_handle_t,
   return woken == pdTRUE;
 }
 static void flush(lv_display_t *d, const lv_area_t *area, uint8_t *px) {
-  if (lv_display_flush_is_last(d)) {
-    esp_err_t err = esp_lcd_panel_draw_bitmap(panel,
+  const int64_t t0 = esp_timer_get_time();
+  ++flush_calls;
+  esp_err_t err = esp_lcd_panel_draw_bitmap(panel,
              area->x1, area->y1, area->x2 + 1, area->y2 + 1, px);
+  if (lv_display_flush_is_last(d)) {
     if (err == ESP_OK) {
       ulTaskNotifyValueClear(nullptr, ULONG_MAX);
       if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100)) == 0) ++vsync_timeout;
     }
     ++frames;
   }
+  flush_last_us = (uint32_t)(esp_timer_get_time() - t0);
   lv_display_flush_ready(d);
 }
 static void tick(void *) { lv_tick_inc(2); }
@@ -198,7 +208,7 @@ static void make_scene() {
   fps_label = lv_label_create(root);
   lv_obj_set_style_text_color(fps_label, lv_color_hex(0x86EEAD), 0);
   lv_obj_set_pos(fps_label, 22, 16);
-  lv_label_set_text(fps_label, "LVGL 9.6  |  FPS: --");
+  lv_label_set_text(fps_label, "SRAM 20L  |  FPS: --");
   lv_obj_t *btn = lv_button_create(root);
   lv_obj_set_pos(btn, 630, 5);
   lv_obj_set_size(btn, 155, 45);
@@ -251,7 +261,13 @@ void setup() {
   lv_init();
   display = lv_display_create(W,H);
   lv_display_set_color_format(display, LV_COLOR_FORMAT_RGB565);
-  lv_display_set_buffers(display, fb1, fb2, W * H * 2, LV_DISPLAY_RENDER_MODE_DIRECT);
+  tile_a = (uint8_t *)heap_caps_malloc(TILE_BYTES, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  tile_b = (uint8_t *)heap_caps_malloc(TILE_BYTES, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  if (!tile_a || !tile_b) {
+    Serial.printf("[MIRA-LVGL9-PROBE] OOM: SRAM tiles (%u bytes each)\n", (unsigned)TILE_BYTES);
+    while(true) { delay(500); }
+  }
+  lv_display_set_buffers(display, tile_a, tile_b, TILE_BYTES, LV_DISPLAY_RENDER_MODE_PARTIAL);
   lv_display_set_flush_cb(display, flush);
   lv_indev_t *pointer = lv_indev_create();
   lv_indev_set_type(pointer, LV_INDEV_TYPE_POINTER);
@@ -264,7 +280,7 @@ void setup() {
   ESP_ERROR_CHECK(esp_timer_create(&ta, &timer));
   ESP_ERROR_CHECK(esp_timer_start_periodic(timer, 2000));
   make_scene();
-  Serial.printf("[MIRA-LVGL9-PROBE] LVGL %d.%d.%d; RGB565 800x480; PSRAM=%u\n",
+  Serial.printf("[MIRA-LVGL9-PROBE] LVGL %d.%d.%d; SRAM PARTIAL 20L 800x480; PSRAM=%u\n",
         LVGL_VERSION_MAJOR, LVGL_VERSION_MINOR, LVGL_VERSION_PATCH,
         (unsigned)ESP.getFreePsram());
 }
@@ -276,7 +292,7 @@ void loop() {
     uint32_t new_frames = frames;
     uint32_t dt = now - last;
     last_fps_tenths = (new_frames-prev) * 10000UL / (dt ? dt : 1);
-    if (fps_label) lv_label_set_text_fmt(fps_label, "LVGL 9.6  |  FPS: %lu.%01lu",
+    if (fps_label) lv_label_set_text_fmt(fps_label, "SRAM 20L  |  FPS: %lu.%01lu",
                   (unsigned long)(last_fps_tenths/10),
                   (unsigned long)(last_fps_tenths%10));
     Serial.printf("[MIRA-LVGL9-PROBE] fps=%lu.%01lu vsync_timeouts=%lu heap=%u psram=%u\n",
