@@ -6,6 +6,18 @@ if (!isConnect('admin')) {
 $plugin = plugin::byId('mira');
 sendVarToJS('eqType', $plugin->getId());
 $eqLogics = eqLogic::byType($plugin->getId());
+// Expose only scenario ID/name/status to the admin editor; never expose
+// scenario definitions, triggers or configuration to the display firmware.
+$miraScenarioOptions = array();
+foreach (scenario::all() as $miraScenario) {
+    if (!is_object($miraScenario)) continue;
+    $miraScenarioOptions[] = array(
+        'id' => (int)$miraScenario->getId(),
+        'name' => (string)$miraScenario->getHumanName(),
+        'active' => (int)$miraScenario->getIsActive()
+    );
+}
+sendVarToJS('miraScenarioOptions', $miraScenarioOptions);
 log::add('mira', 'debug', "Lancement script");
           
 ?>
@@ -30,11 +42,14 @@ log::add('mira', 'debug', "Lancement script");
                         <option value="datetime">Date et heure</option>
         				<option value="info">Info</option>
         				<option value="button">Bouton</option>
-                        <option value="multiaction">Multi-actions (bouton GPIO)</option>
+                        <option value="multiaction">Bouton multi-actions</option>
         				<option value="toggle">Bouton basculant</option>
                         <option value="range">Curseur</option>
                         <option value="roundrange">Curseur arrondi</option>
                         <option value="thermostat">Thermostat</option>
+                        <option value="camera">Caméra</option>
+                        <option value="energy">Énergie · instrumentation</option>
+                        <option value="media">Lecteur multimédia</option>
                         <option value="color">Couleur</option>
                         <option value="list">Liste</option>
                         <option value="listbutton">Liste vers boutons</option>
@@ -78,7 +93,9 @@ log::add('mira', 'debug', "Lancement script");
                           <option value="nope">-- Veuillez sélectionner un emplacement --</option>
                           <option value="accueil">Accueil</option>
                           <option value="temperatures">Températures</option>
-                          <option value="lumieres">Lumières</option>                        
+                          <option value="lumieres">Lumières</option>
+                          <option value="energie">Énergie</option>
+                          <option value="multimedia">Multimédia</option>                        
     					</select>
                       </span>                        
                       <div class="mirainputzone"> 
@@ -86,7 +103,7 @@ log::add('mira', 'debug', "Lancement script");
                         <div id="divmiraname" style="margin-top:2px; display:flex; line-height:40px; vertical-align: middle;"><div align=right style="width:30%;">{{Nom affiché}}:&nbsp;</div><input style="width:70%;" type="text" id="miraname" required minlength="1" size="12" /></div>
                         <div id="divmiramin" style="margin-top:2px; display:flex; line-height:40px; vertical-align: middle;"><div id="titlemiramin" align=right style="width:30%;">{{Valeur mini}}:&nbsp;</div><input style="width:70%;" type="number" id="miramin" size="12" onkeydown="return event.keyCode !== 69" maxlength="3" oninput="javascript: if (this.value.length > this.maxLength) this.value = this.value.slice(0, this.maxLength);"/></div>
                         <div id="divmiramax" style="margin-top:2px; display:flex; line-height:40px; vertical-align: middle;"><div align=right style="width:30%;">{{Valeur maxi}}:&nbsp;</div><input style="width:70%;" type="number" id="miramax" size="12"  onkeydown="return event.keyCode !== 69" maxlength="3" oninput="javascript: if (this.value.length > this.maxLength) this.value = this.value.slice(0, this.maxLength);"/></div>
-                        <div id="divmiraval" style="margin-top:2px; display:flex; line-height:40px; vertical-align: middle;"><div id="titlemiraval" align=right style="width:30%;">{{Valeur}}:&nbsp;</div><input style="width:70%;" type="number" id="miraval" size="12" step="0.5" onkeydown="return event.keyCode !== 69" maxlength="6" oninput="javascript: if (this.value.length > this.maxLength) this.value = this.value.slice(0, this.maxLength);"/></div>
+                        <div id="divmiraval" style="margin-top:2px; display:flex; line-height:40px; vertical-align: middle;"><div id="titlemiraval" align=right style="width:30%;">{{Valeur}}:&nbsp;</div><input style="width:70%;" type="number" id="miraval" size="12" step="0.5" maxlength="6" oninput="if (this.type === 'number' && this.value.length > 6) this.value = this.value.slice(0, 6);"/></div>
                         <div id="divmiraunit" style="margin-top:2px; display:flex; line-height:40px; vertical-align: middle;"><div align=right style="width:30%;">{{Unité}}:&nbsp;</div><input style="width:70%;" type="text" id="miraunit" size="12" /></div>
                         <div id="divmiralist" style="margin-top:2px; display:flex; line-height:40px; vertical-align: middle;"><div align=right style="width:30%;">{{Contenu}}:&nbsp;</div><input placeholder="{{Séparer le contenu de la liste par | (Item1|Item2)}}" style="width:70%;" type="text" id="miralist" size="12" /></div>
                         <div id="divmirathermomodes" style="display:none;margin:3px auto; width:96%;">
@@ -129,6 +146,7 @@ log::add('mira', 'debug', "Lancement script");
                         <div id="miraquickminmaxwrap"><label>Minimum <input type="number" id="miraquickmin"></label><label>Maximum <input type="number" id="miraquickmax"></label></div>
                         <div id="miraquickvaluewrap"><label><span id="miraquickvaluetitle">Valeur / options</span><input type="text" id="miraquickvalue"></label></div>
                         <div id="miraquickthermomodeswrap" style="display:none"><label>Modes du thermostat <input type="text" id="miraquickthermomodes" placeholder="Confort|Éco|Hors gel|Arrêt"></label></div>
+
                         <div class="mira-quickoptions-actions"><button type="button" id="miraquickcancel" class="btn btn-default">Annuler</button><button type="button" id="miraquicksave" class="btn btn-success">Valider</button></div>
                       </div>
                     </div>
@@ -138,6 +156,8 @@ log::add('mira', 'debug', "Lancement script");
                           <button type="button" class="mira-page-tab active" data-page="accueil">Accueil</button>
                           <button type="button" class="mira-page-tab" data-page="lumieres">Lumières</button>
                           <button type="button" class="mira-page-tab" data-page="temperatures">Températures</button>
+                          <button type="button" class="mira-page-tab" data-page="energie">Énergie</button>
+                          <button type="button" class="mira-page-tab" data-page="multimedia">Multimédia</button>
                         </div>
                         <div class="mira-designer-actions">
                           <button type="button" id="miradesignergrid" class="btn btn-sm btn-default active" title="Aimantation sur la grille"><i class="fas fa-th"></i> Grille</button>
@@ -384,6 +404,7 @@ log::add('mira', 'debug', "Lancement script");
                                 '1' => 'Lumières',
                                 '2' => 'Températures',
                                 '4' => 'Énergie',
+                                '5' => 'Multimédia',
                                 '3' => 'Paramètres',
                                 '255' => 'Aucun'
                             );
@@ -406,10 +427,68 @@ log::add('mira', 'debug', "Lancement script");
                                     <small id="miraFavoritesSyncStatus" class="help-block">{{Utile après un redémarrage ou si l'écran était déconnecté.}}</small>
                                 </div>
                             </div>
+                             <legend><i class="fas fa-eye"></i> {{Pages affichées}}</legend>
+                            <p class="help-block" style="margin-left:10px;">{{Masquer une page la retire du menu Pages et empêche de la sélectionner depuis les favoris. Aucun widget ni aucune configuration ne sera supprimé. Accueil reste toujours disponible.}}</p>
+                            <?php
+                            foreach (array('1'=>'Lumières','2'=>'Températures','3'=>'Paramètres',
+                                           '4'=>'Énergie','5'=>'Multimédia') as $miraPageId=>$miraPageName) {
+                                echo '<div class="form-group">';
+                                echo '<label class="col-sm-4 control-label">'.htmlspecialchars($miraPageName,ENT_QUOTES,'UTF-8').'</label>';
+                                echo '<div class="col-sm-6">';
+                                echo '<label class="checkbox-inline"><input type="checkbox" value="1" class="eqLogicAttr" data-l1key="configuration" data-l2key="nav_show'.$miraPageId.'" checked> {{Afficher dans Mira}}</label>';
+                                echo '</div></div>';
+                            }
+                            ?>
+                            <legend><i class="fas fa-cloud-sun"></i> {{Météo de l'horloge}}</legend>
+                            <div class="form-group">
+                                <label class="col-sm-3 control-label">{{Source Weather}}</label>
+                                <div class="col-sm-7">
+                                  <select class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="weather_eqid">
+                                    <option value="">{{Automatique (si un seul équipement Weather)}}</option>
+                                    <?php
+                                    foreach (eqLogic::byType('weather', true) as $weatherEq) {
+                                      echo '<option value="' . (int)$weatherEq->getId() . '">' .
+                                        htmlspecialchars($weatherEq->getHumanName(), ENT_QUOTES, 'UTF-8') . '</option>';
+                                    }
+                                    ?>
+                                  </select>
+                                  <small class="help-block">{{Facultatif : si Weather est absent, l'horloge reste centrée. Plusieurs équipements ? Choisissez celui à afficher.}}</small>
+                                </div>
+                            </div>
+                            <legend><i class="fab fa-spotify"></i> {{Lecteur multimédia}}</legend>
+                            <div class="form-group">
+                              <label class="col-sm-4 control-label">{{Lecteur Jeedom à associer}}</label>
+                              <div class="col-sm-6">
+                                <select class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="media_source_eqid" id="miraMediaSourceEq">
+                                  <option value="">{{Configuration manuelle}}</option>
+                                  <?php
+                                  // Some Jeedom installs resolve both spotifyConnect and
+                                  // spotifyconnect to the very same equipment family.
+                                  // Never duplicate an equipment in Mira's source menu.
+                                  $miraSeenMediaSourceIds=array();
+                                  foreach (array('spotify','spotifyconnect','spotifyConnect') as $miraSpotifyType) {
+                                    foreach ((array)eqLogic::byType($miraSpotifyType) as $miraSpotifyEq) {
+                                      if (!is_object($miraSpotifyEq)) continue;
+                                      $miraSpotifyEqId=(int)$miraSpotifyEq->getId();
+                                      if ($miraSpotifyEqId<1 || isset($miraSeenMediaSourceIds[$miraSpotifyEqId])) continue;
+                                      $miraSeenMediaSourceIds[$miraSpotifyEqId]=true;
+                                      $miraSpotifyLabel=strtolower($miraSpotifyType)==='spotify' ? 'Spotify' : 'Spotify Connect';
+                                      echo '<option value="'.$miraSpotifyEqId.'">'
+                                          .htmlspecialchars($miraSpotifyLabel.' · '.$miraSpotifyEq->getHumanName(),ENT_QUOTES,'UTF-8')
+                                          .'</option>';
+                                    }
+                                  }
+                                  ?>
+                                </select>
+                                <small id="miraMediaModeHelp" class="help-block">{{Choisissez un lecteur Spotify pour associer automatiquement ses commandes lors de l’enregistrement, ou Configuration manuelle pour utiliser un lecteur générique.}}</small>
+                              </div>
+                            </div>
+
+                            
 
                             <div class="form-group">
-								<label class="col-sm-4 control-label"> {{Pinguer et rafraîchir toutes les 15 minutes}}
-									<sup><i class="fas fa-question-circle tooltips" title="{{Si la case est cochée, un ping et un rafraichissement seront effectués toutes les 15 minutes}}"></i></sup>
+								<label class="col-sm-4 control-label"> {{Surveiller l'écran (15 min)}}
+									<sup><i class="fas fa-question-circle tooltips" title="{{Vérifie la connexion toutes les 15 minutes et rafraîchit les informations lorsque l'écran répond.}}"></i></sup>
 								</label>
 								<div class="col-sm-6">
 									<input type="checkbox" value="1" class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="ping" checked>
@@ -452,7 +531,8 @@ log::add('mira', 'debug', "Lancement script");
 				<div class="input-group pull-right" style="display:inline-flex;margin-top:5px;">					
 				</div>
 				<br>
-                <p style="color : #4894E1;">{{Vous pouvez réorganiser les lignes en cliquant sur l'entête des colonnes}}</p>   <!-- ' -->                
+                <p style="color : #4894E1;">{{Vous pouvez réorganiser les lignes en cliquant sur l'entête des colonnes}}</p>   <!-- ' -->
+
 				<div class="table-responsive">
 					<table id="table_cmd" class="sortable table table-bordered table-condensed">
 						<thead>

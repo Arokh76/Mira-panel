@@ -346,7 +346,8 @@ function MiraRowIconConfig(row){
 
 function MiraStyleOptions(type){
   if (type === 'info') return [['standard','Standard'],['value','Valeur dominante'],['compact','Compact']];
-  if (type === 'button') return [['standard','Standard'],['compact','Compact']];
+  if (type === 'button' || type === 'camera') return [['standard','Standard'],['compact','Compact']];
+  if (type === 'energy' || type === 'media') return [['standard','Tableau Mira']];
   if (type === 'toggle') return [['standard','Standard'],['compact','Compact']];
   if (type === 'range' || type === 'roundrange' || type === 'list') return [['standard','Standard'],['compact','Compact']];
   if (type === 'listbutton') return [['standard','Standard'],['compact','Compact'],['segmented','Segmenté']];
@@ -415,7 +416,7 @@ function MiraLayoutSelect(type,layout){
   var select=document.createElement('select');
   select.className='mira-row-layout';
   // Valeurs des anciennes versions conservées sans forcer leur conversion.
-  (type==='thermostat' ? [['auto','Auto']] : [['auto','Auto'],['free','Manuel · designer']]).forEach(function(o){
+  (['thermostat','energy','media'].includes(type) ? [['auto','Auto']] : [['auto','Auto'],['free','Manuel · designer']]).forEach(function(o){
     var opt=document.createElement('option'); opt.value=o[0]; opt.textContent=o[1]; select.appendChild(opt);
   });
   if(layout && layout!=='auto' && layout!=='free'){
@@ -499,6 +500,7 @@ async function SendListHTTP(ip,mdp){
     for (let i = 2; i < miratable.rows.length; i++) {
       if (!MiraValidateRangeRow(miratable.rows[i])) return;
       if (!MiraValidateListRow(miratable.rows[i])) return;
+
     }
 
     /* 1.2.9 : on construit le JSON complet côté Jeedom puis on l'envoie en
@@ -514,7 +516,7 @@ async function SendListHTTP(ip,mdp){
       var miraunit = MiraSafeText(row.cells[4].innerText);
       var miramin = MiraCellValue(row.cells[5]);
       var miramax = MiraCellValue(row.cells[6]);
-      var miraval = MiraSafeText(row.cells[7].innerText);
+      var miraval = miratype === 'camera' ? '' : MiraSafeText(row.cells[7].innerText);
       var layoutSelect = row.cells[8].querySelector('.mira-row-layout');
       var miralayout = layoutSelect ? layoutSelect.value : (row.cells[8].dataset.value || 'auto');
 
@@ -785,7 +787,7 @@ function Remplissage(contjson){
     var miradisplayname = MiraSafeText(obj["lvgl"][i]["displayName"]) || miraname;
   	var miramin = MiraSafeText(obj["lvgl"][i]["min"]);
   	var miramax = MiraSafeText(obj["lvgl"][i]["max"]);
-  	var miraval = MiraSafeText(obj["lvgl"][i]["value"]);
+  	var miraval = miratype === 'camera' ? '' : MiraSafeText(obj["lvgl"][i]["value"]);
     var miraunit = MiraSafeText(obj["lvgl"][i]["unit"]);
     var miralabelmode=MiraInfoValue(MiraInfoModes,MiraSafeText(obj["lvgl"][i]["labelMode"])||'auto');
     var iconFromScreen=MiraSafeText(obj["lvgl"][i]["icon"])||'auto';
@@ -888,6 +890,7 @@ $("#mirabuttonajouter").on('click', function (event) {
   var miratable = document.getElementById('miratable');
   miraname=MiraSafeText(miraname).trim();
   var thermoModes=$('#mirathermomodes').val().trim() || 'Confort|Éco|Hors gel|Arrêt';
+  if (miratype === 'camera') miraval = ''; // URL editable later in Paramètres
   if(miratype==='thermostat'){
     if(!thermoModes.split('|').some(function(v){return v.trim();})){ alert('Il faut au moins un mode thermostat.'); return; }
     miraval=String(Math.round(Number(miraval)*2)/2);
@@ -986,6 +989,8 @@ $("#miratype").on('change',function(event) {
   MiraRefreshLayoutSelector(lvgl_type, 'auto');
   MiraRefreshInfoSelectors(lvgl_type);
   $('#divmirathermomodes').toggle(lvgl_type==='thermostat');
+  // Camera URL is deliberately not requested in the add-widget form.
+  $('#miraval').attr('type', 'number').attr('maxlength', 6).removeAttr('placeholder');
   if (lvgl_type === 'thermostat') {
     $('#miramin').val('5'); $('#miramax').val('30'); $('#miraval').val('20.5');
     $('#miraunit').val('°C'); $('#miralist').val('');
@@ -993,6 +998,17 @@ $("#miratype").on('change',function(event) {
     $('#divmiraunit,#divmiralist').hide();
     $('#titlemiraval').text('Consigne de départ :');
     $('#titlemiramin').text('Consigne mini :');
+  } else if (lvgl_type === 'energy' || lvgl_type === 'media') {
+    // All values/actions are configured in this screen's Jeedom Commandes
+    // after programming. Do not add dummy values to the widget JSON.
+    $('#miramin,#miramax,#miraval,#miraunit,#miralist').val('');
+    $('#miraemplacement,#divmiraname,#mirabuttonajouter').show();
+    $('#divmiramin,#divmiramax,#divmiraval,#divmiraunit,#divmiralist').hide();
+  } else if (lvgl_type === 'camera') {
+    $('#miramin,#miramax,#miraval,#miraunit,#miralist').val('');
+    $('#miraemplacement,#divmiraname,#mirabuttonajouter').show();
+    $('#divmiramin,#divmiramax,#divmiraval,#divmiraunit,#divmiralist').hide();
+    $('#titlemiraval').text('Valeur :');
   } else if (lvgl_type == 'button' || lvgl_type == 'toggle' || lvgl_type == 'color' || lvgl_type == 'multiaction'){
   	$("#miramin").val('');
     $("#miramax").val('');
@@ -1190,6 +1206,97 @@ function miraListOptionKey(optionName) {
   return 'listAction_' + hex
 }
 
+// Media rows stay real Jeedom commands (full columns, IDs and associations).
+// Spotify displays its principal fields and expands other existing rows inline;
+// manual mode keeps only the controls useful for a generic player.
+function miraMediaPrefixes(rows) {
+  var fields={};
+  rows.each(function(){
+    var id=$(this).attr('data-mira-logicalid')||'';
+    var match=id.match(/^(.+)__(title|artist|cover)$/);
+    if (!match) return;
+    if (!fields[match[1]]) fields[match[1]]={};
+    fields[match[1]][match[2]]=true;
+  });
+  return Object.keys(fields).filter(function(name){
+    return fields[name].title && fields[name].artist;
+  });
+}
+function miraMediaFieldForRow(logicalId,prefixes) {
+  var match=(logicalId||'').match(/^(Value_)?(.+)__(title|artist|album|cover|state|progress|volume|device|devices|previous|playpause|play|pause|next|volume_cmd|device_cmd)$/);
+  if(!match || prefixes.indexOf(match[2])<0) return '';
+  return match[3];
+}
+function miraMediaRowVisible(field,auto,expanded) {
+  if (!field) return false;
+  if (auto) return !!expanded || ['title','artist','cover'].indexOf(field)>=0;
+  return ['title','artist','cover','state','volume',
+    'previous','playpause','play','pause','next','volume_cmd'].indexOf(field)>=0;
+}
+var miraMediaExpanded={};
+function miraRefreshMediaCommandRows() {
+  var rows=$('#table_cmd tbody tr[data-mira-logicalid]');
+  var prefixes=miraMediaPrefixes(rows);
+  var auto=!!$('#miraMediaSourceEq').val();
+  rows.each(function(){
+    var tr=$(this), id=tr.attr('data-mira-logicalid')||'';
+    var field=miraMediaFieldForRow(id,prefixes);
+    if(!field) return; // Do not change other widgets or hidden technical rows.
+    var prefix=id.slice(0,id.length-field.length-2).replace(/^Value_/,'');
+    var expanded=!!miraMediaExpanded[prefix];
+    var originallyHidden=tr.attr('data-mira-origin-hidden')==='1';
+    tr.toggle(!originallyHidden && miraMediaRowVisible(field,auto,expanded));
+    tr.find('.mira-media-manual-field').toggle(!auto);
+    // The Spotify indicator on the title row becomes an inline disclosure:
+    // the other Jeedom command rows expand directly below in the same table.
+    tr.find('.mira-media-automatic-message').toggle(auto && field!=='title');
+    if(field==='title') {
+      var toggle=tr.find('.mira-media-toggle-links');
+      if(!toggle.length) {
+        toggle=$('<button type="button" class="mira-media-toggle-links"></button>')
+          .appendTo(tr.children('td').eq(8));
+      }
+      toggle.attr('data-mira-prefix',prefix)
+        .attr('aria-expanded',expanded?'true':'false')
+        .text(expanded ?
+          'Spotify · liaison automatique ▲ Masquer les autres commandes' :
+          'Spotify · liaison automatique ▼ Voir les autres commandes')
+        .toggle(auto);
+    }
+  });
+}
+// Selecting a reader switches presentation immediately. Jeedom postSave()
+// already links its commands automatically when the equipment is saved.
+$(document).off('change.mira_media','#miraMediaSourceEq')
+  .on('change.mira_media','#miraMediaSourceEq',function(){
+    miraMediaExpanded={};
+    miraRefreshMediaCommandRows();
+  });
+$('#table_cmd').off('click.mira_media','.mira-media-toggle-links')
+  .on('click.mira_media','.mira-media-toggle-links',function(event){
+    event.preventDefault();
+    var prefix=$(this).attr('data-mira-prefix')||'';
+    if(!prefix) return;
+    miraMediaExpanded[prefix]=!miraMediaExpanded[prefix];
+    miraRefreshMediaCommandRows();
+  });
+
+// Energy battery rows are real indexed Mira infos. Preserve their Jeedom
+// mappings when hidden: the selector changes visibility, never deletes a cmd.
+function miraRefreshEnergyBatteryRows() {
+  $('#table_cmd tbody tr[data-mira-logicalid$="__soc"]').each(function(){
+    var master=$(this), name=master.attr('data-mira-logicalid')||'';
+    var base=name.slice(0,-'__soc'.length);
+    var count=parseInt(master.find('.mira-energy-battery-count').val(),10)||1;
+    for(var n=2;n<=3;n++){
+      $('#table_cmd tbody tr[data-mira-logicalid]').filter(function(){
+        return $(this).attr('data-mira-logicalid')===base+'__soc'+n;
+      }).toggle(n<=count);
+    }
+  });
+}
+$('#table_cmd').on('change','.mira-energy-battery-count',miraRefreshEnergyBatteryRows);
+
 function addCmdToTable(_cmd) {
             
                       
@@ -1236,6 +1343,13 @@ function addCmdToTable(_cmd) {
           (_cmd.type === 'info' && _cmd.configuration.type === 'toggle');
       var miraLocalAction = (_cmd.type === 'action' && miraLocalEligible);
       tr += '<td class="num">'
+      if (/__soc$/.test(_cmd.logicalId||'')) {
+        tr += '<select class="cmdAttr mira-energy-battery-count form-control input-sm" ' +
+          'data-l1key="configuration" data-l2key="mira_battery_count" ' +
+          'title="Nombre de batteries à afficher" style="width:94px;min-width:80px">' +
+          '<option value="1">1 batterie</option><option value="2">2 batteries</option>' +
+          '<option value="3">3 batteries</option></select>';
+      }
       if (isMultiMaster) tr += '<select class="cmdAttr mira-multi-trigger form-control input-sm" data-l1key="configuration" data-l2key="multi_trigger" style="min-width:110px"><option value="jeedom">Jeedom</option><option value="gpio">GPIO</option><option value="both">Les deux</option></select>';
       if (miraLocalEligible) tr += '<select class="cmdAttr mira-gpio-source form-control input-sm" data-l1key="configuration" data-l2key="mira_source" style="min-width:85px"><option value="jeedom">Jeedom</option><option value="gpio">GPIO</option></select>';
   	  
@@ -1298,7 +1412,8 @@ function addCmdToTable(_cmd) {
       tr += '<td style="width:138px;vertical-align:middle">'
       if (isMultiAction) {
         tr += '<select class="cmdAttr mira-multi-kind form-control input-sm" data-l1key="configuration" data-l2key="multi_mode" style="width:125px;max-width:100%">' +
-          '<option value="none">Aucune</option><option value="scenario">Scénario</option><option value="light">Lumière</option></select>'
+          '<option value="none">Aucune</option><option value="scenario">Scénario</option><option value="light">Lumière</option>' +
+          '<option value="command">Avancé</option></select>'
       }
       tr += '</td>'
 
@@ -1312,23 +1427,51 @@ function addCmdToTable(_cmd) {
           '</select><small>Contact sec vers GND (pull-up).</small></div>';
       }
 
+      if (_cmd.configuration.type === 'camera') {
+        // Same charcoal text field and left alignment as Recevoir de.
+        // The native form-control input used a different light background.
+        tr += '<textarea class="cmdAttr input-sm mira-camera-url" ' +
+          'data-l1key="configuration" data-l2key="camera_url" ' +
+          'placeholder="http://IP_CAMERA/snapshot.jpg" ' +
+          'title="URL de l’image caméra (JPEG ou BMP)" ' +
+          'aria-label="URL de la caméra (JPEG ou BMP)" maxlength="768" rows="1" ' +
+          'style="height:35px;width:85%;resize:vertical;vertical-align:middle"></textarea>';
+      }
       if (isMultiAction) {
-        // Same Jeedom fields/selectors as standard button/toggle actions.
-        // Only this gesture's chosen mode changes what is visible.
-        function multiField(label,key,kind) {
-          var html='<div style="display:flex;align-items:center;gap:5px;margin-bottom:3px;">';
-          if(label)html+='<span style="width:46px;flex-shrink:0">'+label+'</span>';
+        // Same sizing/alignment as the regular Jeedom command selector above.
+        // No extra labels: one field per line, ordered like a native toggle
+        // (info state, OFF, ON); only the placeholder identifies an empty field.
+        function multiField(key,kind,placeholder) {
+          var html='<div style="display:flex;align-items:center;width:100%;margin-bottom:3px;">';
           html+='<textarea class="cmdAttr input-sm" data-l1key="configuration" data-l2key="'+key+
-            '" style="height:35px;width:85%;min-width:0;flex:1" placeholder="{{'+(label?'Choisir '+label:'Envoyer vers')+'}}"></textarea>';
+            '" style="height:35px;width:85%;min-width:0;flex:1 1 85%" placeholder="'+placeholder+'"></textarea>';
           html+='<a class="btn btn-default '+(kind==='info'?'listEquipementInfo':'listEquipementAction')+
-            '" data-input="'+key+'" style="height:35px;min-width:44px;display:flex;align-items:center;justify-content:center">'+
+            '" data-input="'+key+'" style="margin-left:2px;height:35px;width:14%;min-width:35px;flex:0 0 14%;display:flex;align-items:center;justify-content:center">'+
             '<i class="fas fa-list-alt"></i></a></div>';
           return html;
         }
-        tr += '<div class="mira-multi-scenario">'+multiField('','calcul','action')+'</div>';
+        // Scenario chooser is native to Jeedom: only the ID is saved on
+        // this Mira gesture command. Existing Action mappings still work.
+        var availableScenarios=(typeof miraScenarioOptions!=='undefined' &&
+          Array.isArray(miraScenarioOptions)) ? miraScenarioOptions : [];
+        tr += '<div class="mira-multi-scenario"><select class="cmdAttr mira-multi-scenario-select form-control input-sm" '+
+          'data-l1key="configuration" data-l2key="multi_scenario_id" '+
+          'aria-label="Scénario Jeedom à lancer" style="width:100%;margin-bottom:5px;">'+
+          '<option value="">-- Choisir un scénario Jeedom --</option>';
+        availableScenarios.forEach(function(entry) {
+          var id=parseInt(entry.id,10);
+          if(!Number.isSafeInteger(id) || id<=0)return;
+          var label=String(entry.name||('Scénario #'+id));
+          if(Number(entry.active)!==1)label+=' (désactivé)';
+          tr+='<option value="'+id+'">'+$('<div>').text(label).html()+'</option>';
+        });
+        tr+='</select></div>';
+        tr += '<div class="mira-multi-command" style="display:none">'+
+          multiField('calcul','action','Commande Action Jeedom à exécuter')+'</div>';
         tr += '<div class="mira-multi-light" style="display:none">'+
-          multiField('ON','multi_on','action')+multiField('OFF','multi_off','action')+
-          multiField('État','multi_state','info')+'</div>';
+          multiField('multi_state','info','Recevoir de (état)')+
+          multiField('multi_off','action','Envoyer vers OFF')+
+          multiField('multi_on','action','Envoyer vers ON')+'</div>';
       }
       if (miraLocalEligible) {
         tr += '<div class="mira-gpio-params" style="display:none;gap:5px;align-items:center">' +
@@ -1338,14 +1481,33 @@ function addCmdToTable(_cmd) {
         else tr += '<span style="font-size:12px">Lire état</span>';
         tr += '</div><div class="mira-jeedom-params">';
       }			
-  	  if (_cmd.type == "info" && init(_cmd.logicalId) != 'Statut' ){
+  	  if (_cmd.type == "info" && _cmd.configuration.type !== 'camera' && init(_cmd.logicalId) != 'Statut' ){
         tr += '<div style="display: none">'
         tr += _cmd.configuration.calcul;
         tr += '</div>'
-    	tr += '<textarea class="cmdAttr  input-sm" data-l1key="configuration" data-l2key="calcul" style="height:35px;width:85%" placeholder="{{Recevoir de}}"></textarea>'
-      	tr += '<a class="btn btn-default listEquipementInfo " data-input="calcul" style="margin-left:2px; height:35px; width:14%;"><i class="fas fa-list-alt"></i></a>'
+        if (_cmd.configuration.mira_media_source_cmd) {
+          tr += '<span class="mira-media-automatic-message" style="color:#45cbb4;display:block;margin:5px 0"><i class="fas fa-link"></i> Spotify · liaison automatique</span>';
+        }
+        tr += '<span class="mira-media-manual-field" style="display:block;white-space:nowrap">' +
+          '<textarea class="cmdAttr input-sm" data-l1key="configuration" data-l2key="calcul" style="height:35px;width:85%;vertical-align:middle" placeholder="{{Recevoir de}}"></textarea>' +
+          '<a class="btn btn-default listEquipementInfo" data-input="calcul" style="margin-left:2px;height:35px;width:14%;vertical-align:middle"><i class="fas fa-list-alt"></i></a></span>';
       }
   	  if (_cmd.type == "action" && !isMultiMaster && !isMultiAction && init(_cmd.logicalId) != 'Redémarrer' && init(_cmd.logicalId) != 'refresh'){
+        if (_cmd.configuration.mira_media_link_status) {
+          var mediaOk = !!(_cmd.configuration.mira_media_target_cmd || _cmd.configuration.mira_media_play_cmd) ||
+            /__device_cmd$/.test(_cmd.logicalId || '');
+          var mediaStatus = $('<span>').text(_cmd.configuration.mira_media_link_status).html();
+          tr += '<span class="mira-media-automatic-message" style="color:' + (mediaOk ? '#45cbb4' : '#f4b66a') + ';display:block;margin:5px 0">' +
+            '<i class="fas fa-' + (mediaOk ? 'link' : 'exclamation-triangle') + '"></i> Spotify · ' + mediaStatus + '</span>';
+          tr += '<span class="mira-media-manual-field" style="display:block;white-space:nowrap">' +
+            '<textarea class="cmdAttr input-sm" data-l1key="configuration" data-l2key="calcul" style="height:35px;width:85%;vertical-align:middle" placeholder="{{Envoyer vers}}"></textarea>' +
+            '<a class="btn btn-default listEquipementAction" data-input="calcul" style="margin-left:2px;height:35px;width:14%;vertical-align:middle"><i class="fas fa-list-alt"></i></a></span>';
+        } else if (_cmd.configuration.mira_media_target_cmd || _cmd.configuration.mira_media_play_cmd) {
+          tr += '<span class="mira-media-automatic-message" style="color:#45cbb4;display:block;margin:5px 0"><i class="fas fa-link"></i> Spotify · commande automatique</span>';
+          tr += '<span class="mira-media-manual-field" style="display:block;white-space:nowrap">' +
+            '<textarea class="cmdAttr input-sm" data-l1key="configuration" data-l2key="calcul" style="height:35px;width:85%;vertical-align:middle" placeholder="{{Envoyer vers}}"></textarea>' +
+            '<a class="btn btn-default listEquipementAction" data-input="calcul" style="margin-left:2px;height:35px;width:14%;vertical-align:middle"><i class="fas fa-list-alt"></i></a></span>';
+        } else
         if (_cmd.configuration.type == 'list' && init(_cmd.configuration.listValue) != '') {
           // One Jeedom action target per Mira list option.
           var listItems = _cmd.configuration.listValue.split(';')
@@ -1401,6 +1563,10 @@ function addCmdToTable(_cmd) {
       var tr = $('#table_cmd tbody tr').last()
       // Command identity stored safely on DOM; never embed names into HTML attributes.
       tr.attr('data-mira-logicalid',_cmd.logicalId || '');
+      tr.attr('data-mira-origin-hidden',_cmd.configuration.visible_cmd == '1' ? '0' : '1');
+      tr.attr('data-mira-source-id',_cmd.configuration.mira_media_source_cmd || '');
+      tr.attr('data-mira-target-id',_cmd.configuration.mira_media_target_cmd || _cmd.configuration.mira_media_play_cmd || '');
+      tr.attr('data-mira-link-status',_cmd.configuration.mira_media_link_status || '');
       if (isMultiAction) tr.attr('data-mira-parent',_cmd.configuration.multi_parent || '');
       jeedom.eqLogic.buildSelectCmd({
         id: $('.eqLogicAttr[data-l1key=id]').value(),
@@ -1411,10 +1577,20 @@ function addCmdToTable(_cmd) {
         success: function (result) {
           tr.find('.cmdAttr[data-l1key=value]').append(result)
           tr.setValues(_cmd, '.cmdAttr');
+          // Old multi-action rows used mode=scenario + calcul for Action
+          // commands. Show them under Commande Jeedom without discarding
+          // either the original mode or target until the user saves.
+          if (isMultiAction && _cmd.configuration.multi_mode === 'scenario' &&
+              String(_cmd.configuration.calcul || '').trim() !== '' &&
+              String(_cmd.configuration.multi_scenario_id || '').trim() === '') {
+            tr.find('.mira-multi-kind').val('command');
+          }
           miraRefreshGpioParams(tr);
           jeedom.cmd.changeType(tr, init(_cmd.subType))
           miraMultiRefreshRow(tr);
           if (isMultiMaster) miraMultiSourceChanged(tr);
+          if (/__soc(?:2|3)?$/.test(_cmd.logicalId||'')) miraRefreshEnergyBatteryRows();
+          miraRefreshMediaCommandRows();
         }
       })
   
@@ -1500,9 +1676,10 @@ function MiraRowName(row){ return MiraDisplayName(row) || MiraRowType(row); }
 
 function MiraMinWidgetSize(type){
   if(type==='thermostat') return {w:300,h:305};
+  if(type==='energy' || type==='media') return {w:200,h:250};
   if(type==='roundrange' || type==='color') return {w:160,h:160};
   if(type==='range') return {w:180,h:60};
-  if(type==='button' || type==='toggle') return {w:150,h:44};
+  if(type==='button' || type==='camera' || type==='toggle') return {w:150,h:44};
   if(type==='list' || type==='listbutton') return {w:160,h:60};
   if(type==='datetime') return {w:180,h:60};
   if(type==='info') return {w:70,h:40};
@@ -1512,10 +1689,12 @@ function MiraMinWidgetSize(type){
 function MiraDefaultWidgetSize(type){
   var W=MiraDisplayInfo.contentWidth || MiraDisplayInfo.width || 320;
   if(type==='thermostat') return {w:W>=800?786:304,h:W>=800?310:405};
+  if(type==='energy') return {w:W>=800?786:W<=240?224:304,h:W<=240?294:353};
+  if(type==='media') return {w:W>=800?786:W<=240?224:304,h:W>=800?558:W<=240?368:417};
   if(type==='datetime') return {w:Math.max(120,W-16),h:82};
   if(type==='info') return {w:Math.max(90,Math.floor((W-22)/2)),h:66};
   if(type==='toggle') return {w:Math.max(160,W-16),h:54};
-  if(type==='button') return {w:Math.max(160,W-16),h:54};
+  if(type==='button' || type==='camera') return {w:Math.max(160,W-16),h:54};
   if(type==='range') return {w:Math.max(180,W-16),h:80};
   if(type==='roundrange') return {w:Math.min(W-16,238),h:238};
   if(type==='color') return {w:Math.min(W-16,210),h:196};
@@ -2061,6 +2240,7 @@ function miraMultiRefreshRow(tr) {
   var mode=tr.find('.mira-multi-kind').val();
   if (!mode)return;
   tr.find('.mira-multi-scenario').toggle(mode==='scenario');
+  tr.find('.mira-multi-command').toggle(mode==='command');
   tr.find('.mira-multi-light').toggle(mode==='light');
 }
 function miraMultiSourceChanged(tr){
@@ -2075,3 +2255,4 @@ $(document).off('change.mira_multi_kind','#table_cmd .mira-multi-kind')
   .on('change.mira_multi_kind','#table_cmd .mira-multi-kind',function(){
     miraMultiRefreshRow($(this).closest('tr'));
   });
+// No extra scenario-field display logic: each mode has its own field.

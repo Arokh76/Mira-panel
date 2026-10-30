@@ -1,11 +1,20 @@
-name: Mira Jeedom beta - PHP and JS validation
+name: Mira Jeedom - PHP and JS validation
 on:
   push:
-    branches: [beta]
+    branches: [beta, stable]
     paths:
       - "core/**"
       - "desktop/**"
       - "plugin_info/**"
+      - "tests/**"
+      - ".github/workflows/lint-jeedom-beta.yml"
+  pull_request:
+    branches: [beta, stable]
+    paths:
+      - "core/**"
+      - "desktop/**"
+      - "plugin_info/**"
+      - "tests/**"
       - ".github/workflows/lint-jeedom-beta.yml"
   workflow_dispatch:
 permissions:
@@ -23,10 +32,49 @@ jobs:
           php -l desktop/php/mira.php
       - name: Check JavaScript syntax
         run: node --check desktop/js/mira.js
+      - name: Regression test composite widget autosync
+        run: php tests/test_autosync_composite.php
+      - name: Check energy numeric formatting
+        run: php tests/test_energy_precision.php
+      - name: Check unique multimedia command names
+        run: php tests/test_media_unique_names.php
+      - name: Check French Energy and Media labels
+        run: php tests/test_media_energy_french_names.php
+      - name: Check no duplicate Spotify Connect sources
+        run: php tests/test_spotify_source_menu.php
+      - name: Check Spotify range routing and read-only refresh
+        run: php tests/test_media_volume_routing.php
+      - name: Check separate Play and Pause actions
+        run: php tests/test_media_two_actions.php
+      - name: Check runtime Spotify speaker switching
+        run: php tests/test_spotify_speaker_switch.php
+      - name: Check Spotify playback-state discovery
+        run: php tests/test_spotify_playback_state.php
+      - name: Check asynchronous Spotify event listener
+        run: php tests/test_media_async_listener.php
+      - name: Check Spotify burst coalescing and changed-only delivery
+        run: php tests/test_media_burst_delivery.php
+      - name: Check thermostat passive state synchronization
+        run: php tests/test_thermostat_passive_resync.php
+      - name: 'Regression: rebind changed Mira transport IDs safely'
+        run: php tests/test_boot_transport_rebind.php
+      - name: Check compact media/camera editor
+        run: node tests/test_media_command_ui.js
+      - name: Verify native Multimedia page and Spotify mapping
+        shell: bash
+        run: |
+          grep -Fq 'value="multimedia"' desktop/php/mira.php
+          grep -Fq 'data-page="multimedia"' desktop/php/mira.php
+          grep -Fq 'media_source_eqid' desktop/php/mira.php
+          grep -Fq 'pushVisiblePages' core/class/mira.class.php
+          grep -Fq 'rebuildMediaListener' core/class/mira.class.php
+          grep -Fq 'onMediaSourceEvent' core/class/mira.class.php
+          grep -Fq 'mira_media_play_cmd' core/class/mira.class.php
+          grep -Fq 'mira_media_source_cmd' desktop/js/mira.js
       - name: Verify Multi-actions integration
         shell: bash
         run: |
-          grep -Fq 'Multi-actions (bouton GPIO)' desktop/php/mira.php
+          grep -Fq 'Bouton multi-actions' desktop/php/mira.php
           grep -Fq 'mira_input_gpio' desktop/js/mira.js
           grep -Fq '/gpio/multi/config' core/class/mira.class.php
           grep -Fq "type === 'multiaction'" core/ajax/mira.ajax.php

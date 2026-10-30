@@ -520,3 +520,26 @@ th.sorttable_sorted_reverse::after {
 }
 .mira-geometry-validation.invalid { color:#ffb454; }
 #mirageoapply { margin:5px 0 2px; }
+
+/* Spotify links expand existing full-width Jeedom command rows inline. */
+#table_cmd .mira-media-toggle-links {
+  display:block;
+  margin:5px 0;
+  padding:0;
+  border:0;
+  background:transparent;
+  color:#45cbb4;
+  font-size:12px;
+  text-align:left;
+  cursor:pointer;
+}
+#table_cmd .mira-media-toggle-links:hover,
+#table_cmd .mira-media-toggle-links:focus {
+  text-decoration:underline;
+}
+#table_cmd .mira-camera-url {
+  /* Same native Jeedom textarea appearance as Recevoir de / Envoyer vers. */
+  box-sizing:border-box;
+  max-width:85%;
+  min-width:0;
+}

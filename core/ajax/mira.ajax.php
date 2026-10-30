@@ -64,11 +64,46 @@ try {
                 $name = isset($widget['name']) ? trim((string)$widget['name']) : '';
                 $value = isset($widget['value']) ? (string)$widget['value'] : '';
 
-                if ($type == '' || $type == 'datetime') continue;
+                if ($type === 'datetime') {
+                    // Clock's three passive Weather infos are indexed by the
+                    // firmware, even though the editor exposes only one clock.
+                    foreach (array('temperature', 'condition', 'code') as $field) {
+                        $expectedSignatures[] = 'info|__mira_weather_' . $field;
+                    }
+                    continue;
+                }
+                if ($type == '') continue;
+                if ($type === 'camera') {
+                    $expectedSignatures[] = 'info|Camera_' . $name;
+                    continue;
+                }
 
                 if ($type === 'multiaction') {
                     foreach (array('Multi_Clic_','Multi_Double_','Multi_Triple_','Multi_Long_') as $prefix)
                         $expectedSignatures[] = 'button|' . $prefix . $name;
+                    continue;
+                }
+                if ($type === 'energy') {
+                    // One visual Energy card -> five standard Jeedom Info IDs.
+                    // Without these signatures autosync times out even though
+                    // the ESP32 /getindex was rebuilt successfully.
+                    foreach (array('solar', 'home', 'grid', 'battery', 'soc', 'soc2', 'soc3') as $field) {
+                        $expectedSignatures[] = 'info|' . $name . '__' . $field;
+                    }
+                    continue;
+                }
+                if ($type === 'media') {
+                    // Media player: nine passive Infos and four Jeedom actions for three touch buttons
+                    // and one volume Range. Compare the EXACT signatures:
+                    // an old index must never be accepted after reprogramming.
+                    foreach (array('title', 'artist', 'album', 'state', 'progress', 'volume', 'cover', 'device', 'devices') as $field) {
+                        $expectedSignatures[] = 'info|' . $name . '__' . $field;
+                    }
+                    foreach (array('previous', 'play', 'pause', 'next') as $action) {
+                        $expectedSignatures[] = 'button|' . $name . '__' . $action;
+                    }
+                    $expectedSignatures[] = 'range|' . $name . '__volume_cmd';
+                    $expectedSignatures[] = 'range|' . $name . '__device_cmd';
                     continue;
                 }
                 if ($type === 'thermostat') {
