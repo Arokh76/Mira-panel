@@ -39,8 +39,14 @@ $tests=array(
   array('Value_Thermostat__consigne','info','range','',19,0),
   array('Value_Thermostat__mode','action','list','#14#','Éco',0),
   array('Thermostat__consigne','action','range','#13#',18,0),
-  array('Value_Lumiere','info','range','#15#',70,0),
+  // A light remaining physically at 127/254 must restore its 127 display.
+  array('Value_Lumiere','info','range','#15#',127,1),
+  array('Value_AmpouleCouleur','info','color','#18#','#12ABEF',1),
+  array('Value_LumiereSansRetour','info','range','',254,0),
+  array('Value_CouleurSansRetour','info','color','', '#000000',0),
+  // Media control ranges are not generic light dimmers and remain excluded.
   array('Value_Multimedia__volume_cmd','info','range','#16#',45,0),
+  array('Value_Multimedia__device_cmd','info','range','#19#',2,0),
   array('Value_ModeVentilo','info','list','#17#','Normal',0)
 );
 $cmds=array();$expected=0;
@@ -64,5 +70,18 @@ foreach(array(null,'null','NULL','Undefined','NaN','Erreur','') as $bad)
 foreach(array('0',0,19,'19.5','Confort','12 kWh') as $ok)
   if(TestPassiveGuard::missing($ok)) throw new RuntimeException('Valid source rejected: '.var_export($ok,true));
 echo "PASS: thermostat setpoint and mode use passive Info commands, never a heater action\n";
-echo "PASS: unrelated sliders, media controls and lists remain excluded\n";
+echo "PASS: generic light brightness + RGB colour return infos restore on boot\n";
+echo "PASS: media controls, unbound sliders and lists remain excluded\n";
 echo "PASS: unavailable Jeedom values are detected without suppressing numeric zero\n";
+
+$colorAt=strpos($source,"else if ($this->getConfiguration('calcul') != ''&& $this->getConfiguration('type') == 'color')");
+$actionAt=strpos($source,"case 'action':",$colorAt);
+if($colorAt===false||$actionAt===false) throw new RuntimeException('Color Info return-state branch missing');
+$colorBody=substr($source,$colorAt,$actionAt-$colorAt);
+if(strpos($colorBody,"/updatenr?key=")===false || strpos($colorBody,"&color=")===false)
+  throw new RuntimeException('Passive colour does not use display-only /updatenr endpoint');
+if(strpos($colorBody,'shell_exec')!==false || strpos($colorBody,'->execCmd(')!==false)
+  throw new RuntimeException('Passive colour must not invoke a shell or any Jeedom ACTION');
+if(strpos($colorBody,"[0-9A-Fa-f]{6}")===false)
+  throw new RuntimeException('Strict 6-digit RGB state validation missing');
+echo "PASS: validated RGB display-only return, no Jeedom actions or shell invocation\\n";
