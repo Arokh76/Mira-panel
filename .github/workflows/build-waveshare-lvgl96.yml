@@ -39,7 +39,9 @@ jobs:
           arduino-cli config add board_manager.additional_urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
           arduino-cli core update-index
           arduino-cli core install esp32:esp32@3.3.11
-          grep -q 'LVGL_VERSION_MAJOR 9' deps/lvgl/lvgl.h || grep -q 'LVGL_VERSION_MAJOR 9' deps/lvgl/src/lv_version.h
+          grep -Fq '#define LVGL_VERSION_MAJOR 9' deps/lvgl/include/lvgl/lv_version.h
+          grep -Fq '#define LVGL_VERSION_MINOR 6' deps/lvgl/include/lvgl/lv_version.h
+          grep -Fq 'version=9.6.0' deps/lvgl/library.properties
           test -e firmware/experiments/waveshare-lvgl96/LVGL9Probe/LVGL9Probe.ino
 
       - name: Compile Waveshare RGB565 probe on LVGL 9.6
