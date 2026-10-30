@@ -74,7 +74,7 @@ echo "PASS: generic light brightness + RGB colour return infos restore on boot\n
 echo "PASS: media controls, unbound sliders and lists remain excluded\n";
 echo "PASS: unavailable Jeedom values are detected without suppressing numeric zero\n";
 
-$colorAt=strpos($source,"else if ($this->getConfiguration('calcul') != ''&& $this->getConfiguration('type') == 'color')");
+$colorAt=strpos($source,"getConfiguration('type') == 'color'){");
 $actionAt=strpos($source,"case 'action':",$colorAt);
 if($colorAt===false||$actionAt===false) throw new RuntimeException('Color Info return-state branch missing');
 $colorBody=substr($source,$colorAt,$actionAt-$colorAt);
