@@ -375,6 +375,21 @@ jobs:
           conf.write_text(data.replace(old, new, 1))
           print('[MIRA][WAVESHARE] MEMCPY_STD LVGL performance trial, LCD driver unchanged')
           PY
+          # TEST I (PAGE_FLAT): one isolated visual change, preserve all card
+          # gradients, round corners, shadows, full LV_DRAW_COMPLEX and MEMCPY_STD.
+          # The visible page is an opaque 800x~420 object, so its own gradient
+          # is a potentially high-cost repaint on each touch scroll.
+          python3 - <<'PY'
+          from pathlib import Path
+          ui = Path('firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp')
+          src = ui.read_text()
+          old = 'lv_obj_set_style_bg_grad_dir(_pages[i], LV_GRAD_DIR_VER, 0);'
+          new = 'lv_obj_set_style_bg_grad_dir(_pages[i], LV_GRAD_DIR_NONE, 0);'
+          if src.count(old) != 1:
+              raise SystemExit('PAGE_FLAT expected one visible page gradient setting')
+          ui.write_text(src.replace(old, new, 1))
+          print('[MIRA][PAGE_FLAT] flat page background only, complex card styles preserved')
+          PY
           # Measurement-only firmware: no changes to RGB/VSYNC or UI scheduling.
           python3 - <<'PY'
           from pathlib import Path
@@ -513,7 +528,7 @@ jobs:
           Compare with http://IP-OF-WAVESHARE/mira-health for free memory.
           No stable OTA publication. Not for WT32 or Nextion.
           EOF
-          cat > package-waveshare/README-MEMCPY_STD.txt <<'EOF'
+          cat > package-waveshare/README-PAGE_FLAT.txt <<'EOF'
           EXPERIMENTAL ONLY - WAVESHARE 4.3C - 0.7.37 MEMCPY_STD
           Mêmes graphismes que F/PERF, teste uniquement memcpy/memset standard optimisés.
           Based on F+PERF_DIAG: /mira-perf is available for A/B measurement.
@@ -522,12 +537,21 @@ jobs:
           Keep original stable 0.7.37 for rollback.
           DO NOT install on WT32/Nextion or publish to stable.
           EOF
+          cat > package-waveshare/PAGE_FLAT_NOTICE.txt <<'EOF'
+          I = PAGE_FLAT, experimental Waveshare 4.3C only.
+          Inherits G: LV_MEMCPY_MEMSET_STD=1, F: faster input/render and no scroll cache.
+          LV_DRAW_COMPLEX stays 1: gradients, corners and shadows inside cards remain.
+          Changes ONLY the full-page background to flat color.
+          /mira-perf remains active. Compare with G and H using identical scroll.
+          PCLK 12MHz, PSRAM double framebuffers and VSYNC unchanged.
+          Keep stable version available for rollback.
+          EOF
           ls -lh package-waveshare/
 
       - name: Upload Waveshare preview package
         uses: actions/upload-artifact@v4
         with:
-          name: Mira_Panel_Waveshare_4.3C_0.7.37_MEMCPY_STD_TEST
+          name: Mira_Panel_Waveshare_4.3C_0.7.37_PAGE_FLAT_TEST
           path: package-waveshare/
           if-no-files-found: error
           retention-days: 14
