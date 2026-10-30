@@ -331,6 +331,57 @@ jobs:
           grep -Fq '#define LVGL_PORT_AVOID_TEAR_MODE       (3)' "$WS_PORT_H"
           grep -Fq '#define EXAMPLE_LCD_RGB_BUFFER_NUMS     (2)' "$WS_RGB_H"
           echo '[MIRA][WAVESHARE] Mode 3 direct, 2 FB: partial LVGL redraws'
+          # A/B experiment (Waveshare only): bypass the costly PSRAM double
+          # framebuffer direct-mode + VSYNC wait and instead render changed
+          # regions into a small INTERNAL-SRAM buffer, with one RGB framebuffer.
+          # IMPORTANT: this can cause tearing; keep strictly off stable/main.
+          python3 - <<'PY'
+          from pathlib import Path
+          port = Path('firmware/source/work/MIRA_PANEL/src/WaveshareOfficial/lvgl_port/lvgl_port.h')
+          rgb = Path('firmware/source/work/MIRA_PANEL/src/WaveshareOfficial/rgb_lcd_port/rgb_lcd_port.h')
+          def replace_exact(path, before, after):
+              source = path.read_text()
+              if source.count(before) != 1:
+                  raise SystemExit(f'Missing/ambiguous baseline setting in {path}: {before}')
+              path.write_text(source.replace(before, after))
+          replace_exact(port, '#define LVGL_PORT_AVOID_TEAR_ENABLE     (1)', '#define LVGL_PORT_AVOID_TEAR_ENABLE     (0)')
+          replace_exact(port, '#define CONFIG_EXAMPLE_LVGL_PORT_BUF_PSRAM 1', '#define CONFIG_EXAMPLE_LVGL_PORT_BUF_PSRAM 0')
+          replace_exact(port, '#define CONFIG_EXAMPLE_LVGL_PORT_BUF_INTERNAL 0', '#define CONFIG_EXAMPLE_LVGL_PORT_BUF_INTERNAL 1')
+          replace_exact(port, '#define LVGL_PORT_BUFFER_HEIGHT         (100)', '#define LVGL_PORT_BUFFER_HEIGHT         (8)')
+          replace_exact(port, '#define LVGL_PORT_TASK_MIN_DELAY_MS (10)', '#define LVGL_PORT_TASK_MIN_DELAY_MS (2)')
+          replace_exact(rgb, '#define EXAMPLE_LCD_RGB_BUFFER_NUMS     (2)', '#define EXAMPLE_LCD_RGB_BUFFER_NUMS     (1)')
+          assert '#define LVGL_PORT_AVOID_TEAR_ENABLE     (0)' in port.read_text()
+          assert '#define EXAMPLE_LCD_RGB_BUFFER_NUMS     (1)' in rgb.read_text()
+          # Protect startup: the original Waveshare port does assert(buf1)
+          # when the internal SRAM allocation fails. That can cause a reboot
+          # loop: black backlit LCD and a sluggish/reconnecting web server.
+          # Print the available contiguous internal memory and fall back to
+          # PSRAM instead of hard-resetting when there is no suitable block.
+          cpp = Path('firmware/source/work/MIRA_PANEL/src/WaveshareOfficial/lvgl_port/lvgl_port.cpp')
+          body = cpp.read_text()
+          old = '    buf1 = heap_caps_malloc(buffer_size * sizeof(lv_color_t), LVGL_PORT_BUFFER_MALLOC_CAPS); // Allocate memory'
+          new = """
+              ESP_LOGW(TAG, "[MIRA][DIAG] draw_bytes=%d internal_free=%u internal_largest=%u",
+                       buffer_size * sizeof(lv_color_t),
+                       (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                       (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+              buf1 = heap_caps_malloc(buffer_size * sizeof(lv_color_t), LVGL_PORT_BUFFER_MALLOC_CAPS);
+              if (!buf1) {
+                  ESP_LOGE(TAG, "[MIRA][DIAG] SRAM draw allocation failed - fallback PSRAM");
+                  buf1 = heap_caps_malloc(buffer_size * sizeof(lv_color_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+              }
+              if (buf1) {
+                  ESP_LOGW(TAG, "[MIRA][DIAG] draw allocated; remaining_internal_largest=%u",
+                           (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+              }
+          """.rstrip()
+          if body.count(old) != 1:
+              raise SystemExit('Unexpected Waveshare LVGL allocation code')
+          cpp.write_text(body.replace(old, new))
+          print('[MIRA][WAVESHARE][TEST] SRAM partial LVGL 800x8, RGB single FB, no VSYNC block')
+          PY
+          echo '[MIRA][WAVESHARE][EXPERIMENT] single PSRAM RGB FB + 8-line SRAM LVGL partial, malloc fallback; not stable'
+
 
           # Keep the 0.6.38 proven adjustment: change ONLY RGB PCLK
           # from the official 16 MHz to 12 MHz; do not change validated
@@ -394,12 +445,22 @@ jobs:
             python3 -m esptool --chip esp32s3 merge-bin -o package-waveshare/Mira_Panel_Waveshare_4.3C_0.7.37_FACTORY.bin --flash-mode qio --flash-freq 80m --flash-size 16MB 0x0000 package-waveshare/bootloader.bin 0x8000 package-waveshare/partitions.bin 0xE000 package-waveshare/boot_app0.bin 0x10000 package-waveshare/Mira_Panel_Waveshare_4.3C_0.7.37.bin
           fi
           test -s package-waveshare/Mira_Panel_Waveshare_4.3C_0.7.37_FACTORY.bin
+          cat > package-waveshare/README-SRAM-8LINE-DIAG-TEST.txt <<'EOF'
+          DIAGNOSTIC FIRMWARE - Waveshare 4.3C ONLY - NOT stable.
+          Display driver experiment: one RGB framebuffer in PSRAM; LVGL
+          redraws in an 8-line internal SRAM buffer (RGB565, 12,800 bytes).
+          VSYNC-blocking double-buffer path disabled. Potential tearing.\n          SRAM malloc failure falls back to PSRAM instead of rebooting.
+          Still reports version 0.7.37; distinguish via this artifact name.
+          For A/B testing only: compare scrolling, touch responsiveness,
+          graphical tearing and Wi-Fi stability to stable 0.7.37.
+          Do not publish via the official OTA stable manifests.
+          EOF
           ls -lh package-waveshare/
 
       - name: Upload Waveshare preview package
         uses: actions/upload-artifact@v4
         with:
-          name: Mira_Panel_Waveshare_4.3C_0.7.37_preview
+          name: Mira_Panel_Waveshare_4.3C_0.7.37_SRAM_8LINE_DIAG_TEST
           path: package-waveshare/
           if-no-files-found: error
           retention-days: 14
