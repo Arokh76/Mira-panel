@@ -219,6 +219,17 @@ private:
   lv_obj_t* _clockStatusLabel = nullptr;
   String _clockStatusCache;
 
+  // Optional passive Jeedom Weather data for the existing home clock.
+  int _weatherTemperatureId = -1;
+  int _weatherConditionId = -1;
+  int _weatherCodeId = -1;
+  lv_obj_t* _clockWeatherTemperature = nullptr;
+  lv_obj_t* _clockWeatherCondition = nullptr;
+  lv_obj_t* _clockWeatherSunIcon = nullptr;
+  lv_obj_t* _clockWeatherCloudIcon = nullptr;
+  lv_obj_t* _clockWeatherRainIcon = nullptr;
+  bool _clockWeatherShown = false;
+
   lv_obj_t* _settingsCards[4] = {nullptr, nullptr, nullptr, nullptr};
   lv_obj_t* _brightnessSlider = nullptr;
   lv_obj_t* _brightnessValue = nullptr;
