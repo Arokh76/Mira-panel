@@ -23,6 +23,14 @@ function mira_install() {
 
 // Fonction exécutée automatiquement après la mise à jour du plugin
 function mira_update() {
+  // The Media listener may have been created by an older Mira version
+  // with synchronous delivery. Migrate it on update without requiring
+  // the user to edit/save every screen's equipment.
+  try {
+    mira::rebuildMediaListener();
+  } catch (Throwable $e) {
+    log::add('mira','warning','[MEDIA] Mise à jour de l’écouteur : '.$e->getMessage());
+  }
 }
 
 // Fonction exécutée automatiquement après la suppression du plugin
