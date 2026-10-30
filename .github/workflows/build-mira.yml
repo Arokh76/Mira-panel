@@ -433,6 +433,101 @@ jobs:
           print('[MIRA][PERF] instrumentation enabled: handler, VSYNC, display refresh metrics; /mira-perf')
           PY
 
+          # PERF_STAGES: measure PSRAM buffer sync and LVGL software raster time
+          # independently from the already measured RGB VSYNC wait.
+          # All instrumentation is read-only and restricted to Waveshare builds.
+          python3 - <<'PY'
+          from pathlib import Path
+          port = Path('firmware/source/work/MIRA_PANEL/src/WaveshareOfficial/lvgl_port/lvgl_port.cpp')
+          src = port.read_text()
+          def replace_once(old, new):
+              global src
+              if src.count(old) != 1:
+                  raise SystemExit('[PERF_STAGES] expected one port snippet: '+repr(old)+', found '+str(src.count(old)))
+              src = src.replace(old, new, 1)
+          replace_once('volatile uint32_t miraPerfFrameCount = 0;',
+                       'volatile uint32_t miraPerfFrameCount = 0;\n'
+                       'volatile uint32_t miraPerfDrawLastUs = 0;\n'
+                       'volatile uint32_t miraPerfDrawMaxUs = 0;\n'
+                       'static int64_t miraPerfDrawStartUs = 0;')
+          replace_once('static lv_disp_t *display_init(esp_lcd_panel_handle_t panel_handle)',
+                       'static void mira_perf_render_start(lv_disp_drv_t *drv) {\n'
+                       '    (void)drv;\n'
+                       '    miraPerfDrawStartUs = esp_timer_get_time();\n'
+                       '}\n'
+                       'static lv_disp_t *display_init(esp_lcd_panel_handle_t panel_handle)')
+          replace_once('    disp_drv.monitor_cb = mira_perf_monitor; // Read-only refresh timing diagnostics',
+                       '    disp_drv.monitor_cb = mira_perf_monitor; // Read-only refresh timing diagnostics\n'
+                       '    disp_drv.render_start_cb = mira_perf_render_start; // LVGL raster start after PSRAM sync')
+          replace_once('        miraPerfFrameCount++;\n        /* Switch the current RGB frame buffer to ',
+                       '        if (miraPerfDrawStartUs != 0) {\n'
+                       '            const uint32_t draw_us = (uint32_t)(esp_timer_get_time() - miraPerfDrawStartUs);\n'
+                       '            miraPerfDrawLastUs = draw_us;\n'
+                       '            if (draw_us > miraPerfDrawMaxUs) miraPerfDrawMaxUs = draw_us;\n'
+                       '        }\n'
+                       '        miraPerfFrameCount++;\n        /* Switch the current RGB frame buffer to ')
+          port.write_text(src)
+
+          # Exact LVGL 8.4 internal direct-mode synchronization: measure only
+          # refr_sync_areas(), which copies unchanged rectangles from one RGB
+          # PSRAM framebuffer into the other before software rasterization.
+          core = Path('waveshare-official/examples/arduino/libraries/lvgl/src/core/lv_refr.c')
+          c = core.read_text()
+          hdr = '#include "lv_refr.h"'
+          if c.count(hdr) != 1:
+              raise SystemExit('[PERF_STAGES] missing upstream lv_refr.h include')
+          c = c.replace(hdr,
+                        hdr+'\n#include "esp_timer.h"\n'
+                        'volatile uint32_t miraPerfSyncLastUs = 0;\n'
+                        'volatile uint32_t miraPerfSyncMaxUs = 0;\n', 1)
+          old = '    lv_refr_join_area();\n    refr_sync_areas();\n    refr_invalid_areas();'
+          new = ('    lv_refr_join_area();\n'
+                 '    const int64_t mira_sync_t0 = esp_timer_get_time();\n'
+                 '    refr_sync_areas();\n'
+                 '    const uint32_t mira_sync_us = (uint32_t)(esp_timer_get_time() - mira_sync_t0);\n'
+                 '    miraPerfSyncLastUs = mira_sync_us;\n'
+                 '    if (mira_sync_us > miraPerfSyncMaxUs) miraPerfSyncMaxUs = mira_sync_us;\n'
+                 '    refr_invalid_areas();')
+          if c.count(old) != 1:
+              raise SystemExit('[PERF_STAGES] upstream refresh order not recognized')
+          core.write_text(c.replace(old,new,1))
+
+          server = Path('firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp')
+          body = server.read_text()
+          extern_anchor = 'extern volatile uint32_t miraPerfFrameCount;'
+          if body.count(extern_anchor) != 1:
+              raise SystemExit('[PERF_STAGES] missing server export declarations')
+          body = body.replace(extern_anchor, extern_anchor+'\n'
+              'extern volatile uint32_t miraPerfDrawLastUs;\n'
+              'extern volatile uint32_t miraPerfDrawMaxUs;\n'
+              'extern "C" volatile uint32_t miraPerfSyncLastUs;\n'
+              'extern "C" volatile uint32_t miraPerfSyncMaxUs;', 1)
+          endpoint_anchor = '  server.on("/mira-perf", HTTP_GET, [](AsyncWebServerRequest* request) {'
+          if body.count(endpoint_anchor) != 1:
+              raise SystemExit('[PERF_STAGES] missing original perf endpoint')
+          endpoint = (
+              '  // PERF_STAGES diagnostic: durations are microseconds, last full LVGL refresh.\n'
+              '  server.on("/mira-perf-stages", HTTP_GET, [](AsyncWebServerRequest* request) {\n'
+              '    char body[512];\n'
+              '    snprintf(body, sizeof(body),\n'
+              '      "{\\"uptime_ms\\":%lu,\\"frames\\":%lu,\\"draw_last_us\\":%lu,"\n'
+              '      "\\"draw_max_us\\":%lu,\\"sync_last_us\\":%lu,\\"sync_max_us\\":%lu,"\n'
+              '      "\\"vsync_last_us\\":%lu,\\"refresh_last_ms\\":%lu,"\n'
+              '      "\\"refresh_last_pixels\\":%lu}",\n'
+              '      (unsigned long)millis(), (unsigned long)miraPerfFrameCount,\n'
+              '      (unsigned long)miraPerfDrawLastUs, (unsigned long)miraPerfDrawMaxUs,\n'
+              '      (unsigned long)miraPerfSyncLastUs, (unsigned long)miraPerfSyncMaxUs,\n'
+              '      (unsigned long)miraPerfWaitLastUs, (unsigned long)miraPerfRefrLastMs,\n'
+              '      (unsigned long)miraPerfRefrLastPx);\n'
+              '    AsyncWebServerResponse* response =\n'
+              '      request->beginResponse(200, "application/json", body);\n'
+              '    response->addHeader("Cache-Control", "no-store");\n'
+              '    request->send(response);\n'
+              '  });\n\n')
+          body = body.replace(endpoint_anchor,endpoint+endpoint_anchor,1)
+          server.write_text(body)
+          print('[PERF_STAGES] /mira-perf-stages: draw vs PSRAM sync vs VSYNC, hardware unchanged')
+          PY
           # Keep the 0.6.38 proven adjustment: change ONLY RGB PCLK
           # from the official 16 MHz to 12 MHz; do not change validated
           # VSYNC, LVGL, PSRAM, bounce-buffer or backlight configurations.
@@ -522,12 +617,20 @@ jobs:
           Keep original stable 0.7.37 for rollback.
           DO NOT install on WT32/Nextion or publish to stable.
           EOF
+          cat > package-waveshare/README-PERF-STAGES.txt <<'EOF'
+          Experimental Waveshare 4.3C firmware J (0.7.37), same visuals as G.
+          /mira-perf-stages exposes draw_last_us, sync_last_us, vsync_last_us,
+          refresh_last_ms, refresh_last_pixels and the totals/peak values.
+          Framebuffer copy sync and LVGL draw are separately timed (esp_timer).
+          Same LCD PCLK 12 MHz, direct mode double PSRAM framebuffer, VSYNC.
+          No driver / memory topology / UI appearance changes; no WT32/Nextion.
+          EOF
           ls -lh package-waveshare/
 
       - name: Upload Waveshare preview package
         uses: actions/upload-artifact@v4
         with:
-          name: Mira_Panel_Waveshare_4.3C_0.7.37_MEMCPY_STD_TEST
+          name: Mira_Panel_Waveshare_4.3C_0.7.37_PERF_STAGES_TEST
           path: package-waveshare/
           if-no-files-found: error
           retention-days: 14
