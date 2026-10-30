@@ -335,6 +335,7 @@ jobs:
           # Waveshare PCLK-only experiment. Keep LVGL direct mode,
           # panel timing porches, framebuffer count, PSRAM and VSYNC untouched.
           # Baseline 0.7.37: 12 MHz; test variant: 14 MHz.
+          # Isolated PR test build; no stable OTA publication.
           # Theoretical panel scan frequency: 34.15 Hz (820x500 cycles/frame).
           grep -Fq '#define EXAMPLE_LCD_PIXEL_CLOCK_HZ      (16 * 1000 * 1000)' "$WS_RGB_H"
           python3 -c "from pathlib import Path; p=Path('firmware/source/work/MIRA_PANEL/src/WaveshareOfficial/rgb_lcd_port/rgb_lcd_port.h'); s=p.read_text(); old='#define EXAMPLE_LCD_PIXEL_CLOCK_HZ      (16 * 1000 * 1000)'; assert s.count(old)==1; p.write_text(s.replace(old, '#define EXAMPLE_LCD_PIXEL_CLOCK_HZ      (14 * 1000 * 1000)', 1))"
