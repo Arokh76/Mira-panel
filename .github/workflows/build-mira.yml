@@ -332,13 +332,15 @@ jobs:
           grep -Fq '#define EXAMPLE_LCD_RGB_BUFFER_NUMS     (2)' "$WS_RGB_H"
           echo '[MIRA][WAVESHARE] Mode 3 direct, 2 FB: partial LVGL redraws'
 
-          # Keep the 0.6.38 proven adjustment: change ONLY RGB PCLK
-          # from the official 16 MHz to 12 MHz; do not change validated
-          # VSYNC, LVGL, PSRAM, bounce-buffer or backlight configurations.
+          # Waveshare PCLK-only experiment. Keep LVGL direct mode,
+          # panel timing porches, framebuffer count, PSRAM and VSYNC untouched.
+          # Baseline 0.7.37: 12 MHz; test variant: 14 MHz.
+          # Isolated PR test build; no stable OTA publication.
+          # Theoretical panel scan frequency: 34.15 Hz (820x500 cycles/frame).
           grep -Fq '#define EXAMPLE_LCD_PIXEL_CLOCK_HZ      (16 * 1000 * 1000)' "$WS_RGB_H"
-          python3 -c "from pathlib import Path; p=Path('firmware/source/work/MIRA_PANEL/src/WaveshareOfficial/rgb_lcd_port/rgb_lcd_port.h'); s=p.read_text(); old='(16 * 1000 * 1000)'; assert s.count(old) == 1, 'expected one 16 MHz LCD clock macro'; p.write_text(s.replace(old, '(12 * 1000 * 1000)', 1))"
-          grep -Fq '#define EXAMPLE_LCD_PIXEL_CLOCK_HZ      (12 * 1000 * 1000)' "$WS_RGB_H"
-          echo '[MIRA][WAVESHARE] RGB: proven pixel clock = 12 MHz'
+          python3 -c "from pathlib import Path; p=Path('firmware/source/work/MIRA_PANEL/src/WaveshareOfficial/rgb_lcd_port/rgb_lcd_port.h'); s=p.read_text(); old='#define EXAMPLE_LCD_PIXEL_CLOCK_HZ      (16 * 1000 * 1000)'; assert s.count(old)==1; p.write_text(s.replace(old, '#define EXAMPLE_LCD_PIXEL_CLOCK_HZ      (14 * 1000 * 1000)', 1))"
+          grep -Fq '#define EXAMPLE_LCD_PIXEL_CLOCK_HZ      (14 * 1000 * 1000)' "$WS_RGB_H"
+          echo '[MIRA][WAVESHARE][EXPERIMENT] RGB PCLK 14 MHz; stable LVGL + timing/buffers/VSYNC unchanged'
 
           # Critical: a sketch-local lv_conf.h has priority over the library's
           # sibling lv_conf.h. Remove Mira's WT32 config for this build, otherwise
@@ -394,12 +396,21 @@ jobs:
             python3 -m esptool --chip esp32s3 merge-bin -o package-waveshare/Mira_Panel_Waveshare_4.3C_0.7.37_FACTORY.bin --flash-mode qio --flash-freq 80m --flash-size 16MB 0x0000 package-waveshare/bootloader.bin 0x8000 package-waveshare/partitions.bin 0xE000 package-waveshare/boot_app0.bin 0x10000 package-waveshare/Mira_Panel_Waveshare_4.3C_0.7.37.bin
           fi
           test -s package-waveshare/Mira_Panel_Waveshare_4.3C_0.7.37_FACTORY.bin
+          cat > package-waveshare/README-PCLK14-TEST.txt <<'EOF'
+          EXPERIMENTAL Waveshare 4.3C ONLY - NOT stable - 0.7.37
+          Variant: Mira_Panel_Waveshare_4.3C_0.7.37_PCLK14_TEST
+          RGB pixel clock 14 MHz instead of stable baseline 12 MHz.
+          Full official LVGL 8.4/direct-mode double-buffer VSYNC intact.
+          Monitor for jitter, tearing, RGB artifacts, blank LCD, Wi-Fi
+          slowdown and touch responsiveness. Roll back 0.7.37 stable if bad.
+          DO NOT FLASH THIS BINARY TO WT32 OR NEXTION.
+          EOF
           ls -lh package-waveshare/
 
       - name: Upload Waveshare preview package
         uses: actions/upload-artifact@v4
         with:
-          name: Mira_Panel_Waveshare_4.3C_0.7.37_preview
+          name: Mira_Panel_Waveshare_4.3C_0.7.37_PCLK14_TEST
           path: package-waveshare/
           if-no-files-found: error
           retention-days: 14
