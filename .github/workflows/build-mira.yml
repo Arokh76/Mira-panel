@@ -379,6 +379,21 @@ jobs:
           if data.count(meter) != 1:
               raise SystemExit('LVGL NO_COMPLEX expected unused meter macro exactly once')
           data = data.replace(old, new, 1).replace(meter, '#define LV_USE_METER      0', 1)
+          # The bundled LVGL demo sources are compiled by Arduino even if
+          # Mira never calls them. Demo-stress uses lv_meter unconditionally;
+          # disable ALL unused examples/demos for the NO_COMPLEX trial.
+          for macro in (
+              'LV_BUILD_EXAMPLES',
+              'LV_USE_DEMO_WIDGETS',
+              'LV_USE_DEMO_KEYPAD_AND_ENCODER',
+              'LV_USE_DEMO_BENCHMARK',
+              'LV_USE_DEMO_STRESS',
+              'LV_USE_DEMO_MUSIC',
+          ):
+              old_demo = '#define ' + macro + ' 1'
+              if data.count(old_demo) != 1:
+                  raise SystemExit('NO_COMPLEX expected demo option exactly once: ' + macro)
+              data = data.replace(old_demo, '#define ' + macro + ' 0', 1)
           conf.write_text(data)
           print('[MIRA][WAVESHARE] NO_COMPLEX LVGL performance trial, LCD driver unchanged')
           PY
