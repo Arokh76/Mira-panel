@@ -781,6 +781,14 @@ class mira extends eqLogic {
           $count++;
         } elseif (trim((string)$target->getConfiguration('calcul',''))!=='' &&
                   ($target->getConfiguration('type')==='info' ||
+                   // A generic light dimmer or RGB wheel stores its return
+                   // state as a Value_* INFO command, configured "Recevoir de".
+                   // Fetch only the passive Info, never its paired ACTION.
+                   // Media volume/device selectors are intentionally excluded.
+                   (strpos($logical,'Value_')===0 &&
+                    in_array((string)$target->getConfiguration('type'),
+                             array('range','color'),true) &&
+                    !preg_match('/__(volume_cmd|device_cmd)$/D',$logical)) ||
                    // Thermostat feedback (not a heater command): a saved
                    // Jeedom Info source drives its setpoint and mode. These
                    // are Value_* INFO commands, despite type 'range'/'list'.
@@ -2628,15 +2636,37 @@ class miraCmd extends cmd {
           }
           return $result;
         
-        }else if ($this->getConfiguration('calcul') != ''&& $this->getConfiguration('type') == 'color'){           
-          $result = jeedom::evaluateExpression($this->getConfiguration('calcul'));           
-		  list($r, $g, $b) = sscanf($result, "#%02x%02x%02x");
-          $cmd = $this->getConfiguration('commande');
-          $url = 'http://'. $eqLogic->getConfiguration('adresseip') . '/updatenr?key=' . $eqLogic->getConfiguration('password') . '&color=' . $cmd . '&r='.$r.'&g='.$g.'&b='.$b;             
-          log::add('mira', 'debug', $eqLogic->getName().': INFO: color: ' . $nom .": ".$url);
-          $req = 'curl -i -XGET "'.$url.'" ';
-          $output = shell_exec($req);          	
-          return $result;            
+        }else if ($this->getConfiguration('calcul') != ''&& $this->getConfiguration('type') == 'color'){
+          // Strictly a passive return state from a Jeedom Info colour source.
+          // /updatenr updates LVGL with Resend=false; never call Jeedom's
+          // paired ACTION or /update (which would command the bulb).
+          $raw=jeedom::evaluateExpression($this->getConfiguration('calcul'));
+          $color=is_scalar($raw) ? trim((string)$raw) : '';
+          if (!preg_match('/^#?([0-9A-Fa-f]{6})$/D',$color,$match)) {
+            $this->reportMissingPassiveValue();
+            return null;
+          }
+          $hex=strtoupper($match[1]);
+          $id=(int)$this->getConfiguration('commande',0);
+          if ($id<1) return null;
+          $r=hexdec(substr($hex,0,2));
+          $g=hexdec(substr($hex,2,2));
+          $b=hexdec(substr($hex,4,2));
+          $url='http://'.$eqLogic->getConfiguration('adresseip').
+            '/updatenr?key='.rawurlencode((string)$eqLogic->getConfiguration('password')).
+            '&color='.$id.'&r='.$r.'&g='.$g.'&b='.$b;
+          $ch=curl_init($url);
+          curl_setopt_array($ch,array(CURLOPT_RETURNTRANSFER=>true,
+            CURLOPT_CONNECTTIMEOUT=>1,CURLOPT_TIMEOUT=>3));
+          $out=curl_exec($ch);
+          $status=(int)curl_getinfo($ch,CURLINFO_HTTP_CODE);
+          curl_close($ch);
+          if ($out===false || $status!==200 || trim((string)$out)!=='OK') {
+            log::add('mira','warning','[PASSIVE] Couleur non synchronisee : '.
+              $nom.' (HTTP '.$status.')');
+            return null;
+          }
+          return '#'.$hex;
         }
         
         break;
