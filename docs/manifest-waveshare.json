@@ -1,6 +1,6 @@
 {
   "name": "Mira Panel - Waveshare ESP32-S3 Touch LCD 4.3C",
-  "version": "0.7.15",
+  "version": "0.7.35",
   "new_install_prompt_erase": true,
   "builds": [
     {

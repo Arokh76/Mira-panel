@@ -1,6 +1,6 @@
 {
   "name": "Mira Panel - Open Nextion Genius 2.8",
-  "version": "0.7.15",
+  "version": "0.7.35",
   "new_install_prompt_erase": true,
   "builds": [
     {
