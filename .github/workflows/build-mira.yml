@@ -331,6 +331,40 @@ jobs:
           grep -Fq '#define LVGL_PORT_AVOID_TEAR_MODE       (3)' "$WS_PORT_H"
           grep -Fq '#define EXAMPLE_LCD_RGB_BUFFER_NUMS     (2)' "$WS_RGB_H"
           echo '[MIRA][WAVESHARE] Mode 3 direct, 2 FB: partial LVGL redraws'
+          # A/B hardware trial ONLY. Use the exact stable-proven official
+          # Waveshare LVGL RGB double framebuffer/VSYNC driver configuration.
+          # Unlike the previous black-screen SRAM prototype, do not touch
+          # RGB buffer count, memory allocation, pixel clock or flush mode.
+          python3 - <<'PY'
+          from pathlib import Path
+          ui = Path('firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp')
+          src = ui.read_text()
+          def replace_exact(old, new):
+              global src
+              if src.count(old) != 1:
+                  raise SystemExit(f'Unexpected UI source for Waveshare FLAT_UI: {old}')
+              src = src.replace(old, new)
+          # Current snapshot caching changes original card opacity and builds
+          # large RGB tiles. The expensive show/hide/repaint happens right
+          # inside LV_EVENT_SCROLL and can stutter each gesture.
+          replace_exact('lv_obj_add_event_cb(_pages[i], onScrollCacheMove, LV_EVENT_SCROLL, this);',
+                        '// Experiment FLAT_UI: no expensive opacity/snapshot event during scroll.')
+          replace_exact('  ui->serviceScrollCache();',
+                        '  // Experiment FLAT_UI: no idle snapshot rasterization of INFO tiles.')
+
+          # A second, independent performance test: cut the per-pixel
+          # software work of large gradients and shadows, on Waveshare only.
+          replace_exact('lv_obj_set_style_bg_grad_dir(_screen, LV_GRAD_DIR_VER, 0);',
+                        'lv_obj_set_style_bg_grad_dir(_screen, LV_GRAD_DIR_NONE, 0);')
+          replace_exact('lv_obj_set_style_bg_grad_dir(_pages[i], LV_GRAD_DIR_VER, 0);',
+                        'lv_obj_set_style_bg_grad_dir(_pages[i], LV_GRAD_DIR_NONE, 0);')
+          replace_exact('lv_obj_set_style_shadow_width(card, _theme == THEME_MIRA ? 4 : 3, 0);',
+                        'lv_obj_set_style_shadow_width(card, 0, 0);')
+          replace_exact('lv_obj_set_style_shadow_width(art, 16, 0);',
+                        'lv_obj_set_style_shadow_width(art, 0, 0);')
+          ui.write_text(src)
+          print('[MIRA][WAVESHARE][FLAT_UI] LVGL driver unchanged, cache disabled, reduced software effects')
+          PY
 
           # Keep the 0.6.38 proven adjustment: change ONLY RGB PCLK
           # from the official 16 MHz to 12 MHz; do not change validated
@@ -394,12 +428,22 @@ jobs:
             python3 -m esptool --chip esp32s3 merge-bin -o package-waveshare/Mira_Panel_Waveshare_4.3C_0.7.37_FACTORY.bin --flash-mode qio --flash-freq 80m --flash-size 16MB 0x0000 package-waveshare/bootloader.bin 0x8000 package-waveshare/partitions.bin 0xE000 package-waveshare/boot_app0.bin 0x10000 package-waveshare/Mira_Panel_Waveshare_4.3C_0.7.37.bin
           fi
           test -s package-waveshare/Mira_Panel_Waveshare_4.3C_0.7.37_FACTORY.bin
+          cat > package-waveshare/README-FLAT_UI.txt <<'EOF'
+          TEST Waveshare ESP32-S3 4.3C ONLY - NOT stable
+          Firmware base version: 0.7.37
+          Variant: FLAT_UI
+          Proven RGB/VSYNC LVGL 8.4 double-buffer port: UNCHANGED.
+          No snapshot/opacity scroll cache + simplified gradients/shadows.
+          Flash with OTA .bin from this archive only on Waveshare 4.3C.
+          Compare gesture responsiveness, scrolling, HTTP latency and visuals.
+          This is a draft experiment; never publish to stable OTA.
+          EOF
           ls -lh package-waveshare/
 
       - name: Upload Waveshare preview package
         uses: actions/upload-artifact@v4
         with:
-          name: Mira_Panel_Waveshare_4.3C_0.7.37_preview
+          name: Mira_Panel_Waveshare_4.3C_0.7.37_FLAT_UI_TEST
           path: package-waveshare/
           if-no-files-found: error
           retention-days: 14
