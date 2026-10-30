@@ -2235,6 +2235,9 @@ class mira extends eqLogic {
       return false;
     }
     $this->checkAndUpdateCmd('Statut', '1');
+    // Non-destructive recovery even if the screen boot index was transiently
+    // incomplete: each refresh rechecks the live screen transport IDs.
+    $this->repairScreenTransportIds($json_index);
     // Seules les sorties GPIO locales sont lues depuis l'ecran.
     // Les actionneurs Jeedom classiques gardent Jeedom comme source de verite.
     $this->syncGpioStates();
