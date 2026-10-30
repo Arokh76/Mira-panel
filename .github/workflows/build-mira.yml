@@ -361,20 +361,20 @@ jobs:
           body = cpp.read_text()
           old = '    buf1 = heap_caps_malloc(buffer_size * sizeof(lv_color_t), LVGL_PORT_BUFFER_MALLOC_CAPS); // Allocate memory'
           new = """
-    ESP_LOGW(TAG, "[MIRA][DIAG] draw_bytes=%d internal_free=%u internal_largest=%u",
-             buffer_size * sizeof(lv_color_t),
-             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
-             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
-    buf1 = heap_caps_malloc(buffer_size * sizeof(lv_color_t), LVGL_PORT_BUFFER_MALLOC_CAPS);
-    if (!buf1) {
-        ESP_LOGE(TAG, "[MIRA][DIAG] SRAM draw allocation failed - fallback PSRAM");
-        buf1 = heap_caps_malloc(buffer_size * sizeof(lv_color_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    }
-    if (buf1) {
-        ESP_LOGW(TAG, "[MIRA][DIAG] draw allocated; remaining_internal_largest=%u",
-                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
-    }
-""".rstrip()
+              ESP_LOGW(TAG, "[MIRA][DIAG] draw_bytes=%d internal_free=%u internal_largest=%u",
+                       buffer_size * sizeof(lv_color_t),
+                       (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                       (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+              buf1 = heap_caps_malloc(buffer_size * sizeof(lv_color_t), LVGL_PORT_BUFFER_MALLOC_CAPS);
+              if (!buf1) {
+                  ESP_LOGE(TAG, "[MIRA][DIAG] SRAM draw allocation failed - fallback PSRAM");
+                  buf1 = heap_caps_malloc(buffer_size * sizeof(lv_color_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+              }
+              if (buf1) {
+                  ESP_LOGW(TAG, "[MIRA][DIAG] draw allocated; remaining_internal_largest=%u",
+                           (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+              }
+          """.rstrip()
           if body.count(old) != 1:
               raise SystemExit('Unexpected Waveshare LVGL allocation code')
           cpp.write_text(body.replace(old, new))
