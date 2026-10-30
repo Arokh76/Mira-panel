@@ -1,0 +1,68 @@
+name: EXP Waveshare LVGL 9.6 (RGB565 smoke only)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [firmware-beta]
+    paths:
+      - '.github/workflows/build-waveshare-lvgl96.yml'
+      - 'firmware/experiments/waveshare-lvgl96/**'
+
+permissions:
+  contents: read
+
+jobs:
+  build_waveshare_lvgl96:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Mira (isolated probe, no production firmware)
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned LVGL 9.6.0
+        uses: actions/checkout@v4
+        with:
+          repository: lvgl/lvgl
+          ref: v9.6.0
+          path: deps/lvgl
+          submodules: false
+
+      - name: Setup Arduino CLI 1.5.1
+        uses: arduino/setup-arduino-cli@v2
+        with:
+          version: 1.5.1
+
+      - name: Install ESP32-S3 Arduino core 3.3.11
+        shell: bash
+        run: |
+          set -euo pipefail
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@3.3.11
+          grep -q 'LVGL_VERSION_MAJOR 9' deps/lvgl/lvgl.h || grep -q 'LVGL_VERSION_MAJOR 9' deps/lvgl/src/lv_version.h
+          test -e firmware/experiments/waveshare-lvgl96/LVGL9Probe/LVGL9Probe.ino
+
+      - name: Compile Waveshare RGB565 probe on LVGL 9.6
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build-lvgl9
+          # Standalone upstream v9.6, no Waveshare v8 port and no Mira v8 UI.
+          # The app's production build is entirely untouched.
+          arduino-cli compile \
+            --fqbn "esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,CPUFreq=240,FlashMode=qio,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,PSRAM=opi,UploadMode=default,UploadSpeed=921600,LoopCore=1,EventsCore=1" \
+            --libraries "${GITHUB_WORKSPACE}/deps" \
+            --build-property "compiler.c.extra_flags=-DLV_CONF_SKIP=1 -DLV_MEM_SIZE=98304 -O2" \
+            --build-property "compiler.cpp.extra_flags=-DLV_CONF_SKIP=1 -DLV_MEM_SIZE=98304 -O2" \
+            --output-dir build-lvgl9 \
+            firmware/experiments/waveshare-lvgl96/LVGL9Probe
+          test -s build-lvgl9/LVGL9Probe.ino.bin
+          strings build-lvgl9/LVGL9Probe.ino.bin | grep -Fq "[MIRA-LVGL9-PROBE]"
+
+      - name: Upload unvalidated hardware test (not a Mira update)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mira_Waveshare_43C_LVGL_9.6.0_RGB565_POC_UNVALIDATED
+          path: build-lvgl9/LVGL9Probe.ino.bin
+          retention-days: 7
+          if-no-files-found: error
