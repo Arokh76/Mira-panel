@@ -87,7 +87,7 @@ static const char recovery_page[] =
 "<!doctype html><html lang='fr'><meta name='viewport' content='width=device-width,initial-scale=1'>"
 "<title>Mira IDF - Retour</title><h2>Mira ESP-IDF - Banc d'essai LVGL 9.6</h2>"
 "<p>Cette application n'est pas le Mira Jeedom complet.</p>"
-"<p>Pour revenir a Mira 0.7.37, selectionner son fichier <b>OTA .bin</b> (pas le factory.bin).</p>"
+"<p>Pour revenir a la demo Waveshare 7: restaurer la sauvegarde flash USB d origine.</p>"
 "<input type='file' id='fw' accept='.bin'><button onclick='flash()'>Reflasher</button>"
 "<pre id='msg'>Pret</pre><p><a href='/perf'>FPS et statut JSON</a></p>"
 "<p><b>Defilement automatique :</b> "
@@ -277,7 +277,7 @@ esp_err_t mira_recovery_init(void) {
     ESP_RETURN_ON_ERROR(esp_wifi_init(&init), TAG, "wifi init");
     wifi_config_t ap = {
         .ap = {
-            .ssid = "Mira-IDF-Test",
+            .ssid = "Mira-IDF-7-Test",
             .ssid_len = 0,
             .password = "MiraIDF2026",
             .channel = 6,
@@ -320,6 +320,6 @@ esp_err_t mira_recovery_init(void) {
     register_optional_route(httpd, &shadow_off);
     register_optional_route(httpd, &shadow_light);
     register_optional_route(httpd, &shadow_relief);
-    ESP_LOGW(TAG, "Recovery AP Mira-IDF-Test password MiraIDF2026 at http://192.168.4.1");
+    ESP_LOGW(TAG, "Waveshare 7 benchmark AP Mira-IDF-7-Test password MiraIDF2026 at http://192.168.4.1");
     return ESP_OK;
 }
