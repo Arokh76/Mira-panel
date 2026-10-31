@@ -7,4 +7,7 @@ void mira_recovery_set_shadow_mode(int mode);
 
 // HTTP commands queued for the LVGL rendering task (never mutate UI in HTTP).
 int mira_recovery_take_scroll_request(void);
+// No new URI slots: AUTO ON/OFF is controlled via /?auto=on|off.
+int mira_recovery_take_auto_request(void);
+void mira_recovery_set_auto_state(int enabled);
 void mira_recovery_set_scroll_state(uint32_t mode, uint32_t switches, uint32_t rebuild_us);
