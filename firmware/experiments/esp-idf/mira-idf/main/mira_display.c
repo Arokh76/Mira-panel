@@ -17,7 +17,7 @@
 
 #define WIDTH 800
 #define HEIGHT 480
-#define LCD_PCLK_HZ (12 * 1000 * 1000) // conservative matched 4.3C A/B baseline; Waveshare 7 spec = 16 MHz
+#define LCD_PCLK_HZ (16 * 1000 * 1000) // official Waveshare 7 standard 800x480 timing
 
 static const char *TAG = "mira-idf-rgb";
 static i2c_master_bus_handle_t i2c_bus;
@@ -188,17 +188,33 @@ static void init_i2c(void) {
         return;
     }
 
-    // Set outputs to their safe ON state: EXIO1 touch reset released,
-    // EXIO2 DISP high, EXIO3 LCD reset released, EXIO4 SD CS high.
-    // Mode command 0x24 takes 0x01 (enable output); output command 0x38 takes 0xFF.
+    // CH422G 7-inch output bit map: bit1 TP_RST, bit2 DISP,
+    // bit3 LCD_RST, bit4 SD_CS, bit5 USB/CAN select, bit6 LCD_VDD_EN.
+    // Keep USB selected (bit5 LOW), enable panel power (bit6 HIGH).
+    // 0x5E: TP_RST/DISP/LCD_RST/SD_CS/VDD high; USB_SEL low.
+    const uint8_t lcd_normal = 0x5E;
     err = ioexp_write(ioexp_mode, 0x01);
-    if (err == ESP_OK) err = ioexp_write(ioexp_out, 0xff);
+    if (err == ESP_OK) err = ioexp_write(ioexp_out, lcd_normal);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "CH422G 7-inch initialize failed: %s (no panic; Wi-Fi stays up)",
                  esp_err_to_name(err));
         return;
     }
-    ESP_LOGI(TAG, "CH422G 7-inch ready: MODE@0x24=0x01 OUT@0x38=0xFF");
+    ESP_LOGI(TAG, "CH422G 7-inch ready: MODE@0x24=0x01 OUT@0x38=0x5E");
+    // Critical Waveshare 7 LCD controller cold start: assert EXIO3
+    // reset LOW, release HIGH only after panel power has settled.
+    vTaskDelay(pdMS_TO_TICKS(40));
+    err = ioexp_write(ioexp_out, lcd_normal & ~(1U << 3));
+    if (err == ESP_OK) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+        err = ioexp_write(ioexp_out, lcd_normal);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "LCD_RST EXIO3 pulse failed: %s", esp_err_to_name(err));
+        return;
+    }
+    vTaskDelay(pdMS_TO_TICKS(120));
+    ESP_LOGI(TAG, "LCD_RST EXIO3 pulse OK, panel power and DISP enabled");
 
     // Correct missing GT911 hard reset / address selection:
     // (1) EXIO1 low, (2) GPIO4 low => choose GT911 0x5d,
@@ -212,7 +228,7 @@ static void init_i2c(void) {
     };
     ESP_ERROR_CHECK(gpio_config(&irq_cfg));
     ESP_ERROR_CHECK(gpio_set_level(GPIO_NUM_4, 0));
-    err = ioexp_write(ioexp_out, 0xfd); // EXIO1 low; EXIO2 backlight stays on
+    err = ioexp_write(ioexp_out, 0x5c); // TP_RST bit1 LOW; DISP and LCD_VDD_EN stay HIGH
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "CH422G touch reset LOW failed: %s", esp_err_to_name(err));
         return;
@@ -220,7 +236,7 @@ static void init_i2c(void) {
     vTaskDelay(pdMS_TO_TICKS(100));
     ESP_ERROR_CHECK(gpio_set_level(GPIO_NUM_4, 0));
     vTaskDelay(pdMS_TO_TICKS(100));
-    err = ioexp_write(ioexp_out, 0xff); // EXIO1 high => GT911 exits reset
+    err = ioexp_write(ioexp_out, 0x5e); // TP_RST bit1 HIGH => GT911 exits reset
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "CH422G touch reset HIGH failed: %s", esp_err_to_name(err));
         return;
@@ -363,6 +379,7 @@ esp_err_t mira_display_init(void) {
     ESP_RETURN_ON_ERROR(esp_lcd_new_rgb_panel(&cfg, &panel), TAG, "RGB panel allocate");
     ESP_RETURN_ON_ERROR(esp_lcd_panel_reset(panel), TAG, "RGB reset");
     ESP_RETURN_ON_ERROR(esp_lcd_panel_init(panel), TAG, "RGB init");
+    ESP_LOGI(TAG, "Waveshare 7 LCD RGB panel started at %d Hz (800x480, 4/8/8 porch)", LCD_PCLK_HZ);
     esp_lcd_rgb_panel_event_callbacks_t cb = {
         .on_frame_buf_complete = lcd_frame_complete,
         .on_vsync = lcd_vsync_event,
