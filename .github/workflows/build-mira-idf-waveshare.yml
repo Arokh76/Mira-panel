@@ -8,7 +8,7 @@ on:
       - '.github/workflows/build-mira-idf-waveshare.yml'
       - 'firmware/experiments/esp-idf/mira-idf/**'
   push:
-    branches: [experiment/mira-idf-lvgl96-waveshare-43c, experiment/mira-idf-rgb-no-bounce-43c, experiment/mira-idf-raster-profile-43c, experiment/mira-idf-gt911-touch-43c]
+    branches: [experiment/mira-idf-lvgl96-waveshare-43c, experiment/mira-idf-rgb-no-bounce-43c, experiment/mira-idf-raster-profile-43c, experiment/mira-idf-gt911-touch-43c, experiment/mira-idf-cache-shadow-touch-diag-43c]
     paths:
       - '.github/workflows/build-mira-idf-waveshare.yml'
       - 'firmware/experiments/esp-idf/mira-idf/**'
@@ -66,7 +66,7 @@ jobs:
       - name: Publish compiled *unvalidated* IDF test app only
         uses: actions/upload-artifact@v4
         with:
-          name: MIRA_IDF_5.5.6_LVGL96_Waveshare43C_GT911_TOUCH_TEST
+          name: MIRA_IDF_5.5.6_LVGL96_Waveshare43C_CACHE_SHADOW_12FPS_TEST
           path: firmware/experiments/esp-idf/mira-idf/build/mira_idf_scroll.bin
           retention-days: 14
           if-no-files-found: error
