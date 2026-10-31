@@ -32,7 +32,7 @@ static void lvgl_loop(void *arg) {
         // HTTP server never touches LVGL directly: consume the remote command
         // on the render task before drawing anything.
         const int pending_shadows = mira_recovery_take_shadow_request();
-        if (pending_shadows >= 0) mira_ui_set_shadows(pending_shadows != 0);
+        if (pending_shadows >= 0) mira_ui_set_shadow_mode(pending_shadows);
         int64_t t0 = esp_timer_get_time();
         uint32_t next_ms = lv_timer_handler();
         uint64_t now_us = esp_timer_get_time();
@@ -66,6 +66,7 @@ static void lvgl_loop(void *arg) {
             }
             mira_recovery_set_fps(fps_x10);
             mira_recovery_set_profile(avg_draw_us, avg_wait_us, period_max_handler_us);
+            mira_recovery_set_shadow_mode(mira_ui_shadow_mode());
             ESP_LOGI(TAG, "FPS=%" PRIu32 ".%" PRIu32
                  " draw_avg=%" PRIu32 "us wait_avg=%" PRIu32
                  "us handler_max=%" PRIu32 "us VSYNC-missed=%" PRIu32
