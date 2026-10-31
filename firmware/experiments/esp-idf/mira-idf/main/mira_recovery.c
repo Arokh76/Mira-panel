@@ -51,18 +51,25 @@ static esp_err_t index_get(httpd_req_t *req) {
 static esp_err_t perf_get(httpd_req_t *req) {
     mira_display_stats_t s;
     mira_display_stats(&s);
-    char text[360];
+    char text[512];
     snprintf(text, sizeof(text),
       "{\"fps_tenths\":%" PRIu32 ",\"frames\":%" PRIu32
       ",\"vsync_missed\":%" PRIu32 ",\"vsync_wait_us\":%" PRIu32
       ",\"uptime_ms\":%" PRIu32 ",\"vsync_events\":%" PRIu32
       ",\"frame_complete_events\":%" PRIu32
       ",\"draw_avg_us\":%" PRIu32 ",\"wait_avg_us\":%" PRIu32
-      ",\"handler_max_us\":%" PRIu32 "}",
+      ",\"handler_max_us\":%" PRIu32
+      ",\"touch_ready\":%" PRIu32 ",\"touch_addr\":%" PRIu32
+      ",\"touch_presses\":%" PRIu32 ",\"touch_reads\":%" PRIu32
+      ",\"touch_errors\":%" PRIu32 ",\"touch_last_x\":%" PRIu32
+      ",\"touch_last_y\":%" PRIu32 "}",
       current_fps_tenths, s.frames, s.vsync_missed, s.last_refresh_us,
       (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS),
       s.vsync_events, s.frame_complete_events,
-      current_draw_avg_us, current_wait_avg_us, current_handler_max_us);
+      current_draw_avg_us, current_wait_avg_us, current_handler_max_us,
+      (uint32_t)(s.touch_ready ? 1 : 0), (uint32_t)s.touch_addr,
+      s.touch_presses, s.touch_reads, s.touch_errors,
+      s.touch_last_x, s.touch_last_y);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, text);
 }
