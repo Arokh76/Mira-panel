@@ -14,4 +14,8 @@ void mira_recovery_set_auto_state(int enabled);
 // Request from root /?bench=static|off; processed only in LVGL thread.
 int mira_recovery_take_bench_request(void);
 void mira_recovery_set_bench_state(int enabled);
+// Reuse existing root handler, no new HTTP URI slots.
+int mira_recovery_take_cache_request(void);
+void mira_recovery_set_cache_state(int state, int cards);
+
 void mira_recovery_set_scroll_state(uint32_t mode, uint32_t switches, uint32_t rebuild_us);
