@@ -27,19 +27,33 @@ static int scroll_mode = 0; // 0 = 35 original LVGL cards, 1 = 8 recycled
 static uint32_t scroll_switches;
 static uint32_t scroll_rebuild_us;
 static bool automatic = true;
+static bool bench_static = false;
 static bool scrolling_down = true;
 static int shadow_mode = -1;
 static const char *TAG = "mira-compare";
 static void apply_style(lv_obj_t *card, int mode);
 static lv_obj_t *make_card(int row, lv_obj_t **title_out);
 
+static void update_auto_label(void) {
+    if (auto_label) lv_label_set_text(auto_label,
+        bench_static ? "BENCH STATIC" : (automatic ? "AUTO: ON" : "AUTO: OFF"));
+}
 void mira_ui_set_auto_scroll(bool enabled) {
-    if (automatic == enabled) return;
+    if (automatic == enabled && !bench_static) return;
     automatic = enabled;
-    if (auto_label) lv_label_set_text(auto_label, automatic ? "AUTO: ON" : "AUTO: OFF");
+    bench_static = false; // AUTO commands always exit forced-redraw testing.
+    update_auto_label();
     ESP_LOGI(TAG, "Automatic scrolling %s", automatic ? "ON" : "OFF");
 }
 bool mira_ui_auto_scroll(void) { return automatic; }
+void mira_ui_set_bench_static(bool enabled) {
+    if (bench_static == enabled && !automatic) return;
+    bench_static = enabled;
+    automatic = false;  // Keep cards frozen regardless of test state.
+    update_auto_label();
+    ESP_LOGI(TAG, "Static full-screen redraw %s", bench_static ? "ON" : "OFF");
+}
+bool mira_ui_bench_static(void) { return bench_static; }
 static void toggle_scroll(lv_event_t *event) {
     (void)event;
     mira_ui_set_auto_scroll(!automatic);
@@ -176,7 +190,14 @@ uint32_t mira_ui_scroll_rebuild_us(void) { return scroll_rebuild_us; }
 
 static void auto_tick(lv_timer_t *timer) {
     (void)timer;
-    if (!scroll_list || !automatic) return;
+    if (!scroll_list) return;
+    if (bench_static) {
+        // Invalidate ALL 800x480 pixels without moving a single card.
+        // Coalesced by LVGL if rendering takes longer than the 16 ms timer.
+        lv_obj_invalidate(lv_obj_get_screen(scroll_list));
+        return;
+    }
+    if (!automatic) return;
     if (scrolling_down && lv_obj_get_scroll_bottom(scroll_list) <= 3)
         scrolling_down = false;
     if (!scrolling_down && lv_obj_get_scroll_top(scroll_list) <= 3)
@@ -184,11 +205,13 @@ static void auto_tick(lv_timer_t *timer) {
     lv_obj_scroll_by(scroll_list, 0, scrolling_down ? -6 : 6, LV_ANIM_OFF);
     if (scroll_mode == 1) virtual_refresh();
 }
-void mira_ui_update_fps(uint32_t fps_tenths) {
+void mira_ui_update_fps(uint32_t lvgl_fps_tenths, uint32_t rgb_fps_tenths) {
     if (fps_label) {
-        lv_label_set_text_fmt(fps_label, "ESP-IDF | FPS: %lu.%01lu",
-                             (unsigned long)(fps_tenths / 10),
-                             (unsigned long)(fps_tenths % 10));
+        lv_label_set_text_fmt(fps_label, "LVGL:%lu.%01lu RGB:%lu.%01lu",
+                             (unsigned long)(lvgl_fps_tenths / 10),
+                             (unsigned long)(lvgl_fps_tenths % 10),
+                             (unsigned long)(rgb_fps_tenths / 10),
+                             (unsigned long)(rgb_fps_tenths % 10));
     }
 }
 void mira_ui_bench_create(lv_display_t *disp, bool touch_ready) {
@@ -201,7 +224,7 @@ void mira_ui_bench_create(lv_display_t *disp, bool touch_ready) {
     lv_obj_set_style_text_color(fps_label, lv_color_hex(0x86eead), 0);
     lv_obj_set_style_text_font(fps_label, &lv_font_montserrat_20, 0);
     lv_obj_set_pos(fps_label, 22, 16);
-    lv_label_set_text(fps_label, "ESP-IDF | FPS: --");
+    lv_label_set_text(fps_label, "LVGL:-- RGB:--");
 
     lv_obj_t *touch_label = lv_label_create(screen);
     lv_obj_set_pos(touch_label, 277, 19);
