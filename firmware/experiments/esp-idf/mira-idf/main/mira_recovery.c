@@ -49,9 +49,11 @@ static esp_err_t perf_get(httpd_req_t *req) {
     snprintf(text, sizeof(text),
       "{\"fps_tenths\":%" PRIu32 ",\"frames\":%" PRIu32
       ",\"vsync_missed\":%" PRIu32 ",\"vsync_wait_us\":%" PRIu32
-      ",\"uptime_ms\":%" PRIu32 "}",
+      ",\"uptime_ms\":%" PRIu32 ",\"vsync_events\":%" PRIu32
+      ",\"frame_complete_events\":%" PRIu32 "}",
       current_fps_tenths, s.frames, s.vsync_missed, s.last_refresh_us,
-      (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS));
+      (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS),
+      s.vsync_events, s.frame_complete_events);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, text);
 }
