@@ -72,6 +72,25 @@ void mira_recovery_set_profile(uint32_t draw_us, uint32_t wait_us, uint32_t hand
     current_handler_max_us = handler_us;
 }
 
+static volatile uint32_t dirty_sample_ms;
+static volatile uint32_t dirty_invalidation_calls;
+static volatile uint32_t dirty_invalidated_px_frame;
+static volatile uint32_t dirty_flush_rects;
+static volatile uint32_t dirty_flushed_px_frame;
+static volatile uint32_t dirty_full_rects;
+static volatile uint32_t dirty_flush_cover_x10;
+void mira_recovery_set_dirty_profile(uint32_t sample_ms, uint32_t reqs, uint32_t inv_px_avg,
+                                     uint32_t rects, uint32_t flush_px_avg, uint32_t fulls,
+                                     uint32_t coverage_x10) {
+    dirty_sample_ms = sample_ms;
+    dirty_invalidation_calls = reqs;
+    dirty_invalidated_px_frame = inv_px_avg;
+    dirty_flush_rects = rects;
+    dirty_flushed_px_frame = flush_px_avg;
+    dirty_full_rects = fulls;
+    dirty_flush_cover_x10 = coverage_x10;
+}
+
 static const char recovery_page[] =
 "<!doctype html><html lang='fr'><meta name='viewport' content='width=device-width,initial-scale=1'>"
 "<title>Mira IDF - Retour</title><h2>Mira ESP-IDF - Banc d'essai LVGL 9.6</h2>"
