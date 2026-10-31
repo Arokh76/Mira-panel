@@ -89,10 +89,10 @@ jobs:
         run: |
           set -euo pipefail
           ROOT=firmware/experiments/esp-idf/mira-idf/build
-          mkdir -p "$ROOT/mira_7_release"
-          cp "$ROOT/mira_idf_scroll.bin" "$ROOT/mira_7_release/Mira_Waveshare7_CACHE_OTA_app.bin"
-          cp "$ROOT/bootloader/bootloader.bin" "$ROOT/mira_7_release/bootloader.bin"
-          cp "$ROOT/partition_table/partition-table.bin" "$ROOT/mira_7_release/partition-table.bin"
+          mkdir -p mira_7_release
+          cp "$ROOT/mira_idf_scroll.bin" mira_7_release/Mira_Waveshare7_CACHE_OTA_app.bin
+          cp "$ROOT/bootloader/bootloader.bin" mira_7_release/bootloader.bin
+          cp "$ROOT/partition_table/partition-table.bin" mira_7_release/partition-table.bin
           export ROOT
           python3 - <<'PY'
           from pathlib import Path
@@ -110,7 +110,7 @@ jobs:
               if len(out) < offset:
                   out.extend(b'\xff' * (offset-len(out)))
               out.extend(data)
-          dest = p/'mira_7_release/Mira_Waveshare7_CACHE_FACTORY_USB_0x0.bin'
+          dest = Path('mira_7_release/Mira_Waveshare7_CACHE_FACTORY_USB_0x0.bin')
           dest.write_bytes(out)
           print(f"Factory USB image: {len(out)} bytes, ESP32-S3 offset 0x0")
           PY
@@ -119,6 +119,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: MIRA_IDF_5.5.6_LVGL96_Waveshare7_CACHE_AB_FACTORY_USB
-          path: firmware/experiments/esp-idf/mira-idf/build/mira_7_release/
+          path: mira_7_release/
           retention-days: 14
           if-no-files-found: error
