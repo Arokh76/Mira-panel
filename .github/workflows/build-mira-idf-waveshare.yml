@@ -1,0 +1,130 @@
+name: EXP Mira ESP-IDF 5.5.6 + LVGL 9.6 Waveshare 7 standard
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [firmware-beta]
+    paths:
+      - '.github/workflows/build-mira-idf-waveshare.yml'
+      - 'firmware/experiments/esp-idf/mira-idf/**'
+  push:
+    branches: [experiment/mira-idf-lvgl96-waveshare-43c, experiment/mira-idf-rgb-no-bounce-43c, experiment/mira-idf-raster-profile-43c, experiment/mira-idf-gt911-touch-43c, experiment/mira-idf-cache-shadow-touch-diag-43c, experiment/mira-idf-light-relief-shadows-43c, experiment/mira-idf-scroll-lazy-safe-43c, experiment/mira-idf-scroll-http-slots-fix-43c, experiment/mira-idf-auto-http-toggle-43c, experiment/mira-idf-static-bench-dual-fps-43c, experiment/mira-idf-cache-card-snapshots-43c, experiment/mira-idf-waveshare-7-cache-comparison, experiment/mira-idf-waveshare7-ch422g-bootfix, experiment/mira-idf-waveshare7-rgb-init-final]
+    paths:
+      - '.github/workflows/build-mira-idf-waveshare.yml'
+      - 'firmware/experiments/esp-idf/mira-idf/**'
+
+permissions:
+  contents: read
+
+jobs:
+  idf_waveshare:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Mira IDF experiment
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned LVGL v9.6.0 into IDF components
+        uses: actions/checkout@v4
+        with:
+          repository: lvgl/lvgl
+          ref: v9.6.0
+          path: firmware/experiments/esp-idf/mira-idf/components/lvgl
+          submodules: false
+
+      - name: Verify hardware profiles, LVGL and OTA partition compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=firmware/experiments/esp-idf/mira-idf
+          grep -Fq '#define LVGL_VERSION_MAJOR 9' "$ROOT/components/lvgl/include/lvgl/lv_version.h"
+          grep -Fq '#define LVGL_VERSION_MINOR 6' "$ROOT/components/lvgl/include/lvgl/lv_version.h"
+          cmp "$ROOT/partitions.csv" "$ROOT/partitions.csv"
+          grep -Fq '0x610000, 0x9E0000' "$ROOT/partitions.csv"
+          grep -Fq '0x310000, 0x300000' "$ROOT/partitions.csv"
+          test -e "$ROOT/main/mira_display.c"
+          test -e "$ROOT/main/mira_recovery.c"
+          # Prevent recurrence of the 2026-10-31 boot loop:
+          # 9 HTTP handlers on ESP-IDF whose default capacity is only 8.
+          grep -Fq 'conf.max_uri_handlers = 16;' "$ROOT/main/mira_recovery.c"
+          grep -Fq 'register_optional_route(httpd, &scroll_virtual);' "$ROOT/main/mira_recovery.c"
+          grep -Fq 'mira_recovery_take_auto_request' "$ROOT/main/app_main.c"
+          grep -Fq 'httpd_req_get_url_query_str' "$ROOT/main/mira_recovery.c"
+          grep -Fq 'mira_ui_set_bench_static' "$ROOT/main/app_main.c"
+          grep -Fq 'current_rgb_fps_tenths' "$ROOT/main/mira_recovery.c"
+          grep -Fq 'bench_static' "$ROOT/main/mira_recovery.c"
+          grep -Fq 'CONFIG_LV_USE_SNAPSHOT=y' "$ROOT/sdkconfig.defaults"
+          grep -Fq 'lv_snapshot_take' "$ROOT/main/mira_ui.c"
+          grep -Fq 'mira_ui_cache_step' "$ROOT/main/app_main.c"
+          grep -Fq 'max_uri_handlers = 16' "$ROOT/main/mira_recovery.c"
+          grep -Fq '.hsync_pulse_width = 4' "$ROOT/main/mira_display.c"
+          grep -Fq '.vsync_front_porch = 8' "$ROOT/main/mira_display.c"
+          grep -Fq 'Mira-IDF-7-Test' "$ROOT/main/mira_recovery.c"
+          grep -Fq 'ext_cfg.device_address = 0x38;' "$ROOT/main/mira_display.c"
+          grep -Fq 'ioexp_write(ioexp_mode, 0x01)' "$ROOT/main/mira_display.c"
+          grep -Fq 'ioexp_write(ioexp_out, lcd_normal)' "$ROOT/main/mira_display.c"
+          grep -Fq 'LCD_RST EXIO3 pulse OK' "$ROOT/main/mira_display.c"
+          grep -Fq '#define LCD_PCLK_HZ (16 * 1000 * 1000)' "$ROOT/main/mira_display.c"
+          grep -Fq 'ioexp_write(ioexp_out, 0x5c)' "$ROOT/main/mira_display.c"
+          grep -Fq 'LCD_PCLK_HZ (16 * 1000 * 1000)' "$ROOT/main/mira_display.c"
+          # Static redraw must invalidate the whole screen on the LVGL thread.
+          grep -Fq 'lv_obj_invalidate(lv_obj_get_screen(scroll_list));' "$ROOT/main/mira_ui.c"
+          # Keep the known-good recovery routes, no new URI handler in the bench.
+          grep -Fq 'httpd_register_uri_handler(httpd, &ota)' "$ROOT/main/mira_recovery.c"
+
+      - name: Build with native ESP-IDF 5.5.6 (no Arduino)
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.6
+          target: esp32s3
+          path: firmware/experiments/esp-idf/mira-idf
+          command: idf.py build
+
+      - name: Validate standalone OTA application size
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=firmware/experiments/esp-idf/mira-idf/build/mira_idf_scroll.bin
+          test -s "$BIN"
+          bytes=$(stat -c '%s' "$BIN")
+          echo "Mira-IDF application: $bytes bytes"
+          test "$bytes" -lt 3145728
+          grep -Fq 'ota_1' firmware/experiments/esp-idf/mira-idf/partitions.csv
+
+      - name: Assemble USB factory image (offset 0) and OTA app
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=firmware/experiments/esp-idf/mira-idf/build
+          mkdir -p mira_7_release
+          cp "$ROOT/mira_idf_scroll.bin" mira_7_release/Mira_Waveshare7_CACHE_OTA_app.bin
+          cp "$ROOT/bootloader/bootloader.bin" mira_7_release/bootloader.bin
+          cp "$ROOT/partition_table/partition-table.bin" mira_7_release/partition-table.bin
+          export ROOT
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p = Path(os.environ['ROOT'])
+          parts = [
+              (0x0, p/'bootloader/bootloader.bin'),
+              (0x8000, p/'partition_table/partition-table.bin'),
+              (0x10000, p/'mira_idf_scroll.bin'),
+          ]
+          out = bytearray()
+          for offset, file in parts:
+              data = file.read_bytes()
+              assert data and offset + len(data) <= (0x8000 if offset == 0 else 0x10000 if offset == 0x8000 else 0x310000), (offset, len(data))
+              if len(out) < offset:
+                  out.extend(b'\xff' * (offset-len(out)))
+              out.extend(data)
+          dest = Path('mira_7_release/Mira_Waveshare7_CACHE_FACTORY_USB_0x0.bin')
+          dest.write_bytes(out)
+          print(f"Factory USB image: {len(out)} bytes, ESP32-S3 offset 0x0")
+          PY
+
+      - name: Publish compiled *unvalidated* 7-inch USB and OTA images
+        uses: actions/upload-artifact@v4
+        with:
+          name: MIRA_IDF_5.5.6_LVGL96_Waveshare7_LCD_RESET_16MHZ
+          path: mira_7_release/
+          retention-days: 14
+          if-no-files-found: error
