@@ -23,6 +23,17 @@ static volatile int pending_shadow_request = -1;
 static volatile int pending_scroll_request = -1;
 static volatile int pending_auto_request = -1;
 static volatile int pending_bench_request = -1;
+static volatile int pending_cache_request = -1;
+static volatile uint32_t current_cache_state, current_cache_count;
+int mira_recovery_take_cache_request(void) {
+    int request = pending_cache_request;
+    pending_cache_request = -1;
+    return request;
+}
+void mira_recovery_set_cache_state(int state, int cards) {
+    current_cache_state = (uint32_t)state;
+    current_cache_count = (uint32_t)cards;
+}
 static volatile uint32_t current_bench_static = 0;
 int mira_recovery_take_bench_request(void) {
     int request = pending_bench_request;
@@ -85,7 +96,11 @@ static const char recovery_page[] =
 "<p><b>Mesure sans defilement :</b> "
 "<a href='/?bench=static'>BENCH STATIC (RAFRAICHIR TOUT)</a> | "
 "<a href='/?bench=off'>BENCH OFF (ARRET COMPLET)</a></p>"
-"<p>/perf : fps_tenths=LVGL, rgb_fps_tenths=balayage RGB, bench_static=0/1.</p>"
+"<p><b>Cache bitmap des cartes (TEST):</b> "
+"<a href='/?cache=on'>CACHE ON</a> | <a href='/?cache=off'>CACHE OFF</a></p>"
+"<p>cache_state: 0=normal, 1=creation (deplacement suspendu), 2=actif. "
+"En cas de RAM insuffisante, retour automatique au mode normal.</p>"
+"<p>/perf : FPS LVGL/RGB + cache_state / cache_cards.</p>"
 "<p><b>Defilement - au demarrage seul le mode CLASSIQUE est initialise :</b> "
 "<a href='/scroll/classic'>35 CARTES</a> | "
 "<a href='/scroll/virtual'>8 CARTES (TEST)</a></p>"
@@ -123,6 +138,9 @@ static esp_err_t index_get(httpd_req_t *req) {
                 pending_auto_request = -1;
                 pending_bench_request = 0;
             }
+        } else if (httpd_query_key_value(query, "cache", requested, sizeof(requested)) == ESP_OK) {
+            if (strcmp(requested, "on") == 0) pending_cache_request = 1;
+            else if (strcmp(requested, "off") == 0) pending_cache_request = 0;
         }
     }
     httpd_resp_set_type(req, "text/html; charset=utf-8");
@@ -162,7 +180,7 @@ static esp_err_t scroll_virtual_get(httpd_req_t *req) {
 static esp_err_t perf_get(httpd_req_t *req) {
     mira_display_stats_t s;
     mira_display_stats(&s);
-    char text[1120];
+    char text[1280];
     snprintf(text, sizeof(text),
       "{\"fps_tenths\":%" PRIu32 ",\"rgb_fps_tenths\":%" PRIu32 ",\"frames\":%" PRIu32
       ",\"vsync_missed\":%" PRIu32 ",\"vsync_wait_us\":%" PRIu32
@@ -179,7 +197,8 @@ static esp_err_t perf_get(httpd_req_t *req) {
       ",\"touch_raw_x\":%" PRIu32 ",\"touch_raw_y\":%" PRIu32
       ",\"touch_config_x\":%" PRIu32 ",\"touch_config_y\":%" PRIu32
       ",\"auto_scroll\":%" PRIu32 ",\"bench_static\":%" PRIu32 ",\"scroll_mode\":%" PRIu32 ",\"scroll_switches\":%" PRIu32
-      ",\"scroll_rebuild_us\":%" PRIu32 "}",
+      ",\"scroll_rebuild_us\":%" PRIu32 ",\"cache_state\":%" PRIu32
+      ",\"cache_cards\":%" PRIu32 "}",
       current_fps_tenths, current_rgb_fps_tenths, s.frames, s.vsync_missed, s.last_refresh_us,
       (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS),
       s.vsync_events, s.frame_complete_events,
@@ -190,7 +209,8 @@ static esp_err_t perf_get(httpd_req_t *req) {
       (uint32_t)s.touch_last_status, (uint32_t)s.touch_irq_level,
       s.touch_ready_events, s.touch_invalid_coords,
       s.touch_raw_x, s.touch_raw_y, s.touch_config_x, s.touch_config_y,
-      current_auto_scroll, current_bench_static, current_scroll_mode, current_scroll_switches, current_scroll_rebuild_us);
+      current_auto_scroll, current_bench_static, current_scroll_mode, current_scroll_switches,
+      current_scroll_rebuild_us, current_cache_state, current_cache_count);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, text);
 }
