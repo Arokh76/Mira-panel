@@ -47,6 +47,30 @@ static volatile uint32_t last_refresh_us;
 static volatile uint32_t wait_total_us;
 static volatile uint32_t vsync_events;
 static volatile uint32_t frame_complete_events;
+static volatile uint32_t invalidate_requests;
+static volatile uint64_t invalidate_pixels;
+static volatile uint32_t flush_rects;
+static volatile uint64_t flush_pixels;
+static volatile uint32_t flush_full_rects;
+
+// Clip to the panel surface: invalidation areas may fall partly offscreen.
+static uint32_t dirty_area_px(const lv_area_t *area) {
+    if (!area) return 0;
+    int32_t x1 = area->x1 < 0 ? 0 : area->x1;
+    int32_t y1 = area->y1 < 0 ? 0 : area->y1;
+    int32_t x2 = area->x2 >= WIDTH ? WIDTH - 1 : area->x2;
+    int32_t y2 = area->y2 >= HEIGHT ? HEIGHT - 1 : area->y2;
+    if (x2 < x1 || y2 < y1) return 0;
+    return (uint32_t)(x2 - x1 + 1) * (uint32_t)(y2 - y1 + 1);
+}
+// Event is called on LVGL thread. Counts requests BEFORE LVGL merges overlaps.
+static void invalidated_area_cb(lv_event_t *event) {
+    const lv_area_t *area = (const lv_area_t *)lv_event_get_param(event);
+    uint32_t pixels = dirty_area_px(area);
+    if (!pixels) return;
+    invalidate_requests++;
+    invalidate_pixels += pixels;
+}
 
 void mira_display_set_render_task(void) {
     render_task = xTaskGetCurrentTaskHandle();
@@ -58,6 +82,11 @@ void mira_display_stats(mira_display_stats_t *out) {
     out->wait_total_us = wait_total_us;
     out->vsync_events = vsync_events;
     out->frame_complete_events = frame_complete_events;
+    out->invalidate_requests = invalidate_requests;
+    out->invalidate_pixels = invalidate_pixels;
+    out->flush_rects = flush_rects;
+    out->flush_pixels = flush_pixels;
+    out->flush_full_rects = flush_full_rects;
     out->touch_ready = touch_ready;
     out->touch_addr = touch_addr;
     out->touch_presses = touch_presses;
@@ -266,6 +295,14 @@ static bool IRAM_ATTR lcd_vsync_event(esp_lcd_panel_handle_t h,
     return false;
 }
 static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
+    // Count the drawn rectangles, NOT the full RGB DMA scan.
+    // Instrumentation only: original frame-swap path is unchanged.
+    uint32_t pixels = dirty_area_px(area);
+    if (pixels) {
+        flush_rects++;
+        flush_pixels += pixels;
+        if (pixels == (uint32_t)(WIDTH * HEIGHT)) flush_full_rects++;
+    }
     if (!lv_display_flush_is_last(disp)) {
         lv_display_flush_ready(disp);
         return;
@@ -352,6 +389,7 @@ esp_err_t mira_display_init(void) {
     lv_display_set_buffers(lvdisp, fb1, fb2, WIDTH * HEIGHT * 2, LV_DISPLAY_RENDER_MODE_DIRECT);
     lv_display_set_flush_cb(lvdisp, flush_cb);
     lv_display_set_flush_wait_cb(lvdisp, flush_wait_cb);
+    lv_display_add_event_cb(lvdisp, invalidated_area_cb, LV_EVENT_INVALIDATE_AREA, NULL);
     lv_indev_t *touch = lv_indev_create();
     assert(touch);
     lv_indev_set_type(touch, LV_INDEV_TYPE_POINTER);
