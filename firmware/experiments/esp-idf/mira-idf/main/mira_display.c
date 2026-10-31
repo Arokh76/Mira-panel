@@ -22,6 +22,14 @@
 static const char *TAG = "mira-idf-rgb";
 static i2c_master_bus_handle_t i2c_bus;
 static i2c_master_dev_handle_t gt911;
+static bool touch_ready;
+static uint8_t touch_addr;
+static volatile uint32_t touch_reads;
+static volatile uint32_t touch_presses;
+static volatile uint32_t touch_errors;
+static volatile uint32_t touch_last_x;
+static volatile uint32_t touch_last_y;
+static bool finger_down;
 static esp_lcd_panel_handle_t panel;
 static lv_display_t *lvdisp;
 static TaskHandle_t render_task;
@@ -42,38 +50,79 @@ void mira_display_stats(mira_display_stats_t *out) {
     out->wait_total_us = wait_total_us;
     out->vsync_events = vsync_events;
     out->frame_complete_events = frame_complete_events;
+    out->touch_ready = touch_ready;
+    out->touch_addr = touch_addr;
+    out->touch_presses = touch_presses;
+    out->touch_reads = touch_reads;
+    out->touch_errors = touch_errors;
+    out->touch_last_x = touch_last_x;
+    out->touch_last_y = touch_last_y;
 }
 lv_display_t *mira_display_lvgl(void) { return lvdisp; }
 
+// Waveshare ESP32-S3-Touch-LCD-4.3C: GT911 reset = IO expander EXIO1,
+// GT911 IRQ/address select = ESP32 GPIO4. Matches Waveshare official
+// 12_lvgl_transplant/components/touch/gt911.c bring-up sequence.
+// Keep EXIO2 backlight HIGH and preserve the existing working RGB pin map.
+#define TOUCH_I2C_ADDR_PRIMARY 0x5d
+#define TOUCH_I2C_ADDR_BACKUP  0x14
+
+bool mira_display_touch_ready(void) { return touch_ready; }
+
 static esp_err_t i2c_reg_read(uint16_t reg, uint8_t *data, size_t len) {
-    if (!gt911) return ESP_ERR_INVALID_STATE;
-    uint8_t addr[] = {reg >> 8, reg & 0xff};
-    return i2c_master_transmit_receive(gt911, addr, sizeof(addr), data, len, 30);
+    if (!touch_ready || !gt911) return ESP_ERR_INVALID_STATE;
+    const uint8_t addr[] = {(uint8_t)(reg >> 8), (uint8_t)(reg & 0xff)};
+    touch_reads++;
+    const esp_err_t err = i2c_master_transmit_receive(gt911, addr, sizeof(addr), data, len, 30);
+    if (err != ESP_OK) touch_errors++;
+    return err;
 }
 static void touch_clear(void) {
     const uint8_t cmd[] = {0x81, 0x4e, 0};
-    if (gt911) i2c_master_transmit(gt911, cmd, sizeof(cmd), 30);
+    if (gt911 && touch_ready &&
+        i2c_master_transmit(gt911, cmd, sizeof(cmd), 30) != ESP_OK) touch_errors++;
 }
 void mira_display_touch_read(lv_indev_t *indev, lv_indev_data_t *data) {
     (void)indev;
     data->state = LV_INDEV_STATE_RELEASED;
+    if (!touch_ready) return;
     uint8_t status = 0;
-    if (i2c_reg_read(0x814e, &status, 1) != ESP_OK || !(status & 0x80)) return;
-    uint8_t count = status & 0x0f;
+    if (i2c_reg_read(0x814e, &status, 1) != ESP_OK) {
+        finger_down = false;
+        return;
+    }
+    if (!(status & 0x80)) return; // No new coordinates yet; don't clear stale data.
+    const uint8_t count = status & 0x0f;
     if (count > 0 && count <= 5) {
-        uint8_t xy[8] = {0};
+        uint8_t xy[8] = {};
         if (i2c_reg_read(0x8150, xy, sizeof(xy)) == ESP_OK) {
-            int x = xy[1] | (xy[2] << 8);
-            int y = xy[3] | (xy[4] << 8);
+            // GT911 0x8150: track ID, X low, X high, Y low, Y high, ...
+            const int x = xy[1] | (xy[2] << 8);
+            const int y = xy[3] | (xy[4] << 8);
             if (x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT) {
                 data->point.x = x;
                 data->point.y = y;
                 data->state = LV_INDEV_STATE_PRESSED;
+                touch_last_x = (uint32_t)x;
+                touch_last_y = (uint32_t)y;
+                if (!finger_down) {
+                    touch_presses++;
+                    ESP_LOGI(TAG, "GT911 touch press x=%d y=%d", x, y);
+                }
+                finger_down = true;
             }
         }
+    } else {
+        finger_down = false;
     }
     touch_clear();
 }
+
+static esp_err_t ioexp_write(i2c_master_dev_handle_t ioexp, uint8_t reg, uint8_t value) {
+    uint8_t cmd[] = {reg, value};
+    return i2c_master_transmit(ioexp, cmd, sizeof(cmd), 80);
+}
+
 static void init_i2c(void) {
     i2c_master_bus_config_t bus_cfg = {
         .i2c_port = I2C_NUM_0,
@@ -91,18 +140,71 @@ static void init_i2c(void) {
     };
     i2c_master_dev_handle_t ioexp = NULL;
     ESP_ERROR_CHECK(i2c_master_bus_add_device(i2c_bus, &ext_cfg, &ioexp));
-    const uint8_t mode[] = {0x02, 0xff};
-    const uint8_t outputs[] = {0x03, 0xff};
-    ESP_ERROR_CHECK(i2c_master_transmit(ioexp, mode, sizeof(mode), 50));
-    ESP_ERROR_CHECK(i2c_master_transmit(ioexp, outputs, sizeof(outputs), 50));
+
+    // Configure IO0..IO7 outputs; our original 0xff keeps LCD/USB state
+    // identical to the last working no-bounce firmware.
+    ESP_ERROR_CHECK(ioexp_write(ioexp, 0x02, 0xff));
+    ESP_ERROR_CHECK(ioexp_write(ioexp, 0x03, 0xff));
+
+    // Correct missing GT911 hard reset / address selection:
+    // (1) EXIO1 low, (2) GPIO4 low => choose GT911 0x5d,
+    // (3) EXIO1 high, (4) release GPIO4 to input with pull-up.
+    gpio_config_t irq_cfg = {
+        .pin_bit_mask = 1ULL << GPIO_NUM_4,
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    ESP_ERROR_CHECK(gpio_config(&irq_cfg));
+    ESP_ERROR_CHECK(gpio_set_level(GPIO_NUM_4, 0));
+    ESP_ERROR_CHECK(ioexp_write(ioexp, 0x03, 0xfd)); // EXIO1 low; EXIO2 backlight stays on
+    vTaskDelay(pdMS_TO_TICKS(100));
+    ESP_ERROR_CHECK(gpio_set_level(GPIO_NUM_4, 0));
+    vTaskDelay(pdMS_TO_TICKS(100));
+    ESP_ERROR_CHECK(ioexp_write(ioexp, 0x03, 0xff)); // EXIO1 high => GT911 exits reset
+    vTaskDelay(pdMS_TO_TICKS(200));
+
+    // GPIO4 is GT911 interrupt input during operation. Poll coordinates using I2C.
+    irq_cfg.mode = GPIO_MODE_INPUT;
+    irq_cfg.pull_up_en = GPIO_PULLUP_ENABLE;
+    ESP_ERROR_CHECK(gpio_config(&irq_cfg));
+
+    // Don't install an unreachable GT911 handle: verify the address on the bus.
+    if (i2c_master_probe(i2c_bus, TOUCH_I2C_ADDR_PRIMARY, 60) == ESP_OK) {
+        touch_addr = TOUCH_I2C_ADDR_PRIMARY;
+    } else if (i2c_master_probe(i2c_bus, TOUCH_I2C_ADDR_BACKUP, 60) == ESP_OK) {
+        touch_addr = TOUCH_I2C_ADDR_BACKUP;
+    } else {
+        ESP_LOGE(TAG, "GT911 NOT DETECTED at 0x5d or 0x14 after EXIO1 hard reset");
+        return;
+    }
     i2c_device_config_t touch_cfg = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = i2c_master_probe(i2c_bus, 0x5d, 50) == ESP_OK ? 0x5d : 0x14,
+        .device_address = touch_addr,
         .scl_speed_hz = 400000,
     };
     esp_err_t err = i2c_master_bus_add_device(i2c_bus, &touch_cfg, &gt911);
-    if (err != ESP_OK) ESP_LOGW(TAG, "GT911 unavailable: %s", esp_err_to_name(err));
-    ESP_LOGI(TAG, "GT911 address 0x%02x", touch_cfg.device_address);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "GT911 add I2C device failed: %s", esp_err_to_name(err));
+        touch_addr = 0;
+        return;
+    }
+
+    // Verify product ID before saying the tactile is available.
+    uint8_t product[4] = {};
+    const uint8_t id_reg[] = {0x81, 0x40};
+    err = i2c_master_transmit_receive(gt911, id_reg, sizeof(id_reg), product, sizeof(product), 80);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "GT911 ID read failed on 0x%02x: %s",
+                 touch_addr, esp_err_to_name(err));
+        touch_errors++;
+        touch_addr = 0;
+        return;
+    }
+    touch_ready = true;
+    ESP_LOGI(TAG, "GT911 ACTIVE addr=0x%02x product='%c%c%c%c' GPIO4=IRQ EXIO1=RST",
+             touch_addr, product[0], product[1], product[2], product[3]);
 }
 
 static bool IRAM_ATTR lcd_frame_complete(esp_lcd_panel_handle_t h,
