@@ -181,6 +181,14 @@ static esp_err_t update_post(httpd_req_t *req) {
     return ESP_OK;
 }
 
+// Optional UI routes must NEVER abort Mira if an HTTP registration fails.
+static void register_optional_route(httpd_handle_t server, const httpd_uri_t *route) {
+    esp_err_t err = httpd_register_uri_handler(server, route);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Optional HTTP route %s unavailable: %s",
+                 route->uri, esp_err_to_name(err));
+    }
+}
 esp_err_t mira_recovery_init(void) {
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -234,12 +242,12 @@ esp_err_t mira_recovery_init(void) {
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &perf), TAG, "HTTP perf");
     // Prioritize OTA recovery: register it before experimental routes.
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &ota), TAG, "HTTP OTA");
-    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &scroll_classic), TAG, "HTTP scroll classic");
-    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &scroll_virtual), TAG, "HTTP scroll virtual");
-    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &shadow_on), TAG, "HTTP shadows on");
-    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &shadow_off), TAG, "HTTP shadows off");
-    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &shadow_light), TAG, "HTTP shadows light");
-    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &shadow_relief), TAG, "HTTP shadows relief");
+    register_optional_route(httpd, &scroll_classic);
+    register_optional_route(httpd, &scroll_virtual);
+    register_optional_route(httpd, &shadow_on);
+    register_optional_route(httpd, &shadow_off);
+    register_optional_route(httpd, &shadow_light);
+    register_optional_route(httpd, &shadow_relief);
     ESP_LOGW(TAG, "Recovery AP Mira-IDF-Test password MiraIDF2026 at http://192.168.4.1");
     return ESP_OK;
 }
