@@ -1,4 +1,4 @@
-name: EXP Mira ESP-IDF 5.5.6 + LVGL 9.6 Waveshare 4.3C
+name: EXP Mira ESP-IDF 5.5.6 + LVGL 9.6 Waveshare 7 standard
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ on:
       - '.github/workflows/build-mira-idf-waveshare.yml'
       - 'firmware/experiments/esp-idf/mira-idf/**'
   push:
-    branches: [experiment/mira-idf-lvgl96-waveshare-43c, experiment/mira-idf-rgb-no-bounce-43c, experiment/mira-idf-raster-profile-43c, experiment/mira-idf-gt911-touch-43c, experiment/mira-idf-cache-shadow-touch-diag-43c, experiment/mira-idf-light-relief-shadows-43c, experiment/mira-idf-scroll-lazy-safe-43c, experiment/mira-idf-scroll-http-slots-fix-43c, experiment/mira-idf-auto-http-toggle-43c, experiment/mira-idf-static-bench-dual-fps-43c, experiment/mira-idf-cache-card-snapshots-43c]
+    branches: [experiment/mira-idf-lvgl96-waveshare-43c, experiment/mira-idf-rgb-no-bounce-43c, experiment/mira-idf-raster-profile-43c, experiment/mira-idf-gt911-touch-43c, experiment/mira-idf-cache-shadow-touch-diag-43c, experiment/mira-idf-light-relief-shadows-43c, experiment/mira-idf-scroll-lazy-safe-43c, experiment/mira-idf-scroll-http-slots-fix-43c, experiment/mira-idf-auto-http-toggle-43c, experiment/mira-idf-static-bench-dual-fps-43c, experiment/mira-idf-cache-card-snapshots-43c, experiment/mira-idf-waveshare-7-cache-comparison]
     paths:
       - '.github/workflows/build-mira-idf-waveshare.yml'
       - 'firmware/experiments/esp-idf/mira-idf/**'
@@ -56,6 +56,10 @@ jobs:
           grep -Fq 'lv_snapshot_take' "$ROOT/main/mira_ui.c"
           grep -Fq 'mira_ui_cache_step' "$ROOT/main/app_main.c"
           grep -Fq 'max_uri_handlers = 16' "$ROOT/main/mira_recovery.c"
+          grep -Fq '.hsync_pulse_width = 4' "$ROOT/main/mira_display.c"
+          grep -Fq '.vsync_front_porch = 8' "$ROOT/main/mira_display.c"
+          grep -Fq 'Mira-IDF-7-Test' "$ROOT/main/mira_recovery.c"
+          grep -Fq 'LCD_PCLK_HZ (12 * 1000 * 1000)' "$ROOT/main/mira_display.c"
           # Static redraw must invalidate the whole screen on the LVGL thread.
           grep -Fq 'lv_obj_invalidate(lv_obj_get_screen(scroll_list));' "$ROOT/main/mira_ui.c"
           # Keep the known-good recovery routes, no new URI handler in the bench.
@@ -80,10 +84,41 @@ jobs:
           test "$bytes" -lt 3145728
           grep -Fq 'ota_1' firmware/experiments/esp-idf/mira-idf/partitions.csv
 
-      - name: Publish compiled *unvalidated* IDF test app only
+      - name: Assemble USB factory image (offset 0) and OTA app
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=firmware/experiments/esp-idf/mira-idf/build
+          mkdir -p "$ROOT/mira_7_release"
+          cp "$ROOT/mira_idf_scroll.bin" "$ROOT/mira_7_release/Mira_Waveshare7_CACHE_OTA_app.bin"
+          cp "$ROOT/bootloader/bootloader.bin" "$ROOT/mira_7_release/bootloader.bin"
+          cp "$ROOT/partition_table/partition-table.bin" "$ROOT/mira_7_release/partition-table.bin"
+          export ROOT
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p = Path(os.environ['ROOT'])
+          parts = [
+              (0x0, p/'bootloader/bootloader.bin'),
+              (0x8000, p/'partition_table/partition-table.bin'),
+              (0x10000, p/'mira_idf_scroll.bin'),
+          ]
+          out = bytearray()
+          for offset, file in parts:
+              data = file.read_bytes()
+              assert data and offset + len(data) <= (0x8000 if offset == 0 else 0x10000 if offset == 0x8000 else 0x310000), (offset, len(data))
+              if len(out) < offset:
+                  out.extend(b'\\xff' * (offset-len(out)))
+              out.extend(data)
+          dest = p/'mira_7_release/Mira_Waveshare7_CACHE_FACTORY_USB_0x0.bin'
+          dest.write_bytes(out)
+          print(f"Factory USB image: {len(out)} bytes, ESP32-S3 offset 0x0")
+          PY
+
+      - name: Publish compiled *unvalidated* 7-inch USB and OTA images
         uses: actions/upload-artifact@v4
         with:
-          name: MIRA_IDF_5.5.6_LVGL96_Waveshare43C_CARD_BITMAP_CACHE
-          path: firmware/experiments/esp-idf/mira-idf/build/mira_idf_scroll.bin
+          name: MIRA_IDF_5.5.6_LVGL96_Waveshare7_CACHE_AB_FACTORY_USB
+          path: firmware/experiments/esp-idf/mira-idf/build/mira_7_release/
           retention-days: 14
           if-no-files-found: error
