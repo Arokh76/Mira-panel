@@ -29,6 +29,10 @@ static void lvgl_loop(void *arg) {
     uint32_t period_render_frames = 0;
     uint32_t period_max_handler_us = 0;
     for (;;) {
+        // HTTP server never touches LVGL directly: consume the remote command
+        // on the render task before drawing anything.
+        const int pending_shadows = mira_recovery_take_shadow_request();
+        if (pending_shadows >= 0) mira_ui_set_shadows(pending_shadows != 0);
         int64_t t0 = esp_timer_get_time();
         uint32_t next_ms = lv_timer_handler();
         uint64_t now_us = esp_timer_get_time();
