@@ -88,7 +88,7 @@ void app_main(void) {
     ESP_LOGW(TAG, "BENCHMARK ONLY (NOT JEEDOM). Native IDF direct RGB PSRAM.");
     ESP_ERROR_CHECK(mira_recovery_init());
     ESP_ERROR_CHECK(mira_display_init());
-    mira_ui_bench_create(mira_display_lvgl());
+    mira_ui_bench_create(mira_display_lvgl(), mira_display_touch_ready());
     BaseType_t ok = xTaskCreatePinnedToCore(lvgl_loop, "mira_lvgl", 8192, NULL, 5, NULL, 1);
     ESP_ERROR_CHECK(ok == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
 }
