@@ -42,7 +42,7 @@ void mira_ui_update_fps(uint32_t fps_tenths) {
                          (unsigned long)(fps_tenths % 10));
     }
 }
-void mira_ui_bench_create(lv_display_t *disp) {
+void mira_ui_bench_create(lv_display_t *disp, bool touch_ready) {
     lv_obj_t *screen = lv_display_get_screen_active(disp);
     lv_obj_set_style_bg_color(screen, lv_color_hex(0x071421), 0);
     lv_obj_set_style_pad_all(screen, 0, 0);
@@ -53,6 +53,12 @@ void mira_ui_bench_create(lv_display_t *disp) {
     lv_obj_set_style_text_font(fps_label, &lv_font_montserrat_20, 0);
     lv_obj_set_pos(fps_label, 22, 16);
     lv_label_set_text(fps_label, "ESP-IDF | FPS: --");
+
+    lv_obj_t *touch_label = lv_label_create(screen);
+    lv_obj_set_pos(touch_label, 277, 19);
+    lv_obj_set_style_text_color(touch_label,
+         lv_color_hex(touch_ready ? 0x86eead : 0xff7777), 0);
+    lv_label_set_text(touch_label, touch_ready ? "GT911: OK" : "GT911: ERREUR");
 
     lv_obj_t *shadow_btn = lv_button_create(screen);
     lv_obj_set_pos(shadow_btn, 460, 5);
