@@ -77,7 +77,7 @@ static esp_err_t shadow_cache_get(httpd_req_t *req) {
 static esp_err_t perf_get(httpd_req_t *req) {
     mira_display_stats_t s;
     mira_display_stats(&s);
-    char text[512];
+    char text[768];
     snprintf(text, sizeof(text),
       "{\"fps_tenths\":%" PRIu32 ",\"frames\":%" PRIu32
       ",\"vsync_missed\":%" PRIu32 ",\"vsync_wait_us\":%" PRIu32
@@ -88,14 +88,21 @@ static esp_err_t perf_get(httpd_req_t *req) {
       ",\"touch_ready\":%" PRIu32 ",\"touch_addr\":%" PRIu32
       ",\"touch_presses\":%" PRIu32 ",\"touch_reads\":%" PRIu32
       ",\"touch_errors\":%" PRIu32 ",\"touch_last_x\":%" PRIu32
-      ",\"touch_last_y\":%" PRIu32 ",\"shadow_mode\":%" PRIu32 "}",
+      ",\"touch_last_y\":%" PRIu32 ",\"shadow_mode\":%" PRIu32
+      ",\"touch_last_status\":%" PRIu32 ",\"touch_irq_level\":%" PRIu32
+      ",\"touch_ready_events\":%" PRIu32 ",\"touch_invalid_coords\":%" PRIu32
+      ",\"touch_raw_x\":%" PRIu32 ",\"touch_raw_y\":%" PRIu32
+      ",\"touch_config_x\":%" PRIu32 ",\"touch_config_y\":%" PRIu32 "}",
       current_fps_tenths, s.frames, s.vsync_missed, s.last_refresh_us,
       (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS),
       s.vsync_events, s.frame_complete_events,
       current_draw_avg_us, current_wait_avg_us, current_handler_max_us,
       (uint32_t)(s.touch_ready ? 1 : 0), (uint32_t)s.touch_addr,
       s.touch_presses, s.touch_reads, s.touch_errors,
-      s.touch_last_x, s.touch_last_y, current_shadow_mode);
+      s.touch_last_x, s.touch_last_y, current_shadow_mode,
+      (uint32_t)s.touch_last_status, (uint32_t)s.touch_irq_level,
+      s.touch_ready_events, s.touch_invalid_coords,
+      s.touch_raw_x, s.touch_raw_y, s.touch_config_x, s.touch_config_y);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, text);
 }
