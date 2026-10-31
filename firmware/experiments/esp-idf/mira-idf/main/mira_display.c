@@ -28,6 +28,7 @@ static TaskHandle_t render_task;
 static volatile uint32_t frames;
 static volatile uint32_t vsync_missed;
 static volatile uint32_t last_refresh_us;
+static volatile uint32_t wait_total_us;
 static volatile uint32_t vsync_events;
 static volatile uint32_t frame_complete_events;
 
@@ -38,6 +39,7 @@ void mira_display_stats(mira_display_stats_t *out) {
     out->frames = frames;
     out->vsync_missed = vsync_missed;
     out->last_refresh_us = last_refresh_us;
+    out->wait_total_us = wait_total_us;
     out->vsync_events = vsync_events;
     out->frame_complete_events = frame_complete_events;
 }
@@ -145,6 +147,7 @@ static void flush_wait_cb(lv_display_t *disp) {
         // The WiFi recovery HTTP service remains on another FreeRTOS task.
     }
     last_refresh_us = (uint32_t)(esp_timer_get_time() - t0);
+    wait_total_us += last_refresh_us;
     frames++;
     lv_display_flush_ready(disp);
 }
