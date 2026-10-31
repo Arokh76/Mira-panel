@@ -106,7 +106,7 @@ static void lvgl_loop(void *arg) {
     }
 }
 void app_main(void) {
-    ESP_LOGI(TAG, "ESP-IDF Waveshare 4.3C 800x480 RGB565; native driver; LVGL %d.%d.%d",
+    ESP_LOGI(TAG, "ESP-IDF Waveshare 7-inch STD 800x480 RGB565; native driver; LVGL %d.%d.%d",
             LVGL_VERSION_MAJOR, LVGL_VERSION_MINOR, LVGL_VERSION_PATCH);
     ESP_LOGW(TAG, "BENCHMARK ONLY (NOT JEEDOM). Native IDF direct RGB PSRAM.");
     ESP_ERROR_CHECK(mira_recovery_init());
