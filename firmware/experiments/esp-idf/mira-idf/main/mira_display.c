@@ -29,6 +29,14 @@ static volatile uint32_t touch_presses;
 static volatile uint32_t touch_errors;
 static volatile uint32_t touch_last_x;
 static volatile uint32_t touch_last_y;
+static volatile uint32_t touch_ready_events;
+static volatile uint32_t touch_invalid_coords;
+static volatile uint32_t touch_raw_x;
+static volatile uint32_t touch_raw_y;
+static volatile uint32_t touch_config_x;
+static volatile uint32_t touch_config_y;
+static volatile uint8_t touch_last_status;
+static volatile uint8_t touch_irq_level;
 static bool finger_down;
 static esp_lcd_panel_handle_t panel;
 static lv_display_t *lvdisp;
@@ -57,6 +65,14 @@ void mira_display_stats(mira_display_stats_t *out) {
     out->touch_errors = touch_errors;
     out->touch_last_x = touch_last_x;
     out->touch_last_y = touch_last_y;
+    out->touch_ready_events = touch_ready_events;
+    out->touch_invalid_coords = touch_invalid_coords;
+    out->touch_raw_x = touch_raw_x;
+    out->touch_raw_y = touch_raw_y;
+    out->touch_config_x = touch_config_x;
+    out->touch_config_y = touch_config_y;
+    out->touch_last_status = touch_last_status;
+    out->touch_irq_level = touch_irq_level;
 }
 lv_display_t *mira_display_lvgl(void) { return lvdisp; }
 
@@ -86,19 +102,33 @@ void mira_display_touch_read(lv_indev_t *indev, lv_indev_data_t *data) {
     (void)indev;
     data->state = LV_INDEV_STATE_RELEASED;
     if (!touch_ready) return;
+    touch_irq_level = (uint8_t)gpio_get_level(GPIO_NUM_4);
     uint8_t status = 0;
     if (i2c_reg_read(0x814e, &status, 1) != ESP_OK) {
         finger_down = false;
         return;
     }
-    if (!(status & 0x80)) return; // No new coordinates yet; don't clear stale data.
+    touch_last_status = status;
+    if (!(status & 0x80)) return; // Not ready yet; keep the raw status observable.
+    touch_ready_events++;
     const uint8_t count = status & 0x0f;
     if (count > 0 && count <= 5) {
         uint8_t xy[8] = {};
         if (i2c_reg_read(0x8150, xy, sizeof(xy)) == ESP_OK) {
             // GT911 0x8150: track ID, X low, X high, Y low, Y high, ...
-            const int x = xy[1] | (xy[2] << 8);
-            const int y = xy[3] | (xy[4] << 8);
+            const int raw_x = xy[1] | (xy[2] << 8);
+            const int raw_y = xy[3] | (xy[4] << 8);
+            touch_raw_x = raw_x;
+            touch_raw_y = raw_y;
+            int x = raw_x;
+            int y = raw_y;
+            // Some GT911 panel configurations report portrait (480x800)
+            // coordinates despite our landscape RGB 800x480 display.
+            // Recover a swapped orientation while reporting RAW values.
+            if ((x >= WIDTH || y >= HEIGHT) && raw_x < HEIGHT && raw_y < WIDTH) {
+                x = raw_y;
+                y = raw_x;
+            }
             if (x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT) {
                 data->point.x = x;
                 data->point.y = y;
@@ -110,6 +140,10 @@ void mira_display_touch_read(lv_indev_t *indev, lv_indev_data_t *data) {
                     ESP_LOGI(TAG, "GT911 touch press x=%d y=%d", x, y);
                 }
                 finger_down = true;
+            } else {
+                touch_invalid_coords++;
+                if (touch_invalid_coords < 5 || touch_invalid_coords % 50 == 0)
+                    ESP_LOGW(TAG, "GT911 invalid raw touch x=%d y=%d status=0x%02x", raw_x, raw_y, status);
             }
         }
     } else {
@@ -203,6 +237,16 @@ static void init_i2c(void) {
         return;
     }
     touch_ready = true;
+    // GT911 config 0x8048..0x804B stores X and Y resolution as LE16.
+    uint8_t cfg_reg[] = {0x80, 0x48};
+    uint8_t xy_res[4] = {};
+    if (i2c_master_transmit_receive(gt911, cfg_reg, sizeof(cfg_reg),
+                                    xy_res, sizeof(xy_res), 80) == ESP_OK) {
+        touch_config_x = xy_res[0] | (xy_res[1] << 8);
+        touch_config_y = xy_res[2] | (xy_res[3] << 8);
+    }
+    ESP_LOGI(TAG, "GT911 config resolution %lu x %lu", (unsigned long)touch_config_x,
+             (unsigned long)touch_config_y);
     ESP_LOGI(TAG, "GT911 ACTIVE addr=0x%02x product='%c%c%c%c' GPIO4=IRQ EXIO1=RST",
              touch_addr, product[0], product[1], product[2], product[3]);
 }
