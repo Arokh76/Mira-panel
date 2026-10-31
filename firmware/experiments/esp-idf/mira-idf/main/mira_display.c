@@ -152,9 +152,11 @@ void mira_display_touch_read(lv_indev_t *indev, lv_indev_data_t *data) {
     touch_clear();
 }
 
-static esp_err_t ioexp_write(i2c_master_dev_handle_t ioexp, uint8_t reg, uint8_t value) {
-    uint8_t cmd[] = {reg, value};
-    return i2c_master_transmit(ioexp, cmd, sizeof(cmd), 80);
+// Waveshare 7 STANDARD CH422G protocol (unlike 4.3C's former register/value driver):
+// each CH422G command has its own 7-bit I2C address, and receives ONE data byte.
+// 0x24: working mode (bit 0 enables outputs); 0x38: IO0..7 output values.
+static esp_err_t ioexp_write(i2c_master_dev_handle_t ioexp, uint8_t value) {
+    return i2c_master_transmit(ioexp, &value, sizeof(value), 80);
 }
 
 static void init_i2c(void) {
@@ -172,13 +174,31 @@ static void init_i2c(void) {
         .device_address = 0x24,
         .scl_speed_hz = 400000,
     };
-    i2c_master_dev_handle_t ioexp = NULL;
-    ESP_ERROR_CHECK(i2c_master_bus_add_device(i2c_bus, &ext_cfg, &ioexp));
+    i2c_master_dev_handle_t ioexp_mode = NULL;
+    i2c_master_dev_handle_t ioexp_out = NULL;
+    esp_err_t err = i2c_master_bus_add_device(i2c_bus, &ext_cfg, &ioexp_mode);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "CH422G mode device creation: %s", esp_err_to_name(err));
+        return; // HTTP recovery stays available; no boot-loop.
+    }
+    ext_cfg.device_address = 0x38;
+    err = i2c_master_bus_add_device(i2c_bus, &ext_cfg, &ioexp_out);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "CH422G output device creation: %s", esp_err_to_name(err));
+        return;
+    }
 
-    // Configure IO0..IO7 outputs; our original 0xff keeps LCD/USB state
-    // identical to the last working no-bounce firmware.
-    ESP_ERROR_CHECK(ioexp_write(ioexp, 0x02, 0xff));
-    ESP_ERROR_CHECK(ioexp_write(ioexp, 0x03, 0xff));
+    // Set outputs to their safe ON state: EXIO1 touch reset released,
+    // EXIO2 DISP high, EXIO3 LCD reset released, EXIO4 SD CS high.
+    // Mode command 0x24 takes 0x01 (enable output); output command 0x38 takes 0xFF.
+    err = ioexp_write(ioexp_mode, 0x01);
+    if (err == ESP_OK) err = ioexp_write(ioexp_out, 0xff);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "CH422G 7-inch initialize failed: %s (no panic; Wi-Fi stays up)",
+                 esp_err_to_name(err));
+        return;
+    }
+    ESP_LOGI(TAG, "CH422G 7-inch ready: MODE@0x24=0x01 OUT@0x38=0xFF");
 
     // Correct missing GT911 hard reset / address selection:
     // (1) EXIO1 low, (2) GPIO4 low => choose GT911 0x5d,
@@ -192,11 +212,19 @@ static void init_i2c(void) {
     };
     ESP_ERROR_CHECK(gpio_config(&irq_cfg));
     ESP_ERROR_CHECK(gpio_set_level(GPIO_NUM_4, 0));
-    ESP_ERROR_CHECK(ioexp_write(ioexp, 0x03, 0xfd)); // EXIO1 low; EXIO2 backlight stays on
+    err = ioexp_write(ioexp_out, 0xfd); // EXIO1 low; EXIO2 backlight stays on
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "CH422G touch reset LOW failed: %s", esp_err_to_name(err));
+        return;
+    }
     vTaskDelay(pdMS_TO_TICKS(100));
     ESP_ERROR_CHECK(gpio_set_level(GPIO_NUM_4, 0));
     vTaskDelay(pdMS_TO_TICKS(100));
-    ESP_ERROR_CHECK(ioexp_write(ioexp, 0x03, 0xff)); // EXIO1 high => GT911 exits reset
+    err = ioexp_write(ioexp_out, 0xff); // EXIO1 high => GT911 exits reset
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "CH422G touch reset HIGH failed: %s", esp_err_to_name(err));
+        return;
+    }
     vTaskDelay(pdMS_TO_TICKS(200));
 
     // GPIO4 is GT911 interrupt input during operation. Poll coordinates using I2C.
@@ -218,7 +246,7 @@ static void init_i2c(void) {
         .device_address = touch_addr,
         .scl_speed_hz = 400000,
     };
-    esp_err_t err = i2c_master_bus_add_device(i2c_bus, &touch_cfg, &gt911);
+    err = i2c_master_bus_add_device(i2c_bus, &touch_cfg, &gt911);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "GT911 add I2C device failed: %s", esp_err_to_name(err));
         touch_addr = 0;
