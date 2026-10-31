@@ -15,6 +15,10 @@
 
 void mira_recovery_set_fps(uint32_t lvgl_fps_tenths, uint32_t rgb_fps_tenths);
 void mira_recovery_set_profile(uint32_t draw_us, uint32_t wait_us, uint32_t handler_max_us);
+void mira_recovery_set_dirty_profile(uint32_t sample_ms, uint32_t invalidation_calls,
+                                    uint32_t invalidated_px_per_frame,
+                                    uint32_t flushed_rects, uint32_t flushed_px_per_frame,
+                                    uint32_t full_rects, uint32_t flush_cover_pct_x10);
 static const char *TAG = "mira-idf";
 static void lvgl_loop(void *arg) {
     (void)arg;
@@ -66,6 +70,21 @@ static void lvgl_loop(void *arg) {
                 ? (uint32_t)(period_draw_us / period_render_frames) : 0;
             uint32_t avg_wait_us = period_render_frames
                 ? (uint32_t)(period_wait_us / period_render_frames) : 0;
+            const uint32_t painted_frames = curr.frames - prev.frames;
+            const uint32_t dirty_reqs = curr.invalidate_requests - prev.invalidate_requests;
+            const uint32_t flush_areas = curr.flush_rects - prev.flush_rects;
+            const uint32_t full_areas = curr.flush_full_rects - prev.flush_full_rects;
+            const uint64_t invalidated_px = curr.invalidate_pixels - prev.invalidate_pixels;
+            const uint64_t flushed_px = curr.flush_pixels - prev.flush_pixels;
+            // The areas can overlap, so coverage is a summed-area ratio,
+            // not a guaranteed unique percentage of the screen.
+            const uint32_t invalid_px_frame = painted_frames
+                ? (uint32_t)(invalidated_px / painted_frames) : 0;
+            const uint32_t flushed_px_frame = painted_frames
+                ? (uint32_t)(flushed_px / painted_frames) : 0;
+            const uint32_t flush_cover_x10 = painted_frames
+                ? (uint32_t)((flushed_px * 1000ULL) /
+                            ((uint64_t)painted_frames * 800ULL * 480ULL)) : 0;
             // Keep /perf at 1-second granularity, but invalidate the top FPS
             // label only every 3 seconds to diagnose/reduce top-strip shimmer.
             if (now_us - last_display_us >= 3000000ULL) {
@@ -75,6 +94,9 @@ static void lvgl_loop(void *arg) {
             mira_recovery_set_fps(fps_x10, rgb_fps_x10);
             mira_recovery_set_bench_state(mira_ui_bench_static() ? 1 : 0);
             mira_recovery_set_profile(avg_draw_us, avg_wait_us, period_max_handler_us);
+            mira_recovery_set_dirty_profile(dt_us / 1000U, dirty_reqs,
+                invalid_px_frame, flush_areas, flushed_px_frame,
+                full_areas, flush_cover_x10);
             mira_recovery_set_shadow_mode(mira_ui_shadow_mode());
             mira_recovery_set_auto_state(mira_ui_auto_scroll() ? 1 : 0);
             mira_recovery_set_scroll_state((uint32_t)mira_ui_scroll_mode(),
@@ -88,6 +110,10 @@ static void lvgl_loop(void *arg) {
                  period_max_handler_us, curr.vsync_missed,
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+            ESP_LOGI(TAG, "dirty requests=%" PRIu32 " areas=%" PRIu32
+                 " flush_pixels/frame=%" PRIu32 " coverage=%" PRIu32 ".%" PRIu32 "%%",
+                 dirty_reqs, flush_areas, flushed_px_frame,
+                 flush_cover_x10/10, flush_cover_x10%10);
             period_draw_us = 0;
             period_wait_us = 0;
             period_render_frames = 0;
