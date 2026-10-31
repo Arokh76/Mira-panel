@@ -181,7 +181,7 @@ static esp_err_t scroll_virtual_get(httpd_req_t *req) {
 static esp_err_t perf_get(httpd_req_t *req) {
     mira_display_stats_t s;
     mira_display_stats(&s);
-    char text[1120];
+    char text[1536];
     snprintf(text, sizeof(text),
       "{\"fps_tenths\":%" PRIu32 ",\"rgb_fps_tenths\":%" PRIu32 ",\"frames\":%" PRIu32
       ",\"vsync_missed\":%" PRIu32 ",\"vsync_wait_us\":%" PRIu32
@@ -198,7 +198,11 @@ static esp_err_t perf_get(httpd_req_t *req) {
       ",\"touch_raw_x\":%" PRIu32 ",\"touch_raw_y\":%" PRIu32
       ",\"touch_config_x\":%" PRIu32 ",\"touch_config_y\":%" PRIu32
       ",\"auto_scroll\":%" PRIu32 ",\"bench_static\":%" PRIu32 ",\"scroll_mode\":%" PRIu32 ",\"scroll_switches\":%" PRIu32
-      ",\"scroll_rebuild_us\":%" PRIu32 "}",
+      ",\"scroll_rebuild_us\":%" PRIu32
+      ",\"dirty_sample_ms\":%" PRIu32 ",\"inv_req\":%" PRIu32
+      ",\"inv_px_per_frame\":%" PRIu32 ",\"flush_rects\":%" PRIu32
+      ",\"flush_px_per_frame\":%" PRIu32 ",\"flush_full_rects\":%" PRIu32
+      ",\"flush_coverage_pct_x10\":%" PRIu32 "}",
       current_fps_tenths, current_rgb_fps_tenths, s.frames, s.vsync_missed, s.last_refresh_us,
       (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS),
       s.vsync_events, s.frame_complete_events,
@@ -209,7 +213,9 @@ static esp_err_t perf_get(httpd_req_t *req) {
       (uint32_t)s.touch_last_status, (uint32_t)s.touch_irq_level,
       s.touch_ready_events, s.touch_invalid_coords,
       s.touch_raw_x, s.touch_raw_y, s.touch_config_x, s.touch_config_y,
-      current_auto_scroll, current_bench_static, current_scroll_mode, current_scroll_switches, current_scroll_rebuild_us);
+      current_auto_scroll, current_bench_static, current_scroll_mode, current_scroll_switches, current_scroll_rebuild_us,
+      dirty_sample_ms, dirty_invalidation_calls, dirty_invalidated_px_frame,
+      dirty_flush_rects, dirty_flushed_px_frame, dirty_full_rects, dirty_flush_cover_x10);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, text);
 }
