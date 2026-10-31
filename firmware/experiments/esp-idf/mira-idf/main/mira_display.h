@@ -10,6 +10,13 @@ typedef struct {
     uint32_t last_refresh_us;
     uint32_t vsync_events;
     uint32_t frame_complete_events;
+    // LVGL requested invalidation areas may overlap (unmerged requests).
+    uint32_t invalidate_requests;
+    uint64_t invalidate_pixels;
+    // Actual areas passed by LVGL to the RGB flush callback.
+    uint32_t flush_rects;
+    uint64_t flush_pixels;
+    uint32_t flush_full_rects;
     uint32_t wait_total_us;
     uint32_t touch_presses;
     uint32_t touch_reads;
