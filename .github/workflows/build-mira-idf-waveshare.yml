@@ -8,7 +8,7 @@ on:
       - '.github/workflows/build-mira-idf-waveshare.yml'
       - 'firmware/experiments/esp-idf/mira-idf/**'
   push:
-    branches: [experiment/mira-idf-lvgl96-waveshare-43c, experiment/mira-idf-rgb-no-bounce-43c, experiment/mira-idf-raster-profile-43c, experiment/mira-idf-gt911-touch-43c, experiment/mira-idf-cache-shadow-touch-diag-43c, experiment/mira-idf-light-relief-shadows-43c, experiment/mira-idf-scroll-lazy-safe-43c]
+    branches: [experiment/mira-idf-lvgl96-waveshare-43c, experiment/mira-idf-rgb-no-bounce-43c, experiment/mira-idf-raster-profile-43c, experiment/mira-idf-gt911-touch-43c, experiment/mira-idf-cache-shadow-touch-diag-43c, experiment/mira-idf-light-relief-shadows-43c, experiment/mira-idf-scroll-lazy-safe-43c, experiment/mira-idf-scroll-http-slots-fix-43c]
     paths:
       - '.github/workflows/build-mira-idf-waveshare.yml'
       - 'firmware/experiments/esp-idf/mira-idf/**'
@@ -43,6 +43,10 @@ jobs:
           grep -Fq '0x310000, 0x300000' "$ROOT/partitions.csv"
           test -e "$ROOT/main/mira_display.c"
           test -e "$ROOT/main/mira_recovery.c"
+          # Prevent recurrence of the 2026-10-31 boot loop:
+          # 9 HTTP handlers on ESP-IDF whose default capacity is only 8.
+          grep -Fq 'conf.max_uri_handlers = 16;' "$ROOT/main/mira_recovery.c"
+          grep -Fq 'register_optional_route(httpd, &scroll_virtual);' "$ROOT/main/mira_recovery.c"
 
       - name: Build with native ESP-IDF 5.5.6 (no Arduino)
         uses: espressif/esp-idf-ci-action@v1
@@ -66,7 +70,7 @@ jobs:
       - name: Publish compiled *unvalidated* IDF test app only
         uses: actions/upload-artifact@v4
         with:
-          name: MIRA_IDF_5.5.6_LVGL96_Waveshare43C_SCROLL_LAZY_SAFE_TEST
+          name: MIRA_IDF_5.5.6_LVGL96_Waveshare43C_HTTP_9ROUTES_FIXED
           path: firmware/experiments/esp-idf/mira-idf/build/mira_idf_scroll.bin
           retention-days: 14
           if-no-files-found: error
