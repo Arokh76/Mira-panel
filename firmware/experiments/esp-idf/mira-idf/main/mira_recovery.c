@@ -22,6 +22,16 @@ static const char *TAG = "mira-idf-ota";
 static volatile int pending_shadow_request = -1;
 static volatile int pending_scroll_request = -1;
 static volatile int pending_auto_request = -1;
+static volatile int pending_bench_request = -1;
+static volatile uint32_t current_bench_static = 0;
+int mira_recovery_take_bench_request(void) {
+    int request = pending_bench_request;
+    pending_bench_request = -1;
+    return request;
+}
+void mira_recovery_set_bench_state(int enabled) {
+    current_bench_static = enabled ? 1 : 0;
+}
 static volatile uint32_t current_auto_scroll = 1;
 int mira_recovery_take_auto_request(void) {
     int request = pending_auto_request;
@@ -50,7 +60,11 @@ int mira_recovery_take_shadow_request(void) {
     return request;
 }
 static volatile uint32_t current_fps_tenths = 0;
-void mira_recovery_set_fps(uint32_t fps) { current_fps_tenths = fps; }
+static volatile uint32_t current_rgb_fps_tenths = 0;
+void mira_recovery_set_fps(uint32_t lvgl_fps, uint32_t rgb_fps) {
+    current_fps_tenths = lvgl_fps;
+    current_rgb_fps_tenths = rgb_fps;
+}
 static volatile uint32_t current_draw_avg_us, current_wait_avg_us, current_handler_max_us;
 void mira_recovery_set_profile(uint32_t draw_us, uint32_t wait_us, uint32_t handler_us) {
     current_draw_avg_us = draw_us;
@@ -68,6 +82,10 @@ static const char recovery_page[] =
 "<p><b>Defilement automatique :</b> "
 "<a href='/?auto=off'>AUTO OFF (STOP)</a> | "
 "<a href='/?auto=on'>AUTO ON (REPRENDRE)</a></p>"
+"<p><b>Mesure sans defilement :</b> "
+"<a href='/?bench=static'>BENCH STATIC (RAFRAICHIR TOUT)</a> | "
+"<a href='/?bench=off'>BENCH OFF (ARRET COMPLET)</a></p>"
+"<p>/perf : fps_tenths=LVGL, rgb_fps_tenths=balayage RGB, bench_static=0/1.</p>"
 "<p><b>Defilement - au demarrage seul le mode CLASSIQUE est initialise :</b> "
 "<a href='/scroll/classic'>35 CARTES</a> | "
 "<a href='/scroll/virtual'>8 CARTES (TEST)</a></p>"
@@ -86,12 +104,26 @@ static const char recovery_page[] =
 "</script></html>";
 
 static esp_err_t index_get(httpd_req_t *req) {
-    // Reuse the already-registered root URI: no extra handlers or boot-loop risk.
-    char query[40], requested[8];
-    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
-        httpd_query_key_value(query, "auto", requested, sizeof(requested)) == ESP_OK) {
-        if (strcmp(requested, "off") == 0) pending_auto_request = 0;
-        else if (strcmp(requested, "on") == 0) pending_auto_request = 1;
+    // Reuse the already-registered root URI: NO new HTTP handler slots.
+    char query[48], requested[12];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+        if (httpd_query_key_value(query, "auto", requested, sizeof(requested)) == ESP_OK) {
+            if (strcmp(requested, "off") == 0) {
+                pending_bench_request = -1;
+                pending_auto_request = 0;
+            } else if (strcmp(requested, "on") == 0) {
+                pending_bench_request = -1;
+                pending_auto_request = 1;
+            }
+        } else if (httpd_query_key_value(query, "bench", requested, sizeof(requested)) == ESP_OK) {
+            if (strcmp(requested, "static") == 0) {
+                pending_auto_request = -1;
+                pending_bench_request = 1;
+            } else if (strcmp(requested, "off") == 0) {
+                pending_auto_request = -1;
+                pending_bench_request = 0;
+            }
+        }
     }
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     return httpd_resp_send(req, recovery_page, HTTPD_RESP_USE_STRLEN);
@@ -130,9 +162,9 @@ static esp_err_t scroll_virtual_get(httpd_req_t *req) {
 static esp_err_t perf_get(httpd_req_t *req) {
     mira_display_stats_t s;
     mira_display_stats(&s);
-    char text[960];
+    char text[1120];
     snprintf(text, sizeof(text),
-      "{\"fps_tenths\":%" PRIu32 ",\"frames\":%" PRIu32
+      "{\"fps_tenths\":%" PRIu32 ",\"rgb_fps_tenths\":%" PRIu32 ",\"frames\":%" PRIu32
       ",\"vsync_missed\":%" PRIu32 ",\"vsync_wait_us\":%" PRIu32
       ",\"uptime_ms\":%" PRIu32 ",\"vsync_events\":%" PRIu32
       ",\"frame_complete_events\":%" PRIu32
@@ -146,9 +178,9 @@ static esp_err_t perf_get(httpd_req_t *req) {
       ",\"touch_ready_events\":%" PRIu32 ",\"touch_invalid_coords\":%" PRIu32
       ",\"touch_raw_x\":%" PRIu32 ",\"touch_raw_y\":%" PRIu32
       ",\"touch_config_x\":%" PRIu32 ",\"touch_config_y\":%" PRIu32
-      ",\"auto_scroll\":%" PRIu32 ",\"scroll_mode\":%" PRIu32 ",\"scroll_switches\":%" PRIu32
+      ",\"auto_scroll\":%" PRIu32 ",\"bench_static\":%" PRIu32 ",\"scroll_mode\":%" PRIu32 ",\"scroll_switches\":%" PRIu32
       ",\"scroll_rebuild_us\":%" PRIu32 "}",
-      current_fps_tenths, s.frames, s.vsync_missed, s.last_refresh_us,
+      current_fps_tenths, current_rgb_fps_tenths, s.frames, s.vsync_missed, s.last_refresh_us,
       (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS),
       s.vsync_events, s.frame_complete_events,
       current_draw_avg_us, current_wait_avg_us, current_handler_max_us,
@@ -158,7 +190,7 @@ static esp_err_t perf_get(httpd_req_t *req) {
       (uint32_t)s.touch_last_status, (uint32_t)s.touch_irq_level,
       s.touch_ready_events, s.touch_invalid_coords,
       s.touch_raw_x, s.touch_raw_y, s.touch_config_x, s.touch_config_y,
-      current_auto_scroll, current_scroll_mode, current_scroll_switches, current_scroll_rebuild_us);
+      current_auto_scroll, current_bench_static, current_scroll_mode, current_scroll_switches, current_scroll_rebuild_us);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, text);
 }
