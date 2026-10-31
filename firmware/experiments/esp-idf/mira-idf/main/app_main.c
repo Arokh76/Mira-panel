@@ -13,7 +13,7 @@
 #include "mira_ui.h"
 #include "mira_recovery.h"
 
-void mira_recovery_set_fps(uint32_t fps);
+void mira_recovery_set_fps(uint32_t lvgl_fps_tenths, uint32_t rgb_fps_tenths);
 void mira_recovery_set_profile(uint32_t draw_us, uint32_t wait_us, uint32_t handler_max_us);
 static const char *TAG = "mira-idf";
 static void lvgl_loop(void *arg) {
@@ -33,6 +33,8 @@ static void lvgl_loop(void *arg) {
         // on the render task before drawing anything.
         const int requested_auto = mira_recovery_take_auto_request();
         if (requested_auto >= 0) mira_ui_set_auto_scroll(requested_auto != 0);
+        const int requested_bench = mira_recovery_take_bench_request();
+        if (requested_bench >= 0) mira_ui_set_bench_static(requested_bench != 0);
         const int pending_shadows = mira_recovery_take_shadow_request();
         if (pending_shadows >= 0) mira_ui_set_shadow_mode(pending_shadows);
         int requested_scroll = mira_recovery_take_scroll_request();
@@ -58,6 +60,8 @@ static void lvgl_loop(void *arg) {
             mira_display_stats(&curr);
             uint32_t dt_us = (uint32_t)(now_us - last_us);
             uint32_t fps_x10 = (uint32_t)(((uint64_t)(curr.frames - prev.frames) * 10000000ULL) / dt_us);
+            // RGB VSYNC is independent of LVGL redraws: it keeps ticking at rest.
+            uint32_t rgb_fps_x10 = (uint32_t)(((uint64_t)(curr.vsync_events - prev.vsync_events) * 10000000ULL) / dt_us);
             uint32_t avg_draw_us = period_render_frames
                 ? (uint32_t)(period_draw_us / period_render_frames) : 0;
             uint32_t avg_wait_us = period_render_frames
@@ -65,20 +69,22 @@ static void lvgl_loop(void *arg) {
             // Keep /perf at 1-second granularity, but invalidate the top FPS
             // label only every 3 seconds to diagnose/reduce top-strip shimmer.
             if (now_us - last_display_us >= 3000000ULL) {
-                mira_ui_update_fps(fps_x10);
+                mira_ui_update_fps(fps_x10, rgb_fps_x10);
                 last_display_us = now_us;
             }
-            mira_recovery_set_fps(fps_x10);
+            mira_recovery_set_fps(fps_x10, rgb_fps_x10);
+            mira_recovery_set_bench_state(mira_ui_bench_static() ? 1 : 0);
             mira_recovery_set_profile(avg_draw_us, avg_wait_us, period_max_handler_us);
             mira_recovery_set_shadow_mode(mira_ui_shadow_mode());
             mira_recovery_set_auto_state(mira_ui_auto_scroll() ? 1 : 0);
             mira_recovery_set_scroll_state((uint32_t)mira_ui_scroll_mode(),
                 mira_ui_scroll_switches(), mira_ui_scroll_rebuild_us());
-            ESP_LOGI(TAG, "FPS=%" PRIu32 ".%" PRIu32
+            ESP_LOGI(TAG, "LVGL=%" PRIu32 ".%" PRIu32 " RGB=%" PRIu32 ".%" PRIu32
                  " draw_avg=%" PRIu32 "us wait_avg=%" PRIu32
                  "us handler_max=%" PRIu32 "us VSYNC-missed=%" PRIu32
                  " heap=%u PSRAM=%u",
-                 fps_x10/10, fps_x10%10, avg_draw_us, avg_wait_us,
+                 fps_x10/10, fps_x10%10, rgb_fps_x10/10, rgb_fps_x10%10,
+                 avg_draw_us, avg_wait_us,
                  period_max_handler_us, curr.vsync_missed,
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
