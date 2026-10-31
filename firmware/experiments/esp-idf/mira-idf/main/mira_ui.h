@@ -1,7 +1,10 @@
 #pragma once
 #include "lvgl.h"
 void mira_ui_bench_create(lv_display_t *disp, bool touch_ready);
-void mira_ui_update_fps(uint32_t fps_tenths);
+void mira_ui_update_fps(uint32_t lvgl_fps_tenths, uint32_t rgb_fps_tenths);
+// Full-screen forced redraw at a fixed screen position, for A/B render cost.
+void mira_ui_set_bench_static(bool enabled);
+bool mira_ui_bench_static(void);
 // Automatic scroll control: also accessible through HTTP without touchscreen.
 void mira_ui_set_auto_scroll(bool enabled);
 bool mira_ui_auto_scroll(void);
