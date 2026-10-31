@@ -18,15 +18,19 @@ static void toggle_scroll(lv_event_t *event) {
     automatic = !automatic;
     lv_label_set_text(auto_label, automatic ? "AUTO: ON" : "AUTO: OFF");
 }
-static void toggle_shadows(lv_event_t *event) {
-    (void)event;
-    show_shadows = !show_shadows;
-    lv_label_set_text(shadow_label, show_shadows ? "OMBRE: ON" : "OMBRE: OFF");
-    // A/B graphics cost: preserve rounded corners and every other widget style.
-    // Expect one temporary invalidation spike after changing styles.
+void mira_ui_set_shadows(bool enabled) {
+    if (show_shadows == enabled) return;
+    show_shadows = enabled;
+    if (shadow_label)
+        lv_label_set_text(shadow_label, show_shadows ? "OMBRE: ON" : "OMBRE: OFF");
+    // Called only from LVGL render task, even for HTTP commands.
     for (int i = 0; i < 35; i++) {
         if (cards[i]) lv_obj_set_style_shadow_width(cards[i], show_shadows ? 4 : 0, 0);
     }
+}
+static void toggle_shadows(lv_event_t *event) {
+    (void)event;
+    mira_ui_set_shadows(!show_shadows);
 }
 static void auto_tick(lv_timer_t *timer) {
     (void)timer;
