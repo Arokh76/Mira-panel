@@ -33,10 +33,16 @@ static const char *TAG = "mira-compare";
 static void apply_style(lv_obj_t *card, int mode);
 static lv_obj_t *make_card(int row, lv_obj_t **title_out);
 
+void mira_ui_set_auto_scroll(bool enabled) {
+    if (automatic == enabled) return;
+    automatic = enabled;
+    if (auto_label) lv_label_set_text(auto_label, automatic ? "AUTO: ON" : "AUTO: OFF");
+    ESP_LOGI(TAG, "Automatic scrolling %s", automatic ? "ON" : "OFF");
+}
+bool mira_ui_auto_scroll(void) { return automatic; }
 static void toggle_scroll(lv_event_t *event) {
     (void)event;
-    automatic = !automatic;
-    lv_label_set_text(auto_label, automatic ? "AUTO: ON" : "AUTO: OFF");
+    mira_ui_set_auto_scroll(!automatic);
 }
 
 static void apply_style(lv_obj_t *card, int mode) {
