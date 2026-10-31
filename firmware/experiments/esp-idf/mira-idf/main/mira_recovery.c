@@ -211,8 +211,14 @@ esp_err_t mira_recovery_init(void) {
     ESP_RETURN_ON_ERROR(esp_wifi_start(), TAG, "wifi start");
 
     httpd_config_t conf = HTTPD_DEFAULT_CONFIG();
+    // 9 routes are registered below; ESP-IDF defaults to 8 URI handlers.
+    // Exceeding that limit used to abort app_main() before LCD init, causing
+    // a black screen + Wi-Fi reboot loop (ESP_ERR_HTTPD_HANDLERS_FULL).
+    conf.max_uri_handlers = 16;
     conf.stack_size = 6144;
     conf.recv_wait_timeout = 15;
+    ESP_LOGI(TAG, "HTTP URI capacity=%u, registered routes=9",
+             (unsigned)conf.max_uri_handlers);
     httpd_handle_t httpd = NULL;
     ESP_RETURN_ON_ERROR(httpd_start(&httpd, &conf), TAG, "HTTP start");
     httpd_uri_t root = {.uri="/", .method=HTTP_GET, .handler=index_get};
@@ -226,13 +232,14 @@ esp_err_t mira_recovery_init(void) {
     httpd_uri_t ota = {.uri="/update", .method=HTTP_POST, .handler=update_post};
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &root), TAG, "HTTP root");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &perf), TAG, "HTTP perf");
+    // Prioritize OTA recovery: register it before experimental routes.
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &ota), TAG, "HTTP OTA");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &scroll_classic), TAG, "HTTP scroll classic");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &scroll_virtual), TAG, "HTTP scroll virtual");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &shadow_on), TAG, "HTTP shadows on");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &shadow_off), TAG, "HTTP shadows off");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &shadow_light), TAG, "HTTP shadows light");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &shadow_relief), TAG, "HTTP shadows relief");
-    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &ota), TAG, "HTTP OTA");
     ESP_LOGW(TAG, "Recovery AP Mira-IDF-Test password MiraIDF2026 at http://192.168.4.1");
     return ESP_OK;
 }
