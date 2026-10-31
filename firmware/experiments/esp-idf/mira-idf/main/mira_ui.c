@@ -9,11 +9,24 @@ static lv_obj_t *fps_label;
 static lv_obj_t *auto_label;
 static bool automatic = true;
 static bool scrolling_down = true;
+static bool show_shadows = true;
+static lv_obj_t *shadow_label;
+static lv_obj_t *cards[35];
 
 static void toggle_scroll(lv_event_t *event) {
     (void)event;
     automatic = !automatic;
     lv_label_set_text(auto_label, automatic ? "AUTO: ON" : "AUTO: OFF");
+}
+static void toggle_shadows(lv_event_t *event) {
+    (void)event;
+    show_shadows = !show_shadows;
+    lv_label_set_text(shadow_label, show_shadows ? "OMBRE: ON" : "OMBRE: OFF");
+    // A/B graphics cost: preserve rounded corners and every other widget style.
+    // Expect one temporary invalidation spike after changing styles.
+    for (int i = 0; i < 35; i++) {
+        if (cards[i]) lv_obj_set_style_shadow_width(cards[i], show_shadows ? 4 : 0, 0);
+    }
 }
 static void auto_tick(lv_timer_t *timer) {
     (void)timer;
@@ -41,6 +54,14 @@ void mira_ui_bench_create(lv_display_t *disp) {
     lv_obj_set_pos(fps_label, 22, 16);
     lv_label_set_text(fps_label, "ESP-IDF | FPS: --");
 
+    lv_obj_t *shadow_btn = lv_button_create(screen);
+    lv_obj_set_pos(shadow_btn, 460, 5);
+    lv_obj_set_size(shadow_btn, 163, 45);
+    lv_obj_add_event_cb(shadow_btn, toggle_shadows, LV_EVENT_CLICKED, NULL);
+    shadow_label = lv_label_create(shadow_btn);
+    lv_label_set_text(shadow_label, "OMBRE: ON");
+    lv_obj_center(shadow_label);
+
     lv_obj_t *btn = lv_button_create(screen);
     lv_obj_set_pos(btn, 630, 5);
     lv_obj_set_size(btn, 155, 45);
@@ -60,6 +81,7 @@ void mira_ui_bench_create(lv_display_t *disp) {
 
     for (int i = 0; i < 35; i++) {
         lv_obj_t *card = lv_obj_create(scroll_list);
+        cards[i] = card;
         lv_obj_set_width(card, lv_pct(100));
         lv_obj_set_height(card, 86);
         lv_obj_set_style_bg_color(card, lv_color_hex(0x173149), 0);
