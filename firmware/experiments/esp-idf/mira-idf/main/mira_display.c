@@ -17,7 +17,7 @@
 
 #define WIDTH 800
 #define HEIGHT 480
-#define LCD_PCLK_HZ (16 * 1000 * 1000) // official Waveshare 7 standard 800x480 timing
+#define LCD_PCLK_HZ (13 * 1000 * 1000) // 7-inch RGB stable clock: 16MHz may cause continuous horizontal drift with PSRAM EDMA
 
 static const char *TAG = "mira-idf-rgb";
 static i2c_master_bus_handle_t i2c_bus;
