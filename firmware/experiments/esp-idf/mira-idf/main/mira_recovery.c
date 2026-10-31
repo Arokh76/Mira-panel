@@ -21,6 +21,16 @@
 static const char *TAG = "mira-idf-ota";
 static volatile int pending_shadow_request = -1;
 static volatile int pending_scroll_request = -1;
+static volatile int pending_auto_request = -1;
+static volatile uint32_t current_auto_scroll = 1;
+int mira_recovery_take_auto_request(void) {
+    int request = pending_auto_request;
+    pending_auto_request = -1;
+    return request;
+}
+void mira_recovery_set_auto_state(int enabled) {
+    current_auto_scroll = enabled ? 1 : 0;
+}
 static volatile uint32_t current_scroll_mode, current_scroll_switches, current_scroll_rebuild_us;
 int mira_recovery_take_scroll_request(void) {
     int request = pending_scroll_request;
@@ -55,6 +65,9 @@ static const char recovery_page[] =
 "<p>Pour revenir a Mira 0.7.37, selectionner son fichier <b>OTA .bin</b> (pas le factory.bin).</p>"
 "<input type='file' id='fw' accept='.bin'><button onclick='flash()'>Reflasher</button>"
 "<pre id='msg'>Pret</pre><p><a href='/perf'>FPS et statut JSON</a></p>"
+"<p><b>Defilement automatique :</b> "
+"<a href='/?auto=off'>AUTO OFF (STOP)</a> | "
+"<a href='/?auto=on'>AUTO ON (REPRENDRE)</a></p>"
 "<p><b>Defilement - au demarrage seul le mode CLASSIQUE est initialise :</b> "
 "<a href='/scroll/classic'>35 CARTES</a> | "
 "<a href='/scroll/virtual'>8 CARTES (TEST)</a></p>"
@@ -73,6 +86,13 @@ static const char recovery_page[] =
 "</script></html>";
 
 static esp_err_t index_get(httpd_req_t *req) {
+    // Reuse the already-registered root URI: no extra handlers or boot-loop risk.
+    char query[40], requested[8];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+        httpd_query_key_value(query, "auto", requested, sizeof(requested)) == ESP_OK) {
+        if (strcmp(requested, "off") == 0) pending_auto_request = 0;
+        else if (strcmp(requested, "on") == 0) pending_auto_request = 1;
+    }
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     return httpd_resp_send(req, recovery_page, HTTPD_RESP_USE_STRLEN);
 }
@@ -110,7 +130,7 @@ static esp_err_t scroll_virtual_get(httpd_req_t *req) {
 static esp_err_t perf_get(httpd_req_t *req) {
     mira_display_stats_t s;
     mira_display_stats(&s);
-    char text[900];
+    char text[960];
     snprintf(text, sizeof(text),
       "{\"fps_tenths\":%" PRIu32 ",\"frames\":%" PRIu32
       ",\"vsync_missed\":%" PRIu32 ",\"vsync_wait_us\":%" PRIu32
@@ -126,7 +146,7 @@ static esp_err_t perf_get(httpd_req_t *req) {
       ",\"touch_ready_events\":%" PRIu32 ",\"touch_invalid_coords\":%" PRIu32
       ",\"touch_raw_x\":%" PRIu32 ",\"touch_raw_y\":%" PRIu32
       ",\"touch_config_x\":%" PRIu32 ",\"touch_config_y\":%" PRIu32
-      ",\"scroll_mode\":%" PRIu32 ",\"scroll_switches\":%" PRIu32
+      ",\"auto_scroll\":%" PRIu32 ",\"scroll_mode\":%" PRIu32 ",\"scroll_switches\":%" PRIu32
       ",\"scroll_rebuild_us\":%" PRIu32 "}",
       current_fps_tenths, s.frames, s.vsync_missed, s.last_refresh_us,
       (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS),
@@ -138,7 +158,7 @@ static esp_err_t perf_get(httpd_req_t *req) {
       (uint32_t)s.touch_last_status, (uint32_t)s.touch_irq_level,
       s.touch_ready_events, s.touch_invalid_coords,
       s.touch_raw_x, s.touch_raw_y, s.touch_config_x, s.touch_config_y,
-      current_scroll_mode, current_scroll_switches, current_scroll_rebuild_us);
+      current_auto_scroll, current_scroll_mode, current_scroll_switches, current_scroll_rebuild_us);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, text);
 }
