@@ -20,6 +20,8 @@
 
 static const char *TAG = "mira-idf-ota";
 static volatile int pending_shadow_request = -1;
+static volatile uint32_t current_shadow_mode = 1;
+void mira_recovery_set_shadow_mode(int mode) { current_shadow_mode = (uint32_t)mode; }
 int mira_recovery_take_shadow_request(void) {
     int request = pending_shadow_request;
     pending_shadow_request = -1;
@@ -41,7 +43,8 @@ static const char recovery_page[] =
 "<p>Pour revenir a Mira 0.7.37, selectionner son fichier <b>OTA .bin</b> (pas le factory.bin).</p>"
 "<input type='file' id='fw' accept='.bin'><button onclick='flash()'>Reflasher</button>"
 "<pre id='msg'>Pret</pre><p><a href='/perf'>FPS et statut JSON</a></p>"
-"<p>Ombres sans tactile : <a href='/shadow/on'>OMBRE ON</a> | "
+"<p>Rendu pour comparer les FPS : <a href='/shadow/on'>OMBRE LVGL</a> | "
+"<a href='/shadow/cache'>OMBRE CACHE</a> | "
 "<a href='/shadow/off'>OMBRE OFF</a></p>"
 "<script>"
 "async function flash(){let f=document.getElementById('fw').files[0];"
@@ -66,6 +69,11 @@ static esp_err_t shadow_off_get(httpd_req_t *req) {
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     return httpd_resp_sendstr(req, "<h2>OMBRES OFF</h2><p>Commande envoyee au moteur LVGL.</p><a href='/'>Retour</a>");
 }
+static esp_err_t shadow_cache_get(httpd_req_t *req) {
+    pending_shadow_request = 2;
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    return httpd_resp_sendstr(req, "<h2>OMBRE CACHE</h2><p>Commande envoyee a LVGL.</p><a href='/'>Retour</a>");
+}
 static esp_err_t perf_get(httpd_req_t *req) {
     mira_display_stats_t s;
     mira_display_stats(&s);
@@ -80,14 +88,14 @@ static esp_err_t perf_get(httpd_req_t *req) {
       ",\"touch_ready\":%" PRIu32 ",\"touch_addr\":%" PRIu32
       ",\"touch_presses\":%" PRIu32 ",\"touch_reads\":%" PRIu32
       ",\"touch_errors\":%" PRIu32 ",\"touch_last_x\":%" PRIu32
-      ",\"touch_last_y\":%" PRIu32 "}",
+      ",\"touch_last_y\":%" PRIu32 ",\"shadow_mode\":%" PRIu32 "}",
       current_fps_tenths, s.frames, s.vsync_missed, s.last_refresh_us,
       (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS),
       s.vsync_events, s.frame_complete_events,
       current_draw_avg_us, current_wait_avg_us, current_handler_max_us,
       (uint32_t)(s.touch_ready ? 1 : 0), (uint32_t)s.touch_addr,
       s.touch_presses, s.touch_reads, s.touch_errors,
-      s.touch_last_x, s.touch_last_y);
+      s.touch_last_x, s.touch_last_y, current_shadow_mode);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, text);
 }
@@ -168,11 +176,13 @@ esp_err_t mira_recovery_init(void) {
     httpd_uri_t perf = {.uri="/perf", .method=HTTP_GET, .handler=perf_get};
     httpd_uri_t shadow_on = {.uri="/shadow/on", .method=HTTP_GET, .handler=shadow_on_get};
     httpd_uri_t shadow_off = {.uri="/shadow/off", .method=HTTP_GET, .handler=shadow_off_get};
+    httpd_uri_t shadow_cache = {.uri="/shadow/cache", .method=HTTP_GET, .handler=shadow_cache_get};
     httpd_uri_t ota = {.uri="/update", .method=HTTP_POST, .handler=update_post};
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &root), TAG, "HTTP root");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &perf), TAG, "HTTP perf");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &shadow_on), TAG, "HTTP shadows on");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &shadow_off), TAG, "HTTP shadows off");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &shadow_cache), TAG, "HTTP shadows cache");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &ota), TAG, "HTTP OTA");
     ESP_LOGW(TAG, "Recovery AP Mira-IDF-Test password MiraIDF2026 at http://192.168.4.1");
     return ESP_OK;
