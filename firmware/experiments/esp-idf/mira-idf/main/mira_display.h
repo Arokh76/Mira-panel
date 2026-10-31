@@ -10,6 +10,7 @@ typedef struct {
     uint32_t last_refresh_us;
     uint32_t vsync_events;
     uint32_t frame_complete_events;
+    uint32_t wait_total_us;
 } mira_display_stats_t;
 
 esp_err_t mira_display_init(void);
