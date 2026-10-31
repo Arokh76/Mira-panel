@@ -31,6 +31,8 @@ static void lvgl_loop(void *arg) {
     for (;;) {
         // HTTP server never touches LVGL directly: consume the remote command
         // on the render task before drawing anything.
+        const int requested_auto = mira_recovery_take_auto_request();
+        if (requested_auto >= 0) mira_ui_set_auto_scroll(requested_auto != 0);
         const int pending_shadows = mira_recovery_take_shadow_request();
         if (pending_shadows >= 0) mira_ui_set_shadow_mode(pending_shadows);
         int requested_scroll = mira_recovery_take_scroll_request();
@@ -69,6 +71,7 @@ static void lvgl_loop(void *arg) {
             mira_recovery_set_fps(fps_x10);
             mira_recovery_set_profile(avg_draw_us, avg_wait_us, period_max_handler_us);
             mira_recovery_set_shadow_mode(mira_ui_shadow_mode());
+            mira_recovery_set_auto_state(mira_ui_auto_scroll() ? 1 : 0);
             mira_recovery_set_scroll_state((uint32_t)mira_ui_scroll_mode(),
                 mira_ui_scroll_switches(), mira_ui_scroll_rebuild_us());
             ESP_LOGI(TAG, "FPS=%" PRIu32 ".%" PRIu32
