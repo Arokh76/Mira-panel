@@ -35,6 +35,10 @@ static void lvgl_loop(void *arg) {
         if (requested_auto >= 0) mira_ui_set_auto_scroll(requested_auto != 0);
         const int requested_bench = mira_recovery_take_bench_request();
         if (requested_bench >= 0) mira_ui_set_bench_static(requested_bench != 0);
+        const int requested_cache = mira_recovery_take_cache_request();
+        if (requested_cache >= 0) mira_ui_set_card_cache(requested_cache != 0);
+        // One snapshot per iteration, keeping the existing boot/render path intact.
+        mira_ui_cache_step();
         const int pending_shadows = mira_recovery_take_shadow_request();
         if (pending_shadows >= 0) mira_ui_set_shadow_mode(pending_shadows);
         int requested_scroll = mira_recovery_take_scroll_request();
@@ -74,6 +78,7 @@ static void lvgl_loop(void *arg) {
             }
             mira_recovery_set_fps(fps_x10, rgb_fps_x10);
             mira_recovery_set_bench_state(mira_ui_bench_static() ? 1 : 0);
+            mira_recovery_set_cache_state(mira_ui_cache_state(), mira_ui_cache_count());
             mira_recovery_set_profile(avg_draw_us, avg_wait_us, period_max_handler_us);
             mira_recovery_set_shadow_mode(mira_ui_shadow_mode());
             mira_recovery_set_auto_state(mira_ui_auto_scroll() ? 1 : 0);
