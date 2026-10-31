@@ -52,6 +52,10 @@ jobs:
           grep -Fq 'mira_ui_set_bench_static' "$ROOT/main/app_main.c"
           grep -Fq 'current_rgb_fps_tenths' "$ROOT/main/mira_recovery.c"
           grep -Fq 'bench_static' "$ROOT/main/mira_recovery.c"
+          # Static redraw must invalidate the whole screen on the LVGL thread.
+          grep -Fq 'lv_obj_invalidate(lv_obj_get_screen(scroll_list));' "$ROOT/main/mira_ui.c"
+          # Keep the known-good recovery routes, no new URI handler in the bench.
+          grep -Fq 'httpd_register_uri_handler(httpd, &ota)' "$ROOT/main/mira_recovery.c"
 
       - name: Build with native ESP-IDF 5.5.6 (no Arduino)
         uses: espressif/esp-idf-ci-action@v1
