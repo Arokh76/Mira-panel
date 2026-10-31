@@ -8,6 +8,8 @@ typedef struct {
     uint32_t frames;
     uint32_t vsync_missed;
     uint32_t last_refresh_us;
+    uint32_t vsync_events;
+    uint32_t frame_complete_events;
 } mira_display_stats_t;
 
 esp_err_t mira_display_init(void);
