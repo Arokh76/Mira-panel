@@ -29,6 +29,10 @@ static uint32_t scroll_rebuild_us;
 static bool automatic = true;
 static bool bench_static = false;
 static bool scrolling_down = true;
+static bool cache_building = false, cache_active = false, cache_resume_auto = false;
+static int cache_count;
+static lv_draw_buf_t *cache_bitmaps[CARD_COUNT];
+static lv_obj_t *cache_images[CARD_COUNT];
 static int shadow_mode = -1;
 static const char *TAG = "mira-compare";
 static void apply_style(lv_obj_t *card, int mode);
@@ -39,6 +43,7 @@ static void update_auto_label(void) {
         bench_static ? "BENCH STATIC" : (automatic ? "AUTO: ON" : "AUTO: OFF"));
 }
 void mira_ui_set_auto_scroll(bool enabled) {
+    if (cache_building) mira_ui_set_card_cache(false);
     if (automatic == enabled && !bench_static) return;
     automatic = enabled;
     bench_static = false; // AUTO commands always exit forced-redraw testing.
@@ -57,6 +62,94 @@ bool mira_ui_bench_static(void) { return bench_static; }
 static void toggle_scroll(lv_event_t *event) {
     (void)event;
     mira_ui_set_auto_scroll(!automatic);
+}
+
+// Bitmap-cache prototype. Default OFF; normal 35-card LVGL UI always boots.
+// The cache does not change scroll geometry or RGB driver/frame buffers.
+// Building is incremental so HTTP OTA stays available on a different task.
+int mira_ui_cache_state(void) { return cache_building ? 1 : (cache_active ? 2 : 0); }
+int mira_ui_cache_count(void) { return cache_count; }
+
+void mira_ui_set_card_cache(bool enabled) {
+    if (!enabled) {
+        if (!cache_building && !cache_active) return;
+        for (int i = 0; i < CARD_COUNT; i++) {
+            if (cache_images[i]) {
+                lv_obj_delete(cache_images[i]);
+                cache_images[i] = NULL;
+                // Each normal card had exactly two labels before its bitmap.
+                lv_obj_t *label0 = lv_obj_get_child(cards[i], 0);
+                lv_obj_t *label1 = lv_obj_get_child(cards[i], 1);
+                if (label0) lv_obj_remove_flag(label0, LV_OBJ_FLAG_HIDDEN);
+                if (label1) lv_obj_remove_flag(label1, LV_OBJ_FLAG_HIDDEN);
+                apply_style(cards[i], shadow_mode);
+            }
+            if (cache_bitmaps[i]) {
+                lv_draw_buf_destroy(cache_bitmaps[i]);
+                cache_bitmaps[i] = NULL;
+            }
+        }
+        if (cache_building) automatic = cache_resume_auto;
+        cache_building = false;
+        cache_active = false;
+        cache_count = 0;
+        update_auto_label();
+        lv_obj_invalidate(scroll_list);
+        ESP_LOGI(TAG, "Bitmap card cache OFF; normal LVGL draw restored");
+        return;
+    }
+    if (cache_building || cache_active || scroll_mode != 0 || !scroll_list) return;
+    cache_resume_auto = automatic;
+    automatic = false;  // No movement during one-time raster capture.
+    cache_building = true;
+    cache_count = 0;
+    lv_obj_update_layout(scroll_list);
+    ESP_LOGI(TAG, "Card bitmap cache BUILDING (35 snapshots in PSRAM)");
+}
+
+void mira_ui_cache_step(void) {
+    if (!cache_building) return;
+    if (cache_count < CARD_COUNT) {
+        // 1 snapshot/iteration limits LVGL starvation and leaves OTA usable.
+        const size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+        if (free_psram < 1200 * 1024) {
+            ESP_LOGW(TAG, "Not enough PSRAM for snapshots: %u bytes", (unsigned)free_psram);
+            mira_ui_set_card_cache(false);
+            return;
+        }
+        lv_draw_buf_t *bitmap = lv_snapshot_take(cards[cache_count], LV_COLOR_FORMAT_RGB565);
+        if (!bitmap) {
+            ESP_LOGW(TAG, "Snapshot failed on card %d; restoring normal LVGL mode", cache_count);
+            mira_ui_set_card_cache(false);
+            return;
+        }
+        cache_bitmaps[cache_count++] = bitmap;
+        return;
+    }
+
+    // Install only once all 35 snapshots succeeded. Each image replaces both
+    // live text labels + decorated background while keeping the same geometry.
+    for (int i = 0; i < CARD_COUNT; i++) {
+        lv_obj_t *card = cards[i];
+        lv_obj_t *label0 = lv_obj_get_child(card, 0);
+        lv_obj_t *label1 = lv_obj_get_child(card, 1);
+        cache_images[i] = lv_image_create(card);
+        lv_image_set_src(cache_images[i], cache_bitmaps[i]);
+        lv_obj_set_pos(cache_images[i], 0, 0);
+        if (label0) lv_obj_add_flag(label0, LV_OBJ_FLAG_HIDDEN);
+        if (label1) lv_obj_add_flag(label1, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_bg_opa(card, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(card, 0, 0);
+        lv_obj_set_style_shadow_width(card, 0, 0);
+        lv_obj_set_style_outline_width(card, 0, 0);
+    }
+    cache_active = true;
+    cache_building = false;
+    automatic = cache_resume_auto;
+    update_auto_label();
+    lv_obj_invalidate(scroll_list);
+    ESP_LOGI(TAG, "Card bitmap cache ON: %d cards, free PSRAM=%u",
+             cache_count, (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 }
 
 static void apply_style(lv_obj_t *card, int mode) {
@@ -80,6 +173,7 @@ static void apply_style(lv_obj_t *card, int mode) {
 }
 void mira_ui_set_shadow_mode(int mode) {
     if (mode < CARD_NO_SHADOW || mode > CARD_RELIEF_OUTLINE || shadow_mode == mode) return;
+    if (cache_building || cache_active) mira_ui_set_card_cache(false);
     shadow_mode = mode;
     const char *names[] = { "OMBRE: OFF", "OMBRE: LVGL",
                             "OMBRE: LEGERE", "RELIEF: ON" };
@@ -142,6 +236,7 @@ static void virtual_refresh(void) {
 void mira_ui_set_scroll_mode(int mode) {
     if (mode != 0 && mode != 1) return;
     if (mode == scroll_mode || !scroll_list) return;
+    if (cache_building || cache_active) mira_ui_set_card_cache(false);
     // All LVGL modifications happen only on the rendering task.
     const int64_t t0 = esp_timer_get_time();
     int old_scroll = lv_obj_get_scroll_top(scroll_list);
