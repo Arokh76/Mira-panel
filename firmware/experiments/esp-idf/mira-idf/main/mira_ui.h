@@ -5,6 +5,13 @@ void mira_ui_update_fps(uint32_t lvgl_fps_tenths, uint32_t rgb_fps_tenths);
 // Full-screen forced redraw at a fixed screen position, for A/B render cost.
 void mira_ui_set_bench_static(bool enabled);
 bool mira_ui_bench_static(void);
+// Optional card bitmap snapshots, built one per render-task iteration.
+// 0=off, 1=building, 2=active. Failures restore normal rendering.
+void mira_ui_set_card_cache(bool enabled);
+void mira_ui_cache_step(void);
+int mira_ui_cache_state(void);
+int mira_ui_cache_count(void);
+
 // Automatic scroll control: also accessible through HTTP without touchscreen.
 void mira_ui_set_auto_scroll(bool enabled);
 bool mira_ui_auto_scroll(void);
