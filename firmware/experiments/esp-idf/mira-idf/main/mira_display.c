@@ -28,6 +28,8 @@ static TaskHandle_t render_task;
 static volatile uint32_t frames;
 static volatile uint32_t vsync_missed;
 static volatile uint32_t last_refresh_us;
+static volatile uint32_t vsync_events;
+static volatile uint32_t frame_complete_events;
 
 void mira_display_set_render_task(void) {
     render_task = xTaskGetCurrentTaskHandle();
@@ -36,6 +38,8 @@ void mira_display_stats(mira_display_stats_t *out) {
     out->frames = frames;
     out->vsync_missed = vsync_missed;
     out->last_refresh_us = last_refresh_us;
+    out->vsync_events = vsync_events;
+    out->frame_complete_events = frame_complete_events;
 }
 lv_display_t *mira_display_lvgl(void) { return lvdisp; }
 
@@ -102,9 +106,16 @@ static void init_i2c(void) {
 static bool IRAM_ATTR lcd_frame_complete(esp_lcd_panel_handle_t h,
                       const esp_lcd_rgb_panel_event_data_t *data, void *ctx) {
     (void)h; (void)data; (void)ctx;
+    frame_complete_events++;
     BaseType_t woken = pdFALSE;
     if (render_task) vTaskNotifyGiveFromISR(render_task, &woken);
     return woken == pdTRUE;
+}
+static bool IRAM_ATTR lcd_vsync_event(esp_lcd_panel_handle_t h,
+                      const esp_lcd_rgb_panel_event_data_t *data, void *ctx) {
+    (void)h; (void)data; (void)ctx;
+    vsync_events++;
+    return false;
 }
 static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
     if (!lv_display_flush_is_last(disp)) {
@@ -122,8 +133,16 @@ static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 }
 static void flush_wait_cb(lv_display_t *disp) {
     int64_t t0 = esp_timer_get_time();
-    if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(125)) == 0) {
+    // NEVER mark a framebuffer available while DMA can still reference it:
+    // the previous implementation acknowledged a timeout and could render into
+    // a framebuffer still being scanned, producing tearing / a moving image.
+    while (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(125)) == 0) {
         vsync_missed++;
+        if (vsync_missed <= 5 || vsync_missed % 30 == 0) {
+            ESP_LOGW(TAG, "RGB frame-complete callback timeout (%lu); retaining framebuffer",
+                     (unsigned long)vsync_missed);
+        }
+        // The WiFi recovery HTTP service remains on another FreeRTOS task.
     }
     last_refresh_us = (uint32_t)(esp_timer_get_time() - t0);
     frames++;
@@ -150,7 +169,9 @@ esp_err_t mira_display_init(void) {
         .data_width = 16,
         .bits_per_pixel = 16,
         .num_fbs = 2,
-        .bounce_buffer_size_px = WIDTH * 10,
+        // At PCLK 12 MHz + octal PSRAM, direct EDMA avoids racing the
+        // LVGL rasterizer against ISR-driven PSRAM->SRAM bounce copies.
+        .bounce_buffer_size_px = 0,
         .dma_burst_size = 64,
         .sram_trans_align = 4,
         .psram_trans_align = 64,
@@ -167,11 +188,12 @@ esp_err_t mira_display_init(void) {
     ESP_RETURN_ON_ERROR(esp_lcd_panel_init(panel), TAG, "RGB init");
     esp_lcd_rgb_panel_event_callbacks_t cb = {
         .on_frame_buf_complete = lcd_frame_complete,
+        .on_vsync = lcd_vsync_event,
     };
     ESP_RETURN_ON_ERROR(esp_lcd_rgb_panel_register_event_callbacks(panel, &cb, NULL), TAG, "VSYNC callback");
     void *fb1 = NULL, *fb2 = NULL;
     ESP_RETURN_ON_ERROR(esp_lcd_rgb_panel_get_frame_buffer(panel, 2, &fb1, &fb2), TAG, "RGB double buffers");
-    ESP_LOGI(TAG, "RGB565 %dx%d PCLK=%d, fb1=%p fb2=%p, PSRAM=%zu", WIDTH,HEIGHT,
+    ESP_LOGI(TAG, "RGB565 %dx%d PCLK=%d NO_BOUNCE, fb1=%p fb2=%p, PSRAM=%zu", WIDTH,HEIGHT,
          LCD_PCLK_HZ,fb1,fb2,heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
     lv_init();
     lvdisp = lv_display_create(WIDTH, HEIGHT);
