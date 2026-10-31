@@ -20,6 +20,18 @@
 
 static const char *TAG = "mira-idf-ota";
 static volatile int pending_shadow_request = -1;
+static volatile int pending_scroll_request = -1;
+static volatile uint32_t current_scroll_mode, current_scroll_switches, current_scroll_rebuild_us;
+int mira_recovery_take_scroll_request(void) {
+    int request = pending_scroll_request;
+    pending_scroll_request = -1;
+    return request;
+}
+void mira_recovery_set_scroll_state(uint32_t mode, uint32_t switches, uint32_t rebuild_us) {
+    current_scroll_mode = mode;
+    current_scroll_switches = switches;
+    current_scroll_rebuild_us = rebuild_us;
+}
 static volatile uint32_t current_shadow_mode = 1;
 void mira_recovery_set_shadow_mode(int mode) { current_shadow_mode = (uint32_t)mode; }
 int mira_recovery_take_shadow_request(void) {
@@ -43,6 +55,9 @@ static const char recovery_page[] =
 "<p>Pour revenir a Mira 0.7.37, selectionner son fichier <b>OTA .bin</b> (pas le factory.bin).</p>"
 "<input type='file' id='fw' accept='.bin'><button onclick='flash()'>Reflasher</button>"
 "<pre id='msg'>Pret</pre><p><a href='/perf'>FPS et statut JSON</a></p>"
+"<p><b>Defilement - au demarrage seul le mode CLASSIQUE est initialise :</b> "
+"<a href='/scroll/classic'>35 CARTES</a> | "
+"<a href='/scroll/virtual'>8 CARTES (TEST)</a></p>"
 "<p>Comparer les FPS a defilement egal : "
 "<a href='/shadow/off'>SANS OMBRE</a> | "
 "<a href='/shadow/on'>OMBRE 4PX</a> | "
@@ -81,10 +96,21 @@ static esp_err_t shadow_relief_get(httpd_req_t *req) {
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     return httpd_resp_sendstr(req, "<h2>RELIEF SANS FLOU</h2><p>Commande envoyee a LVGL.</p><a href='/'>Retour</a>");
 }
+static esp_err_t scroll_classic_get(httpd_req_t *req) {
+    pending_scroll_request = 0;
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    return httpd_resp_sendstr(req, "<h2>MODE CLASSIQUE 35 CARTES</h2><a href='/'>Retour</a>");
+}
+static esp_err_t scroll_virtual_get(httpd_req_t *req) {
+    pending_scroll_request = 1;
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    return httpd_resp_sendstr(req, "<h2>MODE VIRTUEL 8 CARTES - EXPERIMENTAL</h2>"
+                                "<p>En cas de reboot le mode classique est restaure.</p><a href='/'>Retour</a>");
+}
 static esp_err_t perf_get(httpd_req_t *req) {
     mira_display_stats_t s;
     mira_display_stats(&s);
-    char text[768];
+    char text[900];
     snprintf(text, sizeof(text),
       "{\"fps_tenths\":%" PRIu32 ",\"frames\":%" PRIu32
       ",\"vsync_missed\":%" PRIu32 ",\"vsync_wait_us\":%" PRIu32
@@ -99,7 +125,9 @@ static esp_err_t perf_get(httpd_req_t *req) {
       ",\"touch_last_status\":%" PRIu32 ",\"touch_irq_level\":%" PRIu32
       ",\"touch_ready_events\":%" PRIu32 ",\"touch_invalid_coords\":%" PRIu32
       ",\"touch_raw_x\":%" PRIu32 ",\"touch_raw_y\":%" PRIu32
-      ",\"touch_config_x\":%" PRIu32 ",\"touch_config_y\":%" PRIu32 "}",
+      ",\"touch_config_x\":%" PRIu32 ",\"touch_config_y\":%" PRIu32
+      ",\"scroll_mode\":%" PRIu32 ",\"scroll_switches\":%" PRIu32
+      ",\"scroll_rebuild_us\":%" PRIu32 "}",
       current_fps_tenths, s.frames, s.vsync_missed, s.last_refresh_us,
       (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS),
       s.vsync_events, s.frame_complete_events,
@@ -109,7 +137,8 @@ static esp_err_t perf_get(httpd_req_t *req) {
       s.touch_last_x, s.touch_last_y, current_shadow_mode,
       (uint32_t)s.touch_last_status, (uint32_t)s.touch_irq_level,
       s.touch_ready_events, s.touch_invalid_coords,
-      s.touch_raw_x, s.touch_raw_y, s.touch_config_x, s.touch_config_y);
+      s.touch_raw_x, s.touch_raw_y, s.touch_config_x, s.touch_config_y,
+      current_scroll_mode, current_scroll_switches, current_scroll_rebuild_us);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, text);
 }
@@ -188,6 +217,8 @@ esp_err_t mira_recovery_init(void) {
     ESP_RETURN_ON_ERROR(httpd_start(&httpd, &conf), TAG, "HTTP start");
     httpd_uri_t root = {.uri="/", .method=HTTP_GET, .handler=index_get};
     httpd_uri_t perf = {.uri="/perf", .method=HTTP_GET, .handler=perf_get};
+    httpd_uri_t scroll_classic = {.uri="/scroll/classic", .method=HTTP_GET, .handler=scroll_classic_get};
+    httpd_uri_t scroll_virtual = {.uri="/scroll/virtual", .method=HTTP_GET, .handler=scroll_virtual_get};
     httpd_uri_t shadow_on = {.uri="/shadow/on", .method=HTTP_GET, .handler=shadow_on_get};
     httpd_uri_t shadow_off = {.uri="/shadow/off", .method=HTTP_GET, .handler=shadow_off_get};
     httpd_uri_t shadow_light = {.uri="/shadow/light", .method=HTTP_GET, .handler=shadow_light_get};
@@ -195,6 +226,8 @@ esp_err_t mira_recovery_init(void) {
     httpd_uri_t ota = {.uri="/update", .method=HTTP_POST, .handler=update_post};
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &root), TAG, "HTTP root");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &perf), TAG, "HTTP perf");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &scroll_classic), TAG, "HTTP scroll classic");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &scroll_virtual), TAG, "HTTP scroll virtual");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &shadow_on), TAG, "HTTP shadows on");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &shadow_off), TAG, "HTTP shadows off");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &shadow_light), TAG, "HTTP shadows light");
