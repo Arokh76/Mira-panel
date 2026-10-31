@@ -21,6 +21,12 @@
 static const char *TAG = "mira-idf-ota";
 static volatile uint32_t current_fps_tenths = 0;
 void mira_recovery_set_fps(uint32_t fps) { current_fps_tenths = fps; }
+static volatile uint32_t current_draw_avg_us, current_wait_avg_us, current_handler_max_us;
+void mira_recovery_set_profile(uint32_t draw_us, uint32_t wait_us, uint32_t handler_us) {
+    current_draw_avg_us = draw_us;
+    current_wait_avg_us = wait_us;
+    current_handler_max_us = handler_us;
+}
 
 static const char recovery_page[] =
 "<!doctype html><html lang='fr'><meta name='viewport' content='width=device-width,initial-scale=1'>"
@@ -45,15 +51,18 @@ static esp_err_t index_get(httpd_req_t *req) {
 static esp_err_t perf_get(httpd_req_t *req) {
     mira_display_stats_t s;
     mira_display_stats(&s);
-    char text[224];
+    char text[360];
     snprintf(text, sizeof(text),
       "{\"fps_tenths\":%" PRIu32 ",\"frames\":%" PRIu32
       ",\"vsync_missed\":%" PRIu32 ",\"vsync_wait_us\":%" PRIu32
       ",\"uptime_ms\":%" PRIu32 ",\"vsync_events\":%" PRIu32
-      ",\"frame_complete_events\":%" PRIu32 "}",
+      ",\"frame_complete_events\":%" PRIu32
+      ",\"draw_avg_us\":%" PRIu32 ",\"wait_avg_us\":%" PRIu32
+      ",\"handler_max_us\":%" PRIu32 "}",
       current_fps_tenths, s.frames, s.vsync_missed, s.last_refresh_us,
       (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS),
-      s.vsync_events, s.frame_complete_events);
+      s.vsync_events, s.frame_complete_events,
+      current_draw_avg_us, current_wait_avg_us, current_handler_max_us);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, text);
 }
