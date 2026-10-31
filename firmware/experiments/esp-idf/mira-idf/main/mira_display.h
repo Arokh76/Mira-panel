@@ -16,6 +16,14 @@ typedef struct {
     uint32_t touch_errors;
     uint32_t touch_last_x;
     uint32_t touch_last_y;
+    uint32_t touch_ready_events;
+    uint32_t touch_invalid_coords;
+    uint32_t touch_raw_x;
+    uint32_t touch_raw_y;
+    uint32_t touch_config_x;
+    uint32_t touch_config_y;
+    uint8_t touch_last_status;
+    uint8_t touch_irq_level;
     uint8_t touch_addr;
     bool touch_ready;
 } mira_display_stats_t;
