@@ -1,4 +1,4 @@
-// Mira ESP-IDF Waveshare 4.3C board adapter -- not part of the production firmware.
+// Mira ESP-IDF Waveshare 7-inch STANDARD 800x480 -- independent experimental firmware.
 // Native ESP-IDF RGB frame swap + LVGL 9 direct mode, no Arduino/Waveshare LVGL port.
 #include <assert.h>
 #include <string.h>
@@ -17,7 +17,7 @@
 
 #define WIDTH 800
 #define HEIGHT 480
-#define LCD_PCLK_HZ (12 * 1000 * 1000)
+#define LCD_PCLK_HZ (12 * 1000 * 1000) // conservative matched 4.3C A/B baseline; Waveshare 7 spec = 16 MHz
 
 static const char *TAG = "mira-idf-rgb";
 static i2c_master_bus_handle_t i2c_bus;
@@ -76,7 +76,7 @@ void mira_display_stats(mira_display_stats_t *out) {
 }
 lv_display_t *mira_display_lvgl(void) { return lvdisp; }
 
-// Waveshare ESP32-S3-Touch-LCD-4.3C: GT911 reset = IO expander EXIO1,
+// Waveshare ESP32-S3-Touch-LCD-7: GT911 reset = IO expander EXIO1,
 // GT911 IRQ/address select = ESP32 GPIO4. Matches Waveshare official
 // 12_lvgl_transplant/components/touch/gt911.c bring-up sequence.
 // Keep EXIO2 backlight HIGH and preserve the existing working RGB pin map.
@@ -307,12 +307,12 @@ esp_err_t mira_display_init(void) {
             .pclk_hz = LCD_PCLK_HZ,
             .h_res = WIDTH,
             .v_res = HEIGHT,
-            .hsync_pulse_width = 8,
+            .hsync_pulse_width = 4,
             .hsync_back_porch = 8,
-            .hsync_front_porch = 4,
-            .vsync_pulse_width = 8,
+            .hsync_front_porch = 8,
+            .vsync_pulse_width = 4,
             .vsync_back_porch = 8,
-            .vsync_front_porch = 4,
+            .vsync_front_porch = 8,
             .flags.pclk_active_neg = 1,
         },
         .data_width = 16,
