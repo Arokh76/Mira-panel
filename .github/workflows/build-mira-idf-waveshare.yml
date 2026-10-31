@@ -1,0 +1,72 @@
+name: EXP Mira ESP-IDF 5.5.6 + LVGL 9.6 Waveshare 4.3C
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [firmware-beta]
+    paths:
+      - '.github/workflows/build-mira-idf-waveshare.yml'
+      - 'firmware/experiments/esp-idf/mira-idf/**'
+  push:
+    branches: [experiment/mira-idf-lvgl96-waveshare-43c, experiment/mira-idf-rgb-no-bounce-43c, experiment/mira-idf-raster-profile-43c, experiment/mira-idf-gt911-touch-43c, experiment/mira-idf-cache-shadow-touch-diag-43c]
+    paths:
+      - '.github/workflows/build-mira-idf-waveshare.yml'
+      - 'firmware/experiments/esp-idf/mira-idf/**'
+
+permissions:
+  contents: read
+
+jobs:
+  idf_waveshare:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Mira IDF experiment
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned LVGL v9.6.0 into IDF components
+        uses: actions/checkout@v4
+        with:
+          repository: lvgl/lvgl
+          ref: v9.6.0
+          path: firmware/experiments/esp-idf/mira-idf/components/lvgl
+          submodules: false
+
+      - name: Verify hardware profiles, LVGL and OTA partition compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=firmware/experiments/esp-idf/mira-idf
+          grep -Fq '#define LVGL_VERSION_MAJOR 9' "$ROOT/components/lvgl/include/lvgl/lv_version.h"
+          grep -Fq '#define LVGL_VERSION_MINOR 6' "$ROOT/components/lvgl/include/lvgl/lv_version.h"
+          cmp "$ROOT/partitions.csv" "$ROOT/partitions.csv"
+          grep -Fq '0x610000, 0x9E0000' "$ROOT/partitions.csv"
+          grep -Fq '0x310000, 0x300000' "$ROOT/partitions.csv"
+          test -e "$ROOT/main/mira_display.c"
+          test -e "$ROOT/main/mira_recovery.c"
+
+      - name: Build with native ESP-IDF 5.5.6 (no Arduino)
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.6
+          target: esp32s3
+          path: firmware/experiments/esp-idf/mira-idf
+          command: idf.py build
+
+      - name: Validate standalone OTA application size
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=firmware/experiments/esp-idf/mira-idf/build/mira_idf_scroll.bin
+          test -s "$BIN"
+          bytes=$(stat -c '%s' "$BIN")
+          echo "Mira-IDF application: $bytes bytes"
+          test "$bytes" -lt 3145728
+          grep -Fq 'ota_1' firmware/experiments/esp-idf/mira-idf/partitions.csv
+
+      - name: Publish compiled *unvalidated* IDF test app only
+        uses: actions/upload-artifact@v4
+        with:
+          name: MIRA_IDF_5.5.6_LVGL96_Waveshare43C_CACHE_SHADOW_12FPS_TEST
+          path: firmware/experiments/esp-idf/mira-idf/build/mira_idf_scroll.bin
+          retention-days: 14
+          if-no-files-found: error
