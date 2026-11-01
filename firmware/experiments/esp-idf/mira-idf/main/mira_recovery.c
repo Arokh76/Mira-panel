@@ -13,6 +13,8 @@
 #include "nvs_flash.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
+#include "esp_netif_sntp.h"
+#include <time.h>
 #include "esp_event.h"
 #include "esp_http_server.h"
 #include "esp_ota_ops.h"
@@ -25,6 +27,7 @@
 
 static const char *TAG = "mira-idf-ota";
 static volatile int pending_shadow_request = -1;
+static bool clock_sntp_started;
 static volatile int pending_scroll_request = -1;
 static volatile int pending_auto_request = -1;
 static volatile int pending_bench_request = -1;
@@ -274,6 +277,11 @@ static void wifi_status_event(void *arg,esp_event_base_t base,int32_t id,void *d
     (void)arg;(void)data;
     if(base==IP_EVENT&&id==IP_EVENT_STA_GOT_IP){
         station_connected=true;
+        if(!clock_sntp_started){
+            esp_err_t time_err=esp_netif_sntp_start();
+            if(time_err==ESP_OK)clock_sntp_started=true;
+            else ESP_LOGW(TAG,"SNTP start failed: %s",esp_err_to_name(time_err));
+        }
         ESP_LOGI(TAG,"Station Wi-Fi connected (AP recovery remains active)");
     }else if(base==WIFI_EVENT&&id==WIFI_EVENT_STA_DISCONNECTED){
         station_connected=false;
@@ -339,6 +347,13 @@ esp_err_t mira_recovery_init(void) {
     ESP_RETURN_ON_ERROR(esp_event_loop_create_default(), TAG, "event loop");
     esp_netif_create_default_wifi_ap();
     esp_netif_create_default_wifi_sta();
+    // France / Europe-Paris local time, including automatic summer-time changes.
+    // SNTP is initialized now but starts only when STA has an IP address.
+    setenv("TZ","CET-1CEST,M3.5.0/2,M10.5.0/3",1);
+    tzset();
+    esp_sntp_config_t sntp_cfg=ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+    sntp_cfg.start=false;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_netif_sntp_init(&sntp_cfg));
 
     wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
     ESP_RETURN_ON_ERROR(esp_wifi_init(&init), TAG, "wifi init");
