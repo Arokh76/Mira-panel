@@ -750,7 +750,7 @@ static esp_err_t import_post(httpd_req_t *req){
 /* HTTP-safe input, e.g. POST /mira/state {"name":"Salon","value":"22.5"}.
    Never invoke LVGL in the HTTP server task and never send a Jeedom action. */
 static esp_err_t state_post(httpd_req_t *req){
-    if(!state_queue){httpd_resp_send_err(req,HTTPD_503_SERVICE_UNAVAILABLE,"State queue unavailable");return ESP_FAIL;}
+    if(!state_queue){httpd_resp_set_status(req,"503 Service Unavailable");httpd_resp_sendstr(req,"State queue unavailable");return ESP_FAIL;}
     if(req->content_len<2||req->content_len>512){
         httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"JSON state payload must be 2..512 bytes");
         return ESP_FAIL;
