@@ -474,12 +474,12 @@ static esp_err_t param_get(httpd_req_t *req){
     }
     nvs_handle_t nv;
     if(nvs_open("mira_idf_jeed",NVS_READONLY,&nv)!=ESP_OK)
-        return httpd_resp_sendstr(req,"Null");
+        return httpd_resp_sendstr(req,!strcmp(name,"Jeedom")?"1":"Null");
     char value[256]={0};size_t len=sizeof(value);
     esp_err_t err=nvs_get_str(nv,name,value,&len);
     nvs_close(nv);
     httpd_resp_set_type(req,"text/plain");
-    return httpd_resp_sendstr(req,err==ESP_OK?value:"Null");
+    return httpd_resp_sendstr(req,err==ESP_OK?value:(!strcmp(name,"Jeedom")?"1":"Null"));
 }
 static esp_err_t param_set(httpd_req_t *req){
     if(!require_key(req))return ESP_FAIL;
