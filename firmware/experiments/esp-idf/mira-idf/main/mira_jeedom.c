@@ -400,6 +400,129 @@ static esp_err_t provision_key(httpd_req_t *req) {
     ESP_LOGI(TAG,"Cle API Jeedom provisionnee sans journaliser sa valeur");
     return httpd_resp_sendstr(req,"OK");
 }
+
+// The plugin saves its Jeedom parameters through legacy GET endpoints.
+// Keep those settings in a DIFFERENT namespace: never rewrite the old
+// /params.json, so a rollback to the stable firmware remains possible.
+// NVS storage here is not encrypted; this is experimental, not production-ready.
+static bool supported_jeedom_param(const char *name){
+    static const char *allowed[]={
+        "Jeedom","Jeedom_IP","Jeedom_Key","Jeedom_Key_mira",
+        "Jeedom_Refresh","Jeedom_Init_Cmd"
+    };
+    for(size_t i=0;i<sizeof(allowed)/sizeof(allowed[0]);i++)
+        if(strcmp(name,allowed[i])==0)return true;
+    return false;
+}
+static esp_err_t param_get(httpd_req_t *req){
+    if(!require_key(req))return ESP_FAIL;
+    char name[32];
+    if(!query_param(req,"value",name,sizeof(name))||!supported_jeedom_param(name)){
+        httpd_resp_set_type(req,"text/plain");
+        return httpd_resp_sendstr(req,"Null");
+    }
+    nvs_handle_t nv;
+    if(nvs_open("mira_idf_jeed",NVS_READONLY,&nv)!=ESP_OK)
+        return httpd_resp_sendstr(req,"Null");
+    char value[256]={0};size_t len=sizeof(value);
+    esp_err_t err=nvs_get_str(nv,name,value,&len);
+    nvs_close(nv);
+    httpd_resp_set_type(req,"text/plain");
+    return httpd_resp_sendstr(req,err==ESP_OK?value:"Null");
+}
+static esp_err_t param_set(httpd_req_t *req){
+    if(!require_key(req))return ESP_FAIL;
+    char name[32],value[256];
+    if(!query_param(req,"param",name,sizeof(name))||
+       !query_param(req,"value",value,sizeof(value))||
+       !supported_jeedom_param(name)){
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Parametre Jeedom invalide");
+        return ESP_FAIL;
+    }
+    nvs_handle_t nv;
+    esp_err_t err=nvs_open("mira_idf_jeed",NVS_READWRITE,&nv);
+    if(err==ESP_OK) {
+        err=nvs_set_str(nv,name,value);
+        if(err==ESP_OK)err=nvs_commit(nv);
+        nvs_close(nv);
+    }
+    if(err!=ESP_OK){
+        httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Sauvegarde Jeedom impossible");
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG,"Jeedom parametre %s synchronise",name); // NEVER log its value.
+    return httpd_resp_sendstr(req,"OK");
+}
+static esp_err_t param_saved(httpd_req_t *req){
+    if(!require_key(req))return ESP_FAIL;
+    // nvs_commit() already called by param_set().
+    return httpd_resp_sendstr(req,"OK");
+}
+// Jeedom plugin associates its command IDs with Mira widget IDs.
+// Store mappings without executing them, especially during initialization.
+static bool put_remote_binding(long id,const char *value){
+    if(id<1||id>4096||!value||!*value||strlen(value)>30)return false;
+    char key[14];
+    snprintf(key,sizeof(key),"cmd%ld",id);
+    nvs_handle_t nv;
+    esp_err_t err=nvs_open("mira_idf_map",NVS_READWRITE,&nv);
+    if(err==ESP_OK){
+        err=nvs_set_str(nv,key,value);
+        if(err==ESP_OK)err=nvs_commit(nv);
+        nvs_close(nv);
+    }
+    return err==ESP_OK;
+}
+static esp_err_t set_jeedom_id(httpd_req_t *req){
+    if(!require_key(req))return ESP_FAIL;
+    char id[16],value[32];
+    if(!query_param(req,"id",id,sizeof(id))||
+       !query_param(req,"value",value,sizeof(value))||
+       !put_remote_binding(strtol(id,NULL,10),value)){
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Association Jeedom impossible");
+        return ESP_FAIL;
+    }
+    return httpd_resp_sendstr(req,"OK");
+}
+static esp_err_t set_jeedom_toggle_id(httpd_req_t *req){
+    if(!require_key(req))return ESP_FAIL;
+    char id[16],off[32],on[32];
+    if(!query_param(req,"id",id,sizeof(id))||
+       !query_param(req,"value0",off,sizeof(off))||
+       !query_param(req,"value1",on,sizeof(on))){
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"IDs de toggle manquants");
+        return ESP_FAIL;
+    }
+    long local=strtol(id,NULL,10);
+    if(local<1||local>=4096||
+       !put_remote_binding(local,off)||
+       !put_remote_binding(local+1,on)){
+        httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Mapping toggle impossible");
+        return ESP_FAIL;
+    }
+    return httpd_resp_sendstr(req,"OK");
+}
+static esp_err_t set_jeedom_init_id(httpd_req_t *req){
+    if(!require_key(req))return ESP_FAIL;
+    char id[32];
+    if(!query_param(req,"value",id,sizeof(id))){
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Init ID absent");
+        return ESP_FAIL;
+    }
+    nvs_handle_t nv;
+    esp_err_t err=nvs_open("mira_idf_jeed",NVS_READWRITE,&nv);
+    if(err==ESP_OK) {
+        err=nvs_set_str(nv,"Jeedom_Init_Cmd",id);
+        if(err==ESP_OK)err=nvs_commit(nv);
+        nvs_close(nv);
+    }
+    if(err!=ESP_OK) {
+        httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Init ID non enregistre");
+        return ESP_FAIL;
+    }
+    return httpd_resp_sendstr(req,"OK");
+}
+
 void mira_jeedom_register_http(httpd_handle_t server) {
     const httpd_uri_t routes[]={
         {.uri="/getlvgl",.method=HTTP_GET,.handler=getlvgl},
@@ -410,6 +533,14 @@ void mira_jeedom_register_http(httpd_handle_t server) {
         {.uri="/programui",.method=HTTP_POST,.handler=programui},
         {.uri="/updatenr",.method=HTTP_GET,.handler=updatenr},
         {.uri="/mira/jeedom/key",.method=HTTP_POST,.handler=provision_key},
+        {.uri="/getparam",.method=HTTP_GET,.handler=param_get},
+        {.uri="/addlistparam",.method=HTTP_GET,.handler=param_set},
+        {.uri="/updatelistparam",.method=HTTP_GET,.handler=param_set},
+        {.uri="/savelistparam",.method=HTTP_GET,.handler=param_saved},
+        {.uri="/createlistparam",.method=HTTP_GET,.handler=param_saved},
+        {.uri="/setjeedomid",.method=HTTP_GET,.handler=set_jeedom_id},
+        {.uri="/setjeedomtoggleid",.method=HTTP_GET,.handler=set_jeedom_toggle_id},
+        {.uri="/sendjeedomorderid",.method=HTTP_GET,.handler=set_jeedom_init_id},
     };
     for(size_t i=0;i<sizeof(routes)/sizeof(routes[0]);i++) {
         esp_err_t err=httpd_register_uri_handler(server,&routes[i]);
