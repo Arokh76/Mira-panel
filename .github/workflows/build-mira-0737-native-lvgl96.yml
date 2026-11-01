@@ -27,7 +27,7 @@ jobs:
           arduino-cli lib update-index
           arduino-cli core install esp32:esp32@3.3.11
           echo '--- ESP32-S3 PSRAM cache settings (bounce-mode compatibility) ---'
-          find "$HOME/.arduino15/packages/esp32" -type f -name sdkconfig.h -path '*/esp32s3/*' \\( -exec grep -H -E 'CONFIG_ESP32S3_DATA_CACHE_LINE_(32B|64B)|CONFIG_ESP32S3_DATA_CACHE_LINE_SIZE|CONFIG_SPIRAM_XIP_FROM_PSRAM|CONFIG_LCD_RGB_RESTART_IN_VSYNC' {} \\; \\) || true
+          find "$HOME/.arduino15/packages/esp32" -type f -name sdkconfig.h -path '*/esp32s3/*' -exec grep -H -E 'CONFIG_ESP32S3_DATA_CACHE_LINE_(32B|64B)|CONFIG_ESP32S3_DATA_CACHE_LINE_SIZE|CONFIG_SPIRAM_XIP_FROM_PSRAM|CONFIG_LCD_RGB_RESTART_IN_VSYNC' {} \; || true
           arduino-cli config set library.enable_unsafe_install true
           arduino-cli lib install "ArduinoJson@6.21.5"
           arduino-cli lib install "JPEGDEC@1.8.2"
