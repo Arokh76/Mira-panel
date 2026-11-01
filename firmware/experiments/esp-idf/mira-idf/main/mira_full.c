@@ -810,7 +810,14 @@ static void build_config(void){
     if(len<=0||len>JSON_MAX){fclose(f);empty_notice("JSON Mira trop grand ou vide");return;}
     char *buf=malloc((size_t)len+1);
     if(!buf){fclose(f);empty_notice("Mémoire insuffisante pour JSON Mira");return;}
-    size_t n=fread(buf,1,(size_t)len,f);fclose(f);buf[n]=0;
+    size_t n=fread(buf,1,(size_t)len,f);fclose(f);
+    if(n!=(size_t)len){
+        free(buf);
+        empty_notice("Lecture incomplète de la configuration Mira");
+        ESP_LOGE(TAG,"Incomplete Mira JSON read: %u of %ld bytes",(unsigned)n,len);
+        return;
+    }
+    buf[n]=0;
     cJSON *root=cJSON_ParseWithLength(buf,n);free(buf);
     cJSON *array=root?cJSON_GetObjectItemCaseSensitive(root,"lvgl"):NULL;
     if(!cJSON_IsArray(array)){
