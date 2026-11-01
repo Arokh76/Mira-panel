@@ -465,7 +465,7 @@ static const mira_display_field_t display_fields[]={
     {"DISPLAY_Jour","day_pct",100,false},
     {"DISPLAY_Nuit","night_pct",100,false},
     {"DISPLAY_Veille","sleep_light",100,false},
-    {"DISPLAY_Delai","sleep_delay",3600,false},
+    {"DISPLAY_Delai","sleep_delay",86400,false},
     {"DISPLAY_NuitAuto","night_auto",1,false},
     {"DISPLAY_HorlogeVeille","sleep_clock",1,false},
     {"DISPLAY_DebutNuit","night_start",0,true},
@@ -493,7 +493,7 @@ static bool display_field_write(const mira_display_field_t *field,const char *va
         unsigned long number=strtoul(value,&end,10);
         if(value[0]&&end&&!*end&&number<=field->max&&
            (strcmp(field->key,"day_pct")&&strcmp(field->key,"night_pct")||number>=1)){
-            if(field->max>255)err=nvs_set_u16(nv,field->key,(uint16_t)number);
+            if(field->max>255)err=nvs_set_u32(nv,field->key,(uint32_t)number);
             else err=nvs_set_u8(nv,field->key,(uint8_t)number);
         }
     }
@@ -510,7 +510,13 @@ static bool display_field_read(const mira_display_field_t *field,char *value,siz
         size_t size=cap;
         err=nvs_get_str(nv,field->key,value,&size);
     }else if(field->max>255){
-        uint16_t v=0;err=nvs_get_u16(nv,field->key,&v);
+        uint32_t v=0;err=nvs_get_u32(nv,field->key,&v);
+        if(err!=ESP_OK){
+            uint16_t old=0;
+            if(nvs_get_u16(nv,field->key,&old)==ESP_OK){
+                v=old;err=ESP_OK;
+            }
+        }
         if(err==ESP_OK)snprintf(value,cap,"%u",(unsigned)v);
     }else{
         uint8_t v=0;err=nvs_get_u8(nv,field->key,&v);
@@ -1091,10 +1097,10 @@ static void import_legacy_sleep_settings(const cJSON *params){
         char *end=NULL;
         long number=strtol(value,&end,10);
         if(!end||*end)continue;
-        if(!strcmp(key,"DISPLAY_Delai")&&number>=0&&number<=3600){
-            uint16_t old=0;
-            if(nvs_get_u16(nv,"sleep_delay",&old)==ESP_ERR_NVS_NOT_FOUND &&
-               nvs_set_u16(nv,"sleep_delay",(uint16_t)number)==ESP_OK)changed++;
+        if(!strcmp(key,"DISPLAY_Delai")&&number>=0&&number<=86400){
+            uint32_t old=0;
+            if(nvs_get_u32(nv,"sleep_delay",&old)==ESP_ERR_NVS_NOT_FOUND &&
+               nvs_set_u32(nv,"sleep_delay",(uint32_t)number)==ESP_OK)changed++;
         }else if(!strcmp(key,"DISPLAY_Veille")&&number>=0&&number<=100){
             uint8_t old=0;
             if(nvs_get_u8(nv,"sleep_light",&old)==ESP_ERR_NVS_NOT_FOUND &&
