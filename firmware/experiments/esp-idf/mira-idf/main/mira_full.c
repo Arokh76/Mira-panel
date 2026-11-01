@@ -41,6 +41,10 @@ typedef struct { char name[96]; char value[160]; } mira_state_update_t;
 static QueueHandle_t state_queue;
 static bool suppress_events;
 static uint8_t display_brightness_raw=220;
+static uint16_t sleep_timeout_seconds=120;
+static uint8_t sleep_brightness_percent=8;
+static bool sleep_clock_enabled=true,display_sleeping;
+static lv_obj_t *sleep_overlay,*sleep_clock_text;
 static bool spiffs_ready=false;
 static lv_obj_t *screen, *pages[6], *nav, *page_picker;
 static lv_obj_t *favorite_btn[4];
@@ -198,6 +202,7 @@ static void show_page(int idx){
     lv_obj_add_flag(page_picker,LV_OBJ_FLAG_HIDDEN);
 }
 static void nav_click(lv_event_t *e){
+    if(display_sleeping)return;
     int index=(int)(intptr_t)lv_event_get_user_data(e);
     if(index==6) {
         if(lv_obj_has_flag(page_picker,LV_OBJ_FLAG_HIDDEN))
@@ -206,7 +211,7 @@ static void nav_click(lv_event_t *e){
     } else show_page(index);
 }
 static void event_local(lv_event_t *e){
-    if(suppress_events)return;
+    if(suppress_events||display_sleeping)return;
     mira_widget_t *b=(mira_widget_t*)lv_event_get_user_data(e);
     if(!b)return;
     lv_obj_t *src=lv_event_get_target_obj(e);
@@ -266,7 +271,7 @@ static void media_select_active_device(mira_widget_t *w){
 // Mira 0.7.37 Jeedom and MQTT plugins.  No HTTP/network work in LVGL callback.
 // Encode the immutable static widget index and control ordinal as user_data.
 static void media_direct_action(lv_event_t *event) {
-    if(suppress_events)return;
+    if(suppress_events||display_sleeping)return;
     uintptr_t encoded=(uintptr_t)lv_event_get_user_data(event);
     if(encoded==0)return;
     encoded--;
@@ -337,6 +342,7 @@ static void camera_close_event(lv_event_t *event) {
     camera_close();
 }
 static void camera_open_event(lv_event_t *event) {
+    if(display_sleeping)return;
     uintptr_t opaque=(uintptr_t)lv_event_get_user_data(event);
     if(!opaque)return;
     const size_t idx=opaque-1u;
@@ -624,7 +630,7 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
 // release (never write flash on every pixel of a drag).  This callback runs
 // on LVGL task; the CH32 gate/PWM write is a short I2C transaction.
 static void brightness_release(lv_event_t *event) {
-    if(suppress_events)return;
+    if(suppress_events||display_sleeping)return;
     lv_obj_t *slider=lv_event_get_target_obj(event);
     int value=lv_slider_get_value(slider);
     if(value<30)value=30;
@@ -641,6 +647,68 @@ static void brightness_release(lv_event_t *event) {
             (void)nvs_commit(nvs);
         nvs_close(nvs);
     }
+}
+
+
+static void save_sleep_setting_u16(const char *key,uint16_t value){
+    nvs_handle_t nv;
+    if(nvs_open("mira_idf_ui",NVS_READWRITE,&nv)!=ESP_OK)return;
+    if(nvs_set_u16(nv,key,value)==ESP_OK)(void)nvs_commit(nv);
+    nvs_close(nv);
+}
+static void save_sleep_setting_u8(const char *key,uint8_t value){
+    nvs_handle_t nv;
+    if(nvs_open("mira_idf_ui",NVS_READWRITE,&nv)!=ESP_OK)return;
+    if(nvs_set_u8(nv,key,value)==ESP_OK)(void)nvs_commit(nv);
+    nvs_close(nv);
+}
+static void sleep_delay_changed(lv_event_t *event){
+    if(display_sleeping||suppress_events)return;
+    int value=lv_slider_get_value(lv_event_get_target_obj(event));
+    if(value<0)value=0;
+    if(value>3600)value=3600;
+    sleep_timeout_seconds=(uint16_t)value;
+    save_sleep_setting_u16("sleep_delay",sleep_timeout_seconds);
+}
+static void sleep_light_changed(lv_event_t *event){
+    if(display_sleeping||suppress_events)return;
+    int value=lv_slider_get_value(lv_event_get_target_obj(event));
+    if(value<0)value=0;
+    if(value>100)value=100;
+    sleep_brightness_percent=(uint8_t)value;
+    save_sleep_setting_u8("sleep_light",sleep_brightness_percent);
+}
+static void sleep_clock_changed(lv_event_t *event){
+    if(display_sleeping||suppress_events)return;
+    sleep_clock_enabled=lv_obj_has_state(lv_event_get_target_obj(event),LV_STATE_CHECKED);
+    save_sleep_setting_u8("sleep_clock",sleep_clock_enabled?1:0);
+}
+static uint8_t raw_from_percent(uint8_t percentage){
+    if(percentage==0)return 0;
+    if(percentage>100)percentage=100;
+    return (uint8_t)(30u+(((uint32_t)percentage-1u)*225u+49u)/99u);
+}
+static void display_enter_sleep(void){
+    if(display_sleeping)return;
+    const uint8_t raw=sleep_clock_enabled?raw_from_percent(sleep_brightness_percent):0;
+    esp_err_t err=mira_display_set_brightness(raw);
+    if(err!=ESP_OK){
+        ESP_LOGW(TAG,"Unable to lower backlight for sleep: %s",esp_err_to_name(err));
+        return;
+    }
+    display_sleeping=true;
+    camera_close();
+    if(sleep_overlay && sleep_clock_enabled && raw>0)
+        lv_obj_remove_flag(sleep_overlay,LV_OBJ_FLAG_HIDDEN);
+    ESP_LOGI(TAG,"Mira sleep entered, clock=%d, brightness=%u%%",
+             sleep_clock_enabled,(unsigned)sleep_brightness_percent);
+}
+static void display_wake(void){
+    if(!display_sleeping)return;
+    display_sleeping=false;
+    if(sleep_overlay)lv_obj_add_flag(sleep_overlay,LV_OBJ_FLAG_HIDDEN);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(mira_display_set_brightness(display_brightness_raw));
+    ESP_LOGI(TAG,"Mira display awakened by physical GT911 touch");
 }
 
 static void settings(void){
@@ -660,10 +728,31 @@ static void settings(void){
     lv_obj_t *n=card(3,640,72);
     label(n,"Navigation",0x22BEEA,&lv_font_montserrat_16);
     label(n,"Retour accueil : 60 s",0xF3F6F7,&lv_font_montserrat_16);
-    lv_obj_t *sleep=card(3,640,104);
-    label(sleep,"Veille",0x22BEEA,&lv_font_montserrat_16);
-    label(sleep,"Mise en veille : 120 s",0xF3F6F7,&lv_font_montserrat_16);
-    label(sleep,"Horloge en veille",0xF3F6F7,&lv_font_montserrat_16);
+    lv_obj_t *sleep=card(3,640,214);
+    lv_obj_t *shead=label(sleep,"Veille",0x22BEEA,&lv_font_montserrat_16);
+    lv_obj_set_pos(shead,12,6);
+    lv_obj_t *delay_title=label(sleep,"Délai de veille (0 = désactivée)",0xF3F6F7,&lv_font_montserrat_16);
+    lv_obj_set_pos(delay_title,12,38);
+    lv_obj_t *delay=lv_slider_create(sleep);
+    lv_obj_set_size(delay,575,14);
+    lv_obj_set_pos(delay,18,75);
+    lv_slider_set_range(delay,0,3600);
+    lv_slider_set_value(delay,sleep_timeout_seconds,LV_ANIM_OFF);
+    lv_obj_add_event_cb(delay,sleep_delay_changed,LV_EVENT_RELEASED,NULL);
+    lv_obj_t *light_title=label(sleep,"Luminosité en veille (%)",0xF3F6F7,&lv_font_montserrat_16);
+    lv_obj_set_pos(light_title,12,104);
+    lv_obj_t *dim=lv_slider_create(sleep);
+    lv_obj_set_size(dim,575,14);
+    lv_obj_set_pos(dim,18,138);
+    lv_slider_set_range(dim,0,100);
+    lv_slider_set_value(dim,sleep_brightness_percent,LV_ANIM_OFF);
+    lv_obj_add_event_cb(dim,sleep_light_changed,LV_EVENT_RELEASED,NULL);
+    lv_obj_t *clock_label=label(sleep,"Horloge en veille",0xF3F6F7,&lv_font_montserrat_16);
+    lv_obj_set_pos(clock_label,12,169);
+    lv_obj_t *clock_switch=lv_switch_create(sleep);
+    lv_obj_set_pos(clock_switch,545,163);
+    if(sleep_clock_enabled)lv_obj_add_state(clock_switch,LV_STATE_CHECKED);
+    lv_obj_add_event_cb(clock_switch,sleep_clock_changed,LV_EVENT_VALUE_CHANGED,NULL);
 }
 static void empty_notice(const char *message){
     lv_obj_t *c=card(0,786,120);
@@ -774,6 +863,15 @@ void mira_full_ui_create(lv_display_t *disp){
         uint8_t stored=220;
         if(nvs_get_u8(ui_nvs,"brightness",&stored)==ESP_OK && stored>=30)
             display_brightness_raw=stored;
+        uint16_t delay=120;
+        if(nvs_get_u16(ui_nvs,"sleep_delay",&delay)==ESP_OK && delay<=3600)
+            sleep_timeout_seconds=delay;
+        uint8_t light=8;
+        if(nvs_get_u8(ui_nvs,"sleep_light",&light)==ESP_OK && light<=100)
+            sleep_brightness_percent=light;
+        uint8_t clock=1;
+        if(nvs_get_u8(ui_nvs,"sleep_clock",&clock)==ESP_OK)
+            sleep_clock_enabled=clock!=0;
         nvs_close(ui_nvs);
     }
     ESP_ERROR_CHECK_WITHOUT_ABORT(mira_display_set_brightness(display_brightness_raw));
@@ -836,6 +934,18 @@ void mira_full_ui_create(lv_display_t *disp){
     settings();
     create_picker();
     build_config();
+    sleep_overlay=lv_obj_create(lv_layer_top());
+    lv_obj_set_size(sleep_overlay,800,480);
+    lv_obj_align(sleep_overlay,LV_ALIGN_CENTER,0,0);
+    lv_obj_set_style_bg_color(sleep_overlay,lv_color_hex(0x000000),0);
+    lv_obj_set_style_bg_opa(sleep_overlay,LV_OPA_COVER,0);
+    lv_obj_set_style_border_width(sleep_overlay,0,0);
+    lv_obj_set_style_radius(sleep_overlay,0,0);
+    lv_obj_set_style_pad_all(sleep_overlay,0,0);
+    no_scroll(sleep_overlay);
+    sleep_clock_text=label(sleep_overlay,"--:--",0xffffff,&lv_font_montserrat_48);
+    lv_obj_center(sleep_clock_text);
+    lv_obj_add_flag(sleep_overlay,LV_OBJ_FLAG_HIDDEN);
     feedback=label(screen,"APERÇU IDF : interactions locales (Jeedom non connecté)",0xA8B2B8,&lv_font_montserrat_12);
     lv_obj_set_pos(feedback,6,CONTENT_H-17);
     lv_obj_add_flag(feedback,LV_OBJ_FLAG_HIDDEN); // avoid covering real UI
@@ -1017,9 +1127,14 @@ void mira_full_ui_tick(void){
     if(last_touch.touch_presses!=last_user_touch_count){
         last_user_touch_count=last_touch.touch_presses;
         last_user_touch_ms=now_tick;
-    }else if(now_tick-last_user_touch_ms>=60000u && current_page!=0){
+        if(display_sleeping)display_wake();
+    }else if(!display_sleeping && now_tick-last_user_touch_ms>=60000u && current_page!=0){
         show_page(0);
+        last_user_touch_ms=now_tick;
     }
+    if(!display_sleeping && sleep_timeout_seconds>0 &&
+       now_tick-last_user_touch_ms>=(uint32_t)sleep_timeout_seconds*1000u)
+        display_enter_sleep();
     if(now_tick-diag_last_tick>=200){
         diag_last_tick=now_tick;
         mira_touch_diagnostic_refresh();
@@ -1032,6 +1147,8 @@ void mira_full_ui_tick(void){
             struct tm tmv;localtime_r(&now,&tmv);
             char buff[24];snprintf(buff,sizeof(buff),"%02d:%02d",tmv.tm_hour,tmv.tm_min);
             lv_label_set_text(clock_text,buff);
+            if(display_sleeping&&sleep_clock_enabled&&sleep_clock_text)
+                lv_label_set_text(sleep_clock_text,buff);
         }
     }
 }
