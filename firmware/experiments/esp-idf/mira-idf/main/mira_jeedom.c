@@ -27,6 +27,8 @@
 #define MIRA_KEY_MAX 96
 
 static const char *TAG="mira-idf-jeedom";
+static volatile bool jeedom_mode_enabled;
+bool mira_jeedom_actions_enabled(void){return jeedom_mode_enabled;}
 // Request async synchronization after Jeedom changes its command table.
 static void request_binding_sync(void);
 static uint32_t ui_config_hash(const char *s);
@@ -497,6 +499,7 @@ static esp_err_t param_set(httpd_req_t *req){
         httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Sauvegarde Jeedom impossible");
         return ESP_FAIL;
     }
+    if(!strcmp(name,"Jeedom"))jeedom_mode_enabled=!strcmp(value,"1");
     ESP_LOGI(TAG,"Jeedom parametre %s synchronise",name); // NEVER log its value.
     request_binding_sync();
     return httpd_resp_sendstr(req,"OK");
@@ -605,7 +608,7 @@ static bool decimal_id(const char *str) {
     return true;
 }
 bool mira_jeedom_queue_local_action(const char *name,const char *type,const char *value) {
-    if(!action_queue||!name||!type||!value||!*name ||
+    if(!jeedom_mode_enabled||!action_queue||!name||!type||!value||!*name ||
        strlen(name)>=96||strlen(type)>=24||strlen(value)>=160)return false;
     if(strcmp(type,"toggle")&&strcmp(type,"button")&&strcmp(type,"multiaction")&&
        strcmp(type,"range")&&strcmp(type,"roundrange")&&strcmp(type,"thermostat")&&
@@ -945,6 +948,12 @@ static void jeedom_action_worker(void *unused) {
 }
 esp_err_t mira_jeedom_action_init(void) {
     if(action_queue)return ESP_OK;
+    nvs_handle_t settings;
+    if(nvs_open("mira_idf_jeed",NVS_READONLY,&settings)==ESP_OK){
+        char active[8]={0};size_t len=sizeof(active);
+        jeedom_mode_enabled=nvs_get_str(settings,"Jeedom",active,&len)==ESP_OK&&!strcmp(active,"1");
+        nvs_close(settings);
+    }
     action_queue=xQueueCreate(12,sizeof(mira_action_msg_t));
     if(!action_queue)return ESP_ERR_NO_MEM;
     if(xTaskCreate(jeedom_action_worker,"mira_jeedom_http",7168,NULL,3,NULL)!=pdPASS) {
