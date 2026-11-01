@@ -3525,6 +3525,17 @@ void MiraPanelUI::showPage(uint8_t index) {
 }
 
 #if defined(MIRA_TARGET_WAVESHARE_43C)
+#if defined(MIRA_LVGL9_NATIVE)
+// Hardware tests showed bitmap cache artifacts and lower FPS.  Keep every
+// original Mira widget live and interactive; no snapshot cache in native 9.6.
+void MiraPanelUI::setScrollCacheActive(bool active) {(void)active;_scrollCacheActive=false;}
+void MiraPanelUI::resetScrollCache() {_scrollCacheActive=false;}
+void MiraPanelUI::invalidateScrollCache(uint8_t idx) {(void)idx;}
+void MiraPanelUI::invalidateAllScrollCaches() {}
+void MiraPanelUI::prepareScrollTile(uint8_t idx) {(void)idx;}
+void MiraPanelUI::serviceScrollCache() {}
+void MiraPanelUI::onScrollCacheMove(lv_event_t *e) {(void)e;}
+#else
 // Keep the cache lifecycle entirely in the LVGL task. We snapshot ONLY static
 // information tiles, never switches, sliders, thermostats or date/time.
 // The source widgets are restored as soon as scrolling settles.
@@ -3763,7 +3774,8 @@ void MiraPanelUI::onScrollCacheMove(lv_event_t* e) {
   ui->_scrollCacheLastMoveMs = millis();
   if (!ui->_scrollCacheActive) ui->setScrollCacheActive(true);
 }
-#endif
+#endif // MIRA_LVGL9_NATIVE
+#endif // MIRA_TARGET_WAVESHARE_43C
 
 // LVGL's timer task handles the touch immediately on both display targets.
 void MiraPanelUI::onNavigationTimer(lv_timer_t* timer) {
