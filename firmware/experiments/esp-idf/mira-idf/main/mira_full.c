@@ -851,6 +851,21 @@ static void display_wake(void){
     ESP_LOGI(TAG,"Mira display awakened by physical GT911 touch");
 }
 
+static void night_auto_changed(lv_event_t *event){
+    if(suppress_events)return;
+    lv_obj_t *src=lv_event_get_target_obj(event);
+    const bool requested=lv_obj_has_state(src,LV_STATE_CHECKED);
+    // Refuse to enable an unspecified or degenerate beta schedule.
+    if(requested&&(night_start_minute<0||night_end_minute<0||
+                   night_start_minute==night_end_minute)){
+        lv_obj_remove_state(src,LV_STATE_CHECKED);
+        ESP_LOGW(TAG,"Day/night schedule not configured; retaining manual brightness");
+        return;
+    }
+    night_auto_enabled=requested;
+    save_sleep_setting_u8("night_auto",requested?1:0);
+    apply_auto_brightness();
+}
 static void settings(void){
     lv_obj_t *head=card(3,640,40);
     lv_obj_t *h=label(head,"Paramètres",0xF3F6F7,&lv_font_montserrat_16);
@@ -865,6 +880,21 @@ static void settings(void){
     lv_slider_set_value(sl,display_brightness_raw,LV_ANIM_OFF);
     lv_obj_add_event_cb(sl,brightness_release,LV_EVENT_RELEASED,NULL);
     label(display,"Thème : Mira",0xA8B2B8,&lv_font_montserrat_16);
+    lv_obj_t *schedule=card(3,640,106);
+    label(schedule,"Luminosité automatique jour / nuit",0x22BEEA,&lv_font_montserrat_16);
+    lv_obj_t *auto_switch=lv_switch_create(schedule);
+    lv_obj_set_pos(auto_switch,550,12);
+    if(night_auto_enabled)lv_obj_add_state(auto_switch,LV_STATE_CHECKED);
+    lv_obj_add_event_cb(auto_switch,night_auto_changed,LV_EVENT_VALUE_CHANGED,NULL);
+    char period[140];
+    if(night_start_minute>=0&&night_end_minute>=0){
+        snprintf(period,sizeof(period),"Nuit %02d:%02d - %02d:%02d | Jour %u%% / Nuit %u%%",
+                 night_start_minute/60,night_start_minute%60,
+                 night_end_minute/60,night_end_minute%60,
+                 (unsigned)day_brightness_percent,(unsigned)night_brightness_percent);
+    }else snprintf(period,sizeof(period),"Horaires à configurer dans les paramètres Mira");
+    lv_obj_t *period_label=label(schedule,period,0xA8B2B8,&lv_font_montserrat_14);
+    lv_obj_set_pos(period_label,12,49);
     lv_obj_t *n=card(3,640,72);
     label(n,"Navigation",0x22BEEA,&lv_font_montserrat_16);
     label(n,"Retour accueil : 60 s",0xF3F6F7,&lv_font_montserrat_16);
