@@ -704,15 +704,26 @@ static esp_err_t page_get(httpd_req_t *req){
         "<!doctype html><html lang='fr'><meta name='viewport' content='width=device-width,initial-scale=1'>"
         "<title>Mira LVGL 9.6 - Import JSON</title><h2>Mira LVGL 9.6 / Waveshare 4.3C</h2>"
         "<p>Rendu experimental des widgets reels depuis <code>/miralvgl.json</code> (firmware 0.7.37).</p>"
-        "<p>Les commandes Jeedom et MQTT NE SONT PAS actives : aperçu visuel et tactile uniquement.</p>"
+        "<p>Transport MQTT natif disponible apres configuration. API HTTP Jeedom historique, camera et widgets composites en cours de portage.</p>"
         "<p><b>La partition SPIFFS n'est jamais formatée automatiquement.</b></p>"
         "<p>Charge uniquement un export JSON Mira contenant le tableau <code>lvgl</code>.</p>"
+        "<h3>Wi-Fi IDF (point d'acces de secours conserve)</h3>"
+        "<input id='ssid' placeholder='SSID Wi-Fi'><input id='wpass' type='password' placeholder='Mot de passe Wi-Fi'>"
+        "<button onclick='configureWifi()'>Connecter au Wi-Fi</button><pre id='netresult'></pre>"
+        "<h3>MQTT ESP-IDF (optionnel)</h3><p>Topics identiques: mira/panel/States et Actions</p>"
+        "<input id='mhost' placeholder='Broker IP'><input id='mport' type='number' value='1883'>"
+        "<input id='mname' value='panel' placeholder='Nom de l ecran'>"
+        "<input id='muser' placeholder='Utilisateur MQTT'><input id='mpass' type='password' placeholder='Mot de passe MQTT'>"
+        "<label><input id='menabled' type='checkbox'>Activer MQTT</label>"
+        "<button onclick='configureMqtt()'>Sauver MQTT</button><pre id='mqttresult'></pre>"
         "<input id='file' type='file' accept='.json,application/json'>"
         "<button onclick='send()'>Importer dans SPIFFS</button><pre id='out'></pre>"
         "<p><a href='/perf'>Mesures FPS</a> | <a href='/'>OTA et récupération</a></p>"
         "<script>async function send(){let f=document.getElementById('file').files[0];"
         "if(!f)return;let r=await fetch('/mira/import',{method:'POST',headers:{'Content-Type':'application/json'},body:f});"
-        "document.getElementById('out').textContent=await r.text();}</script></html>";
+        "document.getElementById(\'out\').textContent=await r.text();}"
+        "async function configureWifi(){let r=await fetch('/mira/wifi',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ssid:document.getElementById('ssid').value,password:document.getElementById('wpass').value})});document.getElementById('netresult').textContent=await r.text();}"
+        "async function configureMqtt(){let r=await fetch('/mira/mqtt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({host:document.getElementById('mhost').value,port:Number(document.getElementById('mport').value),screen:document.getElementById('mname').value,username:document.getElementById('muser').value,password:document.getElementById('mpass').value,enabled:document.getElementById('menabled').checked})});document.getElementById('mqttresult').textContent=await r.text();}</script></html>";
     httpd_resp_set_type(req,"text/html; charset=utf-8");
     return httpd_resp_send(req,html,HTTPD_RESP_USE_STRLEN);
 }
