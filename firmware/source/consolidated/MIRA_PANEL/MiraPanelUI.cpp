@@ -544,6 +544,32 @@ void MiraPanelUI::touchRead(lv_indev_drv_t* indev, lv_indev_data_t* data) {
 }
 #endif // native LVGL9 uses the GT911 driver's indev, not Arduino touchRead
 
+#if defined(MIRA_LVGL9_NATIVE)
+bool MiraPanelUI::onNativeTouch(bool pressed, uint16_t x, uint16_t y) {
+  (void)x;
+  (void)y;
+  MiraPanelUI* ui = _uiForLvgl;
+  if (!ui) return false;
+  // The LVGL8 input path had this wake latch, but the native LVGL9 indev
+  // bypassed it entirely. Restore the same first-tap-wakes-only behavior.
+  if (ui->_touchWakeLatch) {
+    if (!pressed) ui->_touchWakeLatch = false;
+    return true;
+  }
+  if (pressed) {
+    const bool wasSleeping = ui->_sleeping;
+    ui->noteActivity();
+    if (wasSleeping) {
+      ui->_touchWakeLatch = true;
+      ui->_touchDown = false;
+      Serial.println("[MIRA][TOUCH9] Premiere pression: reveil seulement");
+      return true;
+    }
+  }
+  return false;
+}
+#endif
+
 void MiraPanelUI::setMqtt(MiraMqtt* mqtt) {
   _mqtt = mqtt;
 }
@@ -830,6 +856,7 @@ void MiraPanelUI::begin() {
   lv_indev_drv_register(&indevDrv);
 #else
   mira_display_set_render_task(); // The validated native driver registered GT911 indev.
+  mira_display_set_touch_hook(&MiraPanelUI::onNativeTouch);
 #endif
 
   _screen = lv_obj_create(nullptr);
