@@ -410,14 +410,14 @@ static void camera_poll_on_lvgl_task(uint32_t tick){
 }
 
 static void make_widget(const cJSON *o,int info_total,int *info_seen){
-    if(widget_n>=MAX_WIDGETS)return;
+    if(widget_n>=MAX_WIDGETS){ESP_LOGW(TAG,"Widget capacity reached (%d)",MAX_WIDGETS);return;}
     const char *type=str(o,"type",""),*loc=str(o,"emplacement","accueil");
     const char *style=str(o,"style","standard"),*layout=str(o,"layout","auto");
     int pg=to_page(loc),is_auto=!strcmp(layout,"auto");
     const char *name=str(o,"name","");
     const char *display=str(o,"displayName","");
     if(!*display)display=name;
-    if(!*type)return;
+    if(!*type){ESP_LOGW(TAG,"Skipping widget without type");return;}
     // An unlabelled placeholder can be confused with a working command.
     // Keep the original type visible for accurate migration diagnostics.
     // Do not silently turn unsupported widgets into passive info cards or
