@@ -29,6 +29,9 @@ typedef struct {
 } mira_display_stats_t;
 
 esp_err_t mira_display_init(void);
+// Waveshare 4.3C confirmed CH32 IO expander (EXIO2 gate + PWM 0x05).
+// Mira 0.7.37 brightness scale: 0=off, 30..255 interactive visible.
+esp_err_t mira_display_set_brightness(uint8_t raw);
 lv_display_t *mira_display_lvgl(void);
 void mira_display_touch_read(lv_indev_t *indev, lv_indev_data_t *data);
 bool mira_display_touch_ready(void);
