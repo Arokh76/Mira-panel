@@ -1153,6 +1153,23 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                 }
             }
         }
+        if(!strcmp(w->type,"thermostat")){
+            char temp_name[128],mode_name[128];
+            snprintf(temp_name,sizeof(temp_name),"%.95s__temperature",w->name);
+            snprintf(mode_name,sizeof(mode_name),"%.95s__mode",w->name);
+            if(!strcmp(temp_name,msg->name)&&w->thermostat_temperature){
+                char text[185];
+                snprintf(text,sizeof(text),"Température : %.150s",msg->value);
+                lv_label_set_text(w->thermostat_temperature,text);
+                continue; // This is information, never a setpoint command.
+            }
+            if(!strcmp(mode_name,msg->name)&&w->thermostat_mode){
+                char text[185];
+                snprintf(text,sizeof(text),"Mode : %.150s",msg->value);
+                lv_label_set_text(w->thermostat_mode,text);
+                continue;
+            }
+        }
         char norm_name[96],norm_recv[96];
         normalize_widget_name(w->name,norm_name,sizeof(norm_name));
         normalize_widget_name(msg->name,norm_recv,sizeof(norm_recv));
