@@ -418,6 +418,8 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
     const char *display=str(o,"displayName","");
     if(!*display)display=name;
     if(!*type)return;
+    // An unlabelled placeholder can be confused with a working command.
+    // Keep the original type visible for accurate migration diagnostics.
     // Do not silently turn unsupported widgets into passive info cards or
     // consume one of the 64 available action slots. Unknown commands would
     // otherwise appear to work while having no functional control.
@@ -437,7 +439,9 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         lv_obj_t *notice=card(pg,390,64);
         lv_obj_t *caption=label(notice,display,0xF3F6F7,&lv_font_montserrat_16);
         lv_obj_set_width(caption,350);
-        lv_obj_t *warning=label(notice,"Widget non porté",0xFFB35C,&lv_font_montserrat_12);
+        char missing[96];
+        snprintf(missing,sizeof(missing),"Type non porté : %.65s",type);
+        lv_obj_t *warning=label(notice,missing,0xFFB35C,&lv_font_montserrat_12);
         lv_obj_align(warning,LV_ALIGN_BOTTOM_LEFT,0,0);
         return;
     }
