@@ -3,6 +3,7 @@
 // NOT a drop-in replacement for the old Jeedom HTTP/MQTT backend yet.
 // All LVGL access is kept on the LVGL task. HTTP may only set reload_pending.
 #include "mira_full.h"
+#include "mira_french_font.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -401,7 +402,7 @@ static void media_add_button(mira_widget_t *w,int action,int x,const char *text)
     lv_obj_set_size(button,142,43);
     lv_obj_set_pos(button,x,203);
     panel_style(button,true);
-    lv_obj_t *caption=label(button,text,0xF3F6F7,&lv_font_montserrat_16);
+    lv_obj_t *caption=label(button,text,0xF3F6F7,&mira_font_fr_16);
     lv_obj_center(caption);
     if(action==1)w->media_play_caption=caption;
     uintptr_t context=((uintptr_t)(w-widgets)<<3)|(uintptr_t)action;
@@ -444,13 +445,13 @@ static void camera_open_event(lv_event_t *event) {
     lv_obj_set_size(back,66,40);
     lv_obj_align(back,LV_ALIGN_TOP_LEFT,5,5);
     lv_obj_add_event_cb(back,camera_close_event,LV_EVENT_CLICKED,NULL);
-    lv_obj_t *caption=label(back,"Retour",0xffffff,&lv_font_montserrat_16);
+    lv_obj_t *caption=label(back,"Retour",0xffffff,&mira_font_fr_16);
     lv_obj_center(caption);
-    lv_obj_t *heading=label(camera_overlay,widgets[idx].name,0xffffff,&lv_font_montserrat_16);
+    lv_obj_t *heading=label(camera_overlay,widgets[idx].name,0xffffff,&mira_font_fr_16);
     lv_obj_align(heading,LV_ALIGN_TOP_MID,25,12);
     camera_image=lv_image_create(camera_overlay);
     lv_obj_align(camera_image,LV_ALIGN_CENTER,0,22);
-    camera_status=label(camera_overlay,"Chargement caméra BMP/JPEG...",0xffffff,&lv_font_montserrat_16);
+    camera_status=label(camera_overlay,"Chargement caméra BMP/JPEG...",0xffffff,&mira_font_fr_16);
     lv_obj_set_width(camera_status,770);
     lv_obj_set_style_text_align(camera_status,LV_TEXT_ALIGN_CENTER,0);
     lv_obj_align(camera_status,LV_ALIGN_CENTER,0,15);
@@ -515,11 +516,11 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         // Leave a visible, explicitly unsupported placeholder instead of
         // silently losing a programmed Mira widget during migration.
         lv_obj_t *notice=card(pg,390,64);
-        lv_obj_t *caption=label(notice,display,0xF3F6F7,&lv_font_montserrat_16);
+        lv_obj_t *caption=label(notice,display,0xF3F6F7,&mira_font_fr_16);
         lv_obj_set_width(caption,350);
         char missing[96];
         snprintf(missing,sizeof(missing),"Type non porté : %.65s",type);
-        lv_obj_t *warning=label(notice,missing,0xFFB35C,&lv_font_montserrat_12);
+        lv_obj_t *warning=label(notice,missing,0xFFB35C,&mira_font_fr_12);
         lv_obj_align(warning,LV_ALIGN_BOTTOM_LEFT,0,0);
         return;
     }
@@ -543,11 +544,11 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         lv_obj_set_size(clock_text,370,92);
         lv_obj_set_style_text_align(clock_text,LV_TEXT_ALIGN_CENTER,0);
         lv_obj_set_pos(clock_text,14,12);
-        date_text=label(c,"-- -- ----",0xA8B2B8,&lv_font_montserrat_16);
+        date_text=label(c,"-- -- ----",0xA8B2B8,&mira_font_fr_16);
         lv_obj_set_size(date_text,370,26);
         lv_obj_set_style_text_align(date_text,LV_TEXT_ALIGN_CENTER,0);
         lv_obj_set_pos(date_text,14,125);
-        lv_obj_t *right=label(c,"Mira Panel",0xA8B2B8,&lv_font_montserrat_16);
+        lv_obj_t *right=label(c,"Mira Panel",0xA8B2B8,&mira_font_fr_16);
         lv_obj_set_pos(right,422,36);
         w->card=c;return;
     }
@@ -566,7 +567,7 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
             int height=home_tile?142:78;
             w->card=card(pg,width,height);
             lv_obj_set_style_pad_all(w->card,4,0);
-            lv_obj_t *nm=label(w->card,display,0xA8B2B8,&lv_font_montserrat_16);
+            lv_obj_t *nm=label(w->card,display,0xA8B2B8,&mira_font_fr_16);
             lv_obj_set_size(nm,width-16,34);
             lv_obj_set_style_text_align(nm,LV_TEXT_ALIGN_CENTER,0);
             lv_obj_align(nm,LV_ALIGN_TOP_MID,0,home_tile?12:1);
@@ -576,7 +577,7 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
             lv_obj_set_style_text_align(w->value_label,LV_TEXT_ALIGN_CENTER,0);
             lv_obj_align(w->value_label,LV_ALIGN_TOP_MID,0,home_tile?48:26);
             if(home_tile){
-                lv_obj_t *since=label(w->card,*w->value?"Valeur configurée":"En attente des données",0xA8B2B8,&lv_font_montserrat_12);
+                lv_obj_t *since=label(w->card,*w->value?"Valeur configurée":"En attente des données",0xA8B2B8,&mira_font_fr_12);
                 w->info_status=since;
                 lv_obj_set_width(since,width-18);
                 lv_obj_set_style_text_align(since,LV_TEXT_ALIGN_CENTER,0);
@@ -587,7 +588,7 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         bool wide=!strcmp(layout,"wide");
         w->card=card(pg,wide?786:cw,wide?56:36);
         make_flex(w->card,LV_FLEX_FLOW_ROW,wide?LV_FLEX_ALIGN_SPACE_BETWEEN:LV_FLEX_ALIGN_CENTER,LV_FLEX_ALIGN_CENTER);
-        label(w->card,display,0xA8B2B8,&lv_font_montserrat_16);
+        label(w->card,display,0xA8B2B8,&mira_font_fr_16);
         char value[198];snprintf(value,sizeof(value),"%s %s",*w->value?w->value:"--",w->unit);
         w->value_label=label(w->card,value,0x22BEEA,&lv_font_montserrat_20);
         return;
@@ -600,7 +601,7 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         w->control=bt;
         lv_obj_set_size(bt,360,44);lv_obj_center(bt);
         panel_style(bt,true);lv_obj_set_style_radius(bt,13,0);
-        lv_obj_t *t=label(bt,display,0xF3F6F7,&lv_font_montserrat_16);lv_obj_center(t);
+        lv_obj_t *t=label(bt,display,0xF3F6F7,&mira_font_fr_16);lv_obj_center(t);
         if(!strcmp(type,"multiaction")){
             lv_obj_add_event_cb(bt,multiaction_event,LV_EVENT_PRESSED,w);
             lv_obj_add_event_cb(bt,multiaction_event,LV_EVENT_LONG_PRESSED,w);
@@ -613,7 +614,7 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         lv_obj_set_style_pad_left(w->card,16,0);
         lv_obj_set_style_pad_right(w->card,16,0);
         make_flex(w->card,LV_FLEX_FLOW_ROW,LV_FLEX_ALIGN_SPACE_BETWEEN,LV_FLEX_ALIGN_CENTER);
-        label(w->card,display,0xF3F6F7,&lv_font_montserrat_16);
+        label(w->card,display,0xF3F6F7,&mira_font_fr_16);
         w->control=lv_switch_create(w->card);
         lv_obj_set_size(w->control,54,28);
         lv_obj_set_style_bg_color(w->control,cyan_c(),LV_PART_INDICATOR|LV_STATE_CHECKED);
@@ -624,7 +625,7 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         bool round=!strcmp(type,"roundrange")||!strcmp(type,"thermostat");
         w->card=card(pg,round?(!strcmp(type,"thermostat")?786:390):cw,round?225:80);
         if(round){
-            label(w->card,display,0xF3F6F7,&lv_font_montserrat_16);
+            label(w->card,display,0xF3F6F7,&mira_font_fr_16);
             w->control=lv_arc_create(w->card);
             lv_obj_set_size(w->control,165,165);
             lv_obj_align(w->control,LV_ALIGN_CENTER,0,14);
@@ -636,9 +637,9 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
             w->value_label=label(w->card,"--",0xF3F6F7,&lv_font_montserrat_28);
             lv_obj_align(w->value_label,LV_ALIGN_CENTER,0,14);
             if(!strcmp(type,"thermostat")){
-                w->thermostat_temperature=label(w->card,"Température : --",0xA8B2B8,&lv_font_montserrat_16);
+                w->thermostat_temperature=label(w->card,"Température : --",0xA8B2B8,&mira_font_fr_16);
                 lv_obj_set_pos(w->thermostat_temperature,18,87);
-                w->thermostat_mode=label(w->card,"Mode : --",0xA8B2B8,&lv_font_montserrat_16);
+                w->thermostat_mode=label(w->card,"Mode : --",0xA8B2B8,&mira_font_fr_16);
                 lv_obj_set_pos(w->thermostat_mode,575,87);
                 w->thermostat_mode_select=lv_dropdown_create(w->card);
                 lv_obj_set_size(w->thermostat_mode_select,184,43);
@@ -659,8 +660,8 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
             lv_obj_set_style_border_width(r,0,0);
             lv_obj_set_style_pad_all(r,0,0);
             make_flex(r,LV_FLEX_FLOW_ROW,LV_FLEX_ALIGN_SPACE_BETWEEN,LV_FLEX_ALIGN_CENTER);
-            label(r,display,0xF3F6F7,&lv_font_montserrat_16);
-            w->value_label=label(r,*w->value?w->value:"--",0x22BEEA,&lv_font_montserrat_16);
+            label(r,display,0xF3F6F7,&mira_font_fr_16);
+            w->value_label=label(r,*w->value?w->value:"--",0x22BEEA,&mira_font_fr_16);
             w->control=lv_slider_create(w->card);
             lv_obj_set_size(w->control,350,14);
             lv_slider_set_range(w->control,w->minv,w->maxv);
@@ -675,7 +676,7 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
     }
     if(!strcmp(type,"list")||!strcmp(type,"listbutton")){
         w->card=card(pg,cw,96);
-        label(w->card,display,0xF3F6F7,&lv_font_montserrat_16);
+        label(w->card,display,0xF3F6F7,&mira_font_fr_16);
         w->control=lv_dropdown_create(w->card);
         lv_obj_set_size(w->control,340,44);
         char options[512];snprintf(options,sizeof(options),"%s",w->value);
@@ -687,7 +688,7 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
     }
     if(!strcmp(type,"color")){
         w->card=card(pg,cw,206);
-        label(w->card,display,0xF3F6F7,&lv_font_montserrat_16);
+        label(w->card,display,0xF3F6F7,&mira_font_fr_16);
         // LVGL 9.6 dropped the LVGL8 colorwheel. A hue arc provides
         // functional RGB output, sent once on finger release.
         w->control=lv_arc_create(w->card);
@@ -717,10 +718,10 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
             int col=n/5,row=n%5;
             int x=col?400:12,y=35+row*31;
             const char *title=media?media_titles[n]:energy_titles[n];
-            lv_obj_t *name_label=label(w->card,title,0xA8B2B8,&lv_font_montserrat_16);
+            lv_obj_t *name_label=label(w->card,title,0xA8B2B8,&mira_font_fr_16);
             lv_obj_set_pos(name_label,x,y);
             lv_obj_set_width(name_label,105);
-            w->fields[n]=label(w->card,"--",0x22BEEA,&lv_font_montserrat_16);
+            w->fields[n]=label(w->card,"--",0x22BEEA,&mira_font_fr_16);
             lv_obj_set_pos(w->fields[n],x+112,y);
             lv_obj_set_width(w->fields[n],245);
         }
@@ -728,7 +729,7 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
             media_add_button(w,0,125,"Précédent");
             media_add_button(w,1,307,"Lecture");
             media_add_button(w,2,489,"Suivant");
-            lv_obj_t *volume_text=label(w->card,"Volume",0xA8B2B8,&lv_font_montserrat_16);
+            lv_obj_t *volume_text=label(w->card,"Volume",0xA8B2B8,&mira_font_fr_16);
             lv_obj_set_pos(volume_text,15,254);
             w->media_slider=lv_slider_create(w->card);
             lv_obj_set_size(w->media_slider,625,15);
@@ -738,7 +739,7 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
             lv_obj_set_style_bg_color(w->media_slider,cyan_c(),LV_PART_INDICATOR);
             uintptr_t vol=((uintptr_t)(w-widgets)<<3)|3u;
             lv_obj_add_event_cb(w->media_slider,media_direct_action,LV_EVENT_RELEASED,(void*)(vol+1));
-            lv_obj_t *device_text=label(w->card,"Sortie",0xA8B2B8,&lv_font_montserrat_16);
+            lv_obj_t *device_text=label(w->card,"Sortie",0xA8B2B8,&mira_font_fr_16);
             lv_obj_set_pos(device_text,15,293);
             w->media_device_dropdown=lv_dropdown_create(w->card);
             lv_obj_set_size(w->media_device_dropdown,625,39);
@@ -757,14 +758,14 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         lv_obj_set_style_bg_color(w->control,panel2_c(),0);
         lv_obj_set_style_border_color(w->control,cyan_c(),0);
         lv_obj_set_style_border_width(w->control,1,0);
-        lv_obj_t *caption=label(w->control,display,0xF3F6F7,&lv_font_montserrat_16);
+        lv_obj_t *caption=label(w->control,display,0xF3F6F7,&mira_font_fr_16);
         lv_obj_center(caption);
         uintptr_t idx=(uintptr_t)(w-widgets)+1u;
         lv_obj_add_event_cb(w->control,camera_open_event,LV_EVENT_CLICKED,(void*)idx);
         return;
     }
     w->card=card(pg,cw,50);
-    label(w->card,display,0xA8B2B8,&lv_font_montserrat_16);
+    label(w->card,display,0xA8B2B8,&mira_font_fr_16);
 }
 
 static bool current_night_period(void); // implementation below
@@ -926,20 +927,20 @@ static void night_auto_changed(lv_event_t *event){
 }
 static void settings(void){
     lv_obj_t *head=card(3,640,40);
-    lv_obj_t *h=label(head,"Paramètres",0xF3F6F7,&lv_font_montserrat_16);
+    lv_obj_t *h=label(head,"Paramètres",0xF3F6F7,&mira_font_fr_16);
     lv_obj_center(h);
     lv_obj_t *display=card(3,640,130);
     make_flex(display,LV_FLEX_FLOW_COLUMN,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_START);
-    label(display,"Affichage",0x22BEEA,&lv_font_montserrat_16);
-    label(display,"Luminosité écran",0xF3F6F7,&lv_font_montserrat_16);
+    label(display,"Affichage",0x22BEEA,&mira_font_fr_16);
+    label(display,"Luminosité écran",0xF3F6F7,&mira_font_fr_16);
     lv_obj_t *sl=lv_slider_create(display);
     lv_obj_set_size(sl,600,14);
     lv_slider_set_range(sl,30,255);
     lv_slider_set_value(sl,desired_awake_brightness(),LV_ANIM_OFF);
     lv_obj_add_event_cb(sl,brightness_release,LV_EVENT_RELEASED,NULL);
-    label(display,"Thème : Mira",0xA8B2B8,&lv_font_montserrat_16);
+    label(display,"Thème : Mira",0xA8B2B8,&mira_font_fr_16);
     lv_obj_t *schedule=card(3,640,106);
-    label(schedule,"Luminosité automatique jour / nuit",0x22BEEA,&lv_font_montserrat_16);
+    label(schedule,"Luminosité automatique jour / nuit",0x22BEEA,&mira_font_fr_16);
     lv_obj_t *auto_switch=lv_switch_create(schedule);
     lv_obj_set_pos(auto_switch,550,12);
     if(night_auto_enabled)lv_obj_add_state(auto_switch,LV_STATE_CHECKED);
@@ -951,15 +952,15 @@ static void settings(void){
                  night_end_minute/60,night_end_minute%60,
                  (unsigned)day_brightness_percent,(unsigned)night_brightness_percent);
     }else snprintf(period,sizeof(period),"Horaires à configurer dans les paramètres Mira");
-    lv_obj_t *period_label=label(schedule,period,0xA8B2B8,&lv_font_montserrat_14);
+    lv_obj_t *period_label=label(schedule,period,0xA8B2B8,&mira_font_fr_14);
     lv_obj_set_pos(period_label,12,49);
     lv_obj_t *n=card(3,640,72);
-    label(n,"Navigation",0x22BEEA,&lv_font_montserrat_16);
-    label(n,"Retour accueil : 60 s",0xF3F6F7,&lv_font_montserrat_16);
+    label(n,"Navigation",0x22BEEA,&mira_font_fr_16);
+    label(n,"Retour accueil : 60 s",0xF3F6F7,&mira_font_fr_16);
     lv_obj_t *sleep=card(3,640,214);
-    lv_obj_t *shead=label(sleep,"Veille",0x22BEEA,&lv_font_montserrat_16);
+    lv_obj_t *shead=label(sleep,"Veille",0x22BEEA,&mira_font_fr_16);
     lv_obj_set_pos(shead,12,6);
-    lv_obj_t *delay_title=label(sleep,"Délai de veille (0 = désactivée)",0xF3F6F7,&lv_font_montserrat_16);
+    lv_obj_t *delay_title=label(sleep,"Délai de veille (0 = désactivée)",0xF3F6F7,&mira_font_fr_16);
     lv_obj_set_pos(delay_title,12,38);
     lv_obj_t *delay=lv_slider_create(sleep);
     lv_obj_set_size(delay,575,14);
@@ -967,7 +968,7 @@ static void settings(void){
     lv_slider_set_range(delay,0,86400);
     lv_slider_set_value(delay,sleep_timeout_seconds,LV_ANIM_OFF);
     lv_obj_add_event_cb(delay,sleep_delay_changed,LV_EVENT_RELEASED,NULL);
-    lv_obj_t *light_title=label(sleep,"Luminosité en veille (%)",0xF3F6F7,&lv_font_montserrat_16);
+    lv_obj_t *light_title=label(sleep,"Luminosité en veille (%)",0xF3F6F7,&mira_font_fr_16);
     lv_obj_set_pos(light_title,12,104);
     lv_obj_t *dim=lv_slider_create(sleep);
     lv_obj_set_size(dim,575,14);
@@ -975,7 +976,7 @@ static void settings(void){
     lv_slider_set_range(dim,0,100);
     lv_slider_set_value(dim,sleep_brightness_percent,LV_ANIM_OFF);
     lv_obj_add_event_cb(dim,sleep_light_changed,LV_EVENT_RELEASED,NULL);
-    lv_obj_t *clock_label=label(sleep,"Horloge en veille",0xF3F6F7,&lv_font_montserrat_16);
+    lv_obj_t *clock_label=label(sleep,"Horloge en veille",0xF3F6F7,&mira_font_fr_16);
     lv_obj_set_pos(clock_label,12,169);
     lv_obj_t *clock_switch=lv_switch_create(sleep);
     lv_obj_set_pos(clock_switch,545,163);
@@ -1067,7 +1068,7 @@ static void create_picker(void){
     lv_obj_t *c=lv_obj_create(page_picker);
     lv_obj_set_size(c,460,376);
     panel_style(c,true);lv_obj_center(c);no_scroll(c);
-    lv_obj_t *t=label(c,"Toutes les pages",0xF3F6F7,&lv_font_montserrat_16);
+    lv_obj_t *t=label(c,"Toutes les pages",0xF3F6F7,&mira_font_fr_16);
     lv_obj_align(t,LV_ALIGN_TOP_MID,0,12);
     for(int j=0;j<6;j++){
         int p=page_order[j];
@@ -1075,7 +1076,7 @@ static void create_picker(void){
         lv_obj_set_size(bt,420,43);
         lv_obj_set_pos(bt,10,38+j*54);
         panel_style(bt,false);
-        lv_obj_t *l=label(bt,page_names[p],0xF3F6F7,&lv_font_montserrat_16);
+        lv_obj_t *l=label(bt,page_names[p],0xF3F6F7,&mira_font_fr_16);
         lv_obj_center(l);
         lv_obj_add_event_cb(bt,nav_click,LV_EVENT_CLICKED,(void *)(intptr_t)p);
     }
@@ -1204,7 +1205,7 @@ void mira_full_ui_create(lv_display_t *disp){
         lv_obj_set_style_shadow_width(bt,0,0);
         lv_obj_add_event_cb(bt,nav_click,LV_EVENT_CLICKED,(void *)(intptr_t)fav[i]);
         if(i==0) {
-            lv_obj_t *l=label(bt,LV_SYMBOL_HOME,0x22BEEA,&lv_font_montserrat_16);
+            lv_obj_t *l=label(bt,LV_SYMBOL_HOME,0x22BEEA,&mira_font_fr_16);
             lv_obj_center(l);
         } else if(i==1) mira_nav_bulb(bt);
         else if(i==2) mira_nav_thermometer(bt);
@@ -1225,13 +1226,13 @@ void mira_full_ui_create(lv_display_t *disp){
     sleep_clock_text=label(sleep_overlay,"--:--",0xffffff,&lv_font_montserrat_48);
     lv_obj_center(sleep_clock_text);
     lv_obj_add_flag(sleep_overlay,LV_OBJ_FLAG_HIDDEN);
-    feedback=label(screen,"APERÇU IDF : interactions locales (Jeedom non connecté)",0xA8B2B8,&lv_font_montserrat_12);
+    feedback=label(screen,"APERÇU IDF : interactions locales (Jeedom non connecté)",0xA8B2B8,&mira_font_fr_12);
     lv_obj_set_pos(feedback,6,CONTENT_H-17);
     lv_obj_add_flag(feedback,LV_OBJ_FLAG_HIDDEN); // avoid covering real UI
 
     // Diagnostic banner, always visible on the device, including an empty Mira.
     // Does not depend on an imported miralvgl.json or functioning navigation.
-    touch_diag_label=label(screen,"GT911: lecture...",0xDCEAF0,&lv_font_montserrat_12);
+    touch_diag_label=label(screen,"GT911: lecture...",0xDCEAF0,&mira_font_fr_12);
     lv_obj_set_pos(touch_diag_label,10,4);
     lv_obj_set_width(touch_diag_label,625);
     no_scroll(touch_diag_label);
@@ -1245,7 +1246,7 @@ void mira_full_ui_create(lv_display_t *disp){
     lv_obj_set_style_shadow_width(touch_diag_button,0,0);
     lv_obj_add_event_cb(touch_diag_button,mira_touch_diagnostic_pressed,LV_EVENT_PRESSED,NULL);
     lv_obj_add_event_cb(touch_diag_button,nav_click,LV_EVENT_CLICKED,(void *)(intptr_t)3);
-    lv_obj_t *btn_caption=label(touch_diag_button,"Paramètres",0xF3F6F7,&lv_font_montserrat_16);
+    lv_obj_t *btn_caption=label(touch_diag_button,"Paramètres",0xF3F6F7,&mira_font_fr_16);
     lv_obj_center(btn_caption);
     // Keep diagnostics available through /perf and logs without overlaying
     // actual Mira programming. The test button is no longer a UI shortcut.
