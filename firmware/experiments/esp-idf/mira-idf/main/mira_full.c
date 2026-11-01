@@ -423,7 +423,8 @@ void mira_full_ui_create(lv_display_t *disp){
     lv_obj_set_style_border_width(screen,0,0);
     lv_obj_set_style_pad_all(screen,0,0);
     no_scroll(screen);
-    lv_display_load_scr(disp,screen);
+    lv_display_set_default(disp);
+    lv_screen_load(screen);
     for(int i=0;i<6;i++){
         pages[i]=lv_obj_create(screen);
         lv_obj_set_size(pages[i],800,CONTENT_H);
