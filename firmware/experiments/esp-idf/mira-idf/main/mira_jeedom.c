@@ -1025,7 +1025,35 @@ static void import_legacy_sleep_settings(const cJSON *params){
             uint8_t old=0;
             if(nvs_get_u8(nv,"sleep_clock",&old)==ESP_ERR_NVS_NOT_FOUND &&
                nvs_set_u8(nv,"sleep_clock",(uint8_t)number)==ESP_OK)changed++;
+        }else if(!strcmp(key,"DISPLAY_Jour")&&number>=1&&number<=100){
+            uint8_t old=0;
+            if(nvs_get_u8(nv,"day_pct",&old)==ESP_ERR_NVS_NOT_FOUND &&
+               nvs_set_u8(nv,"day_pct",(uint8_t)number)==ESP_OK)changed++;
+        }else if(!strcmp(key,"DISPLAY_Nuit")&&number>=1&&number<=100){
+            uint8_t old=0;
+            if(nvs_get_u8(nv,"night_pct",&old)==ESP_ERR_NVS_NOT_FOUND &&
+               nvs_set_u8(nv,"night_pct",(uint8_t)number)==ESP_OK)changed++;
+        }else if(!strcmp(key,"DISPLAY_NuitAuto")&&(number==0||number==1)){
+            uint8_t old=0;
+            if(nvs_get_u8(nv,"night_auto",&old)==ESP_ERR_NVS_NOT_FOUND &&
+               nvs_set_u8(nv,"night_auto",(uint8_t)number)==ESP_OK)changed++;
         }
+    }
+    // Import time strings separately: they are HH:MM, not integers.
+    cJSON_ArrayForEach(item,params){
+        const char *key=jstr((cJSON*)item,"param","");
+        const char *value=jstr((cJSON*)item,"value","");
+        const char *target=!strcmp(key,"DISPLAY_DebutNuit")?"night_start":
+                           !strcmp(key,"DISPLAY_FinNuit")?"night_end":NULL;
+        if(!target||strlen(value)!=5||value[2]!=':')continue;
+        int hours=-1,minutes=-1;
+        if(sscanf(value,"%2d:%2d",&hours,&minutes)!=2||
+           hours<0||hours>23||minutes<0||minutes>59)continue;
+        char normalized[6];
+        snprintf(normalized,sizeof(normalized),"%02d:%02d",hours,minutes);
+        char current[8]={0};size_t size=sizeof(current);
+        if(nvs_get_str(nv,target,current,&size)==ESP_ERR_NVS_NOT_FOUND &&
+           nvs_set_str(nv,target,normalized)==ESP_OK)changed++;
     }
     if(changed&&nvs_commit(nv)==ESP_OK)
         ESP_LOGI(TAG,"Legacy Mira sleep settings imported: %d",changed);
