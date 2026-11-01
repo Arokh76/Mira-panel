@@ -542,6 +542,7 @@ void MiraPanelUI::touchRead(lv_indev_drv_t* indev, lv_indev_data_t* data) {
     // just after REL must still know this was a scrolling gesture.
   }
 }
+#endif // native LVGL9 uses the GT911 driver's indev, not Arduino touchRead
 
 void MiraPanelUI::setMqtt(MiraMqtt* mqtt) {
   _mqtt = mqtt;
@@ -1014,7 +1015,6 @@ void MiraPanelUI::begin() {
 #endif
 }
 
-#endif // GT911 has its own native LVGL9 indev.
 MiraPanelUI::EventContext* MiraPanelUI::makeContext(uint8_t bindingIndex, int8_t itemIndex) {
   if (_eventCtxCount >= MAX_EVENT_CONTEXTS) return nullptr;
   EventContext& c = _eventCtx[_eventCtxCount++];
