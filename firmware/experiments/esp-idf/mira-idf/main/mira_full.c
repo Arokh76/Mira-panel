@@ -41,6 +41,11 @@ typedef struct { char name[96]; char value[160]; } mira_state_update_t;
 static QueueHandle_t state_queue;
 static bool suppress_events;
 static uint8_t display_brightness_raw=220;
+static uint8_t day_brightness_percent=85,night_brightness_percent=20;
+static bool night_auto_enabled;
+static int night_start_minute=-1,night_end_minute=-1;
+static uint8_t applied_brightness_raw;
+
 static uint16_t sleep_timeout_seconds=120;
 static uint8_t sleep_brightness_percent=8;
 static bool sleep_clock_enabled=true,display_sleeping;
@@ -775,6 +780,39 @@ static uint8_t raw_from_percent(uint8_t percentage){
     if(percentage>100)percentage=100;
     return (uint8_t)(30u+(((uint32_t)percentage-1u)*225u+49u)/99u);
 }
+static int parse_beta_clock(const char *value){
+    if(!value||strlen(value)!=5||value[2]!=':')return -1;
+    for(int i=0;i<5;i++)if(i!=2&&(value[i]<'0'||value[i]>'9'))return -1;
+    int hour=(value[0]-'0')*10+(value[1]-'0');
+    int minute=(value[3]-'0')*10+(value[4]-'0');
+    return hour<24&&minute<60?hour*60+minute:-1;
+}
+static bool current_night_period(void){
+    if(!night_auto_enabled||night_start_minute<0||night_end_minute<0||
+       night_start_minute==night_end_minute)return false;
+    time_t now=time(NULL);
+    if(now<1700000000)return false; // No reliable clock before SNTP.
+    struct tm tmv;
+    if(!localtime_r(&now,&tmv))return false;
+    const int minute=tmv.tm_hour*60+tmv.tm_min;
+    if(night_start_minute>night_end_minute)
+        return minute>=night_start_minute||minute<night_end_minute;
+    return minute>=night_start_minute&&minute<night_end_minute;
+}
+static uint8_t desired_awake_brightness(void){
+    if(!night_auto_enabled||night_start_minute<0||night_end_minute<0||
+       night_start_minute==night_end_minute)return display_brightness_raw;
+    time_t now=time(NULL);
+    if(now<1700000000)return display_brightness_raw;
+    return raw_from_percent(current_night_period()?night_brightness_percent:
+                                                day_brightness_percent);
+}
+static void apply_auto_brightness(void){
+    if(display_sleeping)return;
+    const uint8_t wanted=desired_awake_brightness();
+    if(wanted==applied_brightness_raw)return;
+    if(mira_display_set_brightness(wanted)==ESP_OK)applied_brightness_raw=wanted;
+}
 static void display_enter_sleep(void){
     if(display_sleeping)return;
     const uint8_t raw=sleep_clock_enabled?raw_from_percent(sleep_brightness_percent):0;
@@ -784,6 +822,7 @@ static void display_enter_sleep(void){
         return;
     }
     display_sleeping=true;
+    applied_brightness_raw=raw;
     camera_close();
     if(sleep_overlay && sleep_clock_enabled && raw>0)
         lv_obj_remove_flag(sleep_overlay,LV_OBJ_FLAG_HIDDEN);
@@ -794,7 +833,8 @@ static void display_wake(void){
     if(!display_sleeping)return;
     display_sleeping=false;
     if(sleep_overlay)lv_obj_add_flag(sleep_overlay,LV_OBJ_FLAG_HIDDEN);
-    ESP_ERROR_CHECK_WITHOUT_ABORT(mira_display_set_brightness(display_brightness_raw));
+    applied_brightness_raw=desired_awake_brightness();
+    ESP_ERROR_CHECK_WITHOUT_ABORT(mira_display_set_brightness(applied_brightness_raw));
     ESP_LOGI(TAG,"Mira display awakened by physical GT911 touch");
 }
 
@@ -985,9 +1025,24 @@ void mira_full_ui_create(lv_display_t *disp){
         uint8_t clock=1;
         if(nvs_get_u8(ui_nvs,"sleep_clock",&clock)==ESP_OK)
             sleep_clock_enabled=clock!=0;
+        uint8_t day=85,night=20,auto_mode=0;
+        if(nvs_get_u8(ui_nvs,"day_pct",&day)==ESP_OK&&day>=1&&day<=100)
+            day_brightness_percent=day;
+        if(nvs_get_u8(ui_nvs,"night_pct",&night)==ESP_OK&&night>=1&&night<=100)
+            night_brightness_percent=night;
+        if(nvs_get_u8(ui_nvs,"night_auto",&auto_mode)==ESP_OK)
+            night_auto_enabled=auto_mode!=0;
+        char clock_time[8]={0};
+        size_t clock_size=sizeof(clock_time);
+        if(nvs_get_str(ui_nvs,"night_start",clock_time,&clock_size)==ESP_OK)
+            night_start_minute=parse_beta_clock(clock_time);
+        clock_size=sizeof(clock_time);
+        if(nvs_get_str(ui_nvs,"night_end",clock_time,&clock_size)==ESP_OK)
+            night_end_minute=parse_beta_clock(clock_time);
         nvs_close(ui_nvs);
     }
-    ESP_ERROR_CHECK_WITHOUT_ABORT(mira_display_set_brightness(display_brightness_raw));
+    applied_brightness_raw=display_brightness_raw;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(mira_display_set_brightness(applied_brightness_raw));
     screen=lv_obj_create(NULL);
     lv_obj_set_size(screen,800,480);
     lv_obj_set_style_bg_color(screen,bg_c(),0);
@@ -1334,6 +1389,7 @@ void mira_full_ui_tick(void){
     uint32_t ms=lv_tick_get();
     if(ms-last_clock_ms>2000){
         last_clock_ms=ms;
+        apply_auto_brightness();
         time_t now=time(NULL);
         if(now>1700000000){
             struct tm tmv;localtime_r(&now,&tmv);
