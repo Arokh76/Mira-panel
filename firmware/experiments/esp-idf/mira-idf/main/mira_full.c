@@ -1642,9 +1642,20 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                 continue; // This is information, never a setpoint command.
             }
             if(!strcmp(mode_name,msg->name)&&w->thermostat_mode){
-                char text[185];
-                snprintf(text,sizeof(text),"%.150s",msg->value);
-                lv_label_set_text(w->thermostat_mode,text);
+                const char *selected_text=msg->value;
+                char selected_option[96]={0};
+                if(w->thermostat_mode_select){
+                    char *end=NULL;
+                    const long choice=strtol(msg->value,&end,10);
+                    if(*msg->value&&end&&!*end&&choice>=0&&
+                       (uint32_t)choice<lv_dropdown_get_option_count(w->thermostat_mode_select)){
+                        lv_dropdown_set_selected(w->thermostat_mode_select,(uint32_t)choice);
+                        lv_dropdown_get_selected_str(w->thermostat_mode_select,
+                                                     selected_option,sizeof(selected_option));
+                        selected_text=selected_option;
+                    }
+                }
+                lv_label_set_text(w->thermostat_mode,selected_text);
                 if(w->thermostat_mode_select){
                     const char *opts=lv_dropdown_get_options(w->thermostat_mode_select);
                     if(opts){
@@ -1653,7 +1664,7 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                         while(*start){
                             const char *end=strchr(start,'\n');
                             size_t length=end?(size_t)(end-start):strlen(start);
-                            if(length==strlen(msg->value)&&!strncmp(start,msg->value,length)){
+                            if(length==strlen(selected_text)&&!strncasecmp(start,selected_text,length)){
                                 suppress_events=true;
                                 lv_dropdown_set_selected(w->thermostat_mode_select,index);
                                 suppress_events=false;
@@ -1758,6 +1769,7 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
         suppress_events=true;
         if(w->control && !strcmp(w->type,"toggle")){
             bool on=!strcasecmp(msg->value,"on")||!strcasecmp(msg->value,"true")||
+                    !strcasecmp(msg->value,"oui")||!strcasecmp(msg->value,"actif")||
                     !strcmp(msg->value,"1");
             if(on)lv_obj_add_state(w->control,LV_STATE_CHECKED);
             else lv_obj_remove_state(w->control,LV_STATE_CHECKED);
@@ -1782,7 +1794,7 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                 while(*start){
                     const char *end=strchr(start,'\n');
                     size_t length=end?(size_t)(end-start):strlen(start);
-                    if(strlen(msg->value)==length&&!strncmp(start,msg->value,length)){
+                    if(strlen(msg->value)==length&&!strncasecmp(start,msg->value,length)){
                         lv_dropdown_set_selected(w->control,index);
                         break;
                     }
