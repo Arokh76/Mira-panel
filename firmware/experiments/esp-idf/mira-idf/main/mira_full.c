@@ -822,20 +822,20 @@ static void build_config(void){
     // A damaged/incomplete SPIFFS read must not blank a running panel.
     FILE *f=spiffs_ready?fopen(JSON_PATH,"rb"):NULL;
     if(!f){
-        empty_notice("Mira LVGL 9.6 : configuration non trouvée.\n"
+        if(widget_n==0)empty_notice("Mira LVGL 9.6 : configuration non trouvée.\n"
                      "Importer le vrai miralvgl.json via 192.168.4.1/mira");
         ESP_LOGW(TAG,"Mira 0.7.37 JSON absent, import via /mira");
         show_page(0);return;
     }
-    if(fseek(f,0,SEEK_END)!=0){fclose(f);empty_notice("Erreur de lecture JSON Mira");return;}
+    if(fseek(f,0,SEEK_END)!=0){fclose(f);if(!widget_n)empty_notice("Erreur de lecture JSON Mira");return;}
     long len=ftell(f);rewind(f);
-    if(len<=0||len>JSON_MAX){fclose(f);empty_notice("JSON Mira trop grand ou vide");return;}
+    if(len<=0||len>JSON_MAX){fclose(f);if(!widget_n)empty_notice("JSON Mira trop grand ou vide");return;}
     char *buf=malloc((size_t)len+1);
-    if(!buf){fclose(f);empty_notice("Mémoire insuffisante pour JSON Mira");return;}
+    if(!buf){fclose(f);if(!widget_n)empty_notice("Mémoire insuffisante pour JSON Mira");return;}
     size_t n=fread(buf,1,(size_t)len,f);fclose(f);
     if(n!=(size_t)len){
         free(buf);
-        empty_notice("Lecture incomplète de la configuration Mira");
+        if(!widget_n)empty_notice("Lecture incomplète de la configuration Mira");
         ESP_LOGE(TAG,"Incomplete Mira JSON read: %u of %ld bytes",(unsigned)n,len);
         return;
     }
@@ -843,7 +843,7 @@ static void build_config(void){
     cJSON *root=cJSON_ParseWithLength(buf,n);free(buf);
     cJSON *array=root?cJSON_GetObjectItemCaseSensitive(root,"lvgl"):NULL;
     if(!cJSON_IsArray(array)){
-        empty_notice("Le JSON Mira ne contient pas de tableau lvgl");
+        if(!widget_n)empty_notice("Le JSON Mira ne contient pas de tableau lvgl");
         if(root)cJSON_Delete(root);
         ESP_LOGE(TAG,"Invalid Mira JSON: expected lvgl array; existing SPIFFS left unchanged");
         return;
