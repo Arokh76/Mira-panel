@@ -208,7 +208,7 @@ static void event_local(lv_event_t *e){
             char txt[192];snprintf(txt,sizeof(txt),"%s %s",b->value,b->unit);
             lv_label_set_text(b->value_label,txt);
         }
-    }else if(!strcmp(b->type,"list")){
+    }else if(!strcmp(b->type,"list")||!strcmp(b->type,"listbutton")){
         uint16_t n=lv_dropdown_get_selected(src);
         lv_dropdown_get_selected_str(src,b->value,sizeof(b->value));
         (void)n;
