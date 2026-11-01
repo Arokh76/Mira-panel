@@ -1,3 +1,4 @@
+#include "mira_full.h"
 // Isolated IDF test recovery AP. Uses raw .bin POST, not multipart/form-data.
 // Partition layout must match Mira's current Waveshare OTA partition layout.
 #include <stdio.h>
@@ -277,7 +278,7 @@ esp_err_t mira_recovery_init(void) {
     ESP_RETURN_ON_ERROR(esp_wifi_init(&init), TAG, "wifi init");
     wifi_config_t ap = {
         .ap = {
-            .ssid = "Mira-IDF-Test",
+            .ssid = "Mira-LVGL96-43",
             .ssid_len = 0,
             .password = "MiraIDF2026",
             .channel = 6,
@@ -294,7 +295,7 @@ esp_err_t mira_recovery_init(void) {
     // 9 routes are registered below; ESP-IDF defaults to 8 URI handlers.
     // Exceeding that limit used to abort app_main() before LCD init, causing
     // a black screen + Wi-Fi reboot loop (ESP_ERR_HTTPD_HANDLERS_FULL).
-    conf.max_uri_handlers = 16;
+    conf.max_uri_handlers = 20;
     conf.stack_size = 6144;
     conf.recv_wait_timeout = 15;
     ESP_LOGI(TAG, "HTTP URI capacity=%u, registered routes=9",
@@ -320,6 +321,7 @@ esp_err_t mira_recovery_init(void) {
     register_optional_route(httpd, &shadow_off);
     register_optional_route(httpd, &shadow_light);
     register_optional_route(httpd, &shadow_relief);
+    mira_full_register_http(httpd); // optional 0.7.37 SPIFFS config and upload
     ESP_LOGW(TAG, "Recovery AP Mira-IDF-Test password MiraIDF2026 at http://192.168.4.1");
     return ESP_OK;
 }
