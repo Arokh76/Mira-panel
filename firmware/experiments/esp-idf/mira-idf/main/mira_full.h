@@ -11,4 +11,6 @@ void mira_full_register_http(httpd_handle_t server);
 uint32_t mira_full_widget_count(void);
 // Network tasks may only queue passive states, never touch LVGL directly.
 void mira_full_request_reload(void);
+// HTTP settings handlers only signal; LVGL tree and backlight change on UI task.
+void mira_full_request_settings_reload(void);
 bool mira_full_enqueue_state(const char *name,const char *value);
