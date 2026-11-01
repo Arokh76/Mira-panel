@@ -13,6 +13,7 @@
 #include <time.h>
 #include <math.h>
 #include <errno.h>
+#include <ctype.h>
 #include "esp_log.h"
 #include "esp_spiffs.h"
 #include "esp_heap_caps.h"
@@ -368,6 +369,40 @@ static int clamp(int a,int lo,int hi){return a<lo?lo:(a>hi?hi:a);}
 // Passive playback-device list updates and currently selected speaker
 // are independent. A device Info is never a command.
 // Mode commands use the legacy <thermostat>__mode list identity.
+// Keep the same choice syntax and MAX_LIST_ITEMS=12 behavior as the
+// Arduino beta, including literal \\n separators and trimmed labels.
+static void beta_dropdown_options(const char *source,char *out,size_t capacity){
+    if(!capacity)return;
+    size_t used=0,letters=0;
+    unsigned count=0;
+    char option[192]={0};
+    const unsigned char *p=(const unsigned char *)(source?source:"");
+    for(;;){
+        bool separator=!*p||*p=='|'||*p=='\n';
+        if(*p=='\\'&&p[1]=='n'){separator=true;p++;}
+        if(!separator){
+            if(letters+1<sizeof(option))option[letters++]=(char)*p;
+            p++;
+            continue;
+        }
+        option[letters]=0;
+        char *first=option;
+        while(*first&&isspace((unsigned char)*first))first++;
+        char *end=first+strlen(first);
+        while(end>first&&isspace((unsigned char)end[-1]))*--end=0;
+        const size_t len=strlen(first);
+        if(len&&count<12&&used+len+(count?1u:0u)<capacity){
+            if(count)out[used++]='\n';
+            memcpy(out+used,first,len);
+            used+=len;
+            count++;
+        }
+        letters=0;
+        if(!*p||count==12)break;
+        p++;
+    }
+    out[used]=0;
+}
 static void thermostat_mode_selected(lv_event_t *event){
     if(suppress_events||display_sleeping)return;
     mira_widget_t *w=(mira_widget_t*)lv_event_get_user_data(event);
@@ -376,6 +411,7 @@ static void thermostat_mode_selected(lv_event_t *event){
     snprintf(name,sizeof(name),"%.95s__mode",w->name);
     lv_dropdown_get_selected_str(w->thermostat_mode_select,value,sizeof(value));
     if(strlen(name)>=96||!value[0])return;
+    if(w->thermostat_mode)lv_label_set_text(w->thermostat_mode,value);
     if(mira_jeedom_actions_enabled())
         (void)mira_jeedom_queue_local_action(name,"list",value);
     else
@@ -780,10 +816,11 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
                 lv_obj_set_pos(w->thermostat_mode_select,387,294);
                 lv_dropdown_set_dir(w->thermostat_mode_select,LV_DIR_TOP);
                 lv_obj_set_style_text_font(w->thermostat_mode_select,&mira_font_fr_16,0);
-                char modes[192];
-                snprintf(modes,sizeof(modes),"%s",str(o,"modes","Confort|Éco|Hors gel|Arrêt"));
-                for(char *p=modes;*p;p++)if(*p=='|')*p='\n';
-                lv_dropdown_set_options(w->thermostat_mode_select,modes);
+                char modes[256];
+                beta_dropdown_options(str(o,"modes","Confort|Éco|Hors gel|Arrêt"),
+                                      modes,sizeof(modes));
+                lv_dropdown_set_options(w->thermostat_mode_select,
+                                        *modes?modes:"Confort");
                 lv_obj_add_event_cb(w->thermostat_mode_select,thermostat_mode_selected,
                                     LV_EVENT_VALUE_CHANGED,w);
             }
@@ -871,8 +908,8 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         label(w->card,display,0xF3F6F7,&mira_font_fr_16);
         w->control=lv_dropdown_create(w->card);
         lv_obj_set_size(w->control,340,44);
-        char options[512];snprintf(options,sizeof(options),"%s",w->value);
-        for(char *p=options;*p;p++)if(*p=='|')*p='\n';
+        char options[512];
+        beta_dropdown_options(w->value,options,sizeof(options));
         lv_dropdown_set_options(w->control,*options?options:"--");
         lv_obj_align(w->control,LV_ALIGN_BOTTOM_MID,0,-4);
         lv_obj_add_event_cb(w->control,event_local,LV_EVENT_VALUE_CHANGED,w);
