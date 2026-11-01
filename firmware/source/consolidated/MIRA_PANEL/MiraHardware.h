@@ -1,7 +1,10 @@
 #pragma once
 #include "MiraDisplayProfile.h"
 
-#if defined(MIRA_TARGET_WAVESHARE_43C)
+#if defined(MIRA_TARGET_WAVESHARE_43C) && defined(MIRA_LVGL9_NATIVE)
+  #include "MiraNative43CDisplay.h"
+  using MiraDisplay = MiraNative43CDisplay;
+#elif defined(MIRA_TARGET_WAVESHARE_43C)
   #include "Waveshare43CDisplay.h"
   using MiraDisplay = Waveshare43CDisplay;
 #elif defined(MIRA_TARGET_NEXTION_28)
