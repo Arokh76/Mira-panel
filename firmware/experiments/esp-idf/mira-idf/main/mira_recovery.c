@@ -12,6 +12,7 @@
 #include "mira_legacy_cipher.h"
 #include "mira_display.h"
 #include "nvs_flash.h"
+#include "nvs.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
 #include "lwip/ip4_addr.h"
@@ -425,10 +426,11 @@ static esp_err_t wifi_profile_post(httpd_req_t *req){
     return httpd_resp_sendstr(req,"{\"saved\":true,\"joining\":true}");
 }
 
-// Read the newest saved Arduino beta network entry when IDF Wi-Fi NVS has
-// no station profile yet. Fixed-IP profiles are not silently converted to
-// DHCP: provisioning remains available via the recovery AP in that case.
-static bool restore_legacy_dhcp_wifi(void){
+// Import the newest Mira beta network entry without modifying reseau.json.
+// Only migrate the station password when the IDF network has no credentials.
+// On later boots the saved migration marker allows reapplying the static
+// mode while an explicitly configured IDF station remains authoritative.
+static bool restore_legacy_wifi_profile(bool import_station){
     FILE *fp=fopen("/spiffs/reseau.json","rb");
     if(!fp)return false;
     if(fseek(fp,0,SEEK_END)!=0){fclose(fp);return false;}
@@ -452,14 +454,12 @@ static bool restore_legacy_dhcp_wifi(void){
     const cJSON *ip=entry?cJSON_GetObjectItemCaseSensitive(entry,"ip"):NULL;
     const char *mode_text=cJSON_IsString(mode)?mode->valuestring:"";
     const char *ip_text=cJSON_IsString(ip)?ip->valuestring:"";
-    bool dhcp=!strcmp(mode_text,"auto") ||
+    const bool dhcp=!strcmp(mode_text,"auto") ||
               (!mode_text[0]&&(!ip_text[0]||!strcmp(ip_text,"Auto")||
                                !strcmp(ip_text,"null")));
-    bool restored=false;
-    if(entry && !dhcp){
-        ESP_LOGW(TAG,"Legacy static-IP Wi-Fi profile preserved; use recovery AP to provision IDF network");
-    }else if(dhcp&&cJSON_IsString(ssid)&&ssid->valuestring&&
-             cJSON_IsString(pass)&&pass->valuestring){
+    bool restored=!import_station;
+    if(import_station&&entry&&cJSON_IsString(ssid)&&ssid->valuestring&&
+       cJSON_IsString(pass)&&pass->valuestring){
         const size_t ssid_len=strlen(ssid->valuestring);
         char password[256]={0};
         if(ssid_len>0&&ssid_len<=32 &&
@@ -470,10 +470,44 @@ static bool restore_legacy_dhcp_wifi(void){
             memcpy(config.sta.password,password,strlen(password));
             if(esp_wifi_set_config(WIFI_IF_STA,&config)==ESP_OK){
                 restored=true;
-                ESP_LOGI(TAG,"Legacy Mira DHCP Wi-Fi station imported (credentials omitted from logs)");
+                ESP_LOGI(TAG,"Legacy Mira station profile imported (no credentials logged)");
             }
         }
         memset(password,0,sizeof(password));
+    }
+    if(restored && !dhcp && entry) {
+        if(!strcmp(mode_text,"manual")){
+            esp_ip4_addr_t ip_addr={0},gw={0},mask={0},dns={0},backup={0};
+            const cJSON *gateway=cJSON_GetObjectItemCaseSensitive(entry,"gateway");
+            const cJSON *netmask=cJSON_GetObjectItemCaseSensitive(entry,"mask");
+            const cJSON *dns1=cJSON_GetObjectItemCaseSensitive(entry,"dns1");
+            const cJSON *dns2=cJSON_GetObjectItemCaseSensitive(entry,"dns2");
+            bool valid=legacy_parse_ipv4(ip_text,&ip_addr)&&
+                cJSON_IsString(gateway)&&legacy_parse_ipv4(gateway->valuestring,&gw)&&
+                cJSON_IsString(netmask)&&legacy_parse_ipv4(netmask->valuestring,&mask)&&
+                cJSON_IsString(dns1)&&legacy_parse_ipv4(dns1->valuestring,&dns)&&
+                legacy_mask_valid(mask)&&legacy_same_subnet(ip_addr,gw,mask)&&
+                ip_addr.addr!=gw.addr;
+            if(valid&&cJSON_IsString(dns2)&&dns2->valuestring&&dns2->valuestring[0])
+                valid=legacy_parse_ipv4(dns2->valuestring,&backup);
+            const uint32_t host=ip_addr.addr&~mask.addr;
+            if(valid&&host!=0&&host!=~mask.addr){
+                legacy_manual_ip.ip=ip_addr;
+                legacy_manual_ip.gw=gw;
+                legacy_manual_ip.netmask=mask;
+                memset(legacy_manual_dns,0,sizeof(legacy_manual_dns));
+                legacy_manual_dns[0].ip.type=ESP_IPADDR_TYPE_V4;
+                legacy_manual_dns[0].ip.u_addr.ip4.addr=dns.addr;
+                legacy_manual_dns[1].ip.type=ESP_IPADDR_TYPE_V4;
+                legacy_manual_dns[1].ip.u_addr.ip4.addr=backup.addr;
+                legacy_ip_mode=PROFILE_MANUAL;
+            }else ESP_LOGW(TAG,"Invalid legacy manual IP profile; retaining DHCP");
+        }else if(!strcmp(mode_text,"fixed_auto")||
+                 (!mode_text[0]&&ip_text[0]&&strcmp(ip_text,"Auto")&&strcmp(ip_text,"null"))){
+            if(legacy_parse_ipv4(ip_text,&legacy_requested_ip))
+                legacy_ip_mode=PROFILE_FIXED_AUTO;
+            else ESP_LOGW(TAG,"Invalid legacy fixed_auto address; retaining DHCP");
+        }
     }
     if(root)cJSON_Delete(root);
     return restored;
@@ -523,13 +557,27 @@ esp_err_t mira_recovery_init(void) {
         ESP_LOGW(TAG,"Recovery AP supervisor unavailable; AP remains enabled");
     wifi_config_t saved_sta={0};
     bool have_sta=esp_wifi_get_config(WIFI_IF_STA,&saved_sta)==ESP_OK&&saved_sta.sta.ssid[0];
-    if(!have_sta){
-        (void)restore_legacy_dhcp_wifi();
+    nvs_handle_t profile_nv;
+    uint8_t legacy_saved=0;
+    if(nvs_open("mira_idf_net",NVS_READONLY,&profile_nv)==ESP_OK){
+        (void)nvs_get_u8(profile_nv,"legacy_wifi",&legacy_saved);
+        nvs_close(profile_nv);
+    }
+    if(!have_sta || legacy_saved){
+        bool imported=restore_legacy_wifi_profile(!have_sta);
+        if(imported&&!have_sta){
+            if(nvs_open("mira_idf_net",NVS_READWRITE,&profile_nv)==ESP_OK){
+                if(nvs_set_u8(profile_nv,"legacy_wifi",1)==ESP_OK)
+                    (void)nvs_commit(profile_nv);
+                nvs_close(profile_nv);
+            }
+        }
         memset(&saved_sta,0,sizeof(saved_sta));
         have_sta=esp_wifi_get_config(WIFI_IF_STA,&saved_sta)==ESP_OK&&saved_sta.sta.ssid[0];
     }
     if(have_sta){
         station_configured=true;
+        legacy_apply_manual_ip();
         ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_connect());
     }
 
