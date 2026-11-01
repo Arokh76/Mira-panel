@@ -734,7 +734,7 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
             }else label(w->card,display,0xF3F6F7,&mira_font_fr_16);
             if(thermostat){
                 lv_obj_t *plate=lv_obj_create(w->card);
-                lv_obj_set_size(319,319);
+                lv_obj_set_size(plate,319,319);
                 lv_obj_set_pos(plate,16,51);
                 lv_obj_set_style_radius(plate,LV_RADIUS_CIRCLE,0);
                 lv_obj_set_style_bg_color(plate,panel2_c(),0);
