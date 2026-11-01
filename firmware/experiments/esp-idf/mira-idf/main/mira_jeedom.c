@@ -613,7 +613,7 @@ bool mira_jeedom_queue_local_action(const char *name,const char *type,const char
        strlen(name)>=96||strlen(type)>=24||strlen(value)>=160)return false;
     if(strcmp(type,"toggle")&&strcmp(type,"button")&&strcmp(type,"multiaction")&&
        strcmp(type,"range")&&strcmp(type,"roundrange")&&strcmp(type,"thermostat")&&
-       strcmp(type,"list")&&strcmp(type,"listbutton"))return false;
+       strcmp(type,"list")&&strcmp(type,"listbutton")&&strcmp(type,"color"))return false;
     mira_action_msg_t msg={0};
     snprintf(msg.name,sizeof(msg.name),"%s",name);
     snprintf(msg.type,sizeof(msg.type),"%s",type);
@@ -645,6 +645,14 @@ static int resolve_local_action(cJSON *index,const mira_action_msg_t *msg,
         else snprintf(expected,sizeof(expected),"%s",msg->name);
         if(range&&!strcmp(kind,"range")&&!strcmp(name,expected)) {
             snprintf(value,value_size,"%s",msg->value);
+            return jint(item,"id",-1);
+        }
+        if(!strcmp(msg->type,"color")&&!strcmp(kind,"color")&&!strcmp(name,msg->name)){
+            unsigned r=0,g=0,b=0;
+            char extra=0;
+            if(sscanf(msg->value,"%u,%u,%u %c",&r,&g,&b,&extra)!=3 ||
+               r>255u||g>255u||b>255u)return -1;
+            snprintf(value,value_size,"%u,%u,%u",r,g,b);
             return jint(item,"id",-1);
         }
         if(!strcmp(msg->type,"button")&&!strcmp(kind,"button")&&!strcmp(name,msg->name))
