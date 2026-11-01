@@ -709,6 +709,7 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
     label(w->card,display,0xA8B2B8,&lv_font_montserrat_16);
 }
 
+static bool current_night_period(void); // implementation below
 // Match the old Waveshare43CDisplay brightness behavior, but save only on
 // release (never write flash on every pixel of a drag).  This callback runs
 // on LVGL task; the CH32 gate/PWM write is a short I2C transaction.
@@ -726,10 +727,22 @@ static void brightness_release(lv_event_t *event) {
         return;
     }
     display_brightness_raw=(uint8_t)value;
+    applied_brightness_raw=(uint8_t)value;
+    // In automatic mode the same slider adjusts the active day/night level,
+    // so the scheduler will not immediately undo the user's change.
+    const uint8_t pct=(uint8_t)(1+(((uint32_t)value-30u)*99u+112u)/225u);
+    const bool night=night_auto_enabled&&current_night_period();
+    if(night_auto_enabled){
+        if(night)night_brightness_percent=pct;
+        else day_brightness_percent=pct;
+    }
     nvs_handle_t nvs;
     if(nvs_open("mira_idf_ui",NVS_READWRITE,&nvs)==ESP_OK){
-        if(nvs_set_u8(nvs,"brightness",display_brightness_raw)==ESP_OK)
+        if(nvs_set_u8(nvs,"brightness",display_brightness_raw)==ESP_OK){
+            if(night_auto_enabled)
+                (void)nvs_set_u8(nvs,night?"night_pct":"day_pct",pct);
             (void)nvs_commit(nvs);
+        }
         nvs_close(nvs);
     }
 }
