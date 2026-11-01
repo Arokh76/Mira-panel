@@ -6,6 +6,7 @@
 #include "mira_display.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
 #include "driver/i2c_master.h"
 #include "driver/gpio.h"
 #include "esp_lcd_panel_rgb.h"
@@ -98,103 +99,114 @@ static void touch_clear(void) {
     if (gt911 && touch_ready &&
         i2c_master_transmit(gt911, cmd, sizeof(cmd), 30) != ESP_OK) touch_errors++;
 }
-// Keep the last valid sample while GT911 waits for its next data-ready update.
-// A release is generated when GT911 reports zero contacts or after a short
-// no-update safety timeout; do not synthesize RELEASED between touch samples.
-static lv_point_t touch_last_point = {0, 0};
-static int64_t touch_last_sample_us;
+// Independent 10 ms GT911 sampler.  At ~9.7 render FPS the LVGL task can
+// block for ~100 ms, so polling inside LVGL misses quick taps.  A FreeRTOS
+// queue records press/move/release while the RGB renderer is busy.
+typedef struct {
+    int16_t x;
+    int16_t y;
+    uint8_t pressed;
+} mira_touch_event_t;
+static QueueHandle_t touch_events;
+static lv_point_t lv_touch_point = {0, 0};
+static bool lv_touch_pressed;
+
+static void touch_queue_event(bool pressed, int x, int y) {
+    if (!touch_events) return;
+    mira_touch_event_t e = {.x=(int16_t)x,.y=(int16_t)y,
+                            .pressed=pressed ? 1 : 0};
+    if (xQueueSend(touch_events,&e,0)!=pdTRUE) {
+        mira_touch_event_t discard;
+        (void)xQueueReceive(touch_events,&discard,0);
+        (void)xQueueSend(touch_events,&e,0);
+    }
+}
+
+static void gt911_poll_task(void *arg) {
+    (void)arg;
+    bool down=false;
+    int last_x=0, last_y=0;
+    int64_t last_good_us=0;
+    for (;;) {
+        if (touch_ready && gt911) {
+            touch_irq_level=(uint8_t)gpio_get_level(GPIO_NUM_4);
+            uint8_t status=0;
+            const int64_t now=esp_timer_get_time();
+            if (i2c_reg_read(0x814e,&status,1)==ESP_OK) {
+                touch_last_status=status;
+                if (status & 0x80) {
+                    touch_ready_events++;
+                    const uint8_t count=status & 0x0f;
+                    if (count>=1 && count<=5) {
+                        uint8_t xy[8]={0};
+                        if (i2c_reg_read(0x8150,xy,sizeof(xy))==ESP_OK) {
+                            const int raw_x=xy[1] | (xy[2]<<8);
+                            const int raw_y=xy[3] | (xy[4]<<8);
+                            touch_raw_x=(uint32_t)raw_x;
+                            touch_raw_y=(uint32_t)raw_y;
+                            int x=raw_x, y=raw_y;
+                            const bool portrait=(touch_config_x>0 && touch_config_y>0 &&
+                                touch_config_x<=HEIGHT && touch_config_y>=WIDTH);
+                            if (portrait ||
+                                ((x>=WIDTH || y>=HEIGHT) && raw_x<HEIGHT && raw_y<WIDTH)) {
+                                x=raw_y;
+                                y=raw_x;
+                            }
+                            if (x>=0 && x<WIDTH && y>=0 && y<HEIGHT) {
+                                if (!down) {
+                                    touch_presses++;
+                                    ESP_LOGI(TAG,"GT911 DOWN (%d,%d) raw (%d,%d)",x,y,raw_x,raw_y);
+                                    touch_queue_event(true,x,y);
+                                } else if (abs(x-last_x)>=3 || abs(y-last_y)>=3) {
+                                    touch_queue_event(true,x,y);
+                                }
+                                down=true;
+                                last_x=x;last_y=y;last_good_us=now;
+                                touch_last_x=(uint32_t)x;touch_last_y=(uint32_t)y;
+                            } else {
+                                touch_invalid_coords++;
+                                if (touch_invalid_coords<=5 || touch_invalid_coords%50==0)
+                                    ESP_LOGW(TAG,"GT911 invalid touch (%d,%d)",raw_x,raw_y);
+                            }
+                        }
+                    } else if (count==0 && down) {
+                        down=false;
+                        touch_queue_event(false,last_x,last_y);
+                    }
+                    touch_clear();
+                } else {
+                    // Waveshare reference driver acknowledges status even when
+                    // DATA_READY is clear.  Hold a press between 10ms samples.
+                    touch_clear();
+                }
+                // Some GT911 firmwares do not produce an explicit zero-touch
+                // sample: release after a short interval without a fresh point.
+                if (down && now-last_good_us > 100000) {
+                    down=false;
+                    touch_queue_event(false,last_x,last_y);
+                }
+            } else if (down && now-last_good_us > 100000) {
+                down=false;
+                touch_queue_event(false,last_x,last_y);
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
 
 void mira_display_touch_read(lv_indev_t *indev, lv_indev_data_t *data) {
     (void)indev;
-    data->point = touch_last_point;
-    data->state = finger_down ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
-    if (!touch_ready) {
-        finger_down = false;
-        data->state = LV_INDEV_STATE_RELEASED;
-        return;
-    }
-
-    touch_irq_level = (uint8_t)gpio_get_level(GPIO_NUM_4);
-    uint8_t status = 0;
-    const int64_t now = esp_timer_get_time();
-    if (i2c_reg_read(0x814e, &status, 1) != ESP_OK) {
-        finger_down = false;
-        data->state = LV_INDEV_STATE_RELEASED;
-        return;
-    }
-    touch_last_status = status;
-    if (!(status & 0x80)) {
-        // Follow Waveshare's GT911 driver: acknowledge/clear even when DATA_READY
-        // is low; otherwise stale controller state can block future samples.
-        touch_clear();
-        // GT911 has not produced a new frame. Preserve PRESS state briefly
-        // so LVGL receives a stable press even under full-screen rendering.
-        if (finger_down && now - touch_last_sample_us > 200000) {
-            finger_down = false;
-            data->state = LV_INDEV_STATE_RELEASED;
-        }
-        return;
-    }
-
-    touch_ready_events++;
-    const uint8_t count = status & 0x0f;
-    if (count == 0 || count > 5) {
-        finger_down = false;
-        data->state = LV_INDEV_STATE_RELEASED;
-        touch_clear();
-        return;
-    }
-
-    uint8_t xy[8] = {0};
-    if (i2c_reg_read(0x8150, xy, sizeof(xy)) != ESP_OK) {
-        finger_down = false;
-        data->state = LV_INDEV_STATE_RELEASED;
-        touch_clear();
-        return;
-    }
-
-    const int raw_x = xy[1] | (xy[2] << 8);
-    const int raw_y = xy[3] | (xy[4] << 8);
-    touch_raw_x = (uint32_t)raw_x;
-    touch_raw_y = (uint32_t)raw_y;
-    int x = raw_x, y = raw_y;
-
-    // The GT911 may still contain portrait calibration (480x800) even when
-    // touches near the top-left happen to be within landscape bounds.
-    const bool portrait_cfg = touch_config_x > 0 && touch_config_y > 0 &&
-                              touch_config_x <= HEIGHT && touch_config_y >= WIDTH;
-    if (portrait_cfg ||
-        ((x >= WIDTH || y >= HEIGHT) && raw_x < HEIGHT && raw_y < WIDTH)) {
-        x = raw_y;
-        y = raw_x;
-    }
-
-    if (x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT) {
-        touch_last_point.x = (int16_t)x;
-        touch_last_point.y = (int16_t)y;
-        data->point = touch_last_point;
-        data->state = LV_INDEV_STATE_PRESSED;
-        touch_last_sample_us = now;
-        touch_last_x = (uint32_t)x;
-        touch_last_y = (uint32_t)y;
-        if (!finger_down) {
-            touch_presses++;
-            ESP_LOGI(TAG, "GT911 PRESS x=%d y=%d raw=%d,%d cfg=%lu,%lu",
-                     x, y, raw_x, raw_y,
-                     (unsigned long)touch_config_x,
-                     (unsigned long)touch_config_y);
-        }
-        finger_down = true;
+    mira_touch_event_t event;
+    if (touch_events && xQueueReceive(touch_events,&event,0)==pdTRUE) {
+        lv_touch_pressed=(event.pressed!=0);
+        lv_touch_point.x=event.x;
+        lv_touch_point.y=event.y;
+        data->continue_reading = uxQueueMessagesWaiting(touch_events)>0;
     } else {
-        touch_invalid_coords++;
-        if (touch_invalid_coords <= 5 || touch_invalid_coords % 50 == 0)
-            ESP_LOGW(TAG, "GT911 invalid x=%d y=%d raw=%d,%d status=0x%02x",
-                     x, y, raw_x, raw_y, status);
-        finger_down = false;
-        data->state = LV_INDEV_STATE_RELEASED;
+        data->continue_reading=false;
     }
-
-    touch_clear();
+    data->state=lv_touch_pressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+    data->point=lv_touch_point;
 }
 
 static esp_err_t ioexp_write(i2c_master_dev_handle_t ioexp, uint8_t reg, uint8_t value) {
@@ -406,5 +418,12 @@ esp_err_t mira_display_init(void) {
     const esp_timer_create_args_t timer_cfg = {.callback = tick_cb, .name="lv_tick"};
     ESP_RETURN_ON_ERROR(esp_timer_create(&timer_cfg, &timer), TAG, "LVGL tick");
     ESP_RETURN_ON_ERROR(esp_timer_start_periodic(timer, 2000), TAG, "LVGL tick start");
+    if (touch_ready) {
+        touch_events=xQueueCreate(64,sizeof(mira_touch_event_t));
+        if (!touch_events) return ESP_ERR_NO_MEM;
+        BaseType_t task_ok=xTaskCreatePinnedToCore(gt911_poll_task,"gt911_10ms",4096,NULL,5,NULL,0);
+        if (task_ok!=pdPASS) return ESP_ERR_NO_MEM;
+        ESP_LOGI(TAG,"GT911 independent 10ms sampler active; LVGL receives queued events");
+    }
     return ESP_OK;
 }
