@@ -28,7 +28,8 @@
 #define MIRA_KEY_MAX 96
 
 static const char *TAG="mira-idf-jeedom";
-static volatile bool jeedom_mode_enabled;
+// Legacy HTTP is the default. MQTT is an explicitly selected advanced mode.
+static volatile bool jeedom_mode_enabled=true;
 bool mira_jeedom_actions_enabled(void){return jeedom_mode_enabled;}
 // Request async synchronization after Jeedom changes its command table.
 static void request_binding_sync(void);
@@ -960,7 +961,8 @@ esp_err_t mira_jeedom_action_init(void) {
     nvs_handle_t settings;
     if(nvs_open("mira_idf_jeed",NVS_READONLY,&settings)==ESP_OK){
         char active[8]={0};size_t len=sizeof(active);
-        jeedom_mode_enabled=nvs_get_str(settings,"Jeedom",active,&len)==ESP_OK&&!strcmp(active,"1");
+        if(nvs_get_str(settings,"Jeedom",active,&len)==ESP_OK)
+            jeedom_mode_enabled=strcmp(active,"0")!=0;
         nvs_close(settings);
     }
     action_queue=xQueueCreate(12,sizeof(mira_action_msg_t));
