@@ -116,6 +116,8 @@ typedef struct {
 static QueueHandle_t touch_events;
 static lv_point_t lv_touch_point = {0, 0};
 static bool lv_touch_pressed;
+static mira_touch_hook_t lv_touch_hook;
+void mira_display_set_touch_hook(mira_touch_hook_t hook) { lv_touch_hook = hook; }
 static uint32_t rgb_touch_release_restarts;
 static int64_t rgb_last_restart_us;
 
@@ -240,8 +242,16 @@ void mira_display_touch_read(lv_indev_t *indev, lv_indev_data_t *data) {
     } else {
         data->continue_reading=false;
     }
-    data->state=lv_touch_pressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
-    data->point=lv_touch_point;
+    // Mira 0.7.37 managed wake-from-sleep in its former LVGL8 indev.
+    // Native LVGL9 must forward touch activity to the SAME controller.
+    // Suppress the complete initial press/release sequence while waking,
+    // so it cannot trigger a Jeedom action behind the clock overlay.
+    const bool consume = lv_touch_hook &&
+        lv_touch_hook(lv_touch_pressed,
+                      (uint16_t)lv_touch_point.x, (uint16_t)lv_touch_point.y);
+    data->state = consume ? LV_INDEV_STATE_RELEASED :
+                  (lv_touch_pressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED);
+    data->point = lv_touch_point;
 }
 
 static esp_err_t ioexp_write(i2c_master_dev_handle_t ioexp, uint8_t reg, uint8_t value) {
