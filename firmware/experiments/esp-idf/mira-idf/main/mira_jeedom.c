@@ -691,8 +691,11 @@ static void send_jeedom_action(const mira_action_msg_t *msg) {
     nvs_handle_t cfg;
     if(nvs_open("mira_idf_jeed",NVS_READONLY,&cfg)!=ESP_OK)return;
     char enabled[8]={0},base[192]={0},secret[256]={0};
-    bool ready=nvs_read_string(cfg,"Jeedom",enabled,sizeof(enabled))&&
-               !strcmp(enabled,"1")&&
+    // Keep legacy HTTP as default; a missing mode flag must not silently
+    // redirect actions to MQTT. Network requests still require a configured
+    // Jeedom address and API key.
+    const bool mode_saved=nvs_read_string(cfg,"Jeedom",enabled,sizeof(enabled));
+    bool ready=(!mode_saved||!strcmp(enabled,"1"))&&
                nvs_read_string(cfg,"Jeedom_IP",base,sizeof(base))&&
                nvs_read_string(cfg,"Jeedom_Key_mira",secret,sizeof(secret));
     nvs_close(cfg);
