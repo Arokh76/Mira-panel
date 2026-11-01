@@ -854,6 +854,11 @@ static void build_config(void){
     // Reject structurally malformed programming before any screen changes.
     // A valid export can legitimately have an empty lvgl array.
     const int count=cJSON_GetArraySize(array);
+    if(count>MAX_WIDGETS){
+        ESP_LOGE(TAG,"Programming has %d widgets (max %d); keeping live UI",count,MAX_WIDGETS);
+        cJSON_Delete(root);
+        return;
+    }
     for(int i=0;i<count;i++){
         if(!cJSON_IsObject(cJSON_GetArrayItem(array,i))){
             ESP_LOGE(TAG,"Invalid Mira widget at index %d; preserving live UI",i);
