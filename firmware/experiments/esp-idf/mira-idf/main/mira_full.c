@@ -77,6 +77,10 @@ typedef struct {
     lv_obj_t *fields[9]; // energy/media passive Jeedom composite infos
     lv_obj_t *media_slider,*media_device_dropdown,*media_play_caption;
     bool media_is_playing;
+    // Distinguish Mira beta simple, double, triple and long-click commands.
+    uint8_t multi_clicks;
+    uint32_t multi_deadline;
+    bool multi_long_fired;
     char media_active_device[96];
     int minv,maxv;
 } mira_widget_t;
@@ -245,7 +249,7 @@ static void event_local(lv_event_t *e){
         // The selected label is the outward command value, as in the
         // original Mira list controls. No network command on passive state.
         lv_dropdown_get_selected_str(src,b->value,sizeof(b->value));
-    }else if(!strcmp(b->type,"button")||!strcmp(b->type,"multiaction")){
+    }else if(!strcmp(b->type,"button")){
         strcpy(b->value,"1");
     }
     // Unlike MQTT States, only a real human LVGL action may publish Actions.
@@ -258,6 +262,54 @@ static void event_local(lv_event_t *e){
         snprintf(result,sizeof(result),"%s : %.60s = %.60s",
                   jeedom_queued?"Action Jeedom en file":(mqtt_sent?"Action MQTT":"Aperçu local"),b->name,b->value);
         lv_label_set_text(feedback,result);
+    }
+}
+// Multi-action dispatch is deferred until the double/triple-click window
+// closes. It is processed on the LVGL task without timers tied to deleted
+// objects, so hot reprogramming cannot leave callbacks pointing to old cards.
+static void multi_dispatch(mira_widget_t *w,uint8_t gesture){
+    if(!w||suppress_events||display_sleeping)return;
+    static const char *const prefix[]={"Multi_Clic_","Multi_Double_","Multi_Triple_","Multi_Long_"};
+    static const char *const kind[]={"single","double","triple","long"};
+    if(gesture<1||gesture>4)return;
+    const int selected=(int)gesture-1;
+    bool sent=false;
+    if(mira_jeedom_actions_enabled())
+        sent=mira_jeedom_queue_local_action(w->name,"multiaction",kind[selected]);
+    else{
+        char action[112];
+        int n=snprintf(action,sizeof(action),"%s%s",prefix[selected],w->name);
+        if(n>0&&n<(int)sizeof(action))
+            sent=mira_mqtt_publish_action(action,"1");
+    }
+    if(feedback){
+        char result[180];
+        snprintf(result,sizeof(result),"Multi %.90s : %s (%s)",w->name,
+                 kind[selected],sent?"envoyé":"non envoyé");
+        lv_label_set_text(feedback,result);
+    }
+}
+static void multiaction_event(lv_event_t *event){
+    if(suppress_events||display_sleeping)return;
+    mira_widget_t *w=(mira_widget_t*)lv_event_get_user_data(event);
+    if(!w||strcmp(w->type,"multiaction"))return;
+    const lv_event_code_t code=lv_event_get_code(event);
+    if(code==LV_EVENT_PRESSED){w->multi_long_fired=false;return;}
+    if(code==LV_EVENT_LONG_PRESSED){
+        w->multi_long_fired=true;
+        w->multi_clicks=0;
+        multi_dispatch(w,4);
+        return;
+    }
+    if(code!=LV_EVENT_CLICKED||w->multi_long_fired)return;
+    const uint32_t now=lv_tick_get();
+    if(!w->multi_clicks||(int32_t)(now-w->multi_deadline)>=0)
+        w->multi_clicks=1;
+    else if(w->multi_clicks<3)w->multi_clicks++;
+    w->multi_deadline=now+380;
+    if(w->multi_clicks==3){
+        w->multi_clicks=0;
+        multi_dispatch(w,3);
     }
 }
 static int clamp(int a,int lo,int hi){return a<lo?lo:(a>hi?hi:a);}
@@ -549,7 +601,11 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         lv_obj_set_size(bt,360,44);lv_obj_center(bt);
         panel_style(bt,true);lv_obj_set_style_radius(bt,13,0);
         lv_obj_t *t=label(bt,display,0xF3F6F7,&lv_font_montserrat_16);lv_obj_center(t);
-        lv_obj_add_event_cb(bt,event_local,LV_EVENT_CLICKED,w);
+        if(!strcmp(type,"multiaction")){
+            lv_obj_add_event_cb(bt,multiaction_event,LV_EVENT_PRESSED,w);
+            lv_obj_add_event_cb(bt,multiaction_event,LV_EVENT_LONG_PRESSED,w);
+            lv_obj_add_event_cb(bt,multiaction_event,LV_EVENT_CLICKED,w);
+        }else lv_obj_add_event_cb(bt,event_local,LV_EVENT_CLICKED,w);
         return;
     }
     if(!strcmp(type,"toggle")){
@@ -1425,6 +1481,16 @@ void mira_full_ui_tick(void){
         apply_auto_brightness();
     }
     apply_pending_states();
+    // Reconcile pending single/double clicks after the gesture window.
+    const uint32_t gesture_now=lv_tick_get();
+    for(uint8_t n=0;n<widget_n;n++){
+        mira_widget_t *w=&widgets[n];
+        if(strcmp(w->type,"multiaction")||!w->multi_clicks||
+           (int32_t)(gesture_now-w->multi_deadline)<0)continue;
+        const uint8_t count=w->multi_clicks;
+        w->multi_clicks=0;
+        multi_dispatch(w,count);
+    }
     static uint32_t diag_last_tick;
     uint32_t now_tick=lv_tick_get();
     camera_poll_on_lvgl_task(now_tick);
