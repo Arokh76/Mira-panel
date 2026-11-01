@@ -217,8 +217,9 @@ static void event_local(lv_event_t *e){
     }
     // Unlike MQTT States, only a real human LVGL action may publish Actions.
     const char *payload=(!strcmp(b->type,"toggle")) ? (!strcmp(b->value,"On")?"1":"0") : b->value;
-    const bool mqtt_sent=mira_mqtt_publish_action(b->name,payload);
-    const bool jeedom_queued=mira_jeedom_queue_local_action(b->name,b->type,payload);
+    const bool use_jeedom=mira_jeedom_actions_enabled();
+    const bool mqtt_sent=!use_jeedom&&mira_mqtt_publish_action(b->name,payload);
+    const bool jeedom_queued=use_jeedom&&mira_jeedom_queue_local_action(b->name,b->type,payload);
     if(feedback) {
         char result[180];
         snprintf(result,sizeof(result),"%s : %.60s = %.60s",
