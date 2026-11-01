@@ -95,8 +95,16 @@ static bool decode_jpeg(esp_http_client_handle_t http,const uint8_t *prefix,
     memcpy(jpeg,prefix,initial);
     size_t used=initial;
     bool complete=false;
+    // The first network read can already contain EOI plus multipart headers.
+    for(size_t i=1;i<used;i++){
+        if(jpeg[i-1]==0xff && jpeg[i]==0xd9){
+            used=i+1;
+            complete=true;
+            break;
+        }
+    }
     const int64_t deadline=esp_timer_get_time()+7000000LL;
-    while(used<capacity&&esp_timer_get_time()<deadline){
+    while(!complete&&used<capacity&&esp_timer_get_time()<deadline){
         if(used>=2 && jpeg[used-2]==0xff && jpeg[used-1]==0xd9){
             complete=true;break;
         }
