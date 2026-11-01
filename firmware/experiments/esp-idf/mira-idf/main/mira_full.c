@@ -65,7 +65,7 @@ static uint32_t camera_last_update;
 
 typedef struct {
     char name[96], unit[24], type[24], value[160];
-    lv_obj_t *card,*control,*value_label;
+    lv_obj_t *card,*control,*value_label,*info_status;
     lv_obj_t *fields[9]; // energy/media passive Jeedom composite infos
     lv_obj_t *media_slider,*media_device_dropdown,*media_play_caption;
     bool media_is_playing;
@@ -462,7 +462,8 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
             lv_obj_set_style_text_align(w->value_label,LV_TEXT_ALIGN_CENTER,0);
             lv_obj_align(w->value_label,LV_ALIGN_TOP_MID,0,home_tile?48:26);
             if(home_tile){
-                lv_obj_t *since=label(w->card,"En attente des données",0xA8B2B8,&lv_font_montserrat_12);
+                lv_obj_t *since=label(w->card,*w->value?"Valeur configurée":"En attente des données",0xA8B2B8,&lv_font_montserrat_12);
+                w->info_status=since;
                 lv_obj_set_width(since,width-18);
                 lv_obj_set_style_text_align(since,LV_TEXT_ALIGN_CENTER,0);
                 lv_obj_align(since,LV_ALIGN_BOTTOM_MID,0,-10);
@@ -1105,6 +1106,8 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                 }
             }
         }
+        if(w->info_status)
+            lv_label_set_text(w->info_status,"Donnée reçue");
         if(w->value_label){
             char display[200];
             if(*w->unit)snprintf(display,sizeof(display),"%s %s",msg->value,w->unit);
