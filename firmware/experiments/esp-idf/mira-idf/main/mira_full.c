@@ -766,7 +766,7 @@ static esp_err_t state_post(httpd_req_t *req){
         return httpd_resp_sendstr(req,"State queue full");
     }
     httpd_resp_set_type(req,"application/json");
-    return httpd_resp_sendstr(req,"{\\"queued\\":true,\\"action\\":false}");
+    return httpd_resp_sendstr(req,"{\"queued\":true,\"action\":false}");
 }
 
 void mira_full_register_http(httpd_handle_t server){
