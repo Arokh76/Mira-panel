@@ -224,6 +224,15 @@ static void event_local(lv_event_t *e){
             char txt[192];snprintf(txt,sizeof(txt),"%s %s",b->value,b->unit);
             lv_label_set_text(b->value_label,txt);
         }
+    }else if(!strcmp(b->type,"color")){
+        // Match Mira 0.7.37's RGB CSV action payload. LVGL 9 no longer
+        // provides the old colour wheel; use a hue arc at full saturation.
+        const uint16_t hue=(uint16_t)lv_arc_get_value(src);
+        const lv_color_t col=lv_color_hsv_to_rgb(hue,100,100);
+        const uint32_t rgb=lv_color_to_u32(col);
+        snprintf(b->value,sizeof(b->value),"%u,%u,%u",
+                 (unsigned)((rgb>>16)&255u),(unsigned)((rgb>>8)&255u),
+                 (unsigned)(rgb&255u));
     }else if(!strcmp(b->type,"list")||!strcmp(b->type,"listbutton")){
         uint16_t n=lv_dropdown_get_selected(src);
         lv_dropdown_get_selected_str(src,b->value,sizeof(b->value));
@@ -555,8 +564,8 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
     if(!strcmp(type,"color")){
         w->card=card(pg,cw,206);
         label(w->card,display,0xF3F6F7,&lv_font_montserrat_16);
-        // LVGL 9.6 does not provide the old LVGL8 colorwheel widget.
-        // This is a color hue arc PREVIEW only; no Jeedom action.
+        // LVGL 9.6 dropped the LVGL8 colorwheel. A hue arc provides
+        // functional RGB output, sent once on finger release.
         w->control=lv_arc_create(w->card);
         lv_obj_set_size(w->control,150,150);
         lv_arc_set_range(w->control,0,360);
@@ -565,6 +574,7 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         lv_arc_set_bg_angles(w->control,0,270);
         lv_obj_set_style_arc_color(w->control,cyan_c(),LV_PART_INDICATOR);
         lv_obj_align(w->control,LV_ALIGN_CENTER,0,12);
+        lv_obj_add_event_cb(w->control,event_local,LV_EVENT_RELEASED,w);
         return;
     }
     // Energy and media are native passive Jeedom data cards. Every subfield
