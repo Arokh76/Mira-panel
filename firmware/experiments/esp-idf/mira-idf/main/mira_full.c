@@ -15,6 +15,7 @@
 #include "esp_spiffs.h"
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"
+#include "esp_wifi.h"
 #include "cJSON.h"
 #include "nvs.h"
 #include "lvgl.h"
@@ -59,7 +60,7 @@ static lv_obj_t *favorite_btn[4];
 static uint8_t current_page=0;
 static const char *page_names[6]={"Accueil","Lumières","Températures","Paramètres","Énergie","Multimédia"};
 static const int page_order[6]={0,1,2,4,5,3};
-static lv_obj_t *clock_text,*date_text;
+static lv_obj_t *clock_text,*date_text,*clock_status_text;
 static uint32_t widget_count;
 static uint32_t last_clock_ms;
 static uint32_t last_user_touch_ms,last_user_touch_count;
@@ -548,8 +549,9 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         lv_obj_set_size(date_text,370,26);
         lv_obj_set_style_text_align(date_text,LV_TEXT_ALIGN_CENTER,0);
         lv_obj_set_pos(date_text,14,125);
-        lv_obj_t *right=label(c,"Mira Panel",0xA8B2B8,&mira_font_fr_16);
-        lv_obj_set_pos(right,422,36);
+        clock_status_text=label(c,"MIRA PANEL\nConnexion...\nMode jour",0xA8B2B8,&mira_font_fr_16);
+        lv_obj_set_pos(clock_status_text,422,36);
+        lv_obj_set_width(clock_status_text,350);
         w->card=c;return;
     }
     if(!strcmp(type,"info")){
@@ -1038,7 +1040,7 @@ static void build_config(void){
             return;
         }
     }
-    widget_n=0;clock_text=NULL;date_text=NULL;widget_count=0;
+    widget_n=0;clock_text=NULL;date_text=NULL;clock_status_text=NULL;widget_count=0;
     for(int i=0;i<6;i++)if(i!=3)lv_obj_clean(pages[i]);
     int home_info=0,seen=0;
     for(int i=0;i<count;i++){
@@ -1518,15 +1520,30 @@ void mira_full_ui_tick(void){
     if(ms-last_clock_ms>2000){
         last_clock_ms=ms;
         apply_auto_brightness();
+        if(clock_status_text){
+            wifi_ap_record_t access_point={0};
+            char status[150];
+            if(esp_wifi_sta_get_ap_info(&access_point)==ESP_OK)
+                snprintf(status,sizeof(status),"MIRA PANEL\nWi-Fi  %d dBm\nMode %s",
+                    (int)access_point.rssi,current_night_period()?"nuit":"jour");
+            else
+                snprintf(status,sizeof(status),"MIRA PANEL\nWi-Fi déconnecté\nMode %s",
+                    current_night_period()?"nuit":"jour");
+            lv_label_set_text(clock_status_text,status);
+        }
         time_t now=time(NULL);
         if(now>1700000000){
             struct tm tmv;localtime_r(&now,&tmv);
             char buff[24];snprintf(buff,sizeof(buff),"%02d:%02d",tmv.tm_hour,tmv.tm_min);
             if(clock_text)lv_label_set_text(clock_text,buff);
             if(date_text){
-                char datebuf[32];
-                snprintf(datebuf,sizeof(datebuf),"%02d/%02d/%04d",
-                         tmv.tm_mday,tmv.tm_mon+1,tmv.tm_year+1900);
+                static const char *const days[]={"Dimanche","Lundi","Mardi","Mercredi",
+                                                   "Jeudi","Vendredi","Samedi"};
+                static const char *const months[]={"Janvier","Février","Mars","Avril",
+                    "Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"};
+                char datebuf[80];
+                snprintf(datebuf,sizeof(datebuf),"%s, %02d %s %04d",
+                         days[tmv.tm_wday],tmv.tm_mday,months[tmv.tm_mon],tmv.tm_year+1900);
                 lv_label_set_text(date_text,datebuf);
             }
             if(display_sleeping&&sleep_clock_enabled&&sleep_clock_text)
