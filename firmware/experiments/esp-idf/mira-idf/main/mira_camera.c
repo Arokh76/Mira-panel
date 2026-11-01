@@ -132,7 +132,8 @@ static bool decode_jpeg(esp_http_client_handle_t http,const uint8_t *prefix,
         if(esp_jpeg_get_image_info(&config,&info)!=ESP_OK)break;
         if(info.width && info.height &&
            info.width<=CAM_WIDTH && info.height<=CAM_HEIGHT &&
-           info.output_len>0 && info.output_len<=(size_t)CAM_WIDTH*CAM_HEIGHT*2u) {
+           info.output_len>=(size_t)info.width*(size_t)info.height*2u &&
+           info.output_len<=(size_t)CAM_WIDTH*CAM_HEIGHT*2u) {
             fit=true;break;
         }
     }
@@ -144,6 +145,7 @@ static bool decode_jpeg(esp_http_client_handle_t http,const uint8_t *prefix,
     esp_jpeg_image_output_t decoded={0};
     bool ok=esp_jpeg_decode(&config,&decoded)==ESP_OK&&
             decoded.width==info.width && decoded.height==info.height &&
+            decoded.output_len>=(size_t)decoded.width*(size_t)decoded.height*2u &&
             decoded.output_len<=info.output_len;
     heap_caps_free(jpeg);
     if(!ok){heap_caps_free(pixels);return false;}
