@@ -324,7 +324,9 @@ static void legacy_finish_fixed_auto(void){
        !legacy_mask_valid(current.netmask)||
        !legacy_same_subnet(legacy_requested_ip,current.gw,current.netmask)||
        !legacy_same_subnet(legacy_requested_ip,current.ip,current.netmask)||
-       legacy_requested_ip.addr==current.gw.addr){
+       legacy_requested_ip.addr==current.gw.addr||
+       (legacy_requested_ip.addr&~current.netmask.addr)==0||
+       (legacy_requested_ip.addr&~current.netmask.addr)==~current.netmask.addr){
         ESP_LOGW(TAG,"Mira beta fixed_auto IP outside DHCP network; keeping DHCP");
         return;
     }
