@@ -2,6 +2,7 @@
 // Native ESP-IDF RGB frame swap + LVGL 9 direct mode, no Arduino/Waveshare LVGL port.
 #include <assert.h>
 #include <string.h>
+#include <stdlib.h>
 #include <inttypes.h>
 #include "mira_display.h"
 #include "freertos/FreeRTOS.h"
