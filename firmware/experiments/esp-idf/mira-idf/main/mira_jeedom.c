@@ -4,6 +4,7 @@
 // Incoming state updates are PASSIVE, never forwarded to MQTT or an actuator.
 #include "mira_jeedom.h"
 #include "mira_full.h"
+#include "mira_camera.h"
 #include "mira_setup_access.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -966,6 +967,69 @@ esp_err_t mira_jeedom_action_init(void) {
     return ESP_OK;
 }
 
+
+// Legacy plugin POST /camera/config (form: key,name,url). The same namespace
+// and FNV1a key are used by the older Arduino build, preserving stored URLs.
+// Remote plugin must authenticate with the screen key; no URLs in logs.
+static esp_err_t camera_config_post(httpd_req_t *req){
+    if(req->content_len<10||req->content_len>3000){
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Camera form size invalid");
+        return ESP_FAIL;
+    }
+    size_t bytes=req->content_len;
+    char *body=malloc(bytes+1);
+    if(!body){httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Memory unavailable");return ESP_FAIL;}
+    if(!read_exact_request(req,body,bytes)){
+        free(body);
+        httpd_resp_send_err(req,HTTPD_408_REQ_TIMEOUT,"Incomplete camera form");
+        return ESP_FAIL;
+    }
+    char *secret=NULL,*name=NULL,*url=NULL;
+    for(char *segment=body;segment&&*segment;){
+        char *next=strchr(segment,'&');
+        if(next)*next++=0;
+        char *sep=strchr(segment,'=');
+        if(sep){
+            *sep++=0;
+            if(!strcmp(segment,"key"))secret=sep;
+            else if(!strcmp(segment,"name"))name=sep;
+            else if(!strcmp(segment,"url"))url=sep;
+        }
+        segment=next;
+    }
+    if(!secret||!name||!url||!decode_url(secret)||!correct_key(secret)){
+        free(body);httpd_resp_send_err(req,HTTPD_403_FORBIDDEN,"Invalid Mira camera key");return ESP_FAIL;
+    }
+    if(!decode_url(name)||!decode_url(url)||strlen(name)<1||
+       strlen(name)>100||!mira_camera_url_valid(url)){
+        free(body);httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Invalid camera name/URL");return ESP_FAIL;
+    }
+    char *program=read_config(NULL);
+    if(!program){
+        free(body);httpd_resp_send_err(req,HTTPD_404_NOT_FOUND,"Mira programming missing");return ESP_FAIL;
+    }
+    cJSON *root=cJSON_Parse(program);
+    free(program);
+    bool found=false;
+    cJSON *entry;
+    const cJSON *arr=root?cJSON_GetObjectItemCaseSensitive(root,"lvgl"):NULL;
+    cJSON_ArrayForEach(entry,arr){
+        if(!strcmp(jstr(entry,"type",""),"camera")&&
+           !strcmp(jstr(entry,"name",""),name)){
+            found=true;break;
+        }
+    }
+    if(root)cJSON_Delete(root);
+    if(!found){
+        free(body);httpd_resp_send_err(req,HTTPD_404_NOT_FOUND,"Unknown camera widget");return ESP_FAIL;
+    }
+    const bool saved=mira_camera_save_url(name,url);
+    free(body);
+    if(!saved){httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"NVS camera save failed");return ESP_FAIL;}
+    httpd_resp_set_type(req,"text/plain");
+    return httpd_resp_sendstr(req,"OK");
+}
+
 void mira_jeedom_register_http(httpd_handle_t server) {
     const httpd_uri_t routes[]={
         {.uri="/getlvgl",.method=HTTP_GET,.handler=getlvgl},
@@ -985,6 +1049,7 @@ void mira_jeedom_register_http(httpd_handle_t server) {
         {.uri="/setjeedomtoggleid",.method=HTTP_GET,.handler=set_jeedom_toggle_id},
         {.uri="/sendjeedomorderid",.method=HTTP_GET,.handler=set_jeedom_init_id},
         {.uri="/mira/jeedom/status",.method=HTTP_GET,.handler=jeedom_status_get},
+        {.uri="/camera/config",.method=HTTP_POST,.handler=camera_config_post},
     };
     for(size_t i=0;i<sizeof(routes)/sizeof(routes[0]);i++) {
         esp_err_t err=httpd_register_uri_handler(server,&routes[i]);
