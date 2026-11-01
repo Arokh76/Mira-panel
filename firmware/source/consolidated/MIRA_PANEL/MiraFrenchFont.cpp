@@ -568,6 +568,55 @@ static const MiraGlyph* findGlyph(const MiraFontSpec* spec, uint32_t code) {
   return nullptr;
 }
 
+#if LVGL_VERSION_MAJOR >= 9
+// Original Mira 0.7.37 French bitmap tables retained, only LVGL callback ABI
+// converted (LVGL9 exposes a glyph descriptor to get_glyph_bitmap).
+static bool fr_get_glyph_dsc(const lv_font_t *font,lv_font_glyph_dsc_t *dsc,
+                             uint32_t letter,uint32_t letter_next) {
+    (void)letter_next;
+    const MiraFontSpec *spec=static_cast<const MiraFontSpec *>(font->dsc);
+    const MiraGlyph *g=findGlyph(spec,letter);
+    if(!g)return false;
+    dsc->resolved_font=font;
+    dsc->gid.index=letter;  // Supports Unicode accents beyond 8-bit.
+    dsc->format=LV_FONT_GLYPH_FORMAT_A4;
+    dsc->adv_w=(g->adv_w+8)>>4;  // 0.7.37 spacing fix: 1/16px -> px.
+    dsc->box_w=g->box_w;
+    dsc->box_h=g->box_h;
+    dsc->ofs_x=g->ofs_x;
+    dsc->ofs_y=g->ofs_y;
+    dsc->stride=(g->box_w+1)/2;
+    dsc->req_raw_bitmap=1;
+    dsc->is_placeholder=0;
+    return true;
+}
+static const void *fr_get_glyph_bitmap(lv_font_glyph_dsc_t *dsc,
+                                       lv_draw_buf_t *draw_buf) {
+    (void)draw_buf;
+    if(!dsc || !dsc->resolved_font)return nullptr;
+    const MiraFontSpec *spec=static_cast<const MiraFontSpec *>(dsc->resolved_font->dsc);
+    const MiraGlyph *g=findGlyph(spec,dsc->gid.index);
+    return g ? spec->bitmap+g->bitmap_index : nullptr;
+}
+static lv_font_t miraFont9(const MiraFontSpec *spec,const lv_font_t *fallback,
+                           int height,int baseline) {
+    lv_font_t font={};
+    font.dsc=spec;
+    font.fallback=fallback;
+    font.get_glyph_dsc=fr_get_glyph_dsc;
+    font.get_glyph_bitmap=fr_get_glyph_bitmap;
+    font.line_height=height;
+    font.base_line=baseline;
+    font.subpx=LV_FONT_SUBPX_NONE;
+    font.underline_position=-1;
+    font.underline_thickness=1;
+    font.static_bitmap=1;
+    return font;
+}
+const lv_font_t mira_font_fr_12=miraFont9(&fr12_spec,&lv_font_montserrat_12,15,3);
+const lv_font_t mira_font_fr_14=miraFont9(&fr14_spec,&lv_font_montserrat_14,16,3);
+const lv_font_t mira_font_fr_16=miraFont9(&fr16_spec,&lv_font_montserrat_16,18,3);
+#else
 static bool fr_get_glyph_dsc(const lv_font_t* font, lv_font_glyph_dsc_t* dsc, uint32_t letter, uint32_t letter_next) {
   (void)letter_next;
   const MiraFontSpec* spec = static_cast<const MiraFontSpec*>(font->dsc);
@@ -642,3 +691,5 @@ const lv_font_t mira_font_fr_16 = {
   , nullptr
 #endif
 };
+
+#endif
