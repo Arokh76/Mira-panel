@@ -660,7 +660,8 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
             static const char *const energy_fields[]={"solar","home","grid","battery","soc","soc2","soc3"};
             static const char *const media_fields[]={"title","artist","album","state","progress","volume","cover","device","devices"};
             const size_t prefix=strlen(w->name);
-            if(!strncmp(msg->name,w->name,prefix)&&
+            const size_t incoming_len=strlen(msg->name);
+            if(incoming_len>prefix+2 && !strncmp(msg->name,w->name,prefix)&&
                msg->name[prefix]=='_'&&msg->name[prefix+1]=='_'){
                 const char *field=msg->name+prefix+2;
                 const bool media=!strcmp(w->type,"media");
