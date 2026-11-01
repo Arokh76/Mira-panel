@@ -683,6 +683,8 @@ static void brightness_release(lv_event_t *event) {
     int value=lv_slider_get_value(slider);
     if(value<30)value=30;
     if(value>255)value=255;
+    // Slider release can occur without a value change; do not wear NVS.
+    if(display_brightness_raw==(uint8_t)value)return;
     const esp_err_t err=mira_display_set_brightness((uint8_t)value);
     if(err!=ESP_OK){
         ESP_LOGE(TAG,"Waveshare brightness update failed: %s",esp_err_to_name(err));
