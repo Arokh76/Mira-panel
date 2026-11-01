@@ -74,7 +74,7 @@ static void lvgl_loop(void *arg) {
 void app_main(void) {
     ESP_LOGI(TAG,"Mira native UI 0.7.37 -> ESP-IDF + LVGL %d.%d.%d on Waveshare 4.3C",
              LVGL_VERSION_MAJOR,LVGL_VERSION_MINOR,LVGL_VERSION_PATCH);
-    ESP_LOGW(TAG,"EXPERIMENTAL UI PORT: Jeedom HTTP commands, MQTT, camera and OTA settings are not yet ported");
+    ESP_LOGW(TAG,"EXPERIMENTAL Mira port: Jeedom/MQTT transports present, composite widgets, camera and hardware stability still require validation");
     mira_full_storage_init(); // no format, preserve original SPIFFS
     ESP_ERROR_CHECK(mira_recovery_init()); // Wi-Fi AP and separate OTA recovery
     ESP_ERROR_CHECK(mira_mqtt_init()); // native optional MQTT transport, read NVS settings
