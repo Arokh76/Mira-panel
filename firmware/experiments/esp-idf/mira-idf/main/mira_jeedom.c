@@ -177,7 +177,9 @@ static cJSON *index_from_config(const char *json) {
     cJSON_ArrayForEach(w,widgets){
         const char *type=jstr((cJSON*)w,"type","");
         const char *name=jstr((cJSON*)w,"name","");
-        if(!*name||!*type)continue;
+        // The clock can be unnamed in Mira beta exports; its three
+        // internal weather infos still need historical Jeedom bindings.
+        if(!*type||(!*name&&strcmp(type,"datetime")))continue;
         if(!strcmp(type,"info")||!strcmp(type,"button")){
             cJSON *a=append_action(arr,&id,type,name);
             if(a && !strcmp(type,"info")){
@@ -335,9 +337,23 @@ static esp_err_t programui(httpd_req_t *req) {
     }
     size_t len=strlen(encoded_json);
     cJSON *root=cJSON_ParseWithLength(encoded_json,len);
-    bool valid=root&&cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(root,"lvgl"));
+    const cJSON *widgets=root?cJSON_GetObjectItemCaseSensitive(root,"lvgl"):NULL;
+    bool valid=cJSON_IsArray(widgets);
+    const int count=valid?cJSON_GetArraySize(widgets):0;
+    if(count>64)valid=false;  // Same bound as Mira's native LVGL importer.
+    if(valid){
+        const cJSON *entry=NULL;
+        cJSON_ArrayForEach(entry,widgets){
+            if(!cJSON_IsObject(entry)){valid=false;break;}
+        }
+    }
     if(root)cJSON_Delete(root);
-    if(!valid){free(body);httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Tableau lvgl absent");return ESP_FAIL;}
+    if(!valid){
+        free(body);
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,
+                            "Programmation Mira mal formee ou trop de widgets");
+        return ESP_FAIL;
+    }
     FILE *out=fopen(MIRA_JSON_TMP,"wb");
     if(!out){free(body);httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"SPIFFS non accessible");return ESP_FAIL;}
     size_t written=fwrite(encoded_json,1,len,out);
@@ -397,8 +413,12 @@ static esp_err_t updatenr(httpd_req_t *req) {
                     if(!query_param(req,"r",r,sizeof(r))||
                        !query_param(req,"g",g,sizeof(g))||
                        !query_param(req,"b",b,sizeof(b)))break;
-                    int ri=atoi(r),gi=atoi(g),bi=atoi(b);
-                    if(ri<0||ri>255||gi<0||gi>255||bi<0||bi>255)break;
+                    unsigned ri=0,gi=0,bi=0;
+                    char trailing=0;
+                    if(sscanf(r,"%u %c",&ri,&trailing)!=1||
+                       sscanf(g,"%u %c",&gi,&trailing)!=1||
+                       sscanf(b,"%u %c",&bi,&trailing)!=1||
+                       ri>255||gi>255||bi>255)break;
                     snprintf(value,sizeof(value),"#%02x%02x%02x",ri,gi,bi);
                 }else if(!strcmp(kind,"button")){
                     // This legacy endpoint receives a button ID but cannot safely run an action from a state refresh.
