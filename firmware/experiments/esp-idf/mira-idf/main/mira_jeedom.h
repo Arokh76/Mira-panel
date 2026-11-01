@@ -9,3 +9,6 @@ void mira_jeedom_register_http(httpd_handle_t server);
 esp_err_t mira_jeedom_action_init(void);
 // Nonblocking, ONLY called by LVGL direct-user-touch callbacks. Never by States.
 bool mira_jeedom_queue_local_action(const char *name,const char *type,const char *value);
+
+// Select exactly one outbound transport: when Jeedom is enabled, avoid duplicate MQTT actions.
+bool mira_jeedom_actions_enabled(void);
