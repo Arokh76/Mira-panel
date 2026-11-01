@@ -16,6 +16,8 @@
 #include "esp_http_server.h"
 #include "cJSON.h"
 #include "lvgl.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "mira_display.h"
 
 #define MIRA_WIDTH 800
@@ -27,6 +29,11 @@
 static const char *TAG="mira-full-43";
 static const char *JSON_PATH="/spiffs/miralvgl.json";
 static volatile bool reload_pending=false;
+// Strict one-way UI state ingestion. Only the LVGL task can touch the widget tree.
+// No state update ever generates a Jeedom/MQTT command.
+typedef struct { char name[96]; char value[160]; } mira_state_update_t;
+static QueueHandle_t state_queue;
+static bool suppress_events;
 static bool spiffs_ready=false;
 static lv_obj_t *screen, *pages[6], *nav, *page_picker;
 static lv_obj_t *favorite_btn[4];
@@ -183,6 +190,7 @@ static void nav_click(lv_event_t *e){
     } else show_page(index);
 }
 static void event_local(lv_event_t *e){
+    if(suppress_events)return;
     mira_widget_t *b=(mira_widget_t*)lv_event_get_user_data(e);
     if(!b)return;
     lv_obj_t *src=lv_event_get_target_obj(e);
@@ -600,8 +608,44 @@ void mira_full_ui_create(lv_display_t *disp){
     last_clock_ms=lv_tick_get();
     ESP_LOGI(TAG,"Mira LVGL 9.6 rendering tree ready, source 0.7.37 JSON");
 }
+
+static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
+    for(uint8_t i=0;i<widget_n;i++){
+        mira_widget_t *w=&widgets[i];
+        if(strcmp(w->name,msg->name)!=0)continue;
+        snprintf(w->value,sizeof(w->value),"%s",msg->value);
+        suppress_events=true;
+        if(w->control && !strcmp(w->type,"toggle")){
+            bool on=!strcasecmp(msg->value,"on")||!strcasecmp(msg->value,"true")||
+                    !strcmp(msg->value,"1");
+            if(on)lv_obj_add_state(w->control,LV_STATE_CHECKED);
+            else lv_obj_remove_state(w->control,LV_STATE_CHECKED);
+        }else if(w->control && (!strcmp(w->type,"range")||!strcmp(w->type,"roundrange")||
+                                  !strcmp(w->type,"thermostat"))){
+            const int value=clamp(atoi(msg->value),w->minv,w->maxv);
+            if(!strcmp(w->type,"range"))lv_slider_set_value(w->control,value,LV_ANIM_OFF);
+            else lv_arc_set_value(w->control,value);
+        }
+        if(w->value_label){
+            char display[200];
+            if(*w->unit)snprintf(display,sizeof(display),"%s %s",msg->value,w->unit);
+            else snprintf(display,sizeof(display),"%s",msg->value);
+            lv_label_set_text(w->value_label,display);
+        }
+        suppress_events=false;
+        return;
+    }
+}
+static void apply_pending_states(void){
+    if(!state_queue)return;
+    mira_state_update_t update;
+    for(int n=0;n<12&&xQueueReceive(state_queue,&update,0)==pdTRUE;n++)
+        apply_state_on_lvgl_task(&update);
+}
+
 void mira_full_ui_tick(void){
     if(reload_pending){reload_pending=false;build_config();}
+    apply_pending_states();
     static uint32_t diag_last_tick;
     uint32_t now_tick=lv_tick_get();
     if(now_tick-diag_last_tick>=200){
@@ -620,6 +664,8 @@ void mira_full_ui_tick(void){
     }
 }
 bool mira_full_storage_init(void){
+    if(!state_queue)state_queue=xQueueCreate(24,sizeof(mira_state_update_t));
+    if(!state_queue)ESP_LOGE(TAG,"State queue allocation failed");
     const esp_vfs_spiffs_conf_t cfg={
         .base_path="/spiffs",.partition_label="spiffs",
         .max_files=4,.format_if_mount_failed=false
@@ -678,10 +724,57 @@ static esp_err_t import_post(httpd_req_t *req){
     httpd_resp_set_type(req,"text/plain; charset=utf-8");
     return httpd_resp_sendstr(req,"Mira JSON importé. Pages mises à jour sur l'écran.");
 }
+
+/* HTTP-safe input, e.g. POST /mira/state {"name":"Salon","value":"22.5"}.
+   Never invoke LVGL in the HTTP server task and never send a Jeedom action. */
+static esp_err_t state_post(httpd_req_t *req){
+    if(!state_queue){httpd_resp_send_err(req,HTTPD_503_SERVICE_UNAVAILABLE,"State queue unavailable");return ESP_FAIL;}
+    if(req->content_len<2||req->content_len>512){
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"JSON state payload must be 2..512 bytes");
+        return ESP_FAIL;
+    }
+    char buf[513];size_t got=0,len=req->content_len;
+    while(got<len){
+        int n=httpd_req_recv(req,buf+got,len-got);
+        if(n<=0){httpd_resp_send_err(req,HTTPD_408_REQ_TIMEOUT,"Incomplete state payload");return ESP_FAIL;}
+        got+=(size_t)n;
+    }
+    buf[len]=0;
+    cJSON *json=cJSON_ParseWithLength(buf,len);
+    const cJSON *name=json?cJSON_GetObjectItemCaseSensitive(json,"name"):NULL;
+    const cJSON *value=json?cJSON_GetObjectItemCaseSensitive(json,"value"):NULL;
+    const char *val=cJSON_IsString(value)?value->valuestring:NULL;
+    char scalar[48];
+    if(cJSON_IsNumber(value)){
+        snprintf(scalar,sizeof(scalar),"%.9g",value->valuedouble);
+        val=scalar;
+    }else if(cJSON_IsBool(value)){
+        val=cJSON_IsTrue(value)?"1":"0";
+    }
+    if(!cJSON_IsString(name)||!name->valuestring||!*name->valuestring||
+       strlen(name->valuestring)>=96||!val||strlen(val)>=160){
+        if(json)cJSON_Delete(json);
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Expected name (1..95) and value (max 159)");
+        return ESP_FAIL;
+    }
+    mira_state_update_t update={0};
+    snprintf(update.name,sizeof(update.name),"%s",name->valuestring);
+    snprintf(update.value,sizeof(update.value),"%s",val);
+    cJSON_Delete(json);
+    if(xQueueSend(state_queue,&update,0)!=pdTRUE){
+        httpd_resp_set_status(req,"503 Service Unavailable");
+        return httpd_resp_sendstr(req,"State queue full");
+    }
+    httpd_resp_set_type(req,"application/json");
+    return httpd_resp_sendstr(req,"{\\"queued\\":true,\\"action\\":false}");
+}
+
 void mira_full_register_http(httpd_handle_t server){
     httpd_uri_t a={.uri="/mira",.method=HTTP_GET,.handler=page_get};
     httpd_uri_t b={.uri="/mira/import",.method=HTTP_POST,.handler=import_post};
+    httpd_uri_t c={.uri="/mira/state",.method=HTTP_POST,.handler=state_post};
     ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_register_uri_handler(server,&a));
     ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_register_uri_handler(server,&b));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_register_uri_handler(server,&c));
 }
 uint32_t mira_full_widget_count(void){return widget_count;}
