@@ -1,5 +1,6 @@
 #include "mira_full.h"
 #include "mira_mqtt.h"
+#include "mira_jeedom.h"
 #include "mira_setup_access.h"
 // Isolated IDF test recovery AP. Uses raw .bin POST, not multipart/form-data.
 // Partition layout must match Mira's current Waveshare OTA partition layout.
@@ -368,7 +369,7 @@ esp_err_t mira_recovery_init(void) {
     // 9 routes are registered below; ESP-IDF defaults to 8 URI handlers.
     // Exceeding that limit used to abort app_main() before LCD init, causing
     // a black screen + Wi-Fi reboot loop (ESP_ERR_HTTPD_HANDLERS_FULL).
-    conf.max_uri_handlers = 20;
+    conf.max_uri_handlers = 28;
     conf.stack_size = 6144;
     conf.recv_wait_timeout = 15;
     ESP_LOGI(TAG, "HTTP URI capacity=%u, registered routes=9",
@@ -398,6 +399,7 @@ esp_err_t mira_recovery_init(void) {
     register_optional_route(httpd, &shadow_relief);
     mira_full_register_http(httpd); // optional 0.7.37 SPIFFS config and upload
     mira_mqtt_register_http(httpd); // optional native MQTT settings
+    mira_jeedom_register_http(httpd); // beta Jeedom protocol compatibility
     ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_register_uri_handler(httpd,&wifi_get));
     ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_register_uri_handler(httpd,&wifi_post));
     ESP_LOGW(TAG, "Recovery AP Mira-IDF-Test password MiraIDF2026 at http://192.168.4.1");
