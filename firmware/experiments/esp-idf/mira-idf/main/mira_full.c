@@ -818,8 +818,8 @@ static void empty_notice(const char *message){
     lv_obj_set_style_text_align(l,LV_TEXT_ALIGN_CENTER,0);
 }
 static void build_config(void){
-    widget_n=0;clock_text=NULL;date_text=NULL;widget_count=0;
-    for(int i=0;i<6;i++)if(i!=3)lv_obj_clean(pages[i]);
+    // Validate the new programming before deleting live LVGL objects.
+    // A damaged/incomplete SPIFFS read must not blank a running panel.
     FILE *f=spiffs_ready?fopen(JSON_PATH,"rb"):NULL;
     if(!f){
         empty_notice("Mira LVGL 9.6 : configuration non trouvée.\n"
@@ -848,6 +848,8 @@ static void build_config(void){
         ESP_LOGE(TAG,"Invalid Mira JSON: expected lvgl array; existing SPIFFS left unchanged");
         return;
     }
+    widget_n=0;clock_text=NULL;date_text=NULL;widget_count=0;
+    for(int i=0;i<6;i++)if(i!=3)lv_obj_clean(pages[i]);
     int count=cJSON_GetArraySize(array),home_info=0,seen=0;
     for(int i=0;i<count;i++){
         cJSON *it=cJSON_GetArrayItem(array,i);
