@@ -282,7 +282,7 @@ static enum { PROFILE_DHCP, PROFILE_MANUAL, PROFILE_FIXED_AUTO } legacy_ip_mode;
 static esp_netif_ip_info_t legacy_manual_ip;
 static esp_netif_dns_info_t legacy_manual_dns[2];
 static esp_ip4_addr_t legacy_requested_ip;
-static bool legacy_fixed_auto_attempted;
+static bool legacy_fixed_auto_attempted,legacy_fixed_auto_applied;
 
 static bool legacy_parse_ipv4(const char *s,esp_ip4_addr_t *target){
     ip4_addr_t parsed={0};
@@ -334,6 +334,7 @@ static void legacy_finish_fixed_auto(void){
         current.ip=legacy_requested_ip;
         err=esp_netif_set_ip_info(sta_netif,&current);
         if(err==ESP_OK){
+            legacy_fixed_auto_applied=true;
             ESP_LOGI(TAG,"Mira beta fixed_auto IP applied with DHCP gateway/mask/DNS");
             return;
         }
@@ -375,6 +376,12 @@ static void wifi_status_event(void *arg,esp_event_base_t base,int32_t id,void *d
     }else if(base==WIFI_EVENT&&id==WIFI_EVENT_STA_DISCONNECTED){
         station_connected=false;
         legacy_fixed_auto_attempted=false;
+        if(legacy_ip_mode==PROFILE_FIXED_AUTO&&legacy_fixed_auto_applied&&sta_netif){
+            legacy_fixed_auto_applied=false;
+            // Obtain fresh DHCP subnet information on every reconnection
+            // before applying the chosen fixed_auto address again.
+            (void)esp_netif_dhcpc_start(sta_netif);
+        }
         if(station_configured)esp_wifi_connect();
     }
 }
@@ -422,6 +429,7 @@ static esp_err_t wifi_profile_post(httpd_req_t *req){
         // static profile, including on subsequent reboots.
         legacy_ip_mode=PROFILE_DHCP;
         legacy_fixed_auto_attempted=false;
+        legacy_fixed_auto_applied=false;
         nvs_handle_t nv;
         if(nvs_open("mira_idf_net",NVS_READWRITE,&nv)==ESP_OK){
             if(nvs_set_u8(nv,"legacy_wifi",0)==ESP_OK)(void)nvs_commit(nv);
