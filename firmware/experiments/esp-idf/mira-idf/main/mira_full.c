@@ -83,6 +83,10 @@ typedef struct {
     uint8_t multi_clicks;
     uint32_t multi_deadline;
     bool multi_long_fired;
+    // Original beta "listbutton" is a set of tactile options, not a dropdown.
+    char list_text[160];
+    uint8_t list_offsets[12],list_count,list_selected;
+    lv_obj_t *list_buttons[12];
     char media_active_device[96];
     int minv,maxv;
 } mira_widget_t;
@@ -312,6 +316,43 @@ static void multiaction_event(lv_event_t *event){
     if(w->multi_clicks==3){
         w->multi_clicks=0;
         multi_dispatch(w,3);
+    }
+}
+static const char *listbutton_label(const mira_widget_t *w,uint8_t index){
+    if(!w||index>=w->list_count)return "";
+    return w->list_text+w->list_offsets[index];
+}
+static void listbutton_mark_selected(mira_widget_t *w,uint8_t selected){
+    if(!w||selected>=w->list_count)return;
+    w->list_selected=selected;
+    for(uint8_t n=0;n<w->list_count;n++){
+        if(!w->list_buttons[n])continue;
+        lv_obj_set_style_bg_color(w->list_buttons[n],
+                                  n==selected?cyan_c():panel2_c(),0);
+        lv_obj_set_style_border_color(w->list_buttons[n],
+                                      n==selected?lv_color_hex(0xFFC56B):border_c(),0);
+    }
+}
+static void listbutton_clicked(lv_event_t *event){
+    if(suppress_events||display_sleeping)return;
+    uintptr_t token=(uintptr_t)lv_event_get_user_data(event);
+    if(!token)return;
+    token--;
+    const uint8_t widget=(uint8_t)(token>>4),index=(uint8_t)(token&15u);
+    if(widget>=widget_n)return;
+    mira_widget_t *w=&widgets[widget];
+    if(strcmp(w->type,"listbutton")||index>=w->list_count)return;
+    const char *value=listbutton_label(w,index);
+    listbutton_mark_selected(w,index);
+    snprintf(w->value,sizeof(w->value),"%s",value);
+    bool sent=mira_jeedom_actions_enabled()
+        ?mira_jeedom_queue_local_action(w->name,"listbutton",value)
+        :mira_mqtt_publish_action(w->name,value);
+    if(feedback){
+        char response[180];
+        snprintf(response,sizeof(response),"%s : %.60s = %.60s",
+                 sent?"Sélection envoyée":"Sélection locale",w->name,value);
+        lv_label_set_text(feedback,response);
     }
 }
 static int clamp(int a,int lo,int hi){return a<lo?lo:(a>hi?hi:a);}
@@ -676,7 +717,63 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         lv_obj_add_event_cb(w->control,event_local,LV_EVENT_RELEASED,w);
         return;
     }
-    if(!strcmp(type,"list")||!strcmp(type,"listbutton")){
+    if(!strcmp(type,"listbutton")){
+        snprintf(w->list_text,sizeof(w->list_text),"%s",w->value);
+        char *cursor=w->list_text;
+        while(*cursor&&w->list_count<12){
+            char *next=strchr(cursor,'|');
+            if(next)*next=0;
+            while(*cursor==' '||*cursor=='\t')cursor++;
+            char *end=cursor+strlen(cursor);
+            while(end>cursor&&(end[-1]==' '||end[-1]=='\t'))*--end=0;
+            if(*cursor){
+                w->list_offsets[w->list_count]=(uint8_t)(cursor-w->list_text);
+                w->list_count++;
+            }
+            if(!next)break;
+            cursor=next+1;
+        }
+        if(!w->list_count){
+            w->card=card(pg,cw,62);
+            label(w->card,"Liste sans choix",0xFFB35C,&mira_font_fr_16);
+            return;
+        }
+        const bool segmented=!strcmp(style,"segmented");
+        const bool compact=!strcmp(style,"compact");
+        const int per_row=segmented?3:2;
+        const int height=compact||segmented?34:38;
+        const int rows=(w->list_count+per_row-1)/per_row;
+        w->card=card(pg,cw,48+rows*(height+7));
+        make_flex(w->card,LV_FLEX_FLOW_COLUMN,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_CENTER);
+        lv_obj_t *name_label=label(w->card,display,0xF3F6F7,&mira_font_fr_16);
+        lv_obj_set_width(name_label,cw-28);
+        lv_obj_set_style_text_align(name_label,LV_TEXT_ALIGN_CENTER,0);
+        lv_obj_t *wrap=lv_obj_create(w->card);
+        lv_obj_set_size(wrap,cw-22,rows*(height+7));
+        lv_obj_set_style_bg_opa(wrap,segmented?LV_OPA_COVER:LV_OPA_TRANSP,0);
+        lv_obj_set_style_bg_color(wrap,panel2_c(),0);
+        lv_obj_set_style_border_width(wrap,segmented?1:0,0);
+        lv_obj_set_style_pad_all(wrap,3,0);
+        lv_obj_set_style_pad_row(wrap,5,0);
+        lv_obj_set_style_pad_column(wrap,5,0);
+        make_flex(wrap,LV_FLEX_FLOW_ROW_WRAP,LV_FLEX_ALIGN_CENTER,LV_FLEX_ALIGN_CENTER);
+        for(uint8_t idx=0;idx<w->list_count;idx++){
+            lv_obj_t *button=lv_button_create(wrap);
+            w->list_buttons[idx]=button;
+            lv_obj_set_size(button,segmented?110:170,height);
+            lv_obj_set_style_radius(button,9,0);
+            lv_obj_set_style_shadow_width(button,0,0);
+            lv_obj_set_style_border_width(button,1,0);
+            lv_obj_t *choice=label(button,listbutton_label(w,idx),0xF3F6F7,
+                                   compact||segmented?&mira_font_fr_14:&mira_font_fr_16);
+            lv_obj_center(choice);
+            const uintptr_t token=(((uintptr_t)(w-widgets))<<4)|(uintptr_t)idx;
+            lv_obj_add_event_cb(button,listbutton_clicked,LV_EVENT_CLICKED,(void*)(token+1u));
+        }
+        listbutton_mark_selected(w,0);
+        return;
+    }
+    if(!strcmp(type,"list")){
         w->card=card(pg,cw,96);
         label(w->card,display,0xF3F6F7,&mira_font_fr_16);
         w->control=lv_dropdown_create(w->card);
