@@ -22,6 +22,7 @@
 #include "mira_display.h"
 #include "mira_mqtt.h"
 #include "mira_jeedom.h"
+#include "mira_camera.h"
 #include "mira_setup_access.h"
 
 #define MIRA_WIDTH 800
@@ -53,6 +54,10 @@ static uint32_t last_user_touch_ms,last_user_touch_count;
 static lv_obj_t *feedback;
 static lv_obj_t *touch_diag_label;
 static lv_obj_t *touch_diag_button;
+static lv_obj_t *camera_overlay,*camera_image,*camera_status;
+static lv_image_dsc_t camera_dsc;
+static uint16_t *camera_image_pixels;
+static uint32_t camera_last_update;
 
 typedef struct {
     char name[96], unit[24], type[24], value[160];
@@ -315,6 +320,76 @@ static void media_add_button(mira_widget_t *w,int action,int x,const char *text)
     lv_obj_add_event_cb(button,media_direct_action,LV_EVENT_CLICKED,(void*)(context+1));
 }
 
+
+// Native camera popup. The worker delivers RGB565 pixels via a mutex, but
+// only the LVGL render task ever creates/destroys LVGL objects or image dsc.
+static void camera_close(void) {
+    mira_camera_stop();
+    if(camera_image)lv_image_set_src(camera_image,NULL);
+    if(camera_overlay)lv_obj_delete(camera_overlay);
+    camera_overlay=NULL;camera_image=NULL;camera_status=NULL;
+    if(camera_image_pixels)heap_caps_free(camera_image_pixels);
+    camera_image_pixels=NULL;
+    memset(&camera_dsc,0,sizeof(camera_dsc));
+}
+static void camera_close_event(lv_event_t *event) {
+    (void)event;
+    camera_close();
+}
+static void camera_open_event(lv_event_t *event) {
+    uintptr_t opaque=(uintptr_t)lv_event_get_user_data(event);
+    if(!opaque)return;
+    const size_t idx=opaque-1u;
+    if(idx>=widget_n||strcmp(widgets[idx].type,"camera"))return;
+    camera_close();
+    camera_overlay=lv_obj_create(lv_layer_top());
+    lv_obj_set_size(camera_overlay,800,480);
+    lv_obj_align(camera_overlay,LV_ALIGN_CENTER,0,0);
+    lv_obj_set_style_bg_color(camera_overlay,lv_color_hex(0x000000),0);
+    lv_obj_set_style_bg_opa(camera_overlay,LV_OPA_COVER,0);
+    lv_obj_set_style_border_width(camera_overlay,0,0);
+    lv_obj_set_style_radius(camera_overlay,0,0);
+    lv_obj_set_style_pad_all(camera_overlay,0,0);
+    no_scroll(camera_overlay);
+    lv_obj_t *back=lv_button_create(camera_overlay);
+    lv_obj_set_size(back,66,40);
+    lv_obj_align(back,LV_ALIGN_TOP_LEFT,5,5);
+    lv_obj_add_event_cb(back,camera_close_event,LV_EVENT_CLICKED,NULL);
+    lv_obj_t *caption=label(back,"Retour",0xffffff,&lv_font_montserrat_16);
+    lv_obj_center(caption);
+    lv_obj_t *heading=label(camera_overlay,widgets[idx].name,0xffffff,&lv_font_montserrat_16);
+    lv_obj_align(heading,LV_ALIGN_TOP_MID,25,12);
+    camera_image=lv_image_create(camera_overlay);
+    lv_obj_align(camera_image,LV_ALIGN_CENTER,0,22);
+    camera_status=label(camera_overlay,"Chargement du flux BMP...",0xffffff,&lv_font_montserrat_16);
+    lv_obj_set_width(camera_status,770);
+    lv_obj_set_style_text_align(camera_status,LV_TEXT_ALIGN_CENTER,0);
+    lv_obj_align(camera_status,LV_ALIGN_CENTER,0,15);
+    if(!mira_camera_start(widgets[idx].name))
+        lv_label_set_text(camera_status,"Configurer une URL BMP dans Jeedom > Mira > Commandes");
+    camera_last_update=lv_tick_get();
+}
+static void camera_poll_on_lvgl_task(uint32_t tick){
+    if(!camera_overlay||tick-camera_last_update<85u)return;
+    camera_last_update=tick;
+    mira_camera_frame_t frame={0};
+    if(!mira_camera_take(&frame))return;
+    if(!frame.pixels||!frame.width||!frame.height)return;
+    if(camera_image)lv_image_set_src(camera_image,NULL);
+    if(camera_image_pixels)heap_caps_free(camera_image_pixels);
+    camera_image_pixels=frame.pixels;
+    memset(&camera_dsc,0,sizeof(camera_dsc));
+    camera_dsc.header.magic=LV_IMAGE_HEADER_MAGIC;
+    camera_dsc.header.cf=LV_COLOR_FORMAT_RGB565;
+    camera_dsc.header.w=frame.width;
+    camera_dsc.header.h=frame.height;
+    camera_dsc.data_size=(uint32_t)frame.width*(uint32_t)frame.height*2u;
+    camera_dsc.data=(const uint8_t*)camera_image_pixels;
+    lv_image_set_src(camera_image,&camera_dsc);
+    lv_obj_align(camera_image,LV_ALIGN_CENTER,0,22);
+    if(camera_status)lv_obj_add_flag(camera_status,LV_OBJ_FLAG_HIDDEN);
+}
+
 static void make_widget(const cJSON *o,int info_total,int *info_seen){
     if(widget_n>=MAX_WIDGETS)return;
     const char *type=str(o,"type",""),*loc=str(o,"emplacement","accueil");
@@ -528,10 +603,17 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         return;
     }
     if(!strcmp(type,"camera")){
-        w->card=card(pg,390,190);
-        label(w->card,display,0xF3F6F7,&lv_font_montserrat_20);
-        lv_obj_t *note=label(w->card,"Caméra - flux non connecté",0xA8B2B8,&lv_font_montserrat_16);
-        lv_obj_align(note,LV_ALIGN_CENTER,0,0);
+        w->card=card(pg,cw,86);
+        w->control=lv_button_create(w->card);
+        lv_obj_set_size(w->control,cw-24,57);
+        lv_obj_center(w->control);
+        lv_obj_set_style_bg_color(w->control,panel2_c(),0);
+        lv_obj_set_style_border_color(w->control,cyan_c(),0);
+        lv_obj_set_style_border_width(w->control,1,0);
+        lv_obj_t *caption=label(w->control,display,0xF3F6F7,&lv_font_montserrat_16);
+        lv_obj_center(caption);
+        uintptr_t idx=(uintptr_t)(w-widgets)+1u;
+        lv_obj_add_event_cb(w->control,camera_open_event,LV_EVENT_CLICKED,(void*)idx);
         return;
     }
     w->card=card(pg,cw,50);
@@ -923,10 +1005,11 @@ static void apply_pending_states(void){
 }
 
 void mira_full_ui_tick(void){
-    if(reload_pending){reload_pending=false;build_config();}
+    if(reload_pending){reload_pending=false;camera_close();build_config();}
     apply_pending_states();
     static uint32_t diag_last_tick;
     uint32_t now_tick=lv_tick_get();
+    camera_poll_on_lvgl_task(now_tick);
     // Original Mira's 60-second auto return: use verified GT911 physical
     // press counter, not LVGL redraw/Info traffic (which is not user activity).
     mira_display_stats_t last_touch={0};
