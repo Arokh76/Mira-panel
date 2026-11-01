@@ -367,12 +367,12 @@ static void camera_open_event(lv_event_t *event) {
     lv_obj_align(heading,LV_ALIGN_TOP_MID,25,12);
     camera_image=lv_image_create(camera_overlay);
     lv_obj_align(camera_image,LV_ALIGN_CENTER,0,22);
-    camera_status=label(camera_overlay,"Chargement du flux BMP...",0xffffff,&lv_font_montserrat_16);
+    camera_status=label(camera_overlay,"Chargement caméra BMP/JPEG...",0xffffff,&lv_font_montserrat_16);
     lv_obj_set_width(camera_status,770);
     lv_obj_set_style_text_align(camera_status,LV_TEXT_ALIGN_CENTER,0);
     lv_obj_align(camera_status,LV_ALIGN_CENTER,0,15);
     if(!mira_camera_start(widgets[idx].name))
-        lv_label_set_text(camera_status,"Configurer une URL BMP dans Jeedom > Mira > Commandes");
+        lv_label_set_text(camera_status,"Configurer une URL HTTP BMP/JPEG dans Jeedom > Mira > Commandes");
     camera_last_update=lv_tick_get();
 }
 static void camera_poll_on_lvgl_task(uint32_t tick){
