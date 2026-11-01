@@ -24,6 +24,8 @@
 static const char *TAG = "mira-idf-rgb";
 static i2c_master_bus_handle_t i2c_bus;
 static i2c_master_dev_handle_t gt911;
+static i2c_master_dev_handle_t ioexp_device;
+static uint8_t ioexp_output_shadow=0xff;
 static bool touch_ready;
 static uint8_t touch_addr;
 static volatile uint32_t touch_reads;
@@ -217,6 +219,35 @@ static esp_err_t ioexp_write(i2c_master_dev_handle_t ioexp, uint8_t reg, uint8_t
     return i2c_master_transmit(ioexp, cmd, sizeof(cmd), 80);
 }
 
+
+// Backlight port copied from the historically validated Arduino Waveshare43CDisplay
+// policy. The 4.3C uses a CH32 I2C controller at 0x24; EXIO2 enables the lamp
+// and PWM register 0x05 dims it. No ESP32 LEDC/GPIO pin is used.
+// Do not use 7-inch CH422G brightness profiles here.
+esp_err_t mira_display_set_brightness(uint8_t raw) {
+    if(!ioexp_device)return ESP_ERR_INVALID_STATE;
+    if(raw==0){
+        const uint8_t next=ioexp_output_shadow & (uint8_t)~(1u<<2);
+        esp_err_t err=ioexp_write(ioexp_device,0x03,next);
+        if(err==ESP_OK)ioexp_output_shadow=next;
+        return err;
+    }
+    const uint8_t enabled=ioexp_output_shadow | (uint8_t)(1u<<2);
+    esp_err_t err=ioexp_write(ioexp_device,0x03,enabled);
+    if(err!=ESP_OK)return err;
+    ioexp_output_shadow=enabled;
+    uint8_t percentage=1;
+    if(raw>30){
+        uint32_t value=1u+(((uint32_t)(raw-30)*99u+112u)/225u);
+        percentage=(uint8_t)(value>100u?100u:value);
+    }
+    // Hardware duty is inverted on this panel: 100% brightness => PWM 0;
+    // clamp interactive minimum to the already tested Waveshare duty 80/100.
+    const uint8_t pwm100=(uint8_t)(((100u-percentage)*80u+49u)/99u);
+    const uint8_t pwm8=(uint8_t)((pwm100*255u+50u)/100u);
+    return ioexp_write(ioexp_device,0x05,pwm8);
+}
+
 static void init_i2c(void) {
     i2c_master_bus_config_t bus_cfg = {
         .i2c_port = I2C_NUM_0,
@@ -232,13 +263,12 @@ static void init_i2c(void) {
         .device_address = 0x24,
         .scl_speed_hz = 400000,
     };
-    i2c_master_dev_handle_t ioexp = NULL;
-    ESP_ERROR_CHECK(i2c_master_bus_add_device(i2c_bus, &ext_cfg, &ioexp));
+    ESP_ERROR_CHECK(i2c_master_bus_add_device(i2c_bus, &ext_cfg, &ioexp_device));
 
     // Configure IO0..IO7 outputs; our original 0xff keeps LCD/USB state
     // identical to the last working no-bounce firmware.
-    ESP_ERROR_CHECK(ioexp_write(ioexp, 0x02, 0xff));
-    ESP_ERROR_CHECK(ioexp_write(ioexp, 0x03, 0xff));
+    ESP_ERROR_CHECK(ioexp_write(ioexp_device, 0x02, 0xff));
+    ESP_ERROR_CHECK(ioexp_write(ioexp_device, 0x03, 0xff));
 
     // Correct missing GT911 hard reset / address selection:
     // (1) EXIO1 low, (2) GPIO4 low => choose GT911 0x5d,
@@ -252,11 +282,11 @@ static void init_i2c(void) {
     };
     ESP_ERROR_CHECK(gpio_config(&irq_cfg));
     ESP_ERROR_CHECK(gpio_set_level(GPIO_NUM_4, 0));
-    ESP_ERROR_CHECK(ioexp_write(ioexp, 0x03, 0xfd)); // EXIO1 low; EXIO2 backlight stays on
+    ESP_ERROR_CHECK(ioexp_write(ioexp_device, 0x03, 0xfd)); // EXIO1 low; EXIO2 backlight stays on
     vTaskDelay(pdMS_TO_TICKS(100));
     ESP_ERROR_CHECK(gpio_set_level(GPIO_NUM_4, 0));
     vTaskDelay(pdMS_TO_TICKS(100));
-    ESP_ERROR_CHECK(ioexp_write(ioexp, 0x03, 0xff)); // EXIO1 high => GT911 exits reset
+    ESP_ERROR_CHECK(ioexp_write(ioexp_device, 0x03, 0xff)); // EXIO1 high => GT911 exits reset
     vTaskDelay(pdMS_TO_TICKS(200));
 
     // GPIO4 is GT911 interrupt input during operation. Poll coordinates using I2C.
