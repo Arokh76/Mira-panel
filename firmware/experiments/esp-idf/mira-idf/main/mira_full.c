@@ -1149,8 +1149,11 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                     r=(rgb>>16)&255u;g=(rgb>>8)&255u;b=rgb&255u;
                     valid=true;
                 }
-            }else if(sscanf(msg->value,"%u,%u,%u",&r,&g,&b)==3 &&
-                     r<=255u && g<=255u && b<=255u)valid=true;
+            }else{
+                char trailing=0;
+                if(sscanf(msg->value,"%u,%u,%u %c",&r,&g,&b,&trailing)==3 &&
+                   r<=255u && g<=255u && b<=255u)valid=true;
+            }
             if(valid){
                 const lv_color_hsv_t hsv=lv_color_rgb_to_hsv((uint8_t)r,(uint8_t)g,(uint8_t)b);
                 suppress_events=true;
