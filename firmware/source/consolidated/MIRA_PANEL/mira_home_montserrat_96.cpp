@@ -890,12 +890,17 @@ static const lv_font_fmt_txt_cmap_t cmaps[] = {
         .list_length=12, .type=LV_FONT_FMT_TXT_CMAP_SPARSE_TINY
     }
 };
+#if LVGL_VERSION_MAJOR < 9
 static lv_font_fmt_txt_glyph_cache_t cache;
+#endif
 static const lv_font_fmt_txt_dsc_t font_dsc = {
     .glyph_bitmap=glyph_bitmap, .glyph_dsc=glyph_dsc,
     .cmaps=cmaps, .kern_dsc=NULL, .kern_scale=0,
     .cmap_num=1, .bpp=4, .kern_classes=0, .bitmap_format=0,
+    
+#if LVGL_VERSION_MAJOR < 9
     .cache=&cache
+#endif
 };
 extern const lv_font_t mira_home_montserrat_96 = {
     .get_glyph_dsc=lv_font_get_glyph_dsc_fmt_txt,
