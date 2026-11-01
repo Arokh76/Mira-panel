@@ -1,0 +1,73 @@
+name: EXP Full Mira 0.7.37 native LVGL9.6 4.3C
+on:
+  workflow_dispatch:
+  push:
+    branches: [experiment/mira-0737-full-lvgl96-43c]
+    paths:
+      - '.github/workflows/build-mira-0737-native-lvgl96.yml'
+      - 'firmware/source/consolidated/MIRA_PANEL/**'
+permissions:
+  contents: read
+jobs:
+  compile-original-mira:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+        with:
+          version: 1.5.1
+      - name: Arduino ESP32 3.3.11 and original Mira dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          arduino-cli config init --overwrite
+          arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli lib update-index
+          arduino-cli core install esp32:esp32@3.3.11
+          arduino-cli config set library.enable_unsafe_install true
+          arduino-cli lib install "ArduinoJson@6.21.5"
+          arduino-cli lib install "JPEGDEC@1.8.2"
+          arduino-cli lib install "AsyncHTTPRequest_Generic@1.13.0"
+          arduino-cli lib install --git-url https://github.com/ESP32Async/AsyncTCP.git
+      - name: Install official pinned LVGL 9.6.0 as Arduino library
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/Arduino/libraries"
+          git clone -q --branch v9.6.0 --depth 1 https://github.com/lvgl/lvgl.git "$HOME/Arduino/libraries/lvgl"
+          test -f "$HOME/Arduino/libraries/lvgl/library.properties"
+          cp "$HOME/Arduino/libraries/lvgl/lv_conf_template.h" "$HOME/Arduino/libraries/lv_conf.h"
+          sed -i 's/^#if 0 \/\* Set this to "1" to enable content \*\//#if 1 \/\* Mira 0.7.37 LVGL9 port \*\//' "$HOME/Arduino/libraries/lv_conf.h"
+          sed -i 's/^#define LV_MEM_SIZE 65536/#define LV_MEM_SIZE (256U * 1024U)/' "$HOME/Arduino/libraries/lv_conf.h"
+          for size in 12 16 20 28 40 48; do
+            sed -i -E "s/^(#define LV_FONT_MONTSERRAT_${size}) 0$/\1 1/" "$HOME/Arduino/libraries/lv_conf.h"
+          done
+          grep -Fq '#define LV_FONT_MONTSERRAT_40 1' "$HOME/Arduino/libraries/lv_conf.h"
+      - name: Compile ORIGINAL MiraPanelUI / MiraPanelServer / MiraMqtt with native 4.3C
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build-native
+          arduino-cli compile \
+            --fqbn 'esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,CPUFreq=240,FlashMode=qio,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,PSRAM=opi,UploadMode=default,UploadSpeed=921600,LoopCore=1,EventsCore=1' \
+            --build-property 'compiler.c.extra_flags=-DMIRA_TARGET_WAVESHARE_43C=1 -DMIRA_LVGL9_NATIVE=1 -O2' \
+            --build-property 'compiler.cpp.extra_flags=-DMIRA_TARGET_WAVESHARE_43C=1 -DMIRA_LVGL9_NATIVE=1 -O2' \
+            --output-dir build-native \
+            firmware/source/consolidated/MIRA_PANEL 2>&1 | tee /tmp/build-native.log
+          test -s build-native/MIRA_PANEL.ino.bin
+      - name: Package ONLY on fully compiled original Mira
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          cp build-native/MIRA_PANEL.ino.bin release/Mira_0737_NATIVE_LVGL96_43C_OTA.bin
+          sha256sum release/*.bin > release/SHA256.txt
+          echo 'Experimental FULL original Mira 0.7.37 LVGL9.6; validate on board. OTA only.' > release/README.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MIRA_0737_FULL_ORIGINAL_LVGL96_4_3C_TEST
+          path: release/
+          if-no-files-found: error
+          retention-days: 14
