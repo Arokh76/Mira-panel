@@ -23,6 +23,7 @@ Mise à jour : 1er novembre 2026. Une seule branche de développement du portage
 - Nouveau : `POST /mira/state` (JSON `{"name":"Nom","value":"Valeur"}`) vers une file FreeRTOS consommée **uniquement** par la tâche LVGL, sans déclencher d'action.
 - Nouveau : MQTT natif optionnel sur `mira/<screen>/States/#` et `mira/<screen>/Actions/<nom>`, publication non bloquante en réponse **uniquement aux événements tactiles locaux**; configuration stockée séparément en NVS.
 - Nouveau : Wi-Fi AP+STA, configuration volontaire par `POST /mira/wifi`, sans effacer `reseau.json`. Formulaires accessibles sur `/mira`.
+- Sécurité du banc : écriture réseau/MQTT, import SPIFFS et OTA accessibles uniquement aux clients connectés à l'AP de récupération (192.168.4.1). L'AP de test utilise encore un mot de passe connu : ce n'est **pas** une authentification de production.
 - Builds GitHub Actions natifs épinglés 5.5.6 et 9.6; surveiller le dernier commit, ne jamais confondre un ancien succès avec la validation du HEAD.
 
 ## Reste à porter avant un firmware Mira complet
