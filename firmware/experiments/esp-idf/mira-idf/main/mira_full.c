@@ -637,7 +637,14 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
         char norm_name[96],norm_recv[96];
         normalize_widget_name(w->name,norm_name,sizeof(norm_name));
         normalize_widget_name(msg->name,norm_recv,sizeof(norm_recv));
-        if(strcmp(w->name,msg->name)!=0&&strcmp(norm_name,norm_recv)!=0)continue;
+        bool matches=strcmp(w->name,msg->name)==0||strcmp(norm_name,norm_recv)==0;
+        if(!matches&&!strcmp(w->type,"thermostat")){
+            char setpoint_name[128],setpoint_normalized[128];
+            snprintf(setpoint_name,sizeof(setpoint_name),"%s__consigne",w->name);
+            normalize_widget_name(setpoint_name,setpoint_normalized,sizeof(setpoint_normalized));
+            matches=!strcmp(setpoint_name,msg->name)||!strcmp(setpoint_normalized,norm_recv);
+        }
+        if(!matches)continue;
         snprintf(w->value,sizeof(w->value),"%s",msg->value);
         suppress_events=true;
         if(w->control && !strcmp(w->type,"toggle")){
@@ -650,6 +657,23 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
             const int value=clamp(atoi(msg->value),w->minv,w->maxv);
             if(!strcmp(w->type,"range"))lv_slider_set_value(w->control,value,LV_ANIM_OFF);
             else lv_arc_set_value(w->control,value);
+        }else if(w->control && (!strcmp(w->type,"list")||!strcmp(w->type,"listbutton"))){
+            const char *options=lv_dropdown_get_options(w->control);
+            if(options){
+                uint16_t index=0;
+                const char *start=options;
+                while(*start){
+                    const char *end=strchr(start,'\n');
+                    size_t length=end?(size_t)(end-start):strlen(start);
+                    if(strlen(msg->value)==length&&!strncmp(start,msg->value,length)){
+                        lv_dropdown_set_selected(w->control,index);
+                        break;
+                    }
+                    if(!end)break;
+                    start=end+1;
+                    index++;
+                }
+            }
         }
         if(w->value_label){
             char display[200];
