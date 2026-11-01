@@ -744,9 +744,18 @@ static int resolve_local_action(cJSON *index,const mira_action_msg_t *msg,
         }
         if(!strcmp(msg->type,"button")&&!strcmp(kind,"button")&&!strcmp(name,msg->name))
             return jint(item,"id",-1);
-        // Multiaction's ordinary click is the same as the first physical trigger.
+        // Mira beta publishes four distinct Jeedom button IDs for a
+        // multiaction widget. Resolve the gesture to its historical binding;
+        // unknown gestures never fall back silently to a single click.
         if(!strcmp(msg->type,"multiaction")&&!strcmp(kind,"button")) {
-            snprintf(expected,sizeof(expected),"Multi_Clic_%.95s",msg->name);
+            const char *prefix=NULL;
+            if(!strcmp(msg->value,"single")||!strcmp(msg->value,"1"))
+                prefix="Multi_Clic_";
+            else if(!strcmp(msg->value,"double"))prefix="Multi_Double_";
+            else if(!strcmp(msg->value,"triple"))prefix="Multi_Triple_";
+            else if(!strcmp(msg->value,"long"))prefix="Multi_Long_";
+            if(!prefix)return -1;
+            snprintf(expected,sizeof(expected),"%s%.95s",prefix,msg->name);
             if(!strcmp(name,expected))return jint(item,"id",-1);
         }
     }
