@@ -961,6 +961,44 @@ static void jeedom_action_worker(void *unused) {
         }
     }
 }
+// The beta uses /reseau.json -> ap[0].passcrypt as the screen/plugin
+// authentication key. Reuse it when decipherable, without ever replacing a
+// key already provisioned on ESP-IDF or rewriting the original network file.
+static void import_legacy_screen_key(void){
+    FILE *fp=fopen("/spiffs/reseau.json","rb");
+    if(!fp)return;
+    if(fseek(fp,0,SEEK_END)!=0){fclose(fp);return;}
+    long len=ftell(fp);
+    if(len<2||len>4096){fclose(fp);return;}
+    rewind(fp);
+    char *buffer=malloc((size_t)len+1);
+    if(!buffer){fclose(fp);return;}
+    const size_t got=fread(buffer,1,(size_t)len,fp);
+    fclose(fp);
+    if(got!=(size_t)len){free(buffer);return;}
+    buffer[got]=0;
+    cJSON *root=cJSON_ParseWithLength(buffer,got);
+    free(buffer);
+    const cJSON *ap=root?cJSON_GetObjectItemCaseSensitive(root,"ap"):NULL;
+    const cJSON *entry=cJSON_IsArray(ap)?cJSON_GetArrayItem(ap,0):NULL;
+    const char *encrypted=jstr((cJSON*)entry,"passcrypt","");
+    char plaintext[256]={0};
+    bool valid=encrypted[0]&&mira_legacy_decrypt(encrypted,plaintext,sizeof(plaintext));
+    if(valid&&strlen(plaintext)<=MIRA_KEY_MAX){
+        nvs_handle_t nv;
+        if(nvs_open("mira_idf_auth",NVS_READWRITE,&nv)==ESP_OK){
+            size_t existing=0;
+            if(nvs_get_str(nv,"jeedom_key",NULL,&existing)==ESP_ERR_NVS_NOT_FOUND &&
+               nvs_set_str(nv,"jeedom_key",plaintext)==ESP_OK &&
+               nvs_commit(nv)==ESP_OK)
+                ESP_LOGI(TAG,"Legacy Mira screen authentication imported");
+            nvs_close(nv);
+        }
+    }
+    memset(plaintext,0,sizeof(plaintext));
+    if(root)cJSON_Delete(root);
+}
+
 // Import the previous Arduino firmware's /params.json only when there is no
 // newer ESP-IDF setting for a given key. Never modify the legacy SPIFFS file.
 // Mira beta uses {"params":[{"param":"Jeedom_IP","value":"...","type":"text"}]}.
@@ -1027,6 +1065,7 @@ static void import_legacy_http_settings(void) {
 }
 esp_err_t mira_jeedom_action_init(void) {
     if(action_queue)return ESP_OK;
+    import_legacy_screen_key();
     import_legacy_http_settings();
     nvs_handle_t settings;
     if(nvs_open("mira_idf_jeed",NVS_READONLY,&settings)==ESP_OK){
