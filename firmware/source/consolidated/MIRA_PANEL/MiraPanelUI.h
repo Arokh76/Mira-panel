@@ -4,6 +4,9 @@
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include <lvgl.h>
+#if defined(MIRA_LVGL9_NATIVE)
+#include "MiraLvgl9Compat.h"
+#endif
 #include "MiraPanelServer.h"
 #include "MiraHardware.h"
 #include "MiraDisplayProfile.h"
