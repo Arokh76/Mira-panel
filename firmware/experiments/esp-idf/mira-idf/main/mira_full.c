@@ -1129,7 +1129,15 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
             bool valid=false;
             if(msg->value[0]=='#' && strlen(msg->value)==7){
                 unsigned rgb=0;
-                if(sscanf(msg->value+1,"%6x",&rgb)==1){
+                // Require six valid hexadecimal characters, not a partial
+                // sscanf conversion of malformed colour state.
+                bool hex=true;
+                for(int k=1;k<7;k++){
+                    char ch=msg->value[k];
+                    if(!((ch>='0'&&ch<='9')||(ch>='a'&&ch<='f')||
+                         (ch>='A'&&ch<='F'))){hex=false;break;}
+                }
+                if(hex&&sscanf(msg->value+1,"%6x",&rgb)==1){
                     r=(rgb>>16)&255u;g=(rgb>>8)&255u;b=rgb&255u;
                     valid=true;
                 }
