@@ -59,6 +59,7 @@ typedef struct {
     lv_obj_t *fields[9]; // energy/media passive Jeedom composite infos
     lv_obj_t *media_slider,*media_device_dropdown,*media_play_caption;
     bool media_is_playing;
+    char media_active_device[96];
     int minv,maxv;
 } mira_widget_t;
 static mira_widget_t widgets[MAX_WIDGETS];
@@ -232,6 +233,28 @@ static void event_local(lv_event_t *e){
     }
 }
 static int clamp(int a,int lo,int hi){return a<lo?lo:(a>hi?hi:a);}
+
+// Passive playback-device list updates and currently selected speaker
+// are independent. A device Info is never a command.
+static void media_select_active_device(mira_widget_t *w){
+    if(!w||!w->media_device_dropdown||!w->media_active_device[0])return;
+    const char *options=lv_dropdown_get_options(w->media_device_dropdown);
+    if(!options)return;
+    uint16_t index=0;
+    const char *current=options;
+    const size_t wanted=strlen(w->media_active_device);
+    while(*current){
+        const char *next=strchr(current,'\n');
+        size_t length=next?(size_t)(next-current):strlen(current);
+        if(index>0&&length==wanted&&!strncmp(current,w->media_active_device,length)){
+            lv_dropdown_set_selected(w->media_device_dropdown,index);
+            return;
+        }
+        if(!next)break;
+        current=next+1;
+        index++;
+    }
+}
 
 // Multimedia LVGL controls use the *same* action names as the existing
 // Mira 0.7.37 Jeedom and MQTT plugins.  No HTTP/network work in LVGL callback.
@@ -797,11 +820,15 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                                 const bool playing=!strcasecmp(msg->value,"playing")||
                                    !strcasecmp(msg->value,"lecture")||
                                    !strcasecmp(msg->value,"play")||
+                                   !strcasecmp(msg->value,"en lecture")||
                                    !strcasecmp(msg->value,"on")||
                                    !strcmp(msg->value,"1")||
                                    !strcasecmp(msg->value,"true");
                                 const bool paused=!strcasecmp(msg->value,"paused")||
                                    !strcasecmp(msg->value,"pause")||
+                                   !strcasecmp(msg->value,"en pause")||
+                                   !strcasecmp(msg->value,"stopped")||
+                                   !strcasecmp(msg->value,"arrêt")||
                                    !strcasecmp(msg->value,"off")||
                                    !strcmp(msg->value,"0")||
                                    !strcasecmp(msg->value,"false");
@@ -810,6 +837,9 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                                     if(w->media_play_caption)
                                         lv_label_set_text(w->media_play_caption,playing?"Pause":"Lecture");
                                 }
+                            }else if(n==7) {
+                                snprintf(w->media_active_device,sizeof(w->media_active_device),"%.95s",msg->value);
+                                media_select_active_device(w);
                             }else if(n==5&&w->media_slider) {
                                 const int value=clamp(atoi(msg->value),0,100);
                                 lv_slider_set_value(w->media_slider,value,LV_ANIM_OFF);
@@ -819,6 +849,7 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                                 for(char *p=options;*p;p++)if(*p=='|'||*p==';')*p='\n';
                                 lv_dropdown_set_options(w->media_device_dropdown,options);
                                 lv_dropdown_set_selected(w->media_device_dropdown,0);
+                                media_select_active_device(w);
                                 lv_label_set_text(w->fields[n],"Liste actualisée");
                             }
                             suppress_events=false;
