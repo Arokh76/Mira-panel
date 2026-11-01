@@ -1,23 +1,34 @@
 #include "MiraPanelUI.h"
 #include "MiraMqtt.h"
 #include "MiraFrenchFont.h"
+#if defined(MIRA_LVGL9_NATIVE)
+#include "MiraLvgl9Compat.h"
+#include "src/MiraNative43C/mira_display.h"
+#endif
 #include <WiFi.h>
 #include <time.h>
 
 #if defined(MIRA_TARGET_WAVESHARE_43C)
   #include <esp_heap_caps.h>
   // lvgl.h includes LVGL 8.4's snapshot API via lv_extra.h.
-  #if !LV_USE_SNAPSHOT
+  #if !defined(MIRA_LVGL9_NATIVE) && !LV_USE_SNAPSHOT
     #error "Mira Waveshare snapshot cache needs LV_USE_SNAPSHOT=1"
   #endif
 #endif
 
 #if defined(MIRA_TARGET_WAVESHARE_43C)
+#if defined(MIRA_LVGL9_NATIVE)
+  #if LVGL_VERSION_MAJOR != 9 || LVGL_VERSION_MINOR != 6
+    #error "Mira native 4.3C requires exactly LVGL 9.6"
+  #endif
+#else
   #if LVGL_VERSION_MAJOR != 8 || LVGL_VERSION_MINOR != 4
     #error "Mira Waveshare requires the official Waveshare LVGL 8.4 library"
   #endif
 #endif
+#endif
 
+#if !defined(MIRA_LVGL9_NATIVE)
 lv_disp_draw_buf_t MiraPanelUI::_drawBuffer;
 #if MIRA_RGB_DIRECT_FRAMEBUFFER
 lv_color_t* MiraPanelUI::_buf1 = nullptr;
@@ -25,6 +36,7 @@ lv_color_t* MiraPanelUI::_buf2 = nullptr;
 #else
 lv_color_t MiraPanelUI::_buf1[MIRA_DISPLAY_WIDTH * MIRA_DRAW_BUFFER_LINES];
 lv_color_t MiraPanelUI::_buf2[MIRA_DISPLAY_WIDTH * MIRA_DRAW_BUFFER_LINES];
+#endif
 #endif
 MiraDisplay* MiraPanelUI::_displayForLvgl = nullptr;
 MiraPanelUI* MiraPanelUI::_uiForLvgl = nullptr;
@@ -338,10 +350,20 @@ void MiraPanelUI::styleMainCard(lv_obj_t* card, bool dateTime) {
   lv_obj_set_style_border_opa(card, _theme == THEME_MIRA ? LV_OPA_50 : LV_OPA_70, 0);
   lv_obj_set_style_radius(card, _theme == THEME_GLASS ? 16 : 14, 0);
 
+#if defined(MIRA_LVGL9_NATIVE)
+  // Preserve the verified 9.7-FPS benchmark relief: solid 2px contour,
+  // zero blur, no snapshot cache.
+  lv_obj_set_style_shadow_width(card,0,0);
+  lv_obj_set_style_outline_width(card,2,0);
+  lv_obj_set_style_outline_opa(card,LV_OPA_50,0);
+  lv_obj_set_style_outline_color(card,lv_color_hex(0x000000),0);
+  lv_obj_set_style_outline_pad(card,0,0);
+#else
   lv_obj_set_style_shadow_color(card, lv_color_hex(0x000000), 0);
   lv_obj_set_style_shadow_opa(card, _theme == THEME_MIRA ? LV_OPA_10 : LV_OPA_10, 0);
   lv_obj_set_style_shadow_width(card, _theme == THEME_MIRA ? 4 : 3, 0);
   lv_obj_set_style_shadow_ofs_y(card, 2, 0);
+#endif
 
   if (dateTime) {
     lv_obj_set_style_border_color(card, colorAccent2(), 0);
@@ -353,6 +375,7 @@ void MiraPanelUI::styleMainCard(lv_obj_t* card, bool dateTime) {
     }
   }
 }
+#if !defined(MIRA_LVGL9_NATIVE)
 void MiraPanelUI::displayFlush(lv_disp_drv_t* disp, const lv_area_t* area, lv_color_t* color_p) {
   if (!_displayForLvgl) {
     lv_disp_flush_ready(disp);
@@ -384,6 +407,7 @@ void MiraPanelUI::displayFlush(lv_disp_drv_t* disp, const lv_area_t* area, lv_co
   lv_disp_flush_ready(disp);
 }
 
+#endif // The native 9.6 RGB driver owns the flush callback.
 // LVGL 8.3/8.4 re-hit-tests the active object while the finger is down.
 // PRESS_LOCK keeps its ORIGINAL target through a swipe. The scrollable parent
 // still receives the gesture; sliding into an unrelated button/slider doesn't.
@@ -427,6 +451,7 @@ bool MiraPanelUI::touchBlocksAction(bool analog) const {
   return true;
 }
 
+#if !defined(MIRA_LVGL9_NATIVE)
 void MiraPanelUI::touchRead(lv_indev_drv_t* indev, lv_indev_data_t* data) {
   (void)indev;
   data->state = LV_INDEV_STATE_REL;
@@ -796,17 +821,25 @@ void MiraPanelUI::begin() {
   lv_disp_drv_register(&dispDrv);
 #endif
 
+#if !defined(MIRA_LVGL9_NATIVE)
   static lv_indev_drv_t indevDrv;
   lv_indev_drv_init(&indevDrv);
   indevDrv.type = LV_INDEV_TYPE_POINTER;
   indevDrv.read_cb = touchRead;
   lv_indev_drv_register(&indevDrv);
+#else
+  mira_display_set_render_task(); // The validated native driver registered GT911 indev.
+#endif
 
   _screen = lv_obj_create(nullptr);
   lv_obj_clear_flag(_screen, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_set_style_border_width(_screen, 0, 0);
   lv_obj_set_style_pad_all(_screen, 0, 0);
+#if defined(MIRA_LVGL9_NATIVE)
+  lv_screen_load(_screen);
+#else
   lv_scr_load(_screen);
+#endif
 
   for (uint8_t i = 0; i < PAGE_COUNT; ++i) {
     _pages[i] = lv_obj_create(_screen);
@@ -981,6 +1014,7 @@ void MiraPanelUI::begin() {
 #endif
 }
 
+#endif // GT911 has its own native LVGL9 indev.
 MiraPanelUI::EventContext* MiraPanelUI::makeContext(uint8_t bindingIndex, int8_t itemIndex) {
   if (_eventCtxCount >= MAX_EVENT_CONTEXTS) return nullptr;
   EventContext& c = _eventCtx[_eventCtxCount++];
@@ -4866,7 +4900,13 @@ void MiraPanelUI::loop() {
   // Clock/configuration maintenance does not need a 2 ms interval.
   static uint32_t lastMaintenanceMs = 0;
   const uint32_t now = millis();
-  if ((uint32_t)(now - lastMaintenanceMs) < 40UL) return;
+  if ((uint32_t)(now - lastMaintenanceMs) < 40UL) {
+#if defined(MIRA_LVGL9_NATIVE)
+    // Native LVGL renderer has no separate Waveshare LVGL thread.
+    lv_timer_handler();
+#endif
+    return;
+  }
   if (!_display.miraLvglLock(5)) return;
   lastMaintenanceMs = now;
 #endif
@@ -4937,8 +4977,12 @@ void MiraPanelUI::loop() {
   if (_sleeping && _clockInSleep) updateSleepClock();
 
 #if defined(MIRA_TARGET_WAVESHARE_43C)
-  // The official Waveshare lvgl task owns lv_timer_handler().
+#if defined(MIRA_LVGL9_NATIVE)
+  lv_timer_handler(); // Original complete Mira UI on 9.6 direct RGB.
+#else
+  // LVGL 8.4 official Waveshare port owns lv_timer_handler().
   _display.miraLvglUnlock();
+#endif
 #else
   lv_timer_handler();
 #endif
