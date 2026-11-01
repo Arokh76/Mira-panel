@@ -457,7 +457,70 @@ static esp_err_t provision_key(httpd_req_t *req) {
 // Keep those settings in a DIFFERENT namespace: never rewrite the old
 // /params.json, so a rollback to the stable firmware remains possible.
 // NVS storage here is not encrypted; this is experimental, not production-ready.
+// Preserve the beta's GET/SET parameter names while storing typed display
+// values in the dedicated IDF UI namespace. The screen's LVGL task reloads
+// these values via a flag; this HTTP handler never touches LVGL directly.
+typedef struct {const char *legacy,*key;uint32_t max;bool clock;} mira_display_field_t;
+static const mira_display_field_t display_fields[]={
+    {"DISPLAY_Jour","day_pct",100,false},
+    {"DISPLAY_Nuit","night_pct",100,false},
+    {"DISPLAY_Veille","sleep_light",100,false},
+    {"DISPLAY_Delai","sleep_delay",3600,false},
+    {"DISPLAY_NuitAuto","night_auto",1,false},
+    {"DISPLAY_HorlogeVeille","sleep_clock",1,false},
+    {"DISPLAY_DebutNuit","night_start",0,true},
+    {"DISPLAY_FinNuit","night_end",0,true},
+};
+static const mira_display_field_t *display_field(const char *legacy){
+    for(size_t i=0;i<sizeof(display_fields)/sizeof(display_fields[0]);i++)
+        if(!strcmp(display_fields[i].legacy,legacy))return &display_fields[i];
+    return NULL;
+}
+static bool display_field_write(const mira_display_field_t *field,const char *value){
+    nvs_handle_t nv;
+    if(nvs_open("mira_idf_ui",NVS_READWRITE,&nv)!=ESP_OK)return false;
+    esp_err_t err=ESP_ERR_INVALID_ARG;
+    if(field->clock){
+        if(strlen(value)==5&&value[2]==':'&&
+           isdigit((unsigned char)value[0])&&isdigit((unsigned char)value[1])&&
+           isdigit((unsigned char)value[3])&&isdigit((unsigned char)value[4])){
+            int hour=(value[0]-'0')*10+(value[1]-'0');
+            int minute=(value[3]-'0')*10+(value[4]-'0');
+            if(hour<24&&minute<60)err=nvs_set_str(nv,field->key,value);
+        }
+    }else{
+        char *end=NULL;
+        unsigned long number=strtoul(value,&end,10);
+        if(value[0]&&end&&!*end&&number<=field->max&&
+           (strcmp(field->key,"day_pct")&&strcmp(field->key,"night_pct")||number>=1)){
+            if(field->max>255)err=nvs_set_u16(nv,field->key,(uint16_t)number);
+            else err=nvs_set_u8(nv,field->key,(uint8_t)number);
+        }
+    }
+    if(err==ESP_OK)err=nvs_commit(nv);
+    nvs_close(nv);
+    if(err==ESP_OK)mira_full_request_settings_reload();
+    return err==ESP_OK;
+}
+static bool display_field_read(const mira_display_field_t *field,char *value,size_t cap){
+    nvs_handle_t nv;
+    if(nvs_open("mira_idf_ui",NVS_READONLY,&nv)!=ESP_OK)return false;
+    esp_err_t err;
+    if(field->clock){
+        size_t size=cap;
+        err=nvs_get_str(nv,field->key,value,&size);
+    }else if(field->max>255){
+        uint16_t v=0;err=nvs_get_u16(nv,field->key,&v);
+        if(err==ESP_OK)snprintf(value,cap,"%u",(unsigned)v);
+    }else{
+        uint8_t v=0;err=nvs_get_u8(nv,field->key,&v);
+        if(err==ESP_OK)snprintf(value,cap,"%u",(unsigned)v);
+    }
+    nvs_close(nv);
+    return err==ESP_OK;
+}
 static bool supported_jeedom_param(const char *name){
+    if(display_field(name))return true;
     static const char *allowed[]={
         "Jeedom","Jeedom_IP","Jeedom_Key","Jeedom_Key_mira",
         "Jeedom_Refresh","Jeedom_Init_Cmd"
@@ -472,6 +535,13 @@ static esp_err_t param_get(httpd_req_t *req){
     if(!query_param(req,"value",name,sizeof(name))||!supported_jeedom_param(name)){
         httpd_resp_set_type(req,"text/plain");
         return httpd_resp_sendstr(req,"Null");
+    }
+    const mira_display_field_t *display=display_field(name);
+    if(display){
+        char value[48]={0};
+        bool ok=display_field_read(display,value,sizeof(value));
+        httpd_resp_set_type(req,"text/plain");
+        return httpd_resp_sendstr(req,ok?value:"Null");
     }
     nvs_handle_t nv;
     if(nvs_open("mira_idf_jeed",NVS_READONLY,&nv)!=ESP_OK)
@@ -491,6 +561,14 @@ static esp_err_t param_set(httpd_req_t *req){
        (!strcmp(name,"Jeedom")&&strcmp(value,"0")&&strcmp(value,"1"))){
         httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Parametre Jeedom invalide");
         return ESP_FAIL;
+    }
+    const mira_display_field_t *display=display_field(name);
+    if(display){
+        if(!display_field_write(display,value)){
+            httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Reglage d'affichage invalide");
+            return ESP_FAIL;
+        }
+        return httpd_resp_sendstr(req,"OK");
     }
     nvs_handle_t nv;
     esp_err_t err=nvs_open("mira_idf_jeed",NVS_READWRITE,&nv);
