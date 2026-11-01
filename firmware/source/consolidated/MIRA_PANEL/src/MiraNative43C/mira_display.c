@@ -19,7 +19,13 @@
 
 #define WIDTH 800
 #define HEIGHT 480
-#define LCD_PCLK_HZ (12 * 1000 * 1000)
+// Full Mira 0.7.37 redraw + Wi-Fi cause more PSRAM traffic than the
+// lightweight native benchmark.  On ESP32-S3 RGB EDMA an underrun shifts
+// the displayed image horizontally until LCD VSYNC resynchronization.
+// Use a conservative 8 MHz pixel clock for this full-UI stability build;
+// retain BOTH PSRAM framebuffers and the already fixed GT911 0x814F path.
+// 800x480 + porch totals ~ (820*500), so 8 MHz is ~19 Hz scan refresh.
+#define LCD_PCLK_HZ (8 * 1000 * 1000)
 
 static const char *TAG = "mira-idf-rgb";
 static i2c_master_bus_handle_t i2c_bus;
