@@ -535,7 +535,9 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
             lv_obj_set_style_bg_color(w->control,cyan_c(),LV_PART_INDICATOR);
             lv_obj_set_style_bg_color(w->control,lv_color_hex(0xEAF7FF),LV_PART_KNOB);
         }
-        lv_obj_add_event_cb(w->control,event_local,LV_EVENT_VALUE_CHANGED,w);
+        // Only issue a Jeedom/MQTT command after the user finishes moving
+        // the slider/arc. VALUE_CHANGED can generate dozens of requests.
+        lv_obj_add_event_cb(w->control,event_local,LV_EVENT_RELEASED,w);
         return;
     }
     if(!strcmp(type,"list")||!strcmp(type,"listbutton")){
