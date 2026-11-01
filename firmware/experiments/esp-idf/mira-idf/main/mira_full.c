@@ -11,6 +11,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <time.h>
+#include <math.h>
+#include <errno.h>
 #include "esp_log.h"
 #include "esp_spiffs.h"
 #include "esp_heap_caps.h"
@@ -237,9 +239,15 @@ static void event_local(lv_event_t *e){
         snprintf(b->value,sizeof(b->value),"%s",lv_obj_has_state(src,LV_STATE_CHECKED)?"On":"Off");
     }else if(!strcmp(b->type,"range")||!strcmp(b->type,"roundrange")||!strcmp(b->type,"thermostat")){
         int v=(!strcmp(b->type,"roundrange")||!strcmp(b->type,"thermostat"))?lv_arc_get_value(src):lv_slider_get_value(src);
-        snprintf(b->value,sizeof(b->value),"%d",v);
+        if(!strcmp(b->type,"thermostat"))
+            snprintf(b->value,sizeof(b->value),"%.1f",v*0.5f);
+        else
+            snprintf(b->value,sizeof(b->value),"%d",v);
         if(b->value_label){
-            char txt[192];snprintf(txt,sizeof(txt),"%s %s",b->value,b->unit);
+            char txt[192];
+            if(!strcmp(b->type,"thermostat"))
+                snprintf(txt,sizeof(txt),"%s°",b->value);
+            else snprintf(txt,sizeof(txt),"%s %s",b->value,b->unit);
             lv_label_set_text(b->value_label,txt);
         }
     }else if(!strcmp(b->type,"color")){
@@ -572,8 +580,15 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
     snprintf(w->unit,sizeof(w->unit),"%s",str(o,"unit",""));
     snprintf(w->type,sizeof(w->type),"%s",type);
     snprintf(w->value,sizeof(w->value),"%s",str(o,"value",""));
-    w->minv=integer(o,"min",0);w->maxv=integer(o,"max",100);
-    if(w->maxv<=w->minv)w->maxv=w->minv+100;
+    // The beta thermostat uses 5..30 C and half-degree setpoints,
+    // unlike ordinary integer range widgets.
+    const bool thermostat=!strcmp(type,"thermostat");
+    w->minv=integer(o,"min",thermostat?5:0);
+    w->maxv=integer(o,"max",thermostat?30:100);
+    if(thermostat){
+        w->minv=clamp(w->minv,-20,60);
+        w->maxv=clamp(w->maxv,w->minv+1,80);
+    }else if(w->maxv<=w->minv)w->maxv=w->minv+100;
     int cw=390;
     if(!strcmp(layout,"tile"))cw=192;
     if(!strcmp(layout,"wide")||!strcmp(layout,"hero"))cw=786;
@@ -672,12 +687,27 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
             w->control=lv_arc_create(w->card);
             lv_obj_set_size(w->control,165,165);
             lv_obj_align(w->control,LV_ALIGN_CENTER,0,14);
-            lv_arc_set_range(w->control,w->minv,w->maxv);
-            lv_arc_set_value(w->control,clamp(atoi(w->value),w->minv,w->maxv));
+            if(thermostat){
+                char *end=NULL;
+                const float incoming=strtof(w->value,&end);
+                const float initial=(*w->value&&end&&!*end&&isfinite(incoming))
+                                     ?incoming:20.0f;
+                const int half=clamp((int)lroundf(initial*2.0f),
+                                     w->minv*2,w->maxv*2);
+                lv_arc_set_range(w->control,w->minv*2,w->maxv*2);
+                lv_arc_set_value(w->control,half);
+                snprintf(w->value,sizeof(w->value),"%.1f",half*0.5f);
+            }else{
+                lv_arc_set_range(w->control,w->minv,w->maxv);
+                lv_arc_set_value(w->control,clamp(atoi(w->value),w->minv,w->maxv));
+            }
             lv_arc_set_rotation(w->control,135);
             lv_arc_set_bg_angles(w->control,0,270);
             lv_obj_set_style_arc_color(w->control,cyan_c(),LV_PART_INDICATOR);
-            w->value_label=label(w->card,"--",0xF3F6F7,&lv_font_montserrat_28);
+            char initial_label[96];
+            if(thermostat)snprintf(initial_label,sizeof(initial_label),"%s°",w->value);
+            else snprintf(initial_label,sizeof(initial_label),"%s %s",w->value,w->unit);
+            w->value_label=label(w->card,initial_label,0xF3F6F7,&lv_font_montserrat_28);
             lv_obj_align(w->value_label,LV_ALIGN_CENTER,0,14);
             if(!strcmp(type,"thermostat")){
                 w->thermostat_temperature=label(w->card,"Température : --",0xA8B2B8,&mira_font_fr_16);
