@@ -59,6 +59,31 @@ jobs:
             --output-dir build-native \
             firmware/source/consolidated/MIRA_PANEL 2>&1 | tee /tmp/build-native.log
           test -s build-native/MIRA_PANEL.ino.bin
+      - name: Decode 2026-11-01 exact boot panic and retain full ELF
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s build-native/MIRA_PANEL.ino.elf
+          mkdir -p debug
+          cp build-native/MIRA_PANEL.ino.elf debug/Mira_0737_LVGL96_43C.elf
+          find build-native -maxdepth 1 -name '*.map' -exec cp {} debug/ \; || true
+          ADDR2LINE="$(find "$HOME/.arduino15/packages/esp32/tools" -name 'xtensa-esp32s3-elf-addr2line' -type f | head -1)"
+          test -x "$ADDR2LINE"
+          echo '--- Exact PC and call stack from hardware boot log ---'
+          "$ADDR2LINE" -a -p -f -C -i -e debug/Mira_0737_LVGL96_43C.elf \
+            0x4205a162 0x4205a15f 0x42052252 0x42063711 0x42050f29 0x4205170d \
+            0x420638a9 0x4205f71e 0x4204f857 0x4204f89c 0x4204f90f \
+            0x42050e8f 0x4207a4da 0x4214bc32 0x420480d4 0x420481de \
+            0x4204d91f 0x4204d517 0x4204d9ca 0x4204dbda 0x4204dce9 \
+            0x4204dd91 0x4204e501 0x420700f2 0x4203c367 0x42002f89 \
+            0x4209aaf6 0x4037f2e5 | tee debug/panic_decoded.txt
+      - name: Preserve native firmware ELF and decoded crash (developer diagnostics only)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mira_0737_LVGL96_43C_SYMBOLS_AND_PANIC
+          path: debug/
+          if-no-files-found: error
+          retention-days: 3
       - name: Package ONLY on fully compiled original Mira
         shell: bash
         run: |
