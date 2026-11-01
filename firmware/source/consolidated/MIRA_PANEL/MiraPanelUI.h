@@ -304,12 +304,11 @@ private:
   static lv_color_t _buf1[MIRA_DISPLAY_WIDTH * MIRA_DRAW_BUFFER_LINES];
   static lv_color_t _buf2[MIRA_DISPLAY_WIDTH * MIRA_DRAW_BUFFER_LINES];
 #endif
-  static MiraDisplay* _displayForLvgl;
-  static MiraPanelUI* _uiForLvgl;
-
   static void displayFlush(lv_disp_drv_t* disp, const lv_area_t* area, lv_color_t* color_p);
   static void touchRead(lv_indev_drv_t* indev, lv_indev_data_t* data);
 #endif
+  static MiraDisplay* _displayForLvgl;
+  static MiraPanelUI* _uiForLvgl;
   static void lockPressTargetTree(lv_obj_t* root);
   bool touchStartedOnAnalogControl(uint16_t x, uint16_t y) const;
   bool touchBlocksAction(bool analog = false) const;
