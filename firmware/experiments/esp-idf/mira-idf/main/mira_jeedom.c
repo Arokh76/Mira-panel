@@ -6,6 +6,7 @@
 #include "mira_full.h"
 #include "mira_camera.h"
 #include "mira_setup_access.h"
+#include "mira_legacy_cipher.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -998,19 +999,30 @@ static void import_legacy_http_settings(void) {
         const char *type=jstr((cJSON*)entry,"type","");
         if(!supported_jeedom_param(key)||!value[0]||
            !strcmp(value,"null")||strlen(value)>=256)continue;
-        // The old beta encrypts some fields using its own AES format.
-        // Never write opaque ciphertext into a plaintext NVS setting.
-        if(!strcmp(type,"crypted-text")){encrypted++;continue;}
-        if(!strcmp(key,"Jeedom")&&strcmp(value,"0")&&strcmp(value,"1"))continue;
+        // The old beta encrypts some fields; only validated plaintext
+        // from the original AES decoder may be imported.
+        char decrypted[256]={0};
+        const bool legacy_secret=!strcmp(type,"crypted-text");
+        if(legacy_secret){
+            encrypted++;
+            if(!mira_legacy_decrypt(value,decrypted,sizeof(decrypted)))continue;
+            value=decrypted;
+        }
+        if(!strcmp(key,"Jeedom")&&strcmp(value,"0")&&strcmp(value,"1")){
+            memset(decrypted,0,sizeof(decrypted));
+            continue;
+        }
         size_t existing=0;
-        if(nvs_get_str(nv,key,NULL,&existing)!=ESP_ERR_NVS_NOT_FOUND)continue;
-        if(nvs_set_str(nv,key,value)==ESP_OK)imported++;
-        else errors++;
+        if(nvs_get_str(nv,key,NULL,&existing)==ESP_ERR_NVS_NOT_FOUND){
+            if(nvs_set_str(nv,key,value)==ESP_OK)imported++;
+            else errors++;
+        }
+        memset(decrypted,0,sizeof(decrypted));
     }
     if(imported&&nvs_commit(nv)!=ESP_OK)errors++;
     nvs_close(nv);
     cJSON_Delete(root);
-    ESP_LOGI(TAG,"Legacy HTTP parameters: imported=%d, encrypted skipped=%d, errors=%d",
+    ESP_LOGI(TAG,"Legacy HTTP parameters: imported=%d, encrypted examined=%d, errors=%d",
              imported,encrypted,errors);
 }
 esp_err_t mira_jeedom_action_init(void) {
