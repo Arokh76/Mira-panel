@@ -30,7 +30,7 @@ Mise à jour : 1er novembre 2026. Une seule branche de développement du portage
 - Builds GitHub Actions natifs épinglés 5.5.6 et 9.6 ; surveiller le dernier commit, ne jamais confondre un ancien succès avec la validation du HEAD.
 
 ## Reste à porter avant un firmware Mira complet
-1. Compléter la parité Jeedom **au-delà des routes de configuration et des états passifs** : initialisation Jeedom, commandes HTTP sortantes, synchronisation effective des IDs/actions, SSE et stockage sûr des secrets. Le plugin n'est **pas encore intégralement compatible** ; ne pas flasher pour piloter l'installation.
+1. Le transport Jeedom est désormais câblé côté IDF : requêtes HTTP sortantes depuis une file FreeRTOS, récupération de l’index **autoritaire** via `jeeApi.php?...&value=json`, comparaison des signatures de tous les widgets et blocage si la table ne correspond pas. Diagnostics `/mira/jeedom/status`. **La compilation et le comportement matériel doivent encore être validés**, ainsi que SSE, cycle d’initialisation complet et stockage sûr des secrets. Ne pas utiliser ce prototype pour piloter l’installation tant que le test réel n’est pas passé.
 2. Parité complète de l'interface 0.7.37 (widgets composites énergie, multimédia, caméra, thermostat riche, favoris et styles exacts).
 3. Import automatique et sécurisé des paramètres réseau/MQTT conservés dans `reseau.json` et `params.json`, y compris les valeurs héritées chiffrées.
 4. Réglages de veille, luminosité et pilotage d'affichage, OTA/publishing de production.
