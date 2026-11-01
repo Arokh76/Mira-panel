@@ -918,6 +918,17 @@ void MiraPanelUI::begin() {
   lv_obj_set_style_border_width(_navPagesButton, 0, 0);
   lv_obj_set_style_shadow_width(_navPagesButton, 0, 0);
   lv_obj_set_style_pad_all(_navPagesButton, 0, 0);
+#if defined(MIRA_LVGL9_NATIVE)
+  // The original LVGL8 custom indev captured bottom-bar navigation before
+  // LVGL hit-testing.  Native LVGL9 passes taps to real buttons instead.
+  lv_obj_add_event_cb(_navPagesButton, [](lv_event_t *e) {
+    MiraPanelUI *ui=static_cast<MiraPanelUI *>(lv_event_get_user_data(e));
+    if(!ui)return;
+    ui->noteActivity();
+    ui->setPagePickerVisible(ui->_pagePicker &&
+        lv_obj_has_flag(ui->_pagePicker, LV_OBJ_FLAG_HIDDEN));
+  }, LV_EVENT_CLICKED,this);
+#endif
   // Draw a clear 2x2 grid; no font icon dependencies on WT32.
   for (uint8_t dot = 0; dot < 4; ++dot) {
     lv_obj_t* square = lv_obj_create(_navPagesButton);
