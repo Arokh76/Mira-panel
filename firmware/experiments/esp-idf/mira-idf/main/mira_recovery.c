@@ -9,6 +9,7 @@
 #include <string.h>
 #include <inttypes.h>
 #include "mira_recovery.h"
+#include "mira_legacy_cipher.h"
 #include "mira_display.h"
 #include "nvs_flash.h"
 #include "esp_wifi.h"
@@ -354,6 +355,60 @@ static esp_err_t wifi_profile_post(httpd_req_t *req){
     return httpd_resp_sendstr(req,"{\"saved\":true,\"joining\":true}");
 }
 
+// Read the newest saved Arduino beta network entry when IDF Wi-Fi NVS has
+// no station profile yet. Fixed-IP profiles are not silently converted to
+// DHCP: provisioning remains available via the recovery AP in that case.
+static bool restore_legacy_dhcp_wifi(void){
+    FILE *fp=fopen("/spiffs/reseau.json","rb");
+    if(!fp)return false;
+    if(fseek(fp,0,SEEK_END)!=0){fclose(fp);return false;}
+    const long len=ftell(fp);
+    if(len<2||len>4096){fclose(fp);return false;}
+    rewind(fp);
+    char *buf=malloc((size_t)len+1);
+    if(!buf){fclose(fp);return false;}
+    const size_t read=fread(buf,1,(size_t)len,fp);
+    fclose(fp);
+    if(read!=(size_t)len){free(buf);return false;}
+    buf[read]=0;
+    cJSON *root=cJSON_ParseWithLength(buf,read);
+    free(buf);
+    const cJSON *networks=root?cJSON_GetObjectItemCaseSensitive(root,"reseau"):NULL;
+    const int n=cJSON_IsArray(networks)?cJSON_GetArraySize(networks):0;
+    const cJSON *entry=n>0?cJSON_GetArrayItem(networks,n-1):NULL;
+    const cJSON *ssid=entry?cJSON_GetObjectItemCaseSensitive(entry,"ssid"):NULL;
+    const cJSON *pass=entry?cJSON_GetObjectItemCaseSensitive(entry,"pass"):NULL;
+    const cJSON *mode=entry?cJSON_GetObjectItemCaseSensitive(entry,"ip_mode"):NULL;
+    const cJSON *ip=entry?cJSON_GetObjectItemCaseSensitive(entry,"ip"):NULL;
+    const char *mode_text=cJSON_IsString(mode)?mode->valuestring:"";
+    const char *ip_text=cJSON_IsString(ip)?ip->valuestring:"";
+    bool dhcp=!strcmp(mode_text,"auto") ||
+              (!mode_text[0]&&(!ip_text[0]||!strcmp(ip_text,"Auto")||
+                               !strcmp(ip_text,"null")));
+    bool restored=false;
+    if(entry && !dhcp){
+        ESP_LOGW(TAG,"Legacy static-IP Wi-Fi profile preserved; use recovery AP to provision IDF network");
+    }else if(dhcp&&cJSON_IsString(ssid)&&ssid->valuestring&&
+             cJSON_IsString(pass)&&pass->valuestring){
+        const size_t ssid_len=strlen(ssid->valuestring);
+        char password[256]={0};
+        if(ssid_len>0&&ssid_len<=32 &&
+           mira_legacy_decrypt(pass->valuestring,password,sizeof(password)) &&
+           strlen(password)>=8&&strlen(password)<=63){
+            wifi_config_t config={0};
+            memcpy(config.sta.ssid,ssid->valuestring,ssid_len);
+            memcpy(config.sta.password,password,strlen(password));
+            if(esp_wifi_set_config(WIFI_IF_STA,&config)==ESP_OK){
+                restored=true;
+                ESP_LOGI(TAG,"Legacy Mira DHCP Wi-Fi station imported (credentials omitted from logs)");
+            }
+        }
+        memset(password,0,sizeof(password));
+    }
+    if(root)cJSON_Delete(root);
+    return restored;
+}
+
 esp_err_t mira_recovery_init(void) {
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -396,7 +451,13 @@ esp_err_t mira_recovery_init(void) {
     if(xTaskCreate(recovery_ap_supervisor,"mira_ap_guard",3072,NULL,3,NULL)!=pdPASS)
         ESP_LOGW(TAG,"Recovery AP supervisor unavailable; AP remains enabled");
     wifi_config_t saved_sta={0};
-    if(esp_wifi_get_config(WIFI_IF_STA,&saved_sta)==ESP_OK&&saved_sta.sta.ssid[0]){
+    bool have_sta=esp_wifi_get_config(WIFI_IF_STA,&saved_sta)==ESP_OK&&saved_sta.sta.ssid[0];
+    if(!have_sta){
+        (void)restore_legacy_dhcp_wifi();
+        memset(&saved_sta,0,sizeof(saved_sta));
+        have_sta=esp_wifi_get_config(WIFI_IF_STA,&saved_sta)==ESP_OK&&saved_sta.sta.ssid[0];
+    }
+    if(have_sta){
         station_configured=true;
         ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_connect());
     }
