@@ -386,11 +386,14 @@ static void wifi_status_event(void *arg,esp_event_base_t base,int32_t id,void *d
     }
 }
 static esp_err_t wifi_info_get(httpd_req_t *req){
-    char status[100];
+    char status[180];
+    const char *mode=legacy_ip_mode==PROFILE_MANUAL?"manual":
+                     legacy_ip_mode==PROFILE_FIXED_AUTO?"fixed_auto":"auto";
     snprintf(status,sizeof(status),
-             "{\"configured\":%s,\"connected\":%s,\"recovery_ap\":%s}",
+             "{\"configured\":%s,\"connected\":%s,\"recovery_ap\":%s,\"ip_mode\":\"%s\",\"fixed_ip_applied\":%s}",
              station_configured?"true":"false",station_connected?"true":"false",
-             recovery_ap_active?"true":"false");
+             recovery_ap_active?"true":"false",mode,
+             (legacy_ip_mode==PROFILE_MANUAL||legacy_fixed_auto_applied)?"true":"false");
     httpd_resp_set_type(req,"application/json");
     return httpd_resp_sendstr(req,status);
 }
