@@ -1,5 +1,6 @@
 #include "mira_full.h"
 #include "mira_mqtt.h"
+#include "mira_setup_access.h"
 // Isolated IDF test recovery AP. Uses raw .bin POST, not multipart/form-data.
 // Partition layout must match Mira's current Waveshare OTA partition layout.
 #include <stdio.h>
@@ -218,6 +219,7 @@ static esp_err_t perf_get(httpd_req_t *req) {
     return httpd_resp_sendstr(req, text);
 }
 static esp_err_t update_post(httpd_req_t *req) {
+    if(!mira_setup_require_ap(req))return ESP_FAIL;
     const esp_partition_t *target = esp_ota_get_next_update_partition(NULL);
     if (!target || req->content_len <= 0 || req->content_len > target->size) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid OTA size or partition");
@@ -288,6 +290,7 @@ static esp_err_t wifi_info_get(httpd_req_t *req){
 // Explicit provisioning: never overwrite or decode Mira Arduino /reseau.json.
 // Wi-Fi STA profile is stored by ESP-IDF driver in NVS, AP remains available.
 static esp_err_t wifi_profile_post(httpd_req_t *req){
+    if(!mira_setup_require_ap(req))return ESP_FAIL;
     if(req->content_len<2||req->content_len>320){
         httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Invalid network JSON size");return ESP_FAIL;
     }
