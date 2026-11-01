@@ -49,6 +49,7 @@ static const int page_order[6]={0,1,2,4,5,3};
 static lv_obj_t *clock_text,*date_text;
 static uint32_t widget_count;
 static uint32_t last_clock_ms;
+static uint32_t last_user_touch_ms,last_user_touch_count;
 static lv_obj_t *feedback;
 static lv_obj_t *touch_diag_label;
 static lv_obj_t *touch_diag_button;
@@ -777,6 +778,10 @@ void mira_full_ui_create(lv_display_t *disp){
     lv_obj_center(btn_caption);
     mira_touch_diagnostic_refresh();
     last_clock_ms=lv_tick_get();
+    last_user_touch_ms=last_clock_ms;
+    mira_display_stats_t startup_touch={0};
+    mira_display_stats(&startup_touch);
+    last_user_touch_count=startup_touch.touch_presses;
     ESP_LOGI(TAG,"Mira LVGL 9.6 rendering tree ready, source 0.7.37 JSON");
 }
 
@@ -922,6 +927,16 @@ void mira_full_ui_tick(void){
     apply_pending_states();
     static uint32_t diag_last_tick;
     uint32_t now_tick=lv_tick_get();
+    // Original Mira's 60-second auto return: use verified GT911 physical
+    // press counter, not LVGL redraw/Info traffic (which is not user activity).
+    mira_display_stats_t last_touch={0};
+    mira_display_stats(&last_touch);
+    if(last_touch.touch_presses!=last_user_touch_count){
+        last_user_touch_count=last_touch.touch_presses;
+        last_user_touch_ms=now_tick;
+    }else if(now_tick-last_user_touch_ms>=60000u && current_page!=0){
+        show_page(0);
+    }
     if(now_tick-diag_last_tick>=200){
         diag_last_tick=now_tick;
         mira_touch_diagnostic_refresh();
