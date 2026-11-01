@@ -10,6 +10,7 @@
 #include <string.h>
 #include <strings.h>
 #include <ctype.h>
+#include <inttypes.h>
 #include "cJSON.h"
 #include "nvs.h"
 #include "esp_log.h"
@@ -504,12 +505,18 @@ static esp_err_t param_saved(httpd_req_t *req){
 // Store mappings without executing them, especially during initialization.
 static bool put_remote_binding(long id,const char *value){
     if(id<1||id>4096||!value||!*value||strlen(value)>30)return false;
-    char key[14];
+    char *config=read_config(NULL);
+    if(!config)return false;
+    const uint32_t hash=ui_config_hash(config);
+    free(config);
+    char key[14],binding[48];
     snprintf(key,sizeof(key),"cmd%ld",id);
+    int n=snprintf(binding,sizeof(binding),"%08" PRIx32 ":%s",hash,value);
+    if(n<0||n>=(int)sizeof(binding))return false;
     nvs_handle_t nv;
     esp_err_t err=nvs_open("mira_idf_map",NVS_READWRITE,&nv);
     if(err==ESP_OK){
-        err=nvs_set_str(nv,key,value);
+        err=nvs_set_str(nv,key,binding);
         if(err==ESP_OK)err=nvs_commit(nv);
         nvs_close(nv);
     }
@@ -575,6 +582,16 @@ typedef struct {
     char value[160];
 } mira_action_msg_t;
 static QueueHandle_t action_queue;
+
+
+static uint32_t ui_config_hash(const char *s) {
+    uint32_t hash=2166136261u;
+    for(const unsigned char *p=(const unsigned char*)s;*p;p++){
+        hash^=*p;
+        hash*=16777619u;
+    }
+    return hash;
+}
 
 static bool decimal_id(const char *str) {
     if(!str||!*str||strlen(str)>15)return false;
@@ -669,6 +686,7 @@ static void send_jeedom_action(const mira_action_msg_t *msg) {
 
     char *raw=read_config(NULL);
     if(!raw)return;
+    const uint32_t current_hash=ui_config_hash(raw);
     cJSON *index=index_from_config(raw);
     free(raw);
     if(!index)return;
@@ -679,11 +697,15 @@ static void send_jeedom_action(const mira_action_msg_t *msg) {
 
     nvs_handle_t map;
     if(nvs_open("mira_idf_map",NVS_READONLY,&map)!=ESP_OK)return;
-    char local_key[14],remote_id[32]={0};
+    char local_key[14],binding[48]={0};
     snprintf(local_key,sizeof(local_key),"cmd%d",local_id);
-    bool mapped=nvs_read_string(map,local_key,remote_id,sizeof(remote_id));
+    bool mapped=nvs_read_string(map,local_key,binding,sizeof(binding));
     nvs_close(map);
-    if(!mapped||!decimal_id(remote_id))return;
+    char expected_prefix[12];
+    snprintf(expected_prefix,sizeof(expected_prefix),"%08" PRIx32 ":",current_hash);
+    if(!mapped||strncmp(binding,expected_prefix,9)!=0)return;
+    const char *remote_id=binding+9;
+    if(!decimal_id(remote_id))return;
 
     char encoded_secret[768],encoded_value[480];
     if(!urlencode_to(encoded_secret,sizeof(encoded_secret),secret))return;
