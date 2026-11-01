@@ -232,6 +232,11 @@ static esp_err_t getindex(httpd_req_t *req) {
     httpd_resp_set_type(req,"application/json");
     esp_err_t err=httpd_resp_sendstr(req,out);cJSON_free(out);return err;
 }
+static esp_err_t getmodule(httpd_req_t *req) {
+    if(!require_key(req))return ESP_FAIL;
+    httpd_resp_set_type(req,"text/plain");
+    return httpd_resp_sendstr(req,"Mira Panel");
+}
 static esp_err_t testmodule(httpd_req_t *req) {
     if(!require_key(req))return ESP_FAIL;
     httpd_resp_set_type(req,"text/plain");
@@ -400,6 +405,7 @@ void mira_jeedom_register_http(httpd_handle_t server) {
         {.uri="/getlvgl",.method=HTTP_GET,.handler=getlvgl},
         {.uri="/getindex",.method=HTTP_GET,.handler=getindex},
         {.uri="/testmodule",.method=HTTP_GET,.handler=testmodule},
+        {.uri="/getmodule",.method=HTTP_GET,.handler=getmodule},
         {.uri="/displayinfo",.method=HTTP_GET,.handler=displayinfo},
         {.uri="/programui",.method=HTTP_POST,.handler=programui},
         {.uri="/updatenr",.method=HTTP_GET,.handler=updatenr},
