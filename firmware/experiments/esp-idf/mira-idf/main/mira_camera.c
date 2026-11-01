@@ -1,9 +1,9 @@
-// ESP-IDF native Mira camera - asynchronous RGB24 BMP snapshot decoder.
-// Works with the same HTTP BMP snapshot/proxy URLs used by Mira 0.7.37.
-// JPEG/MJPEG is NOT decoded by this initial native backend.
+// ESP-IDF native Mira camera - asynchronous RGB24 BMP and JPEG snapshots.
+// Uses Espressif esp_jpeg for RGB565 software decode; MJPEG multipart is not a snapshot.
 // Never call LVGL from the network task.
 #include "mira_camera.h"
 #include "esp_http_client.h"
+#include "jpeg_decoder.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -19,6 +19,7 @@
 #define CAM_MAX_URL 768
 #define CAM_WIDTH 800
 #define CAM_HEIGHT 428
+#define CAM_MAX_JPEG (900u * 1024u)
 
 static const char *TAG="mira-idf-camera";
 static SemaphoreHandle_t lock;
@@ -80,7 +81,79 @@ static bool read_exact(esp_http_client_handle_t client,uint8_t *buf,size_t size)
     }
     return n==size;
 }
-static bool fetch_bmp(const char *url,mira_camera_frame_t *out){
+
+// Read a complete JPEG (Content-Length or end-of-image marker), then decode
+// off the GUI task into a PSRAM RGB565 frame. Refuse oversized compressed
+// payloads or images that cannot be scaled to the 800x428 viewport.
+static bool decode_jpeg(esp_http_client_handle_t http,const uint8_t *prefix,
+                        size_t initial,int64_t expected,mira_camera_frame_t *out){
+    if(expected>(int64_t)CAM_MAX_JPEG || initial>CAM_MAX_JPEG)return false;
+    const size_t capacity=(expected>0)?(size_t)expected:CAM_MAX_JPEG;
+    if(capacity<initial)return false;
+    uint8_t *jpeg=heap_caps_malloc(capacity,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!jpeg)return false;
+    memcpy(jpeg,prefix,initial);
+    size_t used=initial;
+    bool complete=false;
+    const int64_t deadline=esp_timer_get_time()+7000000LL;
+    while(used<capacity&&esp_timer_get_time()<deadline){
+        if(used>=2 && jpeg[used-2]==0xff && jpeg[used-1]==0xd9){
+            complete=true;break;
+        }
+        size_t pending=capacity-used;
+        if(pending>2048)pending=2048;
+        int n=esp_http_client_read(http,(char*)jpeg+used,(int)pending);
+        if(n<0)break;
+        if(n==0){
+            if(expected>0&&used>=(size_t)expected)break;
+            vTaskDelay(pdMS_TO_TICKS(10));
+            continue;
+        }
+        used+=(size_t)n;
+        if(expected>0&&used>=(size_t)expected){
+            complete=true;break;
+        }
+    }
+    if(used>=2&&jpeg[used-2]==0xff&&jpeg[used-1]==0xd9)complete=true;
+    if(!complete||used<60||jpeg[0]!=0xff||jpeg[1]!=0xd8){
+        heap_caps_free(jpeg);return false;
+    }
+    esp_jpeg_image_cfg_t config={
+        .indata=jpeg,
+        .indata_size=(uint32_t)used,
+        .out_format=JPEG_IMAGE_FORMAT_RGB565,
+        .out_scale=JPEG_IMAGE_SCALE_0,
+    };
+    esp_jpeg_image_output_t info={0};
+    bool fit=false;
+    for(int scale=0;scale<=3;scale++){
+        config.out_scale=(esp_jpeg_image_scale_t)scale;
+        memset(&info,0,sizeof(info));
+        if(esp_jpeg_get_image_info(&config,&info)!=ESP_OK)break;
+        if(info.width && info.height &&
+           info.width<=CAM_WIDTH && info.height<=CAM_HEIGHT &&
+           info.output_len>0 && info.output_len<=(size_t)CAM_WIDTH*CAM_HEIGHT*2u) {
+            fit=true;break;
+        }
+    }
+    if(!fit){heap_caps_free(jpeg);return false;}
+    uint16_t *pixels=heap_caps_malloc(info.output_len,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!pixels){heap_caps_free(jpeg);return false;}
+    config.outbuf=(uint8_t*)pixels;
+    config.outbuf_size=(uint32_t)info.output_len;
+    esp_jpeg_image_output_t decoded={0};
+    bool ok=esp_jpeg_decode(&config,&decoded)==ESP_OK&&
+            decoded.width==info.width && decoded.height==info.height &&
+            decoded.output_len<=info.output_len;
+    heap_caps_free(jpeg);
+    if(!ok){heap_caps_free(pixels);return false;}
+    out->pixels=pixels;
+    out->width=decoded.width;
+    out->height=decoded.height;
+    return true;
+}
+
+static bool fetch_snapshot(const char *url,mira_camera_frame_t *out){
     memset(out,0,sizeof(*out));
     esp_http_client_config_t cfg={
         .url=url,.timeout_ms=3500,.disable_auto_redirect=true
@@ -96,6 +169,11 @@ static bool fetch_bmp(const char *url,mira_camera_frame_t *out){
         if(esp_http_client_get_status_code(http)!=200)break;
         uint8_t header[54];
         if(!read_exact(http,header,sizeof(header)))break;
+        if(header[0]==0xff&&header[1]==0xd8){
+            ok=decode_jpeg(http,header,sizeof(header),
+                           esp_http_client_get_content_length(http),out);
+            break;
+        }
         if(header[0]!='B'||header[1]!='M'||le32(header+14)<40||
            le16(header+26)!=1||le16(header+28)!=24||le32(header+30)!=0)break;
         const uint32_t offset=le32(header+10);
@@ -155,7 +233,7 @@ static void camera_worker(void *unused) {
         if(!should_run){vTaskDelay(pdMS_TO_TICKS(150));continue;}
         if(current!=seen_generation){seen_generation=current;failures=0;}
         mira_camera_frame_t frame={0};
-        bool ok=fetch_bmp(url,&frame);
+        bool ok=fetch_snapshot(url,&frame);
         xSemaphoreTake(lock,portMAX_DELAY);
         bool still_current=enabled && generation==current;
         if(still_current && ok){
@@ -166,7 +244,7 @@ static void camera_worker(void *unused) {
         }else if(still_current){
             failures++;
             if(failures==1||failures%25==0)
-                ESP_LOGW(TAG,"BMP snapshot not received/decoded (%" PRIu32 " consecutive failures)",failures);
+                ESP_LOGW(TAG,"BMP/JPEG snapshot not received or decoded (%" PRIu32 " consecutive failures)",failures);
         }
         xSemaphoreGive(lock);
         if(frame.pixels)heap_caps_free(frame.pixels);
