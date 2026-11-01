@@ -66,6 +66,7 @@ static uint32_t camera_last_update;
 typedef struct {
     char name[96], unit[24], type[24], value[160];
     lv_obj_t *card,*control,*value_label,*info_status;
+    lv_obj_t *thermostat_temperature,*thermostat_mode;
     lv_obj_t *fields[9]; // energy/media passive Jeedom composite infos
     lv_obj_t *media_slider,*media_device_dropdown,*media_play_caption;
     bool media_is_playing;
@@ -557,6 +558,12 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
             lv_obj_set_style_arc_color(w->control,cyan_c(),LV_PART_INDICATOR);
             w->value_label=label(w->card,"--",0xF3F6F7,&lv_font_montserrat_28);
             lv_obj_align(w->value_label,LV_ALIGN_CENTER,0,14);
+            if(!strcmp(type,"thermostat")){
+                w->thermostat_temperature=label(w->card,"Température : --",0xA8B2B8,&lv_font_montserrat_16);
+                lv_obj_set_pos(w->thermostat_temperature,18,87);
+                w->thermostat_mode=label(w->card,"Mode : --",0xA8B2B8,&lv_font_montserrat_16);
+                lv_obj_set_pos(w->thermostat_mode,575,87);
+            }
         }else{
             make_flex(w->card,LV_FLEX_FLOW_COLUMN,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_CENTER);
             lv_obj_t *r=lv_obj_create(w->card);
