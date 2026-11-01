@@ -20,6 +20,7 @@
 #include "freertos/queue.h"
 #include "mira_display.h"
 #include "mira_mqtt.h"
+#include "mira_setup_access.h"
 
 #define MIRA_WIDTH 800
 #define MIRA_HEIGHT 480
@@ -728,6 +729,7 @@ static esp_err_t page_get(httpd_req_t *req){
     return httpd_resp_send(req,html,HTTPD_RESP_USE_STRLEN);
 }
 static esp_err_t import_post(httpd_req_t *req){
+    if(!mira_setup_require_ap(req))return ESP_FAIL;
     if(!spiffs_ready)return httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"SPIFFS absent; sauvegarder avant correction"),ESP_FAIL;
     size_t len=req->content_len;
     if(len<2||len>JSON_MAX)return httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"JSON > 48 KiB ou vide"),ESP_FAIL;
