@@ -27,6 +27,8 @@
 #define MIRA_KEY_MAX 96
 
 static const char *TAG="mira-idf-jeedom";
+// Request async synchronization after Jeedom changes its command table.
+static void request_binding_sync(void);
 
 // URL/form decoding is deliberately bounded, including malformed percent escapes.
 static int hexdigit(char c) {
@@ -340,6 +342,7 @@ static esp_err_t programui(httpd_req_t *req) {
         httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Enregistrement Mira echoue");return ESP_FAIL;
     }
     mira_full_request_reload();
+    request_binding_sync(); // get fresh Jeedom IDs; ignore stale index until plugin re-synchronizes
     ESP_LOGI(TAG,"Programmation Jeedom enregistree (%u octets), UI reload en file",(unsigned)len);
     httpd_resp_set_type(req,"text/plain");
     return httpd_resp_sendstr(req,"OK");
@@ -494,6 +497,7 @@ static esp_err_t param_set(httpd_req_t *req){
         return ESP_FAIL;
     }
     ESP_LOGI(TAG,"Jeedom parametre %s synchronise",name); // NEVER log its value.
+    request_binding_sync();
     return httpd_resp_sendstr(req,"OK");
 }
 static esp_err_t param_saved(httpd_req_t *req){
@@ -569,6 +573,7 @@ static esp_err_t set_jeedom_init_id(httpd_req_t *req){
         httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Init ID non enregistre");
         return ESP_FAIL;
     }
+    request_binding_sync(); // now fetch authoritative full index from plugin
     return httpd_resp_sendstr(req,"OK");
 }
 
