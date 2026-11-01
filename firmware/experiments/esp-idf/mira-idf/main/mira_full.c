@@ -48,7 +48,7 @@ static bool night_auto_enabled;
 static int night_start_minute=-1,night_end_minute=-1;
 static uint8_t applied_brightness_raw;
 
-static uint16_t sleep_timeout_seconds=120;
+static uint32_t sleep_timeout_seconds=120;
 static uint8_t sleep_brightness_percent=8;
 static bool sleep_clock_enabled=true,display_sleeping;
 static lv_obj_t *sleep_overlay,*sleep_clock_text;
@@ -750,10 +750,10 @@ static void brightness_release(lv_event_t *event) {
 }
 
 
-static void save_sleep_setting_u16(const char *key,uint16_t value){
+static void save_sleep_setting_u32(const char *key,uint32_t value){
     nvs_handle_t nv;
     if(nvs_open("mira_idf_ui",NVS_READWRITE,&nv)!=ESP_OK)return;
-    if(nvs_set_u16(nv,key,value)==ESP_OK)(void)nvs_commit(nv);
+    if(nvs_set_u32(nv,key,value)==ESP_OK)(void)nvs_commit(nv);
     nvs_close(nv);
 }
 static void save_sleep_setting_u8(const char *key,uint8_t value){
@@ -766,10 +766,10 @@ static void sleep_delay_changed(lv_event_t *event){
     if(display_sleeping||suppress_events)return;
     int value=lv_slider_get_value(lv_event_get_target_obj(event));
     if(value<0)value=0;
-    if(value>3600)value=3600;
-    if(sleep_timeout_seconds!=(uint16_t)value){
-        sleep_timeout_seconds=(uint16_t)value;
-        save_sleep_setting_u16("sleep_delay",sleep_timeout_seconds);
+    if(value>86400)value=86400;
+    if(sleep_timeout_seconds!=(uint32_t)value){
+        sleep_timeout_seconds=(uint32_t)value;
+        save_sleep_setting_u32("sleep_delay",sleep_timeout_seconds);
     }
 }
 static void sleep_light_changed(lv_event_t *event){
@@ -908,7 +908,7 @@ static void settings(void){
     lv_obj_t *delay=lv_slider_create(sleep);
     lv_obj_set_size(delay,575,14);
     lv_obj_set_pos(delay,18,75);
-    lv_slider_set_range(delay,0,3600);
+    lv_slider_set_range(delay,0,86400);
     lv_slider_set_value(delay,sleep_timeout_seconds,LV_ANIM_OFF);
     lv_obj_add_event_cb(delay,sleep_delay_changed,LV_EVENT_RELEASED,NULL);
     lv_obj_t *light_title=label(sleep,"Luminosité en veille (%)",0xF3F6F7,&lv_font_montserrat_16);
@@ -1061,8 +1061,15 @@ static void load_ui_configuration(void){
         uint8_t stored=220;
         if(nvs_get_u8(ui_nvs,"brightness",&stored)==ESP_OK && stored>=30)
             display_brightness_raw=stored;
-        uint16_t delay=120;
-        if(nvs_get_u16(ui_nvs,"sleep_delay",&delay)==ESP_OK && delay<=3600)
+        uint32_t delay=120;
+        esp_err_t d=nvs_get_u32(ui_nvs,"sleep_delay",&delay);
+        if(d!=ESP_OK){
+            uint16_t legacy_delay=0;
+            if(nvs_get_u16(ui_nvs,"sleep_delay",&legacy_delay)==ESP_OK){
+                delay=legacy_delay;d=ESP_OK;
+            }
+        }
+        if(d==ESP_OK&&delay<=86400)
             sleep_timeout_seconds=delay;
         uint8_t light=8;
         if(nvs_get_u8(ui_nvs,"sleep_light",&light)==ESP_OK && light<=100)
