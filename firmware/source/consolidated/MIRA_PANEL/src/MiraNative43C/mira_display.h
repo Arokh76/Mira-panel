@@ -35,6 +35,7 @@ esp_err_t mira_display_init(void);
 lv_display_t *mira_display_lvgl(void);
 void mira_display_touch_read(lv_indev_t *indev, lv_indev_data_t *data);
 bool mira_display_touch_ready(void);
+void mira_display_set_brightness(uint8_t raw);
 void mira_display_set_render_task(void);
 void mira_display_stats(mira_display_stats_t *out);
 
