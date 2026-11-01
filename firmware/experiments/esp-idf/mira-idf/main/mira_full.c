@@ -54,6 +54,7 @@ static int night_start_minute=-1,night_end_minute=-1;
 static uint8_t applied_brightness_raw;
 
 static uint32_t sleep_timeout_seconds=120;
+static bool return_home_enabled=true;
 static uint8_t sleep_brightness_percent=8;
 static bool sleep_clock_enabled=true,display_sleeping;
 static lv_obj_t *sleep_overlay,*sleep_clock_text;
@@ -1168,6 +1169,12 @@ static void display_wake(void){
     ESP_LOGI(TAG,"Mira display awakened by physical GT911 touch");
 }
 
+static void return_home_changed(lv_event_t *event){
+    if(suppress_events)return;
+    lv_obj_t *src=lv_event_get_target_obj(event);
+    return_home_enabled=lv_obj_has_state(src,LV_STATE_CHECKED);
+    save_sleep_setting_u8("home_return",return_home_enabled?1:0);
+}
 static void night_auto_changed(lv_event_t *event){
     if(suppress_events)return;
     lv_obj_t *src=lv_event_get_target_obj(event);
@@ -1214,7 +1221,11 @@ static void settings(void){
     lv_obj_set_pos(period_label,12,49);
     lv_obj_t *n=card(3,640,72);
     label(n,"Navigation",0x22BEEA,&mira_font_fr_16);
-    label(n,"Retour accueil : 60 s",0xF3F6F7,&mira_font_fr_16);
+    label(n,"Retour accueil après 60 s",0xF3F6F7,&mira_font_fr_16);
+    lv_obj_t *home_switch=lv_switch_create(n);
+    lv_obj_set_pos(home_switch,550,28);
+    if(return_home_enabled)lv_obj_add_state(home_switch,LV_STATE_CHECKED);
+    lv_obj_add_event_cb(home_switch,return_home_changed,LV_EVENT_VALUE_CHANGED,NULL);
     lv_obj_t *sleep=card(3,640,214);
     lv_obj_t *shead=label(sleep,"Veille",0x22BEEA,&mira_font_fr_16);
     lv_obj_set_pos(shead,12,6);
@@ -1401,6 +1412,15 @@ static void mira_touch_diagnostic_pressed(lv_event_t *event) {
     ESP_LOGI(TAG,"LVGL button PRESS reached Mira UI");
 }
 static void load_ui_configuration(void){
+    // Arduino Preferences stored the navigation option in miraui/home.
+    // Read it as a fallback only; never rewrite the beta's original NVS.
+    nvs_handle_t legacy_nvs;
+    if(nvs_open("miraui",NVS_READONLY,&legacy_nvs)==ESP_OK){
+        uint8_t legacy_home=1;
+        if(nvs_get_u8(legacy_nvs,"home",&legacy_home)==ESP_OK)
+            return_home_enabled=legacy_home!=0;
+        nvs_close(legacy_nvs);
+    }
     nvs_handle_t ui_nvs;
     if(nvs_open("mira_idf_ui",NVS_READONLY,&ui_nvs)==ESP_OK){
         uint8_t stored=220;
@@ -1422,6 +1442,9 @@ static void load_ui_configuration(void){
         uint8_t clock=1;
         if(nvs_get_u8(ui_nvs,"sleep_clock",&clock)==ESP_OK)
             sleep_clock_enabled=clock!=0;
+        uint8_t home=1;
+        if(nvs_get_u8(ui_nvs,"home_return",&home)==ESP_OK)
+            return_home_enabled=home!=0;
         uint8_t day=85,night=20,auto_mode=0;
         if(nvs_get_u8(ui_nvs,"day_pct",&day)==ESP_OK&&day>=1&&day<=100)
             day_brightness_percent=day;
@@ -1857,7 +1880,8 @@ void mira_full_ui_tick(void){
         last_user_touch_count=last_touch.touch_presses;
         last_user_touch_ms=now_tick;
         if(display_sleeping)display_wake();
-    }else if(!display_sleeping && now_tick-last_user_touch_ms>=60000u && current_page!=0){
+    }else if(return_home_enabled && !display_sleeping &&
+             now_tick-last_user_touch_ms>=60000u && current_page!=0){
         show_page(0);
         last_user_touch_ms=now_tick;
     }
