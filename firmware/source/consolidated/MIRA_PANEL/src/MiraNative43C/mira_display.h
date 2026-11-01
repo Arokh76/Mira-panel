@@ -34,6 +34,10 @@ typedef struct {
 esp_err_t mira_display_init(void);
 lv_display_t *mira_display_lvgl(void);
 void mira_display_touch_read(lv_indev_t *indev, lv_indev_data_t *data);
+// Executed on the LVGL UI loop, never in the independent I2C touch task.
+// Return true to swallow this event (e.g. the first tap only wakes Mira).
+typedef bool (*mira_touch_hook_t)(bool pressed, uint16_t x, uint16_t y);
+void mira_display_set_touch_hook(mira_touch_hook_t hook);
 bool mira_display_touch_ready(void);
 void mira_display_set_brightness(uint8_t raw);
 void mira_display_set_render_task(void);
