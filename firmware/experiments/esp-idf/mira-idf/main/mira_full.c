@@ -66,7 +66,7 @@ static uint32_t camera_last_update;
 typedef struct {
     char name[96], unit[24], type[24], value[160];
     lv_obj_t *card,*control,*value_label,*info_status;
-    lv_obj_t *thermostat_temperature,*thermostat_mode;
+    lv_obj_t *thermostat_temperature,*thermostat_mode,*thermostat_mode_select;
     lv_obj_t *fields[9]; // energy/media passive Jeedom composite infos
     lv_obj_t *media_slider,*media_device_dropdown,*media_play_caption;
     bool media_is_playing;
@@ -257,6 +257,20 @@ static int clamp(int a,int lo,int hi){return a<lo?lo:(a>hi?hi:a);}
 
 // Passive playback-device list updates and currently selected speaker
 // are independent. A device Info is never a command.
+// Mode commands use the legacy <thermostat>__mode list identity.
+static void thermostat_mode_selected(lv_event_t *event){
+    if(suppress_events||display_sleeping)return;
+    mira_widget_t *w=(mira_widget_t*)lv_event_get_user_data(event);
+    if(!w||strcmp(w->type,"thermostat")||!w->thermostat_mode_select)return;
+    char name[128],value[96];
+    snprintf(name,sizeof(name),"%.95s__mode",w->name);
+    lv_dropdown_get_selected_str(w->thermostat_mode_select,value,sizeof(value));
+    if(strlen(name)>=96||!value[0])return;
+    if(mira_jeedom_actions_enabled())
+        (void)mira_jeedom_queue_local_action(name,"list",value);
+    else
+        (void)mira_mqtt_publish_action(name,value);
+}
 static void media_select_active_device(mira_widget_t *w){
     if(!w||!w->media_device_dropdown||!w->media_active_device[0])return;
     const char *options=lv_dropdown_get_options(w->media_device_dropdown);
@@ -563,6 +577,15 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
                 lv_obj_set_pos(w->thermostat_temperature,18,87);
                 w->thermostat_mode=label(w->card,"Mode : --",0xA8B2B8,&lv_font_montserrat_16);
                 lv_obj_set_pos(w->thermostat_mode,575,87);
+                w->thermostat_mode_select=lv_dropdown_create(w->card);
+                lv_obj_set_size(w->thermostat_mode_select,184,43);
+                lv_obj_set_pos(w->thermostat_mode_select,572,121);
+                char modes[192];
+                snprintf(modes,sizeof(modes),"%s",str(o,"modes","Confort|Éco|Hors gel|Arrêt"));
+                for(char *p=modes;*p;p++)if(*p=='|')*p='\n';
+                lv_dropdown_set_options(w->thermostat_mode_select,modes);
+                lv_obj_add_event_cb(w->thermostat_mode_select,thermostat_mode_selected,
+                                    LV_EVENT_VALUE_CHANGED,w);
             }
         }else{
             make_flex(w->card,LV_FLEX_FLOW_COLUMN,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_CENTER);
