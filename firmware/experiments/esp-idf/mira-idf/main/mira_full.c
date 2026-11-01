@@ -827,7 +827,8 @@ static void build_config(void){
         if(widget_n==0)empty_notice("Mira LVGL 9.6 : configuration non trouvée.\n"
                      "Importer le vrai miralvgl.json via 192.168.4.1/mira");
         ESP_LOGW(TAG,"Mira 0.7.37 JSON absent, import via /mira");
-        show_page(0);return;
+        if(widget_n==0)show_page(0);
+        return;
     }
     if(fseek(f,0,SEEK_END)!=0){fclose(f);if(!widget_n)empty_notice("Erreur de lecture JSON Mira");return;}
     long len=ftell(f);rewind(f);
