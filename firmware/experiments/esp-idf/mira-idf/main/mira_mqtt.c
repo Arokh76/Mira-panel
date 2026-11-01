@@ -109,7 +109,7 @@ bool mira_mqtt_publish_action(const char *name,const char *value) {
     if(strlen(name)>95||strlen(value)>159)return false;
     char topic[240];snprintf(topic,sizeof(topic),"%s%s",action_prefix,name);
     // Only actual user LVGL event callbacks call this; MQTT State callbacks never do.
-    return esp_mqtt_client_publish(client,topic,value,0,0,0)>=0;
+    return esp_mqtt_client_enqueue(client,topic,value,0,0,0,true)>=0;
 }
 static esp_err_t mqtt_get(httpd_req_t *r) {
     char out[128];
