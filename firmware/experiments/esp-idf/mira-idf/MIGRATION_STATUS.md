@@ -47,3 +47,21 @@ Mise à jour : 1er novembre 2026. Une seule branche de développement du portage
 6. Portage du 7" dans le même projet avec sa configuration matérielle propre, **après** stabilisation du 4,3".
 
 Le prototype compile parfois avec succès mais **n'est pas encore un firmware de production**. Ne pas annoncer que le portage est terminé tant que cette liste n'est pas vérifiée.
+
+## Référence de configuration : `firmware-beta` (1er novembre 2026)
+
+Le code Arduino de référence se trouve dans `firmware/source/consolidated/MIRA_PANEL/`.
+La branche `firmware-beta` définit les schémas source :
+- `SPIFFS_Process.h` : `/params.json` avec `params[]` (`param`, `value`, `type`), `/reseau.json` avec `reseau[]` (`ssid`, `pass`, `ip_mode`, `ip`, `mask`, `gateway`, `dns1`, `dns2`) et `ap[0].passcrypt`.
+- `MiraPanelServer.cpp` : paramètres `Jeedom`, `Jeedom_IP`, `Jeedom_Key_mira`, `Jeedom_Refresh`, `Jeedom_Init_Cmd` ; mode historique HTTP par défaut pour le portage. Les paramètres DISPLAY de la bêta sont la référence pour la veille, les luminosités jour/nuit et la plage horaire.
+- `Cipher.cpp` : encodage AES-128-ECB historique des champs marqués `crypted-text` et des mots de passe réseau. La reprise est conditionnée à un déchiffrement valide ; jamais de copie de texte chiffré brut comme mot de passe.
+
+**Porté dans le nouveau firmware (expérimental, validation matérielle encore nécessaire)** :
+- Import en lecture seule des paramètres HTTP/Jeedom depuis le fichier bêta `params.json`, uniquement lorsque la clé NVS ESP-IDF correspondante n'existe pas déjà.
+- Import conditionnel des valeurs historiquement chiffrées, avec vérification des octets déchiffrés ; si illisibles, conserver NVS et demander un provisionnement via l'AP de récupération.
+- Réutilisation conditionnelle de la clé d'écran/plugin `ap[0].passcrypt` ; pas d'affichage des secrets dans les logs.
+- Reprise du dernier profil Wi-Fi **DHCP** issu de `reseau.json` uniquement si le Wi-Fi ESP-IDF n'est pas déjà configuré.
+- Reprise bornée de `DISPLAY_Delai` (jusqu'à 3600 s), `DISPLAY_Veille` et `DISPLAY_HorlogeVeille` sans toucher à la luminosité matérielle déjà validée.
+- Aucun fichier SPIFFS historique n'est effacé, réécrit ou formaté.
+
+**Encore à réaliser/valider** : profils `manual` et `fixed_auto` (IP statique), plages de luminosité jour/nuit, fidélité de tous les widgets, reprise de tous les paramètres et tests physiques 4,3″ / 7″. **Un build qui passe ne prouve pas le bon fonctionnement des données chiffrées provenant d'un appareil réel.**
