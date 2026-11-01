@@ -15,7 +15,7 @@ public:
             return false;
         }
         _initialized=true;
-        Serial.println("[MIRA][RGB9] native 12MHz PSRAM + GT911 ready / VSYNC DMA touch recovery");
+        Serial.println("[MIRA][RGB9] 12MHz bounce20 SRAM (fallback if needed) + GT911 wake hook LVGL9");
         return true;
     }
     bool miraLvglBegin() { return _initialized; }
