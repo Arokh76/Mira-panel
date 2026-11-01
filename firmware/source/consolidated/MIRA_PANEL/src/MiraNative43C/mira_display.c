@@ -23,6 +23,8 @@
 
 static const char *TAG = "mira-idf-rgb";
 static i2c_master_bus_handle_t i2c_bus;
+static i2c_master_dev_handle_t expander;
+static uint8_t expander_io_state=0xff;
 static i2c_master_dev_handle_t gt911;
 static bool touch_ready;
 static uint8_t touch_addr;
@@ -217,6 +219,22 @@ static esp_err_t ioexp_write(i2c_master_dev_handle_t ioexp, uint8_t reg, uint8_t
     return i2c_master_transmit(ioexp, cmd, sizeof(cmd), 80);
 }
 
+// Preserve native RGB performance while exposing Mira's brightness preference.
+void mira_display_set_brightness(uint8_t raw) {
+    if(!expander) return;
+    // IO2 is the LCD backlight enable; output PWM uses inverted duty.
+    if(raw==0) {
+        expander_io_state &= (uint8_t)~(1U<<2);
+        (void)ioexp_write(expander,0x03,expander_io_state);
+        return;
+    }
+    expander_io_state |= (1U<<2);
+    (void)ioexp_write(expander,0x03,expander_io_state);
+    uint8_t pct=(raw<=30)?1:(uint8_t)(1+((uint16_t)(raw-30)*99U+112U)/225U);
+    if(pct>100)pct=100;
+    uint8_t duty=(uint8_t)(((uint16_t)(100-pct)*80U+49U)/99U);
+    (void)ioexp_write(expander,0x05,duty);
+}
 static void init_i2c(void) {
     i2c_master_bus_config_t bus_cfg = {
         .i2c_port = I2C_NUM_0,
@@ -234,6 +252,7 @@ static void init_i2c(void) {
     };
     i2c_master_dev_handle_t ioexp = NULL;
     ESP_ERROR_CHECK(i2c_master_bus_add_device(i2c_bus, &ext_cfg, &ioexp));
+    expander=ioexp;
 
     // Configure IO0..IO7 outputs; our original 0xff keeps LCD/USB state
     // identical to the last working no-bounce firmware.
