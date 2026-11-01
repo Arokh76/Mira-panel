@@ -1143,10 +1143,16 @@ void mira_full_ui_tick(void){
     if(ms-last_clock_ms>2000){
         last_clock_ms=ms;
         time_t now=time(NULL);
-        if(now>1700000000&&clock_text){
+        if(now>1700000000){
             struct tm tmv;localtime_r(&now,&tmv);
             char buff[24];snprintf(buff,sizeof(buff),"%02d:%02d",tmv.tm_hour,tmv.tm_min);
-            lv_label_set_text(clock_text,buff);
+            if(clock_text)lv_label_set_text(clock_text,buff);
+            if(date_text){
+                char datebuf[32];
+                snprintf(datebuf,sizeof(datebuf),"%02d/%02d/%04d",
+                         tmv.tm_mday,tmv.tm_mon+1,tmv.tm_year+1900);
+                lv_label_set_text(date_text,datebuf);
+            }
             if(display_sleeping&&sleep_clock_enabled&&sleep_clock_text)
                 lv_label_set_text(sleep_clock_text,buff);
         }
