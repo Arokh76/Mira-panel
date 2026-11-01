@@ -486,7 +486,8 @@ static esp_err_t param_set(httpd_req_t *req){
     char name[32],value[256];
     if(!query_param(req,"param",name,sizeof(name))||
        !query_param(req,"value",value,sizeof(value))||
-       !supported_jeedom_param(name)){
+       !supported_jeedom_param(name)||
+       (!strcmp(name,"Jeedom")&&strcmp(value,"0")&&strcmp(value,"1"))){
         httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Parametre Jeedom invalide");
         return ESP_FAIL;
     }
