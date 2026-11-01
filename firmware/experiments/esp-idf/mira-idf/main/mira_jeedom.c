@@ -246,24 +246,6 @@ static esp_err_t displayinfo(httpd_req_t *req) {
       "\"rotation\":0,\"logicalWidth\":800,\"logicalHeight\":480,"
       "\"httpPrimary\":true,\"mqttOptional\":true,\"freeLayout\":false}");
 }
-static char *form_field(char *body,const char *key) {
-    // In-place splitting of a URL-encoded form. Call only once per body.
-    char *cursor=body;
-    while(cursor&&*cursor) {
-        char *next=strchr(cursor,'&');
-        if(next)*next++=0;
-        char *sep=strchr(cursor,'=');
-        if(sep) {
-            *sep++=0;
-            if(strcmp(cursor,key)==0){
-                if(!decode_url(sep))return NULL;
-                return sep;
-            }
-        }
-        cursor=next;
-    }
-    return NULL;
-}
 static esp_err_t programui(httpd_req_t *req) {
     const size_t n=req->content_len;
     if(n<10||n>MIRA_FORM_MAX) {
@@ -396,10 +378,10 @@ static esp_err_t provision_key(httpd_req_t *req) {
     }
     cJSON *json=cJSON_Parse(body);
     const cJSON *key=json?cJSON_GetObjectItemCaseSensitive(json,"key"):NULL;
-    if(!cJSON_IsString(key)||!key->valuestring||strlen(key->valuestring)<8||
+    if(!cJSON_IsString(key)||!key->valuestring||strlen(key->valuestring)<1||
        strlen(key->valuestring)>MIRA_KEY_MAX){
         if(json)cJSON_Delete(json);
-        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Cle de 8 a 96 caracteres requise");return ESP_FAIL;
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Cle de 1 a 96 caracteres requise");return ESP_FAIL;
     }
     nvs_handle_t nvs;
     esp_err_t err=nvs_open("mira_idf_auth",NVS_READWRITE,&nvs);
