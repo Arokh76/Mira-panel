@@ -690,6 +690,16 @@ static const lv_font_fmt_txt_dsc_t font_dsc = {
     .cache=&cache
 #endif
 };
+#if LVGL_VERSION_MAJOR >= 9
+extern const lv_font_t mira_sleep_montserrat_84 = {
+    .dsc=&font_dsc,
+    .get_glyph_dsc=lv_font_get_glyph_dsc_fmt_txt,
+    .get_glyph_bitmap=lv_font_get_bitmap_fmt_txt,
+    .line_height=104, .base_line=22,
+    .subpx=LV_FONT_SUBPX_NONE,
+    .underline_position=-3, .underline_thickness=2
+};
+#else
 extern const lv_font_t mira_sleep_montserrat_84 = {
     .get_glyph_dsc=lv_font_get_glyph_dsc_fmt_txt,
     .get_glyph_bitmap=lv_font_get_bitmap_fmt_txt,
@@ -698,4 +708,5 @@ extern const lv_font_t mira_sleep_montserrat_84 = {
     .underline_position=-3, .underline_thickness=2,
     .dsc=&font_dsc
 };
+#endif
 #endif
