@@ -1,4 +1,5 @@
 #include "mira_full.h"
+#include "mira_mqtt.h"
 // Isolated IDF test recovery AP. Uses raw .bin POST, not multipart/form-data.
 // Partition layout must match Mira's current Waveshare OTA partition layout.
 #include <stdio.h>
@@ -322,6 +323,7 @@ esp_err_t mira_recovery_init(void) {
     register_optional_route(httpd, &shadow_light);
     register_optional_route(httpd, &shadow_relief);
     mira_full_register_http(httpd); // optional 0.7.37 SPIFFS config and upload
+    mira_mqtt_register_http(httpd); // optional native MQTT settings
     ESP_LOGW(TAG, "Recovery AP Mira-IDF-Test password MiraIDF2026 at http://192.168.4.1");
     return ESP_OK;
 }
