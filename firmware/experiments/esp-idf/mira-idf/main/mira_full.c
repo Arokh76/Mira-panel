@@ -433,7 +433,7 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         lv_obj_set_size(date_text,370,26);
         lv_obj_set_style_text_align(date_text,LV_TEXT_ALIGN_CENTER,0);
         lv_obj_set_pos(date_text,14,125);
-        lv_obj_t *right=label(c,"MIRA PANEL\nMode jour\nLVGL 9.6 - ESP-IDF",0xA8B2B8,&lv_font_montserrat_16);
+        lv_obj_t *right=label(c,"Mira Panel",0xA8B2B8,&lv_font_montserrat_16);
         lv_obj_set_pos(right,422,36);
         w->card=c;return;
     }
@@ -972,6 +972,10 @@ void mira_full_ui_create(lv_display_t *disp){
     lv_obj_add_event_cb(touch_diag_button,nav_click,LV_EVENT_CLICKED,(void *)(intptr_t)3);
     lv_obj_t *btn_caption=label(touch_diag_button,"Paramètres",0xF3F6F7,&lv_font_montserrat_16);
     lv_obj_center(btn_caption);
+    // Keep diagnostics available through /perf and logs without overlaying
+    // actual Mira programming. The test button is no longer a UI shortcut.
+    lv_obj_add_flag(touch_diag_label,LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(touch_diag_button,LV_OBJ_FLAG_HIDDEN);
     mira_touch_diagnostic_refresh();
     last_clock_ms=lv_tick_get();
     last_user_touch_ms=last_clock_ms;
