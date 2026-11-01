@@ -1744,6 +1744,13 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                 const lv_color_hsv_t hsv=lv_color_rgb_to_hsv((uint8_t)r,(uint8_t)g,(uint8_t)b);
                 suppress_events=true;
                 lv_arc_set_value(w->control,hsv.h);
+                if(w->color_saturation)
+                    lv_slider_set_value(w->color_saturation,hsv.s,LV_ANIM_OFF);
+                if(w->color_brightness)
+                    lv_slider_set_value(w->color_brightness,hsv.v,LV_ANIM_OFF);
+                if(w->color_preview)
+                    lv_obj_set_style_bg_color(w->color_preview,
+                                              lv_color_make(r,g,b),0);
                 suppress_events=false;
             }
         }
