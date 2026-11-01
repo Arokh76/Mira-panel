@@ -230,7 +230,11 @@ static bool fetch_snapshot(const char *url,mira_camera_frame_t *out){
             break;
         }
         if(header[0]!='B'||header[1]!='M'){
-            ok=decode_mjpeg_first_frame(http,header,sizeof(header),out);
+            // Only multipart bodies starting with a MIME boundary may be
+            // scanned for JPEG SOI. Do not parse arbitrary HTML/JSON error
+            // pages as camera streams.
+            if(header[0]=='-' && header[1]=='-')
+                ok=decode_mjpeg_first_frame(http,header,sizeof(header),out);
             break;
         }
         if(le32(header+14)<40||
