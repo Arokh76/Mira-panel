@@ -198,7 +198,7 @@ static void event_local(lv_event_t *e){
     if(!strcmp(b->type,"toggle")){
         snprintf(b->value,sizeof(b->value),"%s",lv_obj_has_state(src,LV_STATE_CHECKED)?"On":"Off");
     }else if(!strcmp(b->type,"range")||!strcmp(b->type,"roundrange")||!strcmp(b->type,"thermostat")){
-        int v=(!strcmp(b->type,"roundrange"))?lv_arc_get_value(src):lv_slider_get_value(src);
+        int v=(!strcmp(b->type,"roundrange")||!strcmp(b->type,"thermostat"))?lv_arc_get_value(src):lv_slider_get_value(src);
         snprintf(b->value,sizeof(b->value),"%d",v);
         if(b->value_label){
             char txt[192];snprintf(txt,sizeof(txt),"%s %s",b->value,b->unit);
@@ -216,8 +216,8 @@ static void event_local(lv_event_t *e){
     const bool sent=mira_mqtt_publish_action(b->name,payload);
     if(feedback) {
         char result[180];
-        snprintf(result,sizeof(result),"Aperçu local : %.60s = %.60s (aucune commande Jeedom)",
-                 b->name,b->value);
+        snprintf(result,sizeof(result),"%s : %.60s = %.60s",
+                  sent?"Action MQTT":"Aperçu local",b->name,b->value);
         lv_label_set_text(feedback,result);
     }
 }
