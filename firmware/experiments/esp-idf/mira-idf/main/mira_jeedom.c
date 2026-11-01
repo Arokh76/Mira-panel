@@ -14,6 +14,10 @@
 #include "nvs.h"
 #include "esp_log.h"
 #include "esp_err.h"
+#include "esp_http_client.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/queue.h"
 
 #define MIRA_JSON_PATH "/spiffs/miralvgl.json"
 #define MIRA_JSON_TMP  "/spiffs/miralvgl.new"
@@ -559,6 +563,175 @@ static esp_err_t set_jeedom_init_id(httpd_req_t *req){
         return ESP_FAIL;
     }
     return httpd_resp_sendstr(req,"OK");
+}
+
+
+// Outbound HTTP Jeedom commands are deliberately separate from passive States.
+// The UI only enqueues a small fixed-size message; this worker resolves the
+// historical local ID and its configured Jeedom ID in a different FreeRTOS task.
+typedef struct {
+    char name[96];
+    char type[24];
+    char value[160];
+} mira_action_msg_t;
+static QueueHandle_t action_queue;
+
+static bool decimal_id(const char *str) {
+    if(!str||!*str||strlen(str)>15)return false;
+    for(const char *p=str;*p;p++)if(*p<'0'||*p>'9')return false;
+    return true;
+}
+bool mira_jeedom_queue_local_action(const char *name,const char *type,const char *value) {
+    if(!action_queue||!name||!type||!value||!*name ||
+       strlen(name)>=96||strlen(type)>=24||strlen(value)>=160)return false;
+    if(strcmp(type,"toggle")&&strcmp(type,"button")&&strcmp(type,"multiaction")&&
+       strcmp(type,"range")&&strcmp(type,"roundrange")&&strcmp(type,"thermostat")&&
+       strcmp(type,"list")&&strcmp(type,"listbutton"))return false;
+    mira_action_msg_t msg={0};
+    snprintf(msg.name,sizeof(msg.name),"%s",name);
+    snprintf(msg.type,sizeof(msg.type),"%s",type);
+    snprintf(msg.value,sizeof(msg.value),"%s",value);
+    return xQueueSend(action_queue,&msg,0)==pdTRUE;
+}
+static int resolve_local_action(cJSON *index,const mira_action_msg_t *msg,
+                                char *value,size_t value_size) {
+    cJSON *entries=cJSON_GetObjectItemCaseSensitive(index,"actions"),*item;
+    cJSON_ArrayForEach(item,entries) {
+        const char *kind=jstr(item,"type","");
+        const char *name=jstr(item,"nom","");
+        if(!strcmp(msg->type,"toggle")&&!strcmp(kind,"toggle")&&!strcmp(name,msg->name))
+            return !strcmp(msg->value,"1")?jint(item,"id1",-1):jint(item,"id0",-1);
+        if((!strcmp(msg->type,"list")||!strcmp(msg->type,"listbutton"))&&
+           !strcmp(kind,"list") &&
+           !strcmp(jstr(item,"nomliste",""),msg->name)&&
+           !strcmp(name,msg->value)) {
+            const int id=jint(item,"id",-1);
+            snprintf(value,value_size,"%d",id); // Historical Jeedom list protocol.
+            return id;
+        }
+        const bool range=!strcmp(msg->type,"range")||
+                         !strcmp(msg->type,"roundrange")||
+                         !strcmp(msg->type,"thermostat");
+        char expected[128];
+        if(!strcmp(msg->type,"thermostat"))
+            snprintf(expected,sizeof(expected),"%.95s__consigne",msg->name);
+        else snprintf(expected,sizeof(expected),"%s",msg->name);
+        if(range&&!strcmp(kind,"range")&&!strcmp(name,expected)) {
+            snprintf(value,value_size,"%s",msg->value);
+            return jint(item,"id",-1);
+        }
+        if(!strcmp(msg->type,"button")&&!strcmp(kind,"button")&&!strcmp(name,msg->name))
+            return jint(item,"id",-1);
+        // Multiaction's ordinary click is the same as the first physical trigger.
+        if(!strcmp(msg->type,"multiaction")&&!strcmp(kind,"button")) {
+            snprintf(expected,sizeof(expected),"Multi_Clic_%.95s",msg->name);
+            if(!strcmp(name,expected))return jint(item,"id",-1);
+        }
+    }
+    return -1;  // Fail closed if legacy bindings cannot be reconstructed.
+}
+static bool urlencode_to(char *dst,size_t capacity,const char *src) {
+    const char *hex="0123456789ABCDEF";
+    size_t n=0;
+    for(const unsigned char *p=(const unsigned char*)src;*p;p++) {
+        unsigned char c=*p;
+        bool safe=(c>='a'&&c<='z')||(c>='A'&&c<='Z')||
+                  (c>='0'&&c<='9')||c=='-'||c=='_'||c=='.'||c=='~';
+        size_t required=safe?1:3;
+        if(n+required>=capacity)return false;
+        if(safe)dst[n++]=(char)c;
+        else{dst[n++]='%';dst[n++]=hex[c>>4];dst[n++]=hex[c&15];}
+    }
+    dst[n]=0;
+    return true;
+}
+static bool nvs_read_string(nvs_handle_t nvs,const char *key,char *out,size_t size) {
+    size_t len=size;
+    return nvs_get_str(nvs,key,out,&len)==ESP_OK && out[0];
+}
+static void send_jeedom_action(const mira_action_msg_t *msg) {
+    // No network action before the screen plugin provisions *all* required
+    // IDs; a fresh /programui invalidates these mappings (see below).
+    nvs_handle_t cfg;
+    if(nvs_open("mira_idf_jeed",NVS_READONLY,&cfg)!=ESP_OK)return;
+    char enabled[8]={0},base[192]={0},secret[256]={0};
+    bool ready=nvs_read_string(cfg,"Jeedom",enabled,sizeof(enabled))&&
+               !strcmp(enabled,"1")&&
+               nvs_read_string(cfg,"Jeedom_IP",base,sizeof(base))&&
+               nvs_read_string(cfg,"Jeedom_Key_mira",secret,sizeof(secret));
+    nvs_close(cfg);
+    if(!ready)return;
+    if(strncmp(base,"http://",7)!=0||strchr(base,'?')||strchr(base,'#')||
+       strchr(base,'@')||strchr(base,'\r')||strchr(base,'\n'))return;
+    size_t baselen=strlen(base);
+    while(baselen>7&&base[baselen-1]=='/')base[--baselen]=0;
+    if(baselen<=7)return;
+
+    char *raw=read_config(NULL);
+    if(!raw)return;
+    cJSON *index=index_from_config(raw);
+    free(raw);
+    if(!index)return;
+    char value[160]={0};
+    int local_id=resolve_local_action(index,msg,value,sizeof(value));
+    cJSON_Delete(index);
+    if(local_id<1||local_id>4096)return;
+
+    nvs_handle_t map;
+    if(nvs_open("mira_idf_map",NVS_READONLY,&map)!=ESP_OK)return;
+    char local_key[14],remote_id[32]={0};
+    snprintf(local_key,sizeof(local_key),"cmd%d",local_id);
+    bool mapped=nvs_read_string(map,local_key,remote_id,sizeof(remote_id));
+    nvs_close(map);
+    if(!mapped||!decimal_id(remote_id))return;
+
+    char encoded_secret[768],encoded_value[480];
+    if(!urlencode_to(encoded_secret,sizeof(encoded_secret),secret))return;
+    if(value[0]&&!urlencode_to(encoded_value,sizeof(encoded_value),value))return;
+    char uri[1600];
+    int n=snprintf(uri,sizeof(uri),
+                   "%s/core/api/jeeApi.php?plugin=mira&type=event&apikey=%s&id=%s",
+                   base,encoded_secret,remote_id);
+    if(n<1||n>=(int)sizeof(uri))return;
+    if(value[0]) {
+        size_t offset=(size_t)n;
+        n=snprintf(uri+offset,sizeof(uri)-offset,"&value=%s",encoded_value);
+        if(n<0||n>=(int)(sizeof(uri)-offset))return;
+    }
+    esp_http_client_config_t http={
+        .url=uri,
+        .timeout_ms=3000,
+        .disable_auto_redirect=true,
+    };
+    esp_http_client_handle_t client=esp_http_client_init(&http);
+    if(!client)return;
+    esp_err_t result=esp_http_client_perform(client);
+    int status=esp_http_client_get_status_code(client);
+    if(result!=ESP_OK||status<200||status>=300)
+        ESP_LOGW(TAG,"Jeedom action local=%d remote=%s failed, HTTP %d (%s)",
+                 local_id,remote_id,status,esp_err_to_name(result));
+    else ESP_LOGI(TAG,"Jeedom action local=%d delivered (HTTP %d)",local_id,status);
+    esp_http_client_cleanup(client);
+}
+static void jeedom_action_worker(void *unused) {
+    (void)unused;
+    mira_action_msg_t action;
+    for(;;) {
+        if(xQueueReceive(action_queue,&action,portMAX_DELAY)==pdTRUE)
+            send_jeedom_action(&action);
+    }
+}
+esp_err_t mira_jeedom_action_init(void) {
+    if(action_queue)return ESP_OK;
+    action_queue=xQueueCreate(12,sizeof(mira_action_msg_t));
+    if(!action_queue)return ESP_ERR_NO_MEM;
+    if(xTaskCreate(jeedom_action_worker,"mira_jeedom_http",7168,NULL,3,NULL)!=pdPASS) {
+        vQueueDelete(action_queue);
+        action_queue=NULL;
+        return ESP_ERR_NO_MEM;
+    }
+    ESP_LOGI(TAG,"Jeedom HTTP event worker ready (no event during passive state updates)");
+    return ESP_OK;
 }
 
 void mira_jeedom_register_http(httpd_handle_t server) {
