@@ -116,7 +116,7 @@ jobs:
           for off in range(0,len(part),32):
               if part[off:off+2]!=bytes([0xAA,0x50]):break
               magic,ptype,subtype,address,length,name,flags=struct.unpack_from('<HBBII16sI',part,off)
-              name=name.split(b'\\x00',1)[0].decode()
+              name=name.split(b'\x00',1)[0].decode()
               partitions[name]=(ptype,subtype,address,length)
           print('Embedded partition table:',partitions)
           # Fail rather than publishing a USB image that would invalidate
@@ -126,7 +126,7 @@ jobs:
           assert partitions.get('spiffs',(0,0,0,0))[2:]==(0x610000,0x9E0000)
           assert len(boot)<=0x8000 and len(part)<=0x1000
           assert len(app)<=0x300000
-          image=bytearray(b'\\xff'*(0x10000+len(app)))
+          image=bytearray(b'\xff'*(0x10000+len(app)))
           image[0:len(boot)]=boot
           image[0x8000:0x8000+len(part)]=part
           image[0x10000:0x10000+len(app)]=app
