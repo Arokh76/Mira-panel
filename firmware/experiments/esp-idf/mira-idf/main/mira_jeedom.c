@@ -148,14 +148,25 @@ static void add_choices(cJSON *arr,int *id,const char *name,const char *options)
     if(!options)return;
     char choices[1024];
     snprintf(choices,sizeof(choices),"%s",options);
+    // Arduino beta accepts literal \\n in thermostat modes and caps
+    // the selectable items at MAX_LIST_ITEMS=12.
+    for(char *p=choices;*p;p++){
+        if(p[0]=='\\'&&p[1]=='n'){
+            *p='|';
+            memmove(p+1,p+2,strlen(p+2)+1);
+        }else if(*p=='\n')*p='|';
+    }
     char *save=NULL;
-    for(char *option=strtok_r(choices,"|",&save);option;option=strtok_r(NULL,"|",&save)){
+    int count=0;
+    for(char *option=strtok_r(choices,"|",&save);option&&count<12;
+        option=strtok_r(NULL,"|",&save)){
         trim(option);
         if(!*option)continue;
         cJSON *entry=append_action(arr,id,"list",option);
         if(!entry)return;
         cJSON_AddStringToObject(entry,"nomliste",name);
         cJSON_AddStringToObject(entry,"option",option);
+        count++;
     }
 }
 // Match the exact signatures expected by Mira Jeedom beta autosync:
