@@ -78,3 +78,16 @@ La branche `firmware-beta` définit les schémas source :
 - `DISPLAY_Delai` accepte désormais jusqu'à 86400 secondes, comme la bêta ; la lecture d'anciennes valeurs NVS `u16` reste possible.
 
 **Prudence** : ces fonctions sont codées mais restent **à vérifier physiquement** ; une réussite du compilateur ne valide ni le basculement DHCP/static, ni la stabilité du rétroéclairage, ni les heures de nuit. Le portage 7 pouces et la parité visuelle complète sont toujours en cours.
+
+## Portage des widgets et des polices — nouveau lot
+
+Implémentations ajoutées sur la branche expérimentale 4,3″, sans modification du pilote LCD/GT911 ni des paramètres matériels stabilisés :
+
+- `multiaction` : clic simple, double, triple et appui long, avec fenêtres de regroupement LVGL et correspondances HTTP Jeedom `Multi_Clic_`, `Multi_Double_`, `Multi_Triple_`, `Multi_Long_`. MQTT ne sert que de transport avancé lorsque le mode Jeedom HTTP a été explicitement désactivé.
+- `listbutton` : boutons de sélection tactiles pour les styles standard, compact et segmenté (maximum 12 choix, comme `MAX_LIST_ITEMS` de la bêta). Synchronisation passive depuis les états HTTP par index ou libellé.
+- `mira_french_font.c` : réutilisation des vrais bitmaps accentués français de `MiraFrenchFont.cpp`, avec adaptation des callbacks à LVGL 9.6 et repli vers Montserrat standard.
+- `mira_home_96.c` : adaptation de l'horloge native Montserrat 96px issue de la bêta (`mira_home_montserrat_96.cpp`). Géométrie du tableau de bord 800×480 rapprochée de la bêta, sans zoom sur la dalle.
+- En-tête : dates françaises, état Wi-Fi, RSSI et indication jour/nuit ; aucun appel réseau externe pour afficher l'heure.
+- HTTP : `/programui` refuse un tableau `lvgl` mal formé ou dépassant 64 entrées avant de remplacer l'export SPIFFS existant. `/getindex` conserve les trois informations météo liées au widget `datetime`, y compris lorsque ce dernier n'a pas de nom.
+
+**À vérifier impérativement avant distribution :** build GitHub Actions du dernier commit (les anciens essais ont signalé des erreurs `-Werror` corrigées ensuite), rendu réel des glyphes LVGL9, press/release/gestes, défilement des pages longues, liaison effective des quatre actions Jeedom et restauration d'interface après reprogrammation. Le 7″ reste dans ses branches expérimentales séparées.
