@@ -15,7 +15,7 @@ public:
             return false;
         }
         _initialized=true;
-        Serial.println("[MIRA][RGB9] 12MHz bounce20 SRAM (fallback if needed) + GT911 wake hook LVGL9");
+        Serial.println("[MIRA][RGB9] BETA5 12MHz SINGLE PSRAM FB, no swap/bounce + GT911 wake LVGL9");
         return true;
     }
     bool miraLvglBegin() { return _initialized; }
