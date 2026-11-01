@@ -45,8 +45,16 @@ bool mira_legacy_decrypt(const char *stored,char *plaintext,size_t capacity){
                                 clear+offset)==0;
     mbedtls_aes_free(&aes);
     if(ok){
+        // Arduino's decryptBuffer stops at the FIRST NUL per block.
+        // Its partial last block can contain padding bytes after that NUL.
         size_t used=encrypted_len;
-        while(used&&clear[used-1]==0)used--;
+        for(size_t i=0;i<encrypted_len;i++){
+            if(clear[i]==0){
+                if(i+16<encrypted_len)ok=false; // no embedded NUL in full blocks
+                used=i;
+                break;
+            }
+        }
         // Legacy password/API-key fields must be printable. In particular,
         // do not write control bytes into NVS on a wrong-key decrypt.
         if(!used||used>=capacity)ok=false;
