@@ -1,5 +1,5 @@
 // ESP-IDF native Mira camera - asynchronous RGB24 BMP and JPEG snapshots.
-// Uses Espressif esp_jpeg for RGB565 software decode; MJPEG multipart is not a snapshot.
+// Uses Espressif esp_jpeg for RGB565 software decode; supports multipart MJPEG first frames.
 // Never call LVGL from the network task.
 #include "mira_camera.h"
 #include "esp_http_client.h"
@@ -109,10 +109,18 @@ static bool decode_jpeg(esp_http_client_handle_t http,const uint8_t *prefix,
             vTaskDelay(pdMS_TO_TICKS(10));
             continue;
         }
+        const size_t previous=used;
         used+=(size_t)n;
-        if(expected>0&&used>=(size_t)expected){
-            complete=true;break;
+        // Multipart boundaries can arrive in the same read as JPEG EOI.
+        for(size_t i=previous?previous-1:0;i+1<used;i++){
+            if(jpeg[i]==0xff&&jpeg[i+1]==0xd9){
+                used=i+2;
+                complete=true;
+                break;
+            }
         }
+        if(complete)break;
+        if(expected>0&&used>=(size_t)expected)break;
     }
     if(used>=2&&jpeg[used-2]==0xff&&jpeg[used-1]==0xd9)complete=true;
     if(!complete||used<60||jpeg[0]!=0xff||jpeg[1]!=0xd8){
@@ -155,6 +163,41 @@ static bool decode_jpeg(esp_http_client_handle_t http,const uint8_t *prefix,
     return true;
 }
 
+// Read one complete JPEG from a multipart MJPEG stream, bounded to 8 KB of
+// headers and 900 KB of JPEG data. Reconnect per frame; no LVGL on this task.
+static bool decode_mjpeg_first_frame(esp_http_client_handle_t http,
+                                      const uint8_t *prefix,size_t count,
+                                      mira_camera_frame_t *out){
+    bool last_ff=false;
+    for(size_t i=0;i<count;i++){
+        if(last_ff && prefix[i]==0xd8)
+            return decode_jpeg(http,prefix+i-1,count-i+1,-1,out);
+        last_ff=prefix[i]==0xff;
+    }
+    size_t scanned=count;
+    const int64_t deadline=esp_timer_get_time()+5000000LL;
+    uint8_t chunk[512];
+    while(scanned<8192 && esp_timer_get_time()<deadline){
+        int n=esp_http_client_read(http,(char*)chunk,sizeof(chunk));
+        if(n<0)return false;
+        if(!n){vTaskDelay(pdMS_TO_TICKS(10));continue;}
+        for(int i=0;i<n;i++){
+            if(last_ff && chunk[i]==0xd8){
+                size_t remaining=(size_t)n-(size_t)i;
+                uint8_t *head=malloc(remaining+1);
+                if(!head)return false;
+                head[0]=0xff;
+                memcpy(head+1,chunk+i,remaining);
+                bool ok=decode_jpeg(http,head,remaining+1,-1,out);
+                free(head);
+                return ok;
+            }
+            last_ff=chunk[i]==0xff;
+        }
+        scanned+=(size_t)n;
+    }
+    return false;
+}
 static bool fetch_snapshot(const char *url,mira_camera_frame_t *out){
     memset(out,0,sizeof(*out));
     esp_http_client_config_t cfg={
@@ -176,7 +219,11 @@ static bool fetch_snapshot(const char *url,mira_camera_frame_t *out){
                            esp_http_client_get_content_length(http),out);
             break;
         }
-        if(header[0]!='B'||header[1]!='M'||le32(header+14)<40||
+        if(header[0]!='B'||header[1]!='M'){
+            ok=decode_mjpeg_first_frame(http,header,sizeof(header),out);
+            break;
+        }
+        if(le32(header+14)<40||
            le16(header+26)!=1||le16(header+28)!=24||le32(header+30)!=0)break;
         const uint32_t offset=le32(header+10);
         const int32_t w=(int32_t)le32(header+18);
