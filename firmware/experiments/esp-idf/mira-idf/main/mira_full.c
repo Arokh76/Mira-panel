@@ -16,6 +16,7 @@
 #include "esp_http_server.h"
 #include "cJSON.h"
 #include "lvgl.h"
+#include "mira_display.h"
 
 #define MIRA_WIDTH 800
 #define MIRA_HEIGHT 480
@@ -36,6 +37,8 @@ static lv_obj_t *clock_text,*date_text;
 static uint32_t widget_count;
 static uint32_t last_clock_ms;
 static lv_obj_t *feedback;
+static lv_obj_t *touch_diag_label;
+static lv_obj_t *touch_diag_button;
 
 typedef struct {
     char name[96], unit[24], type[24], value[160];
@@ -481,6 +484,29 @@ static void create_picker(void){
     }
     lv_obj_add_flag(page_picker,LV_OBJ_FLAG_HIDDEN);
 }
+// Visible diagnostic independent from all Jeedom configuration / settings.
+// The GT911 counters are sampled by the board driver.  Even when LVGL click
+// dispatch is broken, this label identifies whether the hardware saw a press.
+static void mira_touch_diagnostic_refresh(void) {
+    if(!touch_diag_label)return;
+    mira_display_stats_t st;
+    mira_display_stats(&st);
+    lv_label_set_text_fmt(touch_diag_label,
+        "GT911:%s Appuis:%lu X:%lu Y:%lu Err:%lu Stat:%02lX",
+        st.touch_ready ? "OK" : "ABSENT",
+        (unsigned long)st.touch_presses,
+        (unsigned long)st.touch_last_x,
+        (unsigned long)st.touch_last_y,
+        (unsigned long)st.touch_errors,
+        (unsigned long)st.touch_last_status);
+}
+static void mira_touch_diagnostic_pressed(lv_event_t *event) {
+    (void)event;
+    if(touch_diag_button) {
+        lv_obj_set_style_bg_color(touch_diag_button,lv_color_hex(0x27A87C),0);
+    }
+    ESP_LOGI(TAG,"LVGL button PRESS reached Mira UI");
+}
 void mira_full_ui_create(lv_display_t *disp){
     screen=lv_obj_create(NULL);
     lv_obj_set_size(screen,800,480);
@@ -544,11 +570,37 @@ void mira_full_ui_create(lv_display_t *disp){
     feedback=label(screen,"APERÇU IDF : interactions locales (Jeedom non connecté)",0xA8B2B8,&lv_font_montserrat_12);
     lv_obj_set_pos(feedback,6,CONTENT_H-17);
     lv_obj_add_flag(feedback,LV_OBJ_FLAG_HIDDEN); // avoid covering real UI
+
+    // Diagnostic banner, always visible on the device, including an empty Mira.
+    // Does not depend on an imported miralvgl.json or functioning navigation.
+    touch_diag_label=label(screen,"GT911: lecture...",0xDCEAF0,&lv_font_montserrat_12);
+    lv_obj_set_pos(touch_diag_label,10,4);
+    lv_obj_set_width(touch_diag_label,625);
+    no_scroll(touch_diag_label);
+
+    // A direct way to test a real LVGL click and reach the Settings preview.
+    // This temporary button does not replace Mira's normal 4-icon navigation.
+    touch_diag_button=lv_button_create(screen);
+    lv_obj_set_size(touch_diag_button,145,38);
+    lv_obj_set_pos(touch_diag_button,646,4);
+    lv_obj_set_style_bg_color(touch_diag_button,lv_color_hex(0x155A75),0);
+    lv_obj_set_style_shadow_width(touch_diag_button,0,0);
+    lv_obj_add_event_cb(touch_diag_button,mira_touch_diagnostic_pressed,LV_EVENT_PRESSED,NULL);
+    lv_obj_add_event_cb(touch_diag_button,nav_click,LV_EVENT_CLICKED,(void *)(intptr_t)3);
+    lv_obj_t *btn_caption=label(touch_diag_button,"Paramètres",0xF3F6F7,&lv_font_montserrat_16);
+    lv_obj_center(btn_caption);
+    mira_touch_diagnostic_refresh();
     last_clock_ms=lv_tick_get();
     ESP_LOGI(TAG,"Mira LVGL 9.6 rendering tree ready, source 0.7.37 JSON");
 }
 void mira_full_ui_tick(void){
     if(reload_pending){reload_pending=false;build_config();}
+    static uint32_t diag_last_tick;
+    uint32_t now_tick=lv_tick_get();
+    if(now_tick-diag_last_tick>=200){
+        diag_last_tick=now_tick;
+        mira_touch_diagnostic_refresh();
+    }
     uint32_t ms=lv_tick_get();
     if(ms-last_clock_ms>2000){
         last_clock_ms=ms;
