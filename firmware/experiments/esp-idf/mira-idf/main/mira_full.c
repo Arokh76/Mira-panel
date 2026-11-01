@@ -1190,6 +1190,26 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                 char text[185];
                 snprintf(text,sizeof(text),"Mode : %.150s",msg->value);
                 lv_label_set_text(w->thermostat_mode,text);
+                if(w->thermostat_mode_select){
+                    const char *opts=lv_dropdown_get_options(w->thermostat_mode_select);
+                    if(opts){
+                        uint16_t index=0;
+                        const char *start=opts;
+                        while(*start){
+                            const char *end=strchr(start,'\n');
+                            size_t length=end?(size_t)(end-start):strlen(start);
+                            if(length==strlen(msg->value)&&!strncmp(start,msg->value,length)){
+                                suppress_events=true;
+                                lv_dropdown_set_selected(w->thermostat_mode_select,index);
+                                suppress_events=false;
+                                break;
+                            }
+                            if(!end)break;
+                            start=end+1;
+                            index++;
+                        }
+                    }
+                }
                 continue;
             }
         }
