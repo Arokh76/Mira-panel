@@ -740,12 +740,159 @@ static void send_jeedom_action(const mira_action_msg_t *msg) {
     else ESP_LOGI(TAG,"Jeedom action local=%d delivered (HTTP %d)",local_id,status);
     esp_http_client_cleanup(client);
 }
+
+// The installed Jeedom plugin exposes its already-built ID association table
+// through jeeApi.php?plugin=mira&type=event&id=<init_cmd>&value=json.
+// Fetch ONLY this read-only JSON, verify every generated local action signature,
+// then atomically replace the NVS map. Never guess a command ID.
+typedef struct {
+    char *buf;
+    size_t used,cap;
+    bool overflow;
+} mira_http_capture_t;
+static esp_err_t capture_http_json(esp_http_client_event_t *event) {
+    mira_http_capture_t *c=(mira_http_capture_t*)event->user_data;
+    if(event->event_id==HTTP_EVENT_ON_DATA && c && event->data_len>0){
+        const size_t len=(size_t)event->data_len;
+        if(len>=c->cap || c->used>=c->cap-len){
+            c->overflow=true;
+            return ESP_FAIL;
+        }
+        memcpy(c->buf+c->used,event->data,len);
+        c->used+=len;
+        c->buf[c->used]=0;
+    }
+    return ESP_OK;
+}
+static bool same_index_structure(const cJSON *local,const cJSON *remote){
+    const cJSON *a=cJSON_GetObjectItemCaseSensitive(local,"actions");
+    const cJSON *b=cJSON_GetObjectItemCaseSensitive(remote,"actions");
+    if(!cJSON_IsArray(a)||!cJSON_IsArray(b))return false;
+    const int count=cJSON_GetArraySize(a);
+    if(count!=cJSON_GetArraySize(b)||count>4096)return false;
+    for(int i=0;i<count;i++){
+        cJSON *l=cJSON_GetArrayItem(a,i),*r=cJSON_GetArrayItem(b,i);
+        if(strcmp(jstr(l,"type",""),jstr(r,"type",""))!=0 ||
+           strcmp(jstr(l,"nom",""),jstr(r,"nom",""))!=0 ||
+           strcmp(jstr(l,"nomliste",""),jstr(r,"nomliste",""))!=0)return false;
+        if(!strcmp(jstr(l,"type",""),"toggle")){
+            if(jint(l,"id0",-1)!=jint(r,"id0",-2)||
+               jint(l,"id1",-1)!=jint(r,"id1",-2))return false;
+        }else if(jint(l,"id",-1)!=jint(r,"id",-2))return false;
+    }
+    return true;
+}
+static esp_err_t save_remote_mapping(nvs_handle_t nvs,int local,int remote,uint32_t hash){
+    if(local<1||local>4096||remote<1)return ESP_ERR_INVALID_ARG;
+    char key[14],value[48];
+    snprintf(key,sizeof(key),"cmd%d",local);
+    snprintf(value,sizeof(value),"%08" PRIx32 ":%d",hash,remote);
+    return nvs_set_str(nvs,key,value);
+}
+static void sync_jeedom_bindings(void){
+    nvs_handle_t cfg;
+    if(nvs_open("mira_idf_jeed",NVS_READONLY,&cfg)!=ESP_OK)return;
+    char on[8]={0},base[192]={0},secret[256]={0},init[24]={0};
+    const bool ready=nvs_read_string(cfg,"Jeedom",on,sizeof(on))&&
+                     !strcmp(on,"1")&&
+                     nvs_read_string(cfg,"Jeedom_IP",base,sizeof(base))&&
+                     nvs_read_string(cfg,"Jeedom_Key_mira",secret,sizeof(secret))&&
+                     nvs_read_string(cfg,"Jeedom_Init_Cmd",init,sizeof(init));
+    nvs_close(cfg);
+    if(!ready||!decimal_id(init)||strncmp(base,"http://",7)||
+       strchr(base,'?')||strchr(base,'#')||strchr(base,'@')||
+       strchr(base,'\r')||strchr(base,'\n'))return;
+    size_t len=strlen(base);
+    while(len>7 && base[len-1]=='/')base[--len]=0;
+    char token[768];
+    if(len<=7||!urlencode_to(token,sizeof(token),secret))return;
+
+    char uri[1100];
+    int n=snprintf(uri,sizeof(uri),
+        "%s/core/api/jeeApi.php?plugin=mira&type=event&apikey=%s&id=%s&value=json",
+        base,token,init);
+    if(n<0||n>=(int)sizeof(uri))return;
+
+    mira_http_capture_t reply={.cap=65536};
+    reply.buf=malloc(reply.cap);
+    if(!reply.buf){ESP_LOGW(TAG,"No memory for Jeedom index fetch");return;}
+    reply.buf[0]=0;
+    esp_http_client_config_t http={
+        .url=uri,.timeout_ms=5000,.disable_auto_redirect=true,
+        .event_handler=capture_http_json,.user_data=&reply
+    };
+    esp_http_client_handle_t client=esp_http_client_init(&http);
+    if(!client){free(reply.buf);return;}
+    esp_err_t result=esp_http_client_perform(client);
+    const int status=esp_http_client_get_status_code(client);
+    esp_http_client_cleanup(client);
+    if(result!=ESP_OK||status!=200||reply.overflow||reply.used<2){
+        free(reply.buf);
+        ESP_LOGW(TAG,"Jeedom mapping not ready (HTTP %d)",status);
+        return;
+    }
+    cJSON *remote=cJSON_ParseWithLength(reply.buf,reply.used);
+    free(reply.buf);
+    if(!remote)return;
+    char *config=read_config(NULL);
+    if(!config){cJSON_Delete(remote);return;}
+    const uint32_t hash=ui_config_hash(config);
+    cJSON *local=index_from_config(config);
+    free(config);
+    if(!local||!same_index_structure(local,remote)){
+        ESP_LOGW(TAG,"Jeedom index differs from current LVGL program; no action mapping activated");
+        if(local)cJSON_Delete(local);
+        cJSON_Delete(remote);
+        return;
+    }
+    nvs_handle_t map;
+    esp_err_t err=nvs_open("mira_idf_map",NVS_READWRITE,&map);
+    if(err!=ESP_OK){cJSON_Delete(local);cJSON_Delete(remote);return;}
+    err=nvs_erase_all(map);
+    cJSON *arr=cJSON_GetObjectItemCaseSensitive(remote,"actions"),*entry;
+    int bound=0;
+    if(err==ESP_OK) {
+        cJSON_ArrayForEach(entry,arr){
+            if(!strcmp(jstr(entry,"type",""),"toggle")){
+                err=save_remote_mapping(map,jint(entry,"id0",-1),
+                                        jint(entry,"jeedom0",-1),hash);
+                if(err==ESP_OK){
+                    bound++;
+                    err=save_remote_mapping(map,jint(entry,"id1",-1),
+                                            jint(entry,"jeedom1",-1),hash);
+                    if(err==ESP_OK)bound++;
+                }
+            }else {
+                err=save_remote_mapping(map,jint(entry,"id",-1),
+                                        jint(entry,"jeedom",-1),hash);
+                if(err==ESP_OK)bound++;
+            }
+            if(err!=ESP_OK)break;
+        }
+    }
+    if(err==ESP_OK)err=nvs_commit(map);
+    nvs_close(map);
+    cJSON_Delete(local);
+    cJSON_Delete(remote);
+    if(err==ESP_OK)ESP_LOGI(TAG,"Jeedom full index synchronized: %d bounded command IDs",bound);
+    else ESP_LOGE(TAG,"Jeedom mapping validation/storage incomplete: %s",
+                  esp_err_to_name(err));
+}
+static void request_binding_sync(void){
+    if(!action_queue)return;
+    mira_action_msg_t msg={0};
+    snprintf(msg.type,sizeof(msg.type),"__sync");
+    (void)xQueueSend(action_queue,&msg,0);
+}
+
 static void jeedom_action_worker(void *unused) {
     (void)unused;
     mira_action_msg_t action;
     for(;;) {
-        if(xQueueReceive(action_queue,&action,portMAX_DELAY)==pdTRUE)
-            send_jeedom_action(&action);
+        if(xQueueReceive(action_queue,&action,portMAX_DELAY)==pdTRUE){
+            if(!strcmp(action.type,"__sync"))sync_jeedom_bindings();
+            else send_jeedom_action(&action);
+        }
     }
 }
 esp_err_t mira_jeedom_action_init(void) {
@@ -758,6 +905,7 @@ esp_err_t mira_jeedom_action_init(void) {
         return ESP_ERR_NO_MEM;
     }
     ESP_LOGI(TAG,"Jeedom HTTP event worker ready (no event during passive state updates)");
+    request_binding_sync(); // survives reboot; no actions emitted during binding
     return ESP_OK;
 }
 
