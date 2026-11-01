@@ -737,7 +737,8 @@ static esp_err_t page_get(httpd_req_t *req){
         "<p>Charge uniquement un export JSON Mira contenant le tableau <code>lvgl</code>.</p>"
         "<h3>Jeedom - cle de l'ecran deja configuree dans le plugin</h3>"
         "<input id='jkey' type='password' placeholder='Cle Jeedom existante'>"
-        "<button onclick='configureJeedom()'>Enregistrer la cle Jeedom</button><pre id='jresult'></pre>"
+        "<button onclick='configureJeedom()'>Enregistrer la cle Jeedom</button>"
+        "<button onclick='checkJeedom()'>Verifier la liaison Jeedom</button><pre id='jresult'></pre>"
         "<h3>Wi-Fi IDF (point d'acces de secours conserve)</h3>"
         "<input id='ssid' placeholder='SSID Wi-Fi'><input id='wpass' type='password' placeholder='Mot de passe Wi-Fi'>"
         "<button onclick='configureWifi()'>Connecter au Wi-Fi</button><pre id='netresult'></pre>"
@@ -754,6 +755,7 @@ static esp_err_t page_get(httpd_req_t *req){
         "if(!f)return;let r=await fetch('/mira/import',{method:'POST',headers:{'Content-Type':'application/json'},body:f});"
         "document.getElementById(\'out\').textContent=await r.text();}"
         "async function configureJeedom(){let r=await fetch('/mira/jeedom/key',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:document.getElementById('jkey').value})});document.getElementById('jresult').textContent=await r.text();}"
+        "async function checkJeedom(){let k=encodeURIComponent(document.getElementById('jkey').value);let r=await fetch('/mira/jeedom/status?key='+k);document.getElementById('jresult').textContent=await r.text();}"
         "async function configureWifi(){let r=await fetch('/mira/wifi',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ssid:document.getElementById('ssid').value,password:document.getElementById('wpass').value})});document.getElementById('netresult').textContent=await r.text();}"
         "async function configureMqtt(){let r=await fetch('/mira/mqtt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({host:document.getElementById('mhost').value,port:Number(document.getElementById('mport').value),screen:document.getElementById('mname').value,username:document.getElementById('muser').value,password:document.getElementById('mpass').value,enabled:document.getElementById('menabled').checked})});document.getElementById('mqttresult').textContent=await r.text();}</script></html>";
     httpd_resp_set_type(req,"text/html; charset=utf-8");
