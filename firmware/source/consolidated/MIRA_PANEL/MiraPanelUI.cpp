@@ -2328,7 +2328,9 @@ void MiraPanelUI::serviceAlbumArtwork() {
   if (_albumPixels) heap_caps_free(_albumPixels);
   _albumPixels = frame.pixels;
   _albumDescriptor = {};
+#if LVGL_VERSION_MAJOR < 9
   _albumDescriptor.header.always_zero = 0;
+#endif
   _albumDescriptor.header.cf = LV_IMG_CF_TRUE_COLOR;
   _albumDescriptor.header.w = frame.width;
   _albumDescriptor.header.h = frame.height;
@@ -2479,7 +2481,9 @@ void MiraPanelUI::serviceCamera() {
     if (_cameraPixels) heap_caps_free(_cameraPixels);
     _cameraPixels = frame.pixels;
     _cameraDescriptor = {};
+#if LVGL_VERSION_MAJOR < 9
     _cameraDescriptor.header.always_zero = 0;
+#endif
     _cameraDescriptor.header.cf = LV_IMG_CF_TRUE_COLOR;
     _cameraDescriptor.header.w = frame.width;
     _cameraDescriptor.header.h = frame.height;
@@ -3974,7 +3978,7 @@ void MiraPanelUI::onToggle(lv_event_t* e) {
   MiraPanelUI& ui = *ctx->ui;
   if (ui._suppressEvents || ctx->bindingIndex >= ui._bindingCount) return;
   Binding& b = ui._bindings[ctx->bindingIndex];
-  bool on = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+  bool on = lv_obj_has_state(static_cast<lv_obj_t *>(lv_event_get_target(e)), LV_STATE_CHECKED);
   if (ui._server.WT32HasToggle(b.name)) {
     if (!ui._server.WT32ExecuteToggle(b.name,on)) {
       bool actual=false;
@@ -4008,7 +4012,7 @@ void MiraPanelUI::onRange(lv_event_t* e) {
   if (ctx->bindingIndex >= ui._bindingCount) return;
   Binding& b = ui._bindings[ctx->bindingIndex];
   lv_event_code_t code = lv_event_get_code(e);
-  int value = lv_slider_get_value(lv_event_get_target(e));
+  int value = lv_slider_get_value(static_cast<lv_obj_t *>(lv_event_get_target(e)));
   b.currentValue = value;
   if (b.valueLabel) lv_label_set_text_fmt(b.valueLabel, "%d%s%s", value, b.unit.length() ? " " : "", b.unit.c_str());
   ui.noteActivity();
@@ -4046,7 +4050,7 @@ void MiraPanelUI::onRoundRange(lv_event_t* e) {
   if (ctx->bindingIndex >= ui._bindingCount) return;
   Binding& b = ui._bindings[ctx->bindingIndex];
   lv_event_code_t code = lv_event_get_code(e);
-  const int rawValue = lv_arc_get_value(lv_event_get_target(e));
+  const int rawValue = lv_arc_get_value(static_cast<lv_obj_t *>(lv_event_get_target(e)));
   const float setpoint = rawValue * 0.5f;
   b.currentValue = (int)roundf(setpoint);
   if (b.valueLabel) {
@@ -4176,7 +4180,7 @@ void MiraPanelUI::onList(lv_event_t* e) {
   MiraPanelUI& ui = *ctx->ui;
   if (ui._suppressEvents || ctx->bindingIndex >= ui._bindingCount) return;
   Binding& b = ui._bindings[ctx->bindingIndex];
-  uint16_t sel = lv_dropdown_get_selected(lv_event_get_target(e));
+  uint16_t sel = lv_dropdown_get_selected(static_cast<lv_obj_t *>(lv_event_get_target(e)));
   if (sel >= b.listCount) return;
   b.selectedIndex = (int8_t)sel;
   int id = b.listIds[sel];
@@ -4214,8 +4218,8 @@ void MiraPanelUI::onColor(lv_event_t* e) {
   if (code != LV_EVENT_VALUE_CHANGED && code != LV_EVENT_PRESSING && code != LV_EVENT_RELEASED) return;
 
   Binding& b = ui._bindings[ctx->bindingIndex];
-  lv_color_t c = lv_colorwheel_get_rgb(lv_event_get_target(e));
-  uint32_t rgb = lv_color_to32(c);
+  lv_color_t c = lv_colorwheel_get_rgb(static_cast<lv_obj_t *>(lv_event_get_target(e)));
+  uint32_t rgb = lv_color_to_u32(c);
   int r  = (rgb >> 16) & 0xFF;
   int g  = (rgb >> 8)  & 0xFF;
   int bl = rgb & 0xFF;
@@ -4254,7 +4258,7 @@ void MiraPanelUI::onBrightness(lv_event_t* e) {
   MiraPanelUI* ui = static_cast<MiraPanelUI*>(lv_event_get_user_data(e));
   if (!ui) return;
   if (ui->_syncingDisplayControls) return;
-  int value = lv_slider_get_value(lv_event_get_target(e));
+  int value = lv_slider_get_value(static_cast<lv_obj_t *>(lv_event_get_target(e)));
   value = clampInt(value, 30, 255);
   ui->_brightness = (uint8_t)value;
   uint8_t pct = brightnessToPercent(ui->_brightness);
@@ -4269,7 +4273,7 @@ void MiraPanelUI::onTheme(lv_event_t* e) {
   if (_uiForLvgl && _uiForLvgl->touchBlocksAction(false)) return;
   MiraPanelUI* ui = static_cast<MiraPanelUI*>(lv_event_get_user_data(e));
   if (!ui || ui->_suppressEvents) return;
-  uint16_t selected = lv_dropdown_get_selected(lv_event_get_target(e));
+  uint16_t selected = lv_dropdown_get_selected(static_cast<lv_obj_t *>(lv_event_get_target(e)));
   if (selected > THEME_GLASS) selected = THEME_MIRA;
   ui->_theme = (uint8_t)selected;
   ui->_prefs.putUChar("theme", ui->_theme);
@@ -4281,7 +4285,7 @@ void MiraPanelUI::onReturnHome(lv_event_t* e) {
   if (_uiForLvgl && _uiForLvgl->touchBlocksAction(false)) return;
   MiraPanelUI* ui = static_cast<MiraPanelUI*>(lv_event_get_user_data(e));
   if (!ui) return;
-  ui->_returnHomeEnabled = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+  ui->_returnHomeEnabled = lv_obj_has_state(static_cast<lv_obj_t *>(lv_event_get_target(e)), LV_STATE_CHECKED);
   ui->_prefs.putBool("home", ui->_returnHomeEnabled);
   ui->noteActivity();
 }
@@ -4290,7 +4294,7 @@ void MiraPanelUI::onSleepMode(lv_event_t* e) {
   if (_uiForLvgl && _uiForLvgl->touchBlocksAction(false)) return;
   MiraPanelUI* ui = static_cast<MiraPanelUI*>(lv_event_get_user_data(e));
   if (!ui) return;
-  ui->_sleepEnabled = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+  ui->_sleepEnabled = lv_obj_has_state(static_cast<lv_obj_t *>(lv_event_get_target(e)), LV_STATE_CHECKED);
   ui->_prefs.putBool("sleep", ui->_sleepEnabled);
   if (!ui->_sleepEnabled) ui->wakeFromSleep();
   ui->noteActivity();
@@ -4300,7 +4304,7 @@ void MiraPanelUI::onClockSleep(lv_event_t* e) {
   if (_uiForLvgl && _uiForLvgl->touchBlocksAction(false)) return;
   MiraPanelUI* ui = static_cast<MiraPanelUI*>(lv_event_get_user_data(e));
   if (!ui) return;
-  ui->_clockInSleep = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+  ui->_clockInSleep = lv_obj_has_state(static_cast<lv_obj_t *>(lv_event_get_target(e)), LV_STATE_CHECKED);
   ui->_prefs.putBool("clock", ui->_clockInSleep);
   ui->noteActivity();
 }
