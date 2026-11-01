@@ -11,6 +11,7 @@
 #include "lvgl.h"
 #include "mira_display.h"
 #include "mira_full.h"
+#include "mira_mqtt.h"
 #include "mira_recovery.h"
 
 void mira_recovery_set_fps(uint32_t lvgl_fps_tenths, uint32_t rgb_fps_tenths);
@@ -75,6 +76,7 @@ void app_main(void) {
     ESP_LOGW(TAG,"EXPERIMENTAL UI PORT: Jeedom HTTP commands, MQTT, camera and OTA settings are not yet ported");
     mira_full_storage_init(); // no format, preserve original SPIFFS
     ESP_ERROR_CHECK(mira_recovery_init()); // Wi-Fi AP and separate OTA recovery
+    ESP_ERROR_CHECK(mira_mqtt_init()); // native optional MQTT transport, read NVS settings
     ESP_ERROR_CHECK(mira_display_init());  // 4.3C known-good 12MHz RGB + GT911
     mira_full_ui_create(mira_display_lvgl());
     BaseType_t ok=xTaskCreatePinnedToCore(lvgl_loop,"mira_lvgl",8192,NULL,5,NULL,1);
