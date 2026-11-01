@@ -1490,6 +1490,22 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
             matches=!strcmp(setpoint_name,msg->name)||!strcmp(setpoint_normalized,norm_recv);
         }
         if(!matches)continue;
+        // Beta lists accept both the displayed choice and its numeric index.
+        // A passive Jeedom update changes visual selection without actions.
+        if(!strcmp(w->type,"listbutton")&&w->list_count){
+            char *end=NULL;
+            long numeric=strtol(msg->value,&end,10);
+            int selected=(*msg->value && end && !*end && numeric>=0 &&
+                          numeric<w->list_count)?(int)numeric:-1;
+            if(selected<0){
+                for(uint8_t n=0;n<w->list_count;n++){
+                    if(!strcasecmp(listbutton_label(w,n),msg->value)){
+                        selected=n;break;
+                    }
+                }
+            }
+            if(selected>=0)listbutton_mark_selected(w,(uint8_t)selected);
+        }
         // Remote information is authoritative, but must never trigger an
         // outgoing command. Color states accept legacy #RRGGBB / r,g,b.
         if(w->control && !strcmp(w->type,"color")){
@@ -1533,9 +1549,17 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
             const int value=clamp(atoi(msg->value),w->minv,w->maxv);
             if(!strcmp(w->type,"range"))lv_slider_set_value(w->control,value,LV_ANIM_OFF);
             else lv_arc_set_value(w->control,value);
-        }else if(w->control && (!strcmp(w->type,"list")||!strcmp(w->type,"listbutton"))){
+        }else if(w->control && !strcmp(w->type,"list")){
             const char *options=lv_dropdown_get_options(w->control);
             if(options){
+                char *end_number=NULL;
+                long numeric=strtol(msg->value,&end_number,10);
+                if(*msg->value&&end_number&&!*end_number&&numeric>=0){
+                    uint16_t total=lv_dropdown_get_option_cnt(w->control);
+                    if(numeric<total){
+                        lv_dropdown_set_selected(w->control,(uint16_t)numeric);
+                    }
+                }
                 uint16_t index=0;
                 const char *start=options;
                 while(*start){
