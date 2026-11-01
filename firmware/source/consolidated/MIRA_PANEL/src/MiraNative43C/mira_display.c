@@ -349,9 +349,9 @@ static bool IRAM_ATTR lcd_frame_complete(esp_lcd_panel_handle_t h,
                       const esp_lcd_rgb_panel_event_data_t *data, void *ctx) {
     (void)h; (void)data; (void)ctx;
     frame_complete_events++;
-    BaseType_t woken = pdFALSE;
-    if (render_task) vTaskNotifyGiveFromISR(render_task, &woken);
-    return woken == pdTRUE;
+    // Single framebuffer stays permanently attached to RGB DMA. There is
+    // no async swap to acknowledge, and no render-task notification to queue.
+    return false;
 }
 static bool IRAM_ATTR lcd_vsync_event(esp_lcd_panel_handle_t h,
                       const esp_lcd_rgb_panel_event_data_t *data, void *ctx) {
@@ -359,35 +359,14 @@ static bool IRAM_ATTR lcd_vsync_event(esp_lcd_panel_handle_t h,
     vsync_events++;
     return false;
 }
+// BETA5: LVGL renders directly into the ONE RGB framebuffer already
+// scanned by the panel. No esp_lcd_panel_draw_bitmap(frame swap), no
+// secondary full-frame memcpy and no waiting on DMA completion.
+// This intentionally trades occasional in-frame tearing for a drastic
+// reduction of PSRAM transfers during vertical scrolling.
 static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
-    if (!lv_display_flush_is_last(disp)) {
-        lv_display_flush_ready(disp);
-        return;
-    }
-    // Native IDF frame swap: only submit the final region, as the buffer is already
-    // an entire offscreen 800x480 RGB565 framebuffer allocated by esp_lcd.
-    ulTaskNotifyTake(pdTRUE, 0);
-    esp_err_t err = esp_lcd_panel_draw_bitmap(panel, 0, 0, WIDTH, HEIGHT, px_map);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "RGB swap failed: %s", esp_err_to_name(err));
-        lv_display_flush_ready(disp);
-    }
-}
-static void flush_wait_cb(lv_display_t *disp) {
-    int64_t t0 = esp_timer_get_time();
-    // NEVER mark a framebuffer available while DMA can still reference it:
-    // the previous implementation acknowledged a timeout and could render into
-    // a framebuffer still being scanned, producing tearing / a moving image.
-    while (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(125)) == 0) {
-        vsync_missed++;
-        if (vsync_missed <= 5 || vsync_missed % 30 == 0) {
-            ESP_LOGW(TAG, "RGB frame-complete callback timeout (%lu); retaining framebuffer",
-                     (unsigned long)vsync_missed);
-        }
-        // The WiFi recovery HTTP service remains on another FreeRTOS task.
-    }
-    last_refresh_us = (uint32_t)(esp_timer_get_time() - t0);
-    wait_total_us += last_refresh_us;
+    (void)area;
+    (void)px_map;
     frames++;
     lv_display_flush_ready(disp);
 }
@@ -411,13 +390,11 @@ esp_err_t mira_display_init(void) {
         },
         .data_width = 16,
         .bits_per_pixel = 16,
-        .num_fbs = 2,
-        // Espressif RGB drift workaround: two DMA bounce buffers in internal
-        // SRAM, 20 scanlines each. Prevents direct PSRAM EDMA FIFO underflow
-        // when the full Mira UI + Wi-Fi contend for octal PSRAM bandwidth.
-        // Requires enough internal SRAM. On failure, fallback below to the
-        // original display mode so OTA web recovery is still possible.
-        .bounce_buffer_size_px = WIDTH * 20,
+        .num_fbs = 1,
+        // One PSRAM framebuffer: no internal bounce-buffer refills
+        // (which also require a specific 64-byte DCache line configuration
+        // unavailable via the prebuilt Arduino-ESP32 core).
+        .bounce_buffer_size_px = 0,
         .dma_burst_size = 64,
         .sram_trans_align = 4,
         .psram_trans_align = 64,
@@ -429,19 +406,9 @@ esp_err_t mira_display_init(void) {
         .data_gpio_nums = {14, 38, 18, 17, 10, 39, 0, 45, 48, 47, 21, 1, 2, 42, 41, 40},
         .flags.fb_in_psram = 1,
     };
-    ESP_LOGI(TAG,"RGB 12MHz bounce=%lu px (2 x %lu bytes SRAM), internal free=%lu largest=%lu",
-             (unsigned long)cfg.bounce_buffer_size_px,
-             (unsigned long)(cfg.bounce_buffer_size_px * 2U),
-             (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-             (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
-    esp_err_t lcd_init_err = esp_lcd_new_rgb_panel(&cfg, &panel);
-    if (lcd_init_err != ESP_OK) {
-        ESP_LOGW(TAG, "RGB bounce allocation failed: %s; fallback to direct EDMA",
-                 esp_err_to_name(lcd_init_err));
-        cfg.bounce_buffer_size_px = 0;
-        ESP_RETURN_ON_ERROR(esp_lcd_new_rgb_panel(&cfg, &panel), TAG,
-                            "RGB panel allocate (direct fallback)");
-    }
+    ESP_LOGI(TAG, "RGB BETA5: 12MHz one PSRAM FB, no LVGL memcpy/swap, no bounce. Internal free=%lu",
+             (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+    ESP_RETURN_ON_ERROR(esp_lcd_new_rgb_panel(&cfg, &panel), TAG, "RGB one-FB allocate");
     ESP_RETURN_ON_ERROR(esp_lcd_panel_reset(panel), TAG, "RGB reset");
     ESP_RETURN_ON_ERROR(esp_lcd_panel_init(panel), TAG, "RGB init");
     esp_lcd_rgb_panel_event_callbacks_t cb = {
@@ -449,18 +416,18 @@ esp_err_t mira_display_init(void) {
         .on_vsync = lcd_vsync_event,
     };
     ESP_RETURN_ON_ERROR(esp_lcd_rgb_panel_register_event_callbacks(panel, &cb, NULL), TAG, "VSYNC callback");
-    void *fb1 = NULL, *fb2 = NULL;
-    ESP_RETURN_ON_ERROR(esp_lcd_rgb_panel_get_frame_buffer(panel, 2, &fb1, &fb2), TAG, "RGB double buffers");
-    ESP_LOGI(TAG, "RGB565 %dx%d PCLK=%d bounce_lines=%lu, fb1=%p fb2=%p, PSRAM=%zu", WIDTH,HEIGHT, (unsigned long)(cfg.bounce_buffer_size_px / WIDTH),
-         LCD_PCLK_HZ,fb1,fb2,heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    void *fb1 = NULL;
+    ESP_RETURN_ON_ERROR(esp_lcd_rgb_panel_get_frame_buffer(panel, 1, &fb1), TAG, "RGB single framebuffer");
+    ESP_LOGI(TAG, "RGB565 %dx%d PCLK=%d ONE FB=%p, PSRAM=%zu", WIDTH, HEIGHT,
+             LCD_PCLK_HZ, fb1, heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    memset(fb1, 0, WIDTH * HEIGHT * 2);
     lv_init();
     lvdisp = lv_display_create(WIDTH, HEIGHT);
     assert(lvdisp);
     lv_display_set_user_data(lvdisp, panel);
     lv_display_set_color_format(lvdisp, LV_COLOR_FORMAT_RGB565);
-    lv_display_set_buffers(lvdisp, fb1, fb2, WIDTH * HEIGHT * 2, LV_DISPLAY_RENDER_MODE_DIRECT);
+    lv_display_set_buffers(lvdisp, fb1, NULL, WIDTH * HEIGHT * 2, LV_DISPLAY_RENDER_MODE_DIRECT);
     lv_display_set_flush_cb(lvdisp, flush_cb);
-    lv_display_set_flush_wait_cb(lvdisp, flush_wait_cb);
     lv_indev_t *touch = lv_indev_create();
     assert(touch);
     lv_indev_set_type(touch, LV_INDEV_TYPE_POINTER);
