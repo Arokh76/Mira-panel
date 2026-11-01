@@ -459,7 +459,7 @@ void mira_full_ui_create(lv_display_t *disp){
     lv_obj_set_style_pad_all(nav,0,0);
     no_scroll(nav);
     const int fav[4]={0,1,2,6};
-    const char *icons[4]={LV_SYMBOL_HOME,"●","◉","▦"};
+    // Use built-in LVGL symbol glyphs (supported by the Montserrat symbol font).\n    // Unicode circles/grid were missing in lv_font_montserrat_28 (tofu boxes).\n    const char *icons[4]={LV_SYMBOL_HOME,LV_SYMBOL_LIST,LV_SYMBOL_IMAGE,LV_SYMBOL_SETTINGS};
     for(int i=0;i<4;i++){
         lv_obj_t *bt=lv_button_create(nav);
         favorite_btn[i]=bt;
