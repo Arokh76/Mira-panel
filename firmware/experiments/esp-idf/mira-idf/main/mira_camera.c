@@ -223,8 +223,10 @@ static bool fetch_snapshot(const char *url,mira_camera_frame_t *out){
         uint8_t header[54];
         if(!read_exact(http,header,sizeof(header)))break;
         if(header[0]==0xff&&header[1]==0xd8){
-            ok=decode_jpeg(http,header,sizeof(header),
-                           esp_http_client_get_content_length(http),out);
+            // Some camera servers report a stale Content-Length or use a
+            // continuous JPEG body. Always bound by JPEG EOI and CAM_MAX_JPEG,
+            // not by an unreliable HTTP entity length.
+            ok=decode_jpeg(http,header,sizeof(header),-1,out);
             break;
         }
         if(header[0]!='B'||header[1]!='M'){
