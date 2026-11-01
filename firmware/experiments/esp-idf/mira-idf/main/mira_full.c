@@ -44,7 +44,6 @@ typedef struct {
 } mira_widget_t;
 static mira_widget_t widgets[MAX_WIDGETS];
 static uint8_t widget_n=0;
-static const lv_color_t TEXT_C={0}; // colors dynamically initialized using lv_color_hex
 static lv_color_t text_c(void){return lv_color_hex(0xF3F6F7);}
 static lv_color_t muted_c(void){return lv_color_hex(0xA8B2B8);}
 static lv_color_t cyan_c(void){return lv_color_hex(0x22BEEA);}
@@ -300,8 +299,15 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
     if(!strcmp(type,"color")){
         w->card=card(pg,cw,206);
         label(w->card,display,0xF3F6F7,&lv_font_montserrat_16);
-        w->control=lv_colorwheel_create(w->card,true);
+        // LVGL 9.6 does not provide the old LVGL8 colorwheel widget.
+        // This is a color hue arc PREVIEW only; no Jeedom action.
+        w->control=lv_arc_create(w->card);
         lv_obj_set_size(w->control,150,150);
+        lv_arc_set_range(w->control,0,360);
+        lv_arc_set_value(w->control,200);
+        lv_arc_set_rotation(w->control,135);
+        lv_arc_set_bg_angles(w->control,0,270);
+        lv_obj_set_style_arc_color(w->control,cyan_c(),LV_PART_INDICATOR);
         lv_obj_align(w->control,LV_ALIGN_CENTER,0,12);
         return;
     }
