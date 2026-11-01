@@ -156,6 +156,10 @@ static cJSON *index_from_config(const char *json) {
     if(!out||!arr){cJSON_Delete(root);cJSON_Delete(out);cJSON_Delete(arr);return NULL;}
     cJSON_AddItemToObject(out,"actions",arr);
     int id=1;
+    bool weather_registered=false;
+    static const char *const energy_fields[]={"solar","home","grid","battery","soc","soc2","soc3"};
+    static const char *const media_fields[]={"title","artist","album","state","progress","volume","cover","device","devices"};
+    static const char *const media_actions[]={"previous","play","next"};
     const cJSON *w=NULL;
     cJSON_ArrayForEach(w,widgets){
         const char *type=jstr((cJSON*)w,"type","");
@@ -207,8 +211,42 @@ static cJSON *index_from_config(const char *json) {
             }
             snprintf(compound,sizeof(compound),"%s__mode",name);
             add_choices(arr,&id,compound,jstr((cJSON*)w,"modes","Confort|Éco|Hors gel|Arrêt"));
+        }else if(!strcmp(type,"multiaction")){
+            static const char *const triggers[]={"Multi_Clic_","Multi_Double_","Multi_Triple_","Multi_Long_"};
+            for(size_t n=0;n<4;n++){
+                char compound[192];snprintf(compound,sizeof(compound),"%s%.95s",triggers[n],name);
+                append_action(arr,&id,"button",compound);
+            }
+        }else if(!strcmp(type,"camera")){
+            char compound[192];snprintf(compound,sizeof(compound),"Camera_%.95s",name);
+            append_action(arr,&id,"info",compound);
+        }else if(!strcmp(type,"energy")){
+            for(size_t n=0;n<7;n++){
+                char compound[192];snprintf(compound,sizeof(compound),"%.95s__%s",name,energy_fields[n]);
+                append_action(arr,&id,"info",compound);
+            }
+        }else if(!strcmp(type,"media")){
+            for(size_t n=0;n<9;n++){
+                char compound[192];snprintf(compound,sizeof(compound),"%.95s__%s",name,media_fields[n]);
+                append_action(arr,&id,"info",compound);
+            }
+            for(size_t n=0;n<3;n++){
+                char compound[192];snprintf(compound,sizeof(compound),"%.95s__%s",name,media_actions[n]);
+                append_action(arr,&id,"button",compound);
+            }
+            char compound[192];
+            snprintf(compound,sizeof(compound),"%.95s__pause",name);
+            append_action(arr,&id,"button",compound);
+            snprintf(compound,sizeof(compound),"%.95s__volume_cmd",name);
+            append_action(arr,&id,"range",compound);
+            snprintf(compound,sizeof(compound),"%.95s__device_cmd",name);
+            append_action(arr,&id,"range",compound);
+        }else if(!strcmp(type,"datetime")&&!weather_registered){
+            weather_registered=true;
+            append_action(arr,&id,"info","__mira_weather_temperature");
+            append_action(arr,&id,"info","__mira_weather_condition");
+            append_action(arr,&id,"info","__mira_weather_code");
         }
-        // The plugin's current autosync intentionally excludes composites.
     }
     cJSON_Delete(root);
     return out;
