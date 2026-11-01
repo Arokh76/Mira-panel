@@ -582,10 +582,10 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         lv_obj_set_style_bg_opa(c,LV_OPA_TRANSP,0);
         lv_obj_set_style_border_width(c,0,0);
         lv_obj_set_style_pad_all(c,0,0);
-        clock_text=label(c,"--:--",0xffffff,&lv_font_montserrat_48);
-        lv_obj_set_size(clock_text,370,92);
+        clock_text=label(c,"--:--",0xffffff,&mira_home_montserrat_96);
+        lv_obj_set_size(clock_text,370,118);
         lv_obj_set_style_text_align(clock_text,LV_TEXT_ALIGN_CENTER,0);
-        lv_obj_set_pos(clock_text,14,12);
+        lv_obj_set_pos(clock_text,14,0);
         date_text=label(c,"-- -- ----",0xA8B2B8,&mira_font_fr_16);
         lv_obj_set_size(date_text,370,26);
         lv_obj_set_style_text_align(date_text,LV_TEXT_ALIGN_CENTER,0);
