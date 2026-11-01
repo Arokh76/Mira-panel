@@ -140,7 +140,9 @@ static void gt911_poll_task(void *arg) {
                     const uint8_t count=status & 0x0f;
                     if (count>=1 && count<=5) {
                         uint8_t xy[8]={0};
-                        if (i2c_reg_read(0x8150,xy,sizeof(xy))==ESP_OK) {
+                        // GT911 point 0 starts at 0x814F (track ID), then X/Y little endian.
+                        // Starting at 0x8150 shifts every field and creates absurd coordinates.
+                        if (i2c_reg_read(0x814f,xy,sizeof(xy))==ESP_OK) {
                             const int raw_x=xy[1] | (xy[2]<<8);
                             const int raw_y=xy[3] | (xy[4]<<8);
                             touch_raw_x=(uint32_t)raw_x;
