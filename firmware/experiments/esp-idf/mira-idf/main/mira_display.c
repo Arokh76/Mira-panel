@@ -98,57 +98,99 @@ static void touch_clear(void) {
     if (gt911 && touch_ready &&
         i2c_master_transmit(gt911, cmd, sizeof(cmd), 30) != ESP_OK) touch_errors++;
 }
+// Keep the last valid sample while GT911 waits for its next data-ready update.
+// A release is generated when GT911 reports zero contacts or after a short
+// no-update safety timeout; do not synthesize RELEASED between touch samples.
+static lv_point_t touch_last_point = {0, 0};
+static int64_t touch_last_sample_us;
+
 void mira_display_touch_read(lv_indev_t *indev, lv_indev_data_t *data) {
     (void)indev;
-    data->state = LV_INDEV_STATE_RELEASED;
-    if (!touch_ready) return;
+    data->point = touch_last_point;
+    data->state = finger_down ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+    if (!touch_ready) {
+        finger_down = false;
+        data->state = LV_INDEV_STATE_RELEASED;
+        return;
+    }
+
     touch_irq_level = (uint8_t)gpio_get_level(GPIO_NUM_4);
     uint8_t status = 0;
+    const int64_t now = esp_timer_get_time();
     if (i2c_reg_read(0x814e, &status, 1) != ESP_OK) {
         finger_down = false;
+        data->state = LV_INDEV_STATE_RELEASED;
         return;
     }
     touch_last_status = status;
-    if (!(status & 0x80)) return; // Not ready yet; keep the raw status observable.
+    if (!(status & 0x80)) {
+        // GT911 has not produced a new frame. Preserve PRESS state briefly
+        // so LVGL receives a stable press even under full-screen rendering.
+        if (finger_down && now - touch_last_sample_us > 200000) {
+            finger_down = false;
+            data->state = LV_INDEV_STATE_RELEASED;
+        }
+        return;
+    }
+
     touch_ready_events++;
     const uint8_t count = status & 0x0f;
-    if (count > 0 && count <= 5) {
-        uint8_t xy[8] = {};
-        if (i2c_reg_read(0x8150, xy, sizeof(xy)) == ESP_OK) {
-            // GT911 0x8150: track ID, X low, X high, Y low, Y high, ...
-            const int raw_x = xy[1] | (xy[2] << 8);
-            const int raw_y = xy[3] | (xy[4] << 8);
-            touch_raw_x = raw_x;
-            touch_raw_y = raw_y;
-            int x = raw_x;
-            int y = raw_y;
-            // Some GT911 panel configurations report portrait (480x800)
-            // coordinates despite our landscape RGB 800x480 display.
-            // Recover a swapped orientation while reporting RAW values.
-            if ((x >= WIDTH || y >= HEIGHT) && raw_x < HEIGHT && raw_y < WIDTH) {
-                x = raw_y;
-                y = raw_x;
-            }
-            if (x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT) {
-                data->point.x = x;
-                data->point.y = y;
-                data->state = LV_INDEV_STATE_PRESSED;
-                touch_last_x = (uint32_t)x;
-                touch_last_y = (uint32_t)y;
-                if (!finger_down) {
-                    touch_presses++;
-                    ESP_LOGI(TAG, "GT911 touch press x=%d y=%d", x, y);
-                }
-                finger_down = true;
-            } else {
-                touch_invalid_coords++;
-                if (touch_invalid_coords < 5 || touch_invalid_coords % 50 == 0)
-                    ESP_LOGW(TAG, "GT911 invalid raw touch x=%d y=%d status=0x%02x", raw_x, raw_y, status);
-            }
-        }
-    } else {
+    if (count == 0 || count > 5) {
         finger_down = false;
+        data->state = LV_INDEV_STATE_RELEASED;
+        touch_clear();
+        return;
     }
+
+    uint8_t xy[8] = {0};
+    if (i2c_reg_read(0x8150, xy, sizeof(xy)) != ESP_OK) {
+        finger_down = false;
+        data->state = LV_INDEV_STATE_RELEASED;
+        touch_clear();
+        return;
+    }
+
+    const int raw_x = xy[1] | (xy[2] << 8);
+    const int raw_y = xy[3] | (xy[4] << 8);
+    touch_raw_x = (uint32_t)raw_x;
+    touch_raw_y = (uint32_t)raw_y;
+    int x = raw_x, y = raw_y;
+
+    // The GT911 may still contain portrait calibration (480x800) even when
+    // touches near the top-left happen to be within landscape bounds.
+    const bool portrait_cfg = touch_config_x > 0 && touch_config_y > 0 &&
+                              touch_config_x <= HEIGHT && touch_config_y >= WIDTH;
+    if (portrait_cfg ||
+        ((x >= WIDTH || y >= HEIGHT) && raw_x < HEIGHT && raw_y < WIDTH)) {
+        x = raw_y;
+        y = raw_x;
+    }
+
+    if (x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT) {
+        touch_last_point.x = (int16_t)x;
+        touch_last_point.y = (int16_t)y;
+        data->point = touch_last_point;
+        data->state = LV_INDEV_STATE_PRESSED;
+        touch_last_sample_us = now;
+        touch_last_x = (uint32_t)x;
+        touch_last_y = (uint32_t)y;
+        if (!finger_down) {
+            touch_presses++;
+            ESP_LOGI(TAG, "GT911 PRESS x=%d y=%d raw=%d,%d cfg=%lu,%lu",
+                     x, y, raw_x, raw_y,
+                     (unsigned long)touch_config_x,
+                     (unsigned long)touch_config_y);
+        }
+        finger_down = true;
+    } else {
+        touch_invalid_coords++;
+        if (touch_invalid_coords <= 5 || touch_invalid_coords % 50 == 0)
+            ESP_LOGW(TAG, "GT911 invalid x=%d y=%d raw=%d,%d status=0x%02x",
+                     x, y, raw_x, raw_y, status);
+        finger_down = false;
+        data->state = LV_INDEV_STATE_RELEASED;
+    }
+
     touch_clear();
 }
 
