@@ -124,6 +124,9 @@ void mira_display_touch_read(lv_indev_t *indev, lv_indev_data_t *data) {
     }
     touch_last_status = status;
     if (!(status & 0x80)) {
+        // Follow Waveshare's GT911 driver: acknowledge/clear even when DATA_READY
+        // is low; otherwise stale controller state can block future samples.
+        touch_clear();
         // GT911 has not produced a new frame. Preserve PRESS state briefly
         // so LVGL receives a stable press even under full-screen rendering.
         if (finger_down && now - touch_last_sample_us > 200000) {
