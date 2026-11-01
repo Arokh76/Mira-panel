@@ -512,7 +512,7 @@ static bool display_field_write(const mira_display_field_t *field,const char *va
         char *end=NULL;
         unsigned long number=strtoul(value,&end,10);
         if(value[0]&&end&&!*end&&number<=field->max&&
-           (strcmp(field->key,"day_pct")&&strcmp(field->key,"night_pct")||number>=1)){
+           ((strcmp(field->key,"day_pct")&&strcmp(field->key,"night_pct"))||number>=1)){
             if(field->max>255)err=nvs_set_u32(nv,field->key,(uint32_t)number);
             else err=nvs_set_u8(nv,field->key,(uint8_t)number);
         }
