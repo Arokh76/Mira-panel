@@ -418,6 +418,16 @@ static esp_err_t wifi_profile_post(httpd_req_t *req){
     esp_wifi_disconnect();
     esp_err_t err=esp_wifi_set_config(WIFI_IF_STA,&sta);
     if(err==ESP_OK){
+        // An explicit user provisioning always supersedes a migrated beta
+        // static profile, including on subsequent reboots.
+        legacy_ip_mode=PROFILE_DHCP;
+        legacy_fixed_auto_attempted=false;
+        nvs_handle_t nv;
+        if(nvs_open("mira_idf_net",NVS_READWRITE,&nv)==ESP_OK){
+            if(nvs_set_u8(nv,"legacy_wifi",0)==ESP_OK)(void)nvs_commit(nv);
+            nvs_close(nv);
+        }
+        if(sta_netif)(void)esp_netif_dhcpc_start(sta_netif);
         station_configured=true;
         err=esp_wifi_connect();
     }
