@@ -17,6 +17,7 @@
 #include "esp_log.h"
 #include "esp_check.h"
 #include "esp_system.h"
+#include "cJSON.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -263,6 +264,65 @@ static void register_optional_route(httpd_handle_t server, const httpd_uri_t *ro
                  route->uri, esp_err_to_name(err));
     }
 }
+
+static volatile bool station_configured;
+static volatile bool station_connected;
+static void wifi_status_event(void *arg,esp_event_base_t base,int32_t id,void *data){
+    (void)arg;(void)data;
+    if(base==IP_EVENT&&id==IP_EVENT_STA_GOT_IP){
+        station_connected=true;
+        ESP_LOGI(TAG,"Station Wi-Fi connected (AP recovery remains active)");
+    }else if(base==WIFI_EVENT&&id==WIFI_EVENT_STA_DISCONNECTED){
+        station_connected=false;
+        if(station_configured)esp_wifi_connect();
+    }
+}
+static esp_err_t wifi_info_get(httpd_req_t *req){
+    char status[100];
+    snprintf(status,sizeof(status),
+             "{\"configured\":%s,\"connected\":%s,\"recovery_ap\":true}",
+             station_configured?"true":"false",station_connected?"true":"false");
+    httpd_resp_set_type(req,"application/json");
+    return httpd_resp_sendstr(req,status);
+}
+// Explicit provisioning: never overwrite or decode Mira Arduino /reseau.json.
+// Wi-Fi STA profile is stored by ESP-IDF driver in NVS, AP remains available.
+static esp_err_t wifi_profile_post(httpd_req_t *req){
+    if(req->content_len<2||req->content_len>320){
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Invalid network JSON size");return ESP_FAIL;
+    }
+    char body[321];size_t n=0,len=req->content_len;
+    while(n<len){
+        int r=httpd_req_recv(req,body+n,len-n);
+        if(r<=0){httpd_resp_send_err(req,HTTPD_408_REQ_TIMEOUT,"Incomplete Wi-Fi JSON");return ESP_FAIL;}
+        n+=(size_t)r;
+    }
+    body[len]=0;
+    cJSON *json=cJSON_ParseWithLength(body,len);
+    const cJSON *ssid=json?cJSON_GetObjectItemCaseSensitive(json,"ssid"):NULL;
+    const cJSON *pass=json?cJSON_GetObjectItemCaseSensitive(json,"password"):NULL;
+    if(!cJSON_IsString(ssid)||!ssid->valuestring||!*ssid->valuestring||
+       strlen(ssid->valuestring)>32||!cJSON_IsString(pass)||!pass->valuestring||
+       strlen(pass->valuestring)>63){
+        if(json)cJSON_Delete(json);
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Expected SSID (1..32) and password (0..63)");
+        return ESP_FAIL;
+    }
+    wifi_config_t sta={0};
+    snprintf((char*)sta.sta.ssid,sizeof(sta.sta.ssid),"%s",ssid->valuestring);
+    snprintf((char*)sta.sta.password,sizeof(sta.sta.password),"%s",pass->valuestring);
+    cJSON_Delete(json);
+    esp_wifi_disconnect();
+    esp_err_t err=esp_wifi_set_config(WIFI_IF_STA,&sta);
+    if(err==ESP_OK){
+        station_configured=true;
+        err=esp_wifi_connect();
+    }
+    if(err!=ESP_OK){httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"STA configuration failed");return ESP_FAIL;}
+    httpd_resp_set_type(req,"application/json");
+    return httpd_resp_sendstr(req,"{\"saved\":true,\"joining\":true}");
+}
+
 esp_err_t mira_recovery_init(void) {
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -274,9 +334,13 @@ esp_err_t mira_recovery_init(void) {
     ESP_RETURN_ON_ERROR(esp_netif_init(), TAG, "netif");
     ESP_RETURN_ON_ERROR(esp_event_loop_create_default(), TAG, "event loop");
     esp_netif_create_default_wifi_ap();
+    esp_netif_create_default_wifi_sta();
 
     wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
     ESP_RETURN_ON_ERROR(esp_wifi_init(&init), TAG, "wifi init");
+    ESP_RETURN_ON_ERROR(esp_wifi_set_storage(WIFI_STORAGE_FLASH), TAG, "wifi storage");
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_event_handler_register(IP_EVENT,IP_EVENT_STA_GOT_IP,wifi_status_event,NULL));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_event_handler_register(WIFI_EVENT,WIFI_EVENT_STA_DISCONNECTED,wifi_status_event,NULL));
     wifi_config_t ap = {
         .ap = {
             .ssid = "Mira-LVGL96-43",
@@ -288,9 +352,14 @@ esp_err_t mira_recovery_init(void) {
             .pmf_cfg = {.required = false},
         }
     };
-    ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_AP), TAG, "wifi mode");
+    ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_APSTA), TAG, "wifi mode");
     ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_AP, &ap), TAG, "wifi config");
     ESP_RETURN_ON_ERROR(esp_wifi_start(), TAG, "wifi start");
+    wifi_config_t saved_sta={0};
+    if(esp_wifi_get_config(WIFI_IF_STA,&saved_sta)==ESP_OK&&saved_sta.sta.ssid[0]){
+        station_configured=true;
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_connect());
+    }
 
     httpd_config_t conf = HTTPD_DEFAULT_CONFIG();
     // 9 routes are registered below; ESP-IDF defaults to 8 URI handlers.
@@ -312,6 +381,8 @@ esp_err_t mira_recovery_init(void) {
     httpd_uri_t shadow_light = {.uri="/shadow/light", .method=HTTP_GET, .handler=shadow_light_get};
     httpd_uri_t shadow_relief = {.uri="/shadow/relief", .method=HTTP_GET, .handler=shadow_relief_get};
     httpd_uri_t ota = {.uri="/update", .method=HTTP_POST, .handler=update_post};
+    httpd_uri_t wifi_get={.uri="/mira/wifi",.method=HTTP_GET,.handler=wifi_info_get};
+    httpd_uri_t wifi_post={.uri="/mira/wifi",.method=HTTP_POST,.handler=wifi_profile_post};
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &root), TAG, "HTTP root");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &perf), TAG, "HTTP perf");
     // Prioritize OTA recovery: register it before experimental routes.
@@ -324,6 +395,8 @@ esp_err_t mira_recovery_init(void) {
     register_optional_route(httpd, &shadow_relief);
     mira_full_register_http(httpd); // optional 0.7.37 SPIFFS config and upload
     mira_mqtt_register_http(httpd); // optional native MQTT settings
+    ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_register_uri_handler(httpd,&wifi_get));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_register_uri_handler(httpd,&wifi_post));
     ESP_LOGW(TAG, "Recovery AP Mira-IDF-Test password MiraIDF2026 at http://192.168.4.1");
     return ESP_OK;
 }
