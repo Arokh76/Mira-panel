@@ -15,6 +15,7 @@
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"
 #include "cJSON.h"
+#include "nvs.h"
 #include "lvgl.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -38,6 +39,7 @@ void mira_full_request_reload(void){ reload_pending=true; }
 typedef struct { char name[96]; char value[160]; } mira_state_update_t;
 static QueueHandle_t state_queue;
 static bool suppress_events;
+static uint8_t display_brightness_raw=220;
 static bool spiffs_ready=false;
 static lv_obj_t *screen, *pages[6], *nav, *page_picker;
 static lv_obj_t *favorite_btn[4];
@@ -511,6 +513,30 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
     w->card=card(pg,cw,50);
     label(w->card,display,0xA8B2B8,&lv_font_montserrat_16);
 }
+
+// Match the old Waveshare43CDisplay brightness behavior, but save only on
+// release (never write flash on every pixel of a drag).  This callback runs
+// on LVGL task; the CH32 gate/PWM write is a short I2C transaction.
+static void brightness_release(lv_event_t *event) {
+    if(suppress_events)return;
+    lv_obj_t *slider=lv_event_get_target_obj(event);
+    int value=lv_slider_get_value(slider);
+    if(value<30)value=30;
+    if(value>255)value=255;
+    const esp_err_t err=mira_display_set_brightness((uint8_t)value);
+    if(err!=ESP_OK){
+        ESP_LOGE(TAG,"Waveshare brightness update failed: %s",esp_err_to_name(err));
+        return;
+    }
+    display_brightness_raw=(uint8_t)value;
+    nvs_handle_t nvs;
+    if(nvs_open("mira_idf_ui",NVS_READWRITE,&nvs)==ESP_OK){
+        if(nvs_set_u8(nvs,"brightness",display_brightness_raw)==ESP_OK)
+            (void)nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+}
+
 static void settings(void){
     lv_obj_t *head=card(3,640,40);
     lv_obj_t *h=label(head,"Paramètres",0xF3F6F7,&lv_font_montserrat_16);
@@ -521,7 +547,9 @@ static void settings(void){
     label(display,"Luminosité écran",0xF3F6F7,&lv_font_montserrat_16);
     lv_obj_t *sl=lv_slider_create(display);
     lv_obj_set_size(sl,600,14);
-    lv_slider_set_range(sl,30,255);lv_slider_set_value(sl,220,LV_ANIM_OFF);
+    lv_slider_set_range(sl,30,255);
+    lv_slider_set_value(sl,display_brightness_raw,LV_ANIM_OFF);
+    lv_obj_add_event_cb(sl,brightness_release,LV_EVENT_RELEASED,NULL);
     label(display,"Thème : Mira",0xA8B2B8,&lv_font_montserrat_16);
     lv_obj_t *n=card(3,640,72);
     label(n,"Navigation",0x22BEEA,&lv_font_montserrat_16);
@@ -635,6 +663,14 @@ static void mira_touch_diagnostic_pressed(lv_event_t *event) {
     ESP_LOGI(TAG,"LVGL button PRESS reached Mira UI");
 }
 void mira_full_ui_create(lv_display_t *disp){
+    nvs_handle_t ui_nvs;
+    if(nvs_open("mira_idf_ui",NVS_READONLY,&ui_nvs)==ESP_OK){
+        uint8_t stored=220;
+        if(nvs_get_u8(ui_nvs,"brightness",&stored)==ESP_OK && stored>=30)
+            display_brightness_raw=stored;
+        nvs_close(ui_nvs);
+    }
+    ESP_ERROR_CHECK_WITHOUT_ABORT(mira_display_set_brightness(display_brightness_raw));
     screen=lv_obj_create(NULL);
     lv_obj_set_size(screen,800,480);
     lv_obj_set_style_bg_color(screen,bg_c(),0);
