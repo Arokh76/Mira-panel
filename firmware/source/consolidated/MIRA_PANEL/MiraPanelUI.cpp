@@ -2334,6 +2334,10 @@ void MiraPanelUI::serviceAlbumArtwork() {
   _albumDescriptor.header.cf = LV_IMG_CF_TRUE_COLOR;
   _albumDescriptor.header.w = frame.width;
   _albumDescriptor.header.h = frame.height;
+#if defined(MIRA_LVGL9_NATIVE)
+  _albumDescriptor.header.magic = LV_IMAGE_HEADER_MAGIC;
+  _albumDescriptor.header.stride = (uint32_t)frame.width * 2U;
+#endif
   _albumDescriptor.data_size = uint32_t(frame.width) * frame.height * 2;
   _albumDescriptor.data = reinterpret_cast<const uint8_t*>(_albumPixels);
   lv_img_set_src(b.mediaArtworkImage, &_albumDescriptor);
@@ -2487,6 +2491,10 @@ void MiraPanelUI::serviceCamera() {
     _cameraDescriptor.header.cf = LV_IMG_CF_TRUE_COLOR;
     _cameraDescriptor.header.w = frame.width;
     _cameraDescriptor.header.h = frame.height;
+#if defined(MIRA_LVGL9_NATIVE)
+  _cameraDescriptor.header.magic = LV_IMAGE_HEADER_MAGIC;
+  _cameraDescriptor.header.stride = (uint32_t)frame.width * 2U;
+#endif
     _cameraDescriptor.data_size = uint32_t(frame.width) * frame.height * 2;
     _cameraDescriptor.data = reinterpret_cast<const uint8_t*>(_cameraPixels);
     lv_img_set_src(_cameraImage, &_cameraDescriptor);
