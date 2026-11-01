@@ -418,6 +418,10 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
     const char *display=str(o,"displayName","");
     if(!*display)display=name;
     if(!*type){ESP_LOGW(TAG,"Skipping widget without type");return;}
+    if(!*name && strcmp(type,"datetime")){
+        ESP_LOGW(TAG,"Skipping unnamed widget type '%s' to prevent ambiguous commands",type);
+        return;
+    }
     // An unlabelled placeholder can be confused with a working command.
     // Keep the original type visible for accurate migration diagnostics.
     // Do not silently turn unsupported widgets into passive info cards or
