@@ -1,4 +1,11 @@
 #pragma once
+#include <stdbool.h>
+#include "esp_err.h"
 #include "esp_http_server.h"
 // Read-only and authenticated Jeedom plugin protocol + safe programming and state commands.
 void mira_jeedom_register_http(httpd_handle_t server);
+
+// Called once after NVS, Wi-Fi and SPIFFS are initialized.
+esp_err_t mira_jeedom_action_init(void);
+// Nonblocking, ONLY called by LVGL direct-user-touch callbacks. Never by States.
+bool mira_jeedom_queue_local_action(const char *name,const char *type,const char *value);
