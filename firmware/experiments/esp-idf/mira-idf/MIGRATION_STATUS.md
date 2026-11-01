@@ -65,3 +65,16 @@ La branche `firmware-beta` définit les schémas source :
 - Aucun fichier SPIFFS historique n'est effacé, réécrit ou formaté.
 
 **Encore à réaliser/valider** : profils `manual` et `fixed_auto` (IP statique), plages de luminosité jour/nuit, fidélité de tous les widgets, reprise de tous les paramètres et tests physiques 4,3″ / 7″. **Un build qui passe ne prouve pas le bon fonctionnement des données chiffrées provenant d'un appareil réel.**
+
+## Lot suivant : réseau IP fixe et horaires jour/nuit (ESP-IDF expérimental)
+
+- Reprise du dernier profil bêta `manual` : adresse IPv4, masque, passerelle et DNS validés avant l'application via `esp_netif`. Aucun écrasement du réseau ESP-IDF déjà configuré.
+- Reprise de `fixed_auto` : DHCP initial, vérification que l'adresse demandée est sur le réseau DHCP, puis utilisation de cette adresse avec les paramètres réseau obtenus. Retour DHCP si l'application échoue ; vérification répétée lors des reconnexions.
+- Les imports Wi-Fi de la bêta sont marqués en NVS ; un nouveau provisionnement par l'utilisateur désactive ce profil migré et réactive DHCP.
+- `GET /mira/wifi` expose le mode IP et le statut d'application, sans exposer mot de passe, clé ou adresse.
+- Horaires de luminosité `DISPLAY_DebutNuit` / `DISPLAY_FinNuit`, activation `DISPLAY_NuitAuto`, pourcentages jour/nuit : lecture depuis les paramètres bêta, calcul sur l'horloge locale après synchronisation de l'heure.
+- La luminosité manuelle règle le niveau de la période active si l'automatisation est sélectionnée. La veille conserve sa luminosité indépendante.
+- Les endpoints HTTP hérités `/getparam` / `/updatelistparam` et `/addlistparam` reconnaissent les huit paramètres `DISPLAY_*` migrés, les enregistrent en NVS typé et signalent à la tâche LVGL d'appliquer les changements sans interaction directe depuis HTTP.
+- `DISPLAY_Delai` accepte désormais jusqu'à 86400 secondes, comme la bêta ; la lecture d'anciennes valeurs NVS `u16` reste possible.
+
+**Prudence** : ces fonctions sont codées mais restent **à vérifier physiquement** ; une réussite du compilateur ne valide ni le basculement DHCP/static, ni la stabilité du rétroéclairage, ni les heures de nuit. Le portage 7 pouces et la parité visuelle complète sont toujours en cours.
