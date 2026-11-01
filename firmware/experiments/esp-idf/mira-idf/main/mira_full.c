@@ -1649,7 +1649,9 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                     const long choice=strtol(msg->value,&end,10);
                     if(*msg->value&&end&&!*end&&choice>=0&&
                        (uint32_t)choice<lv_dropdown_get_option_count(w->thermostat_mode_select)){
+                        suppress_events=true;
                         lv_dropdown_set_selected(w->thermostat_mode_select,(uint32_t)choice);
+                        suppress_events=false;
                         lv_dropdown_get_selected_str(w->thermostat_mode_select,
                                                      selected_option,sizeof(selected_option));
                         selected_text=selected_option;
