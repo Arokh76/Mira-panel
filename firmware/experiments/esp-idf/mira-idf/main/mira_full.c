@@ -1122,6 +1122,26 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
             matches=!strcmp(setpoint_name,msg->name)||!strcmp(setpoint_normalized,norm_recv);
         }
         if(!matches)continue;
+        // Remote information is authoritative, but must never trigger an
+        // outgoing command. Color states accept legacy #RRGGBB / r,g,b.
+        if(w->control && !strcmp(w->type,"color")){
+            unsigned r=0,g=0,b=0;
+            bool valid=false;
+            if(msg->value[0]=='#' && strlen(msg->value)==7){
+                unsigned rgb=0;
+                if(sscanf(msg->value+1,"%6x",&rgb)==1){
+                    r=(rgb>>16)&255u;g=(rgb>>8)&255u;b=rgb&255u;
+                    valid=true;
+                }
+            }else if(sscanf(msg->value,"%u,%u,%u",&r,&g,&b)==3 &&
+                     r<=255u && g<=255u && b<=255u)valid=true;
+            if(valid){
+                const lv_color_hsv_t hsv=lv_color_rgb_to_hsv((uint8_t)r,(uint8_t)g,(uint8_t)b);
+                suppress_events=true;
+                lv_arc_set_value(w->control,hsv.h);
+                suppress_events=false;
+            }
+        }
         snprintf(w->value,sizeof(w->value),"%s",msg->value);
         suppress_events=true;
         if(w->control && !strcmp(w->type,"toggle")){
