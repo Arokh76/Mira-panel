@@ -273,6 +273,24 @@ static void register_optional_route(httpd_handle_t server, const httpd_uri_t *ro
 
 static volatile bool station_configured;
 static volatile bool station_connected;
+// Keep the recovery AP while unprovisioned; once STA is connected it can be
+// disabled without changing or deleting any saved configuration. On network
+// loss it is restored, so the firmware remains reachable for recovery.
+static volatile bool recovery_ap_active=true;
+static void recovery_ap_supervisor(void *arg){
+    (void)arg;
+    for(;;){
+        vTaskDelay(pdMS_TO_TICKS(3000));
+        const bool want_ap=!station_connected;
+        if(want_ap==recovery_ap_active)continue;
+        esp_err_t err=esp_wifi_set_mode(want_ap?WIFI_MODE_APSTA:WIFI_MODE_STA);
+        if(err==ESP_OK){
+            recovery_ap_active=want_ap;
+            ESP_LOGI(TAG,"Recovery AP %s (%s)",want_ap?"enabled":"disabled",
+                     want_ap?"station not connected":"station connected");
+        }else ESP_LOGW(TAG,"Recovery AP mode update failed: %s",esp_err_to_name(err));
+    }
+}
 static void wifi_status_event(void *arg,esp_event_base_t base,int32_t id,void *data){
     (void)arg;(void)data;
     if(base==IP_EVENT&&id==IP_EVENT_STA_GOT_IP){
@@ -282,7 +300,7 @@ static void wifi_status_event(void *arg,esp_event_base_t base,int32_t id,void *d
             if(time_err==ESP_OK)clock_sntp_started=true;
             else ESP_LOGW(TAG,"SNTP start failed: %s",esp_err_to_name(time_err));
         }
-        ESP_LOGI(TAG,"Station Wi-Fi connected (AP recovery remains active)");
+        ESP_LOGI(TAG,"Station Wi-Fi connected; recovery AP will be disabled");
     }else if(base==WIFI_EVENT&&id==WIFI_EVENT_STA_DISCONNECTED){
         station_connected=false;
         if(station_configured)esp_wifi_connect();
@@ -291,8 +309,9 @@ static void wifi_status_event(void *arg,esp_event_base_t base,int32_t id,void *d
 static esp_err_t wifi_info_get(httpd_req_t *req){
     char status[100];
     snprintf(status,sizeof(status),
-             "{\"configured\":%s,\"connected\":%s,\"recovery_ap\":true}",
-             station_configured?"true":"false",station_connected?"true":"false");
+             "{\"configured\":%s,\"connected\":%s,\"recovery_ap\":%s}",
+             station_configured?"true":"false",station_connected?"true":"false",
+             recovery_ap_active?"true":"false");
     httpd_resp_set_type(req,"application/json");
     return httpd_resp_sendstr(req,status);
 }
@@ -374,6 +393,8 @@ esp_err_t mira_recovery_init(void) {
     ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_APSTA), TAG, "wifi mode");
     ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_AP, &ap), TAG, "wifi config");
     ESP_RETURN_ON_ERROR(esp_wifi_start(), TAG, "wifi start");
+    if(xTaskCreate(recovery_ap_supervisor,"mira_ap_guard",3072,NULL,3,NULL)!=pdPASS)
+        ESP_LOGW(TAG,"Recovery AP supervisor unavailable; AP remains enabled");
     wifi_config_t saved_sta={0};
     if(esp_wifi_get_config(WIFI_IF_STA,&saved_sta)==ESP_OK&&saved_sta.sta.ssid[0]){
         station_configured=true;
