@@ -585,18 +585,50 @@ static bool fr_get_glyph_dsc(const lv_font_t *font,lv_font_glyph_dsc_t *dsc,
     dsc->box_h=g->box_h;
     dsc->ofs_x=g->ofs_x;
     dsc->ofs_y=g->ofs_y;
-    dsc->stride=(g->box_w+1)/2;
-    dsc->req_raw_bitmap=1;
+    // Original 0.7.37 A4 tables pack nibbles continuously across row
+    // boundaries (no byte-aligned row stride). LVGL9 asks us for a decoded
+    // A8 draw buffer, not a raw pointer into the bitmap.
+    dsc->stride=0;
+    dsc->req_raw_bitmap=0;
     dsc->is_placeholder=0;
     return true;
 }
 static const void *fr_get_glyph_bitmap(lv_font_glyph_dsc_t *dsc,
                                        lv_draw_buf_t *draw_buf) {
-    (void)draw_buf;
-    if(!dsc || !dsc->resolved_font)return nullptr;
-    const MiraFontSpec *spec=static_cast<const MiraFontSpec *>(dsc->resolved_font->dsc);
-    const MiraGlyph *g=findGlyph(spec,dsc->gid.index);
-    return g ? spec->bitmap+g->bitmap_index : nullptr;
+    if (!dsc || !dsc->resolved_font || !draw_buf || !draw_buf->data)
+        return nullptr;
+    const MiraFontSpec *spec =
+        static_cast<const MiraFontSpec *>(dsc->resolved_font->dsc);
+    const MiraGlyph *g = findGlyph(spec, dsc->gid.index);
+    if (!g || !g->box_w || !g->box_h)
+        return nullptr;
+    if (draw_buf->header.w < g->box_w || draw_buf->header.h < g->box_h)
+        return nullptr;
+
+    // LVGL9's lv_draw_sw_letter.c treats the get_glyph_bitmap() return
+    // value as lv_draw_buf_t*, then reads its ->data and ->header.stride.
+    // Returning a raw pointer here made the renderer interpret A4 pixel
+    // bytes as a structure, causing Core1 LoadProhibited at 0x4205a162.
+    //
+    // Expand the original packed A4 bitmap (high nibble first) into the A8
+    // scratch buffer supplied by LVGL. Its rows can have a padded stride.
+    const uint8_t *packed = spec->bitmap + g->bitmap_index;
+    uint8_t *dest = static_cast<uint8_t *>(draw_buf->data);
+    const uint32_t dest_stride = draw_buf->header.stride;
+    const uint32_t glyph_w = g->box_w;
+    const uint32_t glyph_h = g->box_h;
+    if (dest_stride < glyph_w) return nullptr;
+    for (uint32_t y = 0; y < glyph_h; ++y) {
+        uint8_t *out = dest + y * dest_stride;
+        for (uint32_t x = 0; x < glyph_w; ++x) {
+            const uint32_t index = y * glyph_w + x;
+            const uint8_t b = packed[index >> 1];
+            const uint8_t coverage = (index & 1U) ? (b & 0x0FU) : (b >> 4);
+            out[x] = static_cast<uint8_t>(coverage * 17U);
+        }
+    }
+    lv_draw_buf_flush_cache(draw_buf, nullptr);
+    return draw_buf;
 }
 static lv_font_t miraFont9(const MiraFontSpec *spec,const lv_font_t *fallback,
                            int height,int baseline) {
@@ -610,7 +642,7 @@ static lv_font_t miraFont9(const MiraFontSpec *spec,const lv_font_t *fallback,
     font.subpx=LV_FONT_SUBPX_NONE;
     font.underline_position=-1;
     font.underline_thickness=1;
-    font.static_bitmap=1;
+    font.static_bitmap=0; // Decoded A8 scratch buffer is owned by LVGL.
     return font;
 }
 const lv_font_t mira_font_fr_12=miraFont9(&fr12_spec,&lv_font_montserrat_12,15,3);
