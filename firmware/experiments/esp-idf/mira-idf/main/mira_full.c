@@ -212,7 +212,8 @@ static void event_local(lv_event_t *e){
         strcpy(b->value,"1");
     }
     // Unlike MQTT States, only a real human LVGL action may publish Actions.
-    const bool sent=mira_mqtt_publish_action(b->name,b->value);
+    const char *payload=(!strcmp(b->type,"toggle")) ? (!strcmp(b->value,"On")?"1":"0") : b->value;
+    const bool sent=mira_mqtt_publish_action(b->name,payload);
     if(feedback) {
         char result[180];
         snprintf(result,sizeof(result),"Aperçu local : %.60s = %.60s (aucune commande Jeedom)",
