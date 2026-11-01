@@ -234,9 +234,9 @@ static void event_local(lv_event_t *e){
                  (unsigned)((rgb>>16)&255u),(unsigned)((rgb>>8)&255u),
                  (unsigned)(rgb&255u));
     }else if(!strcmp(b->type,"list")||!strcmp(b->type,"listbutton")){
-        uint16_t n=lv_dropdown_get_selected(src);
+        // The selected label is the outward command value, as in the
+        // original Mira list controls. No network command on passive state.
         lv_dropdown_get_selected_str(src,b->value,sizeof(b->value));
-        (void)n;
     }else if(!strcmp(b->type,"button")||!strcmp(b->type,"multiaction")){
         strcpy(b->value,"1");
     }
