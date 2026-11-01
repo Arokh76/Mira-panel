@@ -1,0 +1,100 @@
+name: WT32 Dimitri JSON beta - private test artifact
+
+on:
+  push:
+    branches: [test/wt32-json-dimitri-b1]
+
+permissions:
+  contents: read
+
+jobs:
+  build-wt32-dimitri:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout isolated test branch
+        uses: actions/checkout@v4
+
+      - name: Setup Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+        with:
+          version: 1.5.1
+
+      - name: Install WT32 toolchain and libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli lib update-index
+          arduino-cli lib install "lvgl@8.3.11"
+          arduino-cli lib install "LovyanGFX@1.1.9"
+          arduino-cli lib install "ArduinoJson@6.21.5"
+          arduino-cli lib install "JPEGDEC@1.8.2"
+          arduino-cli lib install "AsyncHTTPRequest_Generic@1.13.0"
+          arduino-cli core install esp32:esp32@2.0.17
+          arduino-cli lib install "AsyncTCP@1.1.4"
+
+      - name: Prepare clean WT32-only build
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s firmware/source/consolidated/MIRA_PANEL/MiraPanelServer.cpp
+          grep -Fq 'WT32-DIMITRI-JSON-B1' firmware/source/consolidated/MIRA_PANEL/MiraPanelServer.cpp
+          grep -Fq 'miraCompactActionValues()' firmware/source/consolidated/MIRA_PANEL/MiraPanelServer.cpp
+          grep -Fq '"0.7.37"' firmware/source/consolidated/MIRA_PANEL/MIRA_PANEL.ino
+          rm -rf firmware/source/work
+          mkdir -p firmware/source/work/MIRA_PANEL
+          cp -a firmware/source/consolidated/MIRA_PANEL/. firmware/source/work/MIRA_PANEL/
+          CW="$HOME/Arduino/libraries/lvgl/src/extra/widgets/colorwheel/lv_colorwheel.c"
+          sed -i 's/line_dsc.width += 2;/line_dsc.width += 4;/' "$CW"
+          cp firmware/source/work/MIRA_PANEL/lv_conf.h "$HOME/Arduino/libraries/lv_conf.h"
+          rm -f firmware/source/work/MIRA_PANEL/partitions.csv
+
+      - name: Compile WT32-SC01 Plus OTA application
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build-wt32
+          arduino-cli compile \
+            --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,CPUFreq=240,FlashMode=qio,FlashSize=8M,PartitionScheme=default_8MB,PSRAM=enabled,UploadMode=default,USBMode=hwcdc" \
+            --output-dir build-wt32 \
+            firmware/source/work/MIRA_PANEL
+          test -s build-wt32/MIRA_PANEL.ino.bin
+          strings build-wt32/MIRA_PANEL.ino.bin | grep -Fq 'WT32-DIMITRI-JSON-B1'
+          strings build-wt32/MIRA_PANEL.ino.bin | grep -Fq 'WT32-SC01 Plus'
+
+      - name: Package beta OTA for Dimitri only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p package-dimitri
+          cp build-wt32/MIRA_PANEL.ino.bin package-dimitri/Mira_WT32_Dimitri_JSON_beta1_OTA.bin
+          cat > package-dimitri/README.txt <<'EOF'
+          MIRA PANEL - WT32-SC01 PLUS - DIMITRI JSON BETA 1
+          ------------------------------------------------
+          SINGLE-SCREEN TEST: never install on Waveshare or Nextion.
+          This OTA application uses the stable 0.7.37 base with a targeted
+          ArduinoJson value-storage fix. This is NOT an official 0.7.38 release.
+          No production, beta, Jeedom or release manifest is modified.
+
+          Install the *_OTA.bin through the WT32 web firmware update.
+          Never use 'erase flash' or factory flashing for this test.
+          Confirm /mira-health shows test_build = WT32-DIMITRI-JSON-B1.
+          Record /mira-health shortly after install, then after several hours.
+          Check json_actions_used, json_actions_capacity,
+          json_actions_overflow, json_actions_null_infos,
+          json_actions_compactions and json_actions_write_failures.
+          Do NOT share /getindex URLs with their secret API key.
+
+          If the test fails, flash the known-good 0.7.37 WT32 OTA image.
+          EOF
+          sha256sum package-dimitri/*.bin | tee package-dimitri/SHA256.txt
+
+      - name: Upload single-screen test image (NOT published as release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mira_WT32_Dimitri_JSON_beta1_OTA
+          path: package-dimitri/
+          if-no-files-found: error
+          retention-days: 30
