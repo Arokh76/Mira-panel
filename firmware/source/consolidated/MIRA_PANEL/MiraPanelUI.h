@@ -292,6 +292,7 @@ private:
   uint32_t _lastActivity = 0;
   uint32_t _reloadAt = 0;
 
+#if !defined(MIRA_LVGL9_NATIVE)
   static lv_disp_draw_buf_t _drawBuffer;
 #if MIRA_RGB_DIRECT_FRAMEBUFFER
   static lv_color_t* _buf1;
@@ -305,6 +306,7 @@ private:
 
   static void displayFlush(lv_disp_drv_t* disp, const lv_area_t* area, lv_color_t* color_p);
   static void touchRead(lv_indev_drv_t* indev, lv_indev_data_t* data);
+#endif
   static void lockPressTargetTree(lv_obj_t* root);
   bool touchStartedOnAnalogControl(uint16_t x, uint16_t y) const;
   bool touchBlocksAction(bool analog = false) const;
