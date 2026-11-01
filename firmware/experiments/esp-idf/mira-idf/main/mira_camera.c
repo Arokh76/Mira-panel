@@ -182,10 +182,17 @@ static bool fetch_snapshot(const char *url,mira_camera_frame_t *out){
         const int32_t w=(int32_t)le32(header+18);
         const int32_t signed_h=(int32_t)le32(header+22);
         const uint32_t h=(uint32_t)(signed_h<0?-(int64_t)signed_h:(int64_t)signed_h);
-        if(offset<54||offset>1024||w<1||w>CAM_WIDTH||
-           h<1||h>CAM_HEIGHT)break;
+        // Common 640x480 and 800x480 BMP snapshots exceed the 428px
+        // camera viewport. Downsample by two rather than rejecting them.
+        // Refuse large sources before allocating any network image buffers.
+        if(offset<54||offset>1024||w<1||w>CAM_WIDTH*2||
+           h<1||h>CAM_HEIGHT*2)break;
+        const uint32_t step=(w>CAM_WIDTH||h>CAM_HEIGHT)?2u:1u;
+        const uint32_t out_w=(uint32_t)w/step;
+        const uint32_t out_h=h/step;
+        if(!out_w||!out_h)break;
         const size_t stride=(((size_t)w*3u)+3u)&~(size_t)3u;
-        pixels=heap_caps_malloc((size_t)w*h*2u,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+        pixels=heap_caps_malloc((size_t)out_w*out_h*2u,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
         row=malloc(stride);
         if(!pixels||!row)break;
         uint8_t discard[64];
@@ -199,17 +206,19 @@ static bool fetch_snapshot(const char *url,mira_camera_frame_t *out){
         uint32_t y=0;
         for(;y<h;y++){
             if(!read_exact(http,row,stride))break;
-            const uint32_t target=signed_h>0 ? h-y-1 : y;
-            uint16_t *dst=pixels+(size_t)target*(size_t)w;
-            for(int32_t x=0;x<w;x++){
-                uint8_t blue=row[3*x],green=row[3*x+1],red=row[3*x+2];
+            const uint32_t source_y=signed_h>0 ? h-y-1 : y;
+            if(source_y%step || source_y/step>=out_h)continue;
+            uint16_t *dst=pixels+(size_t)(source_y/step)*(size_t)out_w;
+            for(uint32_t x=0;x<out_w;x++){
+                const uint32_t i=3u*x*step;
+                uint8_t blue=row[i],green=row[i+1],red=row[i+2];
                 dst[x]=(uint16_t)(((red&0xf8u)<<8)|((green&0xfcu)<<3)|(blue>>3));
             }
         }
         if(y!=h)break;
         out->pixels=pixels;
-        out->width=(uint16_t)w;
-        out->height=(uint16_t)h;
+        out->width=(uint16_t)out_w;
+        out->height=(uint16_t)out_h;
         pixels=NULL;
         ok=true;
     }while(0);
