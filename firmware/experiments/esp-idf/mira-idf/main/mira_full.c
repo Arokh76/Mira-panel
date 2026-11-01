@@ -55,6 +55,8 @@ typedef struct {
     char name[96], unit[24], type[24], value[160];
     lv_obj_t *card,*control,*value_label;
     lv_obj_t *fields[9]; // energy/media passive Jeedom composite infos
+    lv_obj_t *media_slider,*media_device_dropdown,*media_play_caption;
+    bool media_is_playing;
     int minv,maxv;
 } mira_widget_t;
 static mira_widget_t widgets[MAX_WIDGETS];
@@ -228,6 +230,65 @@ static void event_local(lv_event_t *e){
     }
 }
 static int clamp(int a,int lo,int hi){return a<lo?lo:(a>hi?hi:a);}
+
+// Multimedia LVGL controls use the *same* action names as the existing
+// Mira 0.7.37 Jeedom and MQTT plugins.  No HTTP/network work in LVGL callback.
+// Encode the immutable static widget index and control ordinal as user_data.
+static void media_direct_action(lv_event_t *event) {
+    if(suppress_events)return;
+    uintptr_t encoded=(uintptr_t)lv_event_get_user_data(event);
+    if(encoded==0)return;
+    encoded--;
+    const size_t index=encoded>>3,action=encoded&7u;
+    if(index>=widget_n||action>4)return;
+    mira_widget_t *w=&widgets[index];
+    if(strcmp(w->type,"media"))return;
+    char command[128],payload[48]="1";
+    const char *suffix=NULL;
+    if(action==0)suffix="previous";
+    if(action==1)suffix=w->media_is_playing?"pause":"play";
+    if(action==2)suffix="next";
+    if(action==3){
+        if(!w->media_slider)return;
+        suffix="volume_cmd";
+        snprintf(payload,sizeof(payload),"%ld",(long)lv_slider_get_value(w->media_slider));
+    }
+    if(action==4){
+        if(!w->media_device_dropdown)return;
+        const uint16_t choice=lv_dropdown_get_selected(w->media_device_dropdown);
+        if(choice==0)return; // Placeholder is not a real playback target.
+        suffix="device_cmd";
+        snprintf(payload,sizeof(payload),"%u",(unsigned)(choice-1));
+    }
+    if(!suffix)return;
+    snprintf(command,sizeof(command),"%.95s__%s",w->name,suffix);
+    const bool jeedom=mira_jeedom_actions_enabled();
+    const bool queued=jeedom&&mira_jeedom_queue_local_action(
+        command,(action>=3)?"range":"button",payload);
+    const bool published=!jeedom&&mira_mqtt_publish_action(command,payload);
+    if(action==1&&(queued||published)){
+        w->media_is_playing=!w->media_is_playing;
+        if(w->media_play_caption)lv_label_set_text(w->media_play_caption,w->media_is_playing?"Pause":"Lecture");
+    }
+    if(feedback){
+        char result[180];
+        snprintf(result,sizeof(result),"%s : %.112s",
+            queued?"Jeedom en file":(published?"MQTT envoyé":"Action inactive"),command);
+        lv_label_set_text(feedback,result);
+    }
+}
+static void media_add_button(mira_widget_t *w,int action,int x,const char *text){
+    lv_obj_t *button=lv_button_create(w->card);
+    lv_obj_set_size(button,142,43);
+    lv_obj_set_pos(button,x,203);
+    panel_style(button,true);
+    lv_obj_t *caption=label(button,text,0xF3F6F7,&lv_font_montserrat_16);
+    lv_obj_center(caption);
+    if(action==1)w->media_play_caption=caption;
+    uintptr_t context=((uintptr_t)(w-widgets)<<3)|(uintptr_t)action;
+    lv_obj_add_event_cb(button,media_direct_action,LV_EVENT_CLICKED,(void*)(context+1));
+}
+
 static void make_widget(const cJSON *o,int info_total,int *info_seen){
     if(widget_n>=MAX_WIDGETS)return;
     const char *type=str(o,"type",""),*loc=str(o,"emplacement","accueil");
@@ -401,7 +462,7 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         static const char *const media_titles[]={"Titre","Artiste","Album","État","Progression","Volume","Pochette","Appareil","Appareils"};
         bool media=!strcmp(type,"media");
         int total=media?9:7;
-        w->card=card(pg,786,205);
+        w->card=card(pg,786,media?355:205);
         lv_obj_t *heading=label(w->card,display,0xF3F6F7,&lv_font_montserrat_20);
         lv_obj_set_pos(heading,10,4);
         for(int n=0;n<total;n++){
@@ -414,6 +475,29 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
             w->fields[n]=label(w->card,"--",0x22BEEA,&lv_font_montserrat_16);
             lv_obj_set_pos(w->fields[n],x+112,y);
             lv_obj_set_width(w->fields[n],245);
+        }
+        if(media){
+            media_add_button(w,0,125,"Précédent");
+            media_add_button(w,1,307,"Lecture");
+            media_add_button(w,2,489,"Suivant");
+            lv_obj_t *volume_text=label(w->card,"Volume",0xA8B2B8,&lv_font_montserrat_16);
+            lv_obj_set_pos(volume_text,15,254);
+            w->media_slider=lv_slider_create(w->card);
+            lv_obj_set_size(w->media_slider,625,15);
+            lv_obj_set_pos(w->media_slider,118,262);
+            lv_slider_set_range(w->media_slider,0,100);
+            lv_slider_set_value(w->media_slider,40,LV_ANIM_OFF);
+            lv_obj_set_style_bg_color(w->media_slider,cyan_c(),LV_PART_INDICATOR);
+            uintptr_t vol=((uintptr_t)(w-widgets)<<3)|3u;
+            lv_obj_add_event_cb(w->media_slider,media_direct_action,LV_EVENT_RELEASED,(void*)(vol+1));
+            lv_obj_t *device_text=label(w->card,"Sortie",0xA8B2B8,&lv_font_montserrat_16);
+            lv_obj_set_pos(device_text,15,293);
+            w->media_device_dropdown=lv_dropdown_create(w->card);
+            lv_obj_set_size(w->media_device_dropdown,625,39);
+            lv_obj_set_pos(w->media_device_dropdown,118,290);
+            lv_dropdown_set_options(w->media_device_dropdown,"Sélectionner un appareil");
+            uintptr_t device=((uintptr_t)(w-widgets)<<3)|4u;
+            lv_obj_add_event_cb(w->media_device_dropdown,media_direct_action,LV_EVENT_VALUE_CHANGED,(void*)(device+1));
         }
         return;
     }
@@ -671,6 +755,38 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                     const char *known=media?media_fields[n]:energy_fields[n];
                     if(!strcmp(field,known)&&w->fields[n]){
                         lv_label_set_text(w->fields[n],msg->value);
+                        if(media){
+                            suppress_events=true;
+                            if(n==3){
+                                const bool playing=!strcasecmp(msg->value,"playing")||
+                                   !strcasecmp(msg->value,"lecture")||
+                                   !strcasecmp(msg->value,"play")||
+                                   !strcasecmp(msg->value,"on")||
+                                   !strcmp(msg->value,"1")||
+                                   !strcasecmp(msg->value,"true");
+                                const bool paused=!strcasecmp(msg->value,"paused")||
+                                   !strcasecmp(msg->value,"pause")||
+                                   !strcasecmp(msg->value,"off")||
+                                   !strcmp(msg->value,"0")||
+                                   !strcasecmp(msg->value,"false");
+                                if(playing||paused){
+                                    w->media_is_playing=playing;
+                                    if(w->media_play_caption)
+                                        lv_label_set_text(w->media_play_caption,playing?"Pause":"Lecture");
+                                }
+                            }else if(n==5&&w->media_slider) {
+                                const int value=clamp(atoi(msg->value),0,100);
+                                lv_slider_set_value(w->media_slider,value,LV_ANIM_OFF);
+                            }else if(n==8&&w->media_device_dropdown) {
+                                char options[240];
+                                snprintf(options,sizeof(options),"Sélectionner un appareil\n%.159s",msg->value);
+                                for(char *p=options;*p;p++)if(*p=='|'||*p==';')*p='\n';
+                                lv_dropdown_set_options(w->media_device_dropdown,options);
+                                lv_dropdown_set_selected(w->media_device_dropdown,0);
+                                lv_label_set_text(w->fields[n],"Liste actualisée");
+                            }
+                            suppress_events=false;
+                        }
                         return; // Passive infos never invoke UI callbacks.
                     }
                 }
