@@ -22,6 +22,10 @@ Mise à jour : 1er novembre 2026. Une seule branche de développement du portage
 - AP de secours et OTA HTTP pour revenir à Mira; partitionnement inchangé.
 - Nouveau : `POST /mira/state` (JSON `{"name":"Nom","value":"Valeur"}`) vers une file FreeRTOS consommée **uniquement** par la tâche LVGL, sans déclencher d'action.
 - Nouveau : MQTT natif optionnel sur `mira/<screen>/States/#` et `mira/<screen>/Actions/<nom>`, publication non bloquante en réponse **uniquement aux événements tactiles locaux**; configuration stockée séparément en NVS.
+- Nouveau : **transport Jeedom HTTP sortant** sur tâche FreeRTOS dédiée (file bornée). Les actions utilisateur seules peuvent créer une requête, jamais les states HTTP/MQTT passifs.
+- **Correspondances sûres** : récupération depuis l'API Jeedom existante `value=json` sur la commande `init_cmd`, vérification exacte des types, noms et IDs de tous les widgets avant publication; les associations sont liées à l'empreinte du `miralvgl.json`. Sans correspondance valide, aucune commande HTTP ne part.
+- **Diagnostic** : `GET /mira/jeedom/status?key=...`, également accessible par le bouton dans le portail de récupération.
+- Les widgets `energy` (7 valeurs) et `media` (9 valeurs) affichent désormais leurs champs `Nom__champ` transmis en information passive. **Commandes multimédia, caméra, météo riche et widgets avancés restent à porter.**
 - Nouveau : Wi-Fi AP+STA, configuration volontaire par `POST /mira/wifi`, sans effacer `reseau.json`. Formulaires accessibles sur `/mira`.
 - Sécurité du banc : écriture réseau/MQTT, import SPIFFS et OTA accessibles uniquement aux clients connectés à l'AP de récupération (192.168.4.1). L'AP de test utilise encore un mot de passe connu : ce n'est **pas** une authentification de production.
 - Couche HTTP Jeedom **partielle** : `/testmodule`, `/getmodule`, `/getlvgl`, `/getindex`, `/programui`, `/displayinfo`, `/updatenr`. Format des commandes et de la programmation vérifié dans le plugin `jeedom-beta`. La clé de l'écran doit être provisionnée **sur l'AP de secours** depuis `/mira` ; le portage ne déchiffre pas automatiquement l'ancien mot de passe.
@@ -30,7 +34,7 @@ Mise à jour : 1er novembre 2026. Une seule branche de développement du portage
 - Builds GitHub Actions natifs épinglés 5.5.6 et 9.6 ; surveiller le dernier commit, ne jamais confondre un ancien succès avec la validation du HEAD.
 
 ## Reste à porter avant un firmware Mira complet
-1. Le transport Jeedom est désormais câblé côté IDF : requêtes HTTP sortantes depuis une file FreeRTOS, récupération de l’index **autoritaire** via `jeeApi.php?...&value=json`, comparaison des signatures de tous les widgets et blocage si la table ne correspond pas. Diagnostics `/mira/jeedom/status`. **La compilation et le comportement matériel doivent encore être validés**, ainsi que SSE, cycle d’initialisation complet et stockage sûr des secrets. Ne pas utiliser ce prototype pour piloter l’installation tant que le test réel n’est pas passé.
+1. **Valider matériellement** le cycle d'initialisation Jeedom, les tables `value=json` et les actions réelles avec un équipement de test avant toute utilisation domotique. Ajouter SSE, authentification/stockage sûr des secrets et vérifier l'absence de double commande MQTT/HTTP.
 2. Parité complète de l'interface 0.7.37 (widgets composites énergie, multimédia, caméra, thermostat riche, favoris et styles exacts).
 3. Import automatique et sécurisé des paramètres réseau/MQTT conservés dans `reseau.json` et `params.json`, y compris les valeurs héritées chiffrées.
 4. Réglages de veille, luminosité et pilotage d'affichage, OTA/publishing de production.
