@@ -879,7 +879,7 @@ static void settings(void){
     lv_obj_t *sl=lv_slider_create(display);
     lv_obj_set_size(sl,600,14);
     lv_slider_set_range(sl,30,255);
-    lv_slider_set_value(sl,display_brightness_raw,LV_ANIM_OFF);
+    lv_slider_set_value(sl,desired_awake_brightness(),LV_ANIM_OFF);
     lv_obj_add_event_cb(sl,brightness_release,LV_EVENT_RELEASED,NULL);
     label(display,"Thème : Mira",0xA8B2B8,&lv_font_montserrat_16);
     lv_obj_t *schedule=card(3,640,106);
