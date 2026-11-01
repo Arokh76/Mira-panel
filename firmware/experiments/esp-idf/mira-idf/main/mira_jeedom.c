@@ -29,6 +29,7 @@
 static const char *TAG="mira-idf-jeedom";
 // Request async synchronization after Jeedom changes its command table.
 static void request_binding_sync(void);
+static uint32_t ui_config_hash(const char *s);
 
 // URL/form decoding is deliberately bounded, including malformed percent escapes.
 static int hexdigit(char c) {
