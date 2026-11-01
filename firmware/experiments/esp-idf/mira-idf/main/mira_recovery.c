@@ -14,6 +14,7 @@
 #include "nvs_flash.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
+#include "lwip/ip4_addr.h"
 #include "esp_netif_sntp.h"
 #include <time.h>
 #include "esp_event.h"
@@ -273,6 +274,73 @@ static void register_optional_route(httpd_handle_t server, const httpd_uri_t *ro
 }
 
 static volatile bool station_configured;
+static esp_netif_t *sta_netif;
+// Mira beta modes: auto, manual (full static IP), fixed_auto (DHCP options
+// followed by a requested static IP once its subnet has been verified).
+static enum { PROFILE_DHCP, PROFILE_MANUAL, PROFILE_FIXED_AUTO } legacy_ip_mode;
+static esp_netif_ip_info_t legacy_manual_ip;
+static esp_netif_dns_info_t legacy_manual_dns[2];
+static esp_ip4_addr_t legacy_requested_ip;
+static bool legacy_fixed_auto_attempted;
+
+static bool legacy_parse_ipv4(const char *s,esp_ip4_addr_t *target){
+    ip4_addr_t parsed={0};
+    if(!s||!*s||!ip4addr_aton(s,&parsed))return false;
+    target->addr=parsed.addr;
+    return parsed.addr!=0 && parsed.addr!=0xffffffffu;
+}
+static bool legacy_mask_valid(esp_ip4_addr_t mask){
+    uint32_t m=ntohl(mask.addr);
+    uint32_t inverted=~m;
+    return m!=0 && (inverted&(inverted+1u))==0;
+}
+static bool legacy_same_subnet(esp_ip4_addr_t a,esp_ip4_addr_t b,esp_ip4_addr_t mask){
+    return (a.addr&mask.addr)==(b.addr&mask.addr);
+}
+static void legacy_apply_manual_ip(void){
+    if(legacy_ip_mode!=PROFILE_MANUAL||!sta_netif)return;
+    esp_err_t err=esp_netif_dhcpc_stop(sta_netif);
+    if(err!=ESP_OK && err!=ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED){
+        ESP_LOGW(TAG,"Legacy manual IP: unable to stop DHCP: %s",esp_err_to_name(err));
+        return;
+    }
+    err=esp_netif_set_ip_info(sta_netif,&legacy_manual_ip);
+    if(err==ESP_OK){
+        (void)esp_netif_set_dns_info(sta_netif,ESP_NETIF_DNS_MAIN,&legacy_manual_dns[0]);
+        if(legacy_manual_dns[1].ip.u_addr.ip4.addr)
+            (void)esp_netif_set_dns_info(sta_netif,ESP_NETIF_DNS_BACKUP,&legacy_manual_dns[1]);
+        ESP_LOGI(TAG,"Mira beta manual IP settings applied");
+    }else{
+        ESP_LOGW(TAG,"Invalid static IP setup, falling back to DHCP: %s",esp_err_to_name(err));
+        (void)esp_netif_dhcpc_start(sta_netif);
+    }
+}
+static void legacy_finish_fixed_auto(void){
+    if(legacy_ip_mode!=PROFILE_FIXED_AUTO||legacy_fixed_auto_attempted||!sta_netif)return;
+    legacy_fixed_auto_attempted=true;
+    esp_netif_ip_info_t current={0};
+    if(esp_netif_get_ip_info(sta_netif,&current)!=ESP_OK||
+       !legacy_mask_valid(current.netmask)||
+       !legacy_same_subnet(legacy_requested_ip,current.gw,current.netmask)||
+       !legacy_same_subnet(legacy_requested_ip,current.ip,current.netmask)||
+       legacy_requested_ip.addr==current.gw.addr){
+        ESP_LOGW(TAG,"Mira beta fixed_auto IP outside DHCP network; keeping DHCP");
+        return;
+    }
+    if(legacy_requested_ip.addr==current.ip.addr)return;
+    esp_err_t err=esp_netif_dhcpc_stop(sta_netif);
+    if(err==ESP_OK||err==ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED){
+        current.ip=legacy_requested_ip;
+        err=esp_netif_set_ip_info(sta_netif,&current);
+        if(err==ESP_OK){
+            ESP_LOGI(TAG,"Mira beta fixed_auto IP applied with DHCP gateway/mask/DNS");
+            return;
+        }
+        (void)esp_netif_dhcpc_start(sta_netif);
+    }
+    ESP_LOGW(TAG,"Mira beta fixed_auto IP setup failed; DHCP restored");
+}
+
 static volatile bool station_connected;
 // Keep the recovery AP while unprovisioned; once STA is connected it can be
 // disabled without changing or deleting any saved configuration. On network
@@ -296,6 +364,7 @@ static void wifi_status_event(void *arg,esp_event_base_t base,int32_t id,void *d
     (void)arg;(void)data;
     if(base==IP_EVENT&&id==IP_EVENT_STA_GOT_IP){
         station_connected=true;
+        legacy_finish_fixed_auto();
         if(!clock_sntp_started){
             esp_err_t time_err=esp_netif_sntp_start();
             if(time_err==ESP_OK)clock_sntp_started=true;
@@ -304,6 +373,7 @@ static void wifi_status_event(void *arg,esp_event_base_t base,int32_t id,void *d
         ESP_LOGI(TAG,"Station Wi-Fi connected; recovery AP will be disabled");
     }else if(base==WIFI_EVENT&&id==WIFI_EVENT_STA_DISCONNECTED){
         station_connected=false;
+        legacy_fixed_auto_attempted=false;
         if(station_configured)esp_wifi_connect();
     }
 }
@@ -420,7 +490,8 @@ esp_err_t mira_recovery_init(void) {
     ESP_RETURN_ON_ERROR(esp_netif_init(), TAG, "netif");
     ESP_RETURN_ON_ERROR(esp_event_loop_create_default(), TAG, "event loop");
     esp_netif_create_default_wifi_ap();
-    esp_netif_create_default_wifi_sta();
+    sta_netif=esp_netif_create_default_wifi_sta();
+    if(!sta_netif)return ESP_ERR_NO_MEM;
     // France / Europe-Paris local time, including automatic summer-time changes.
     // SNTP is initialized now but starts only when STA has an IP address.
     setenv("TZ","CET-1CEST,M3.5.0/2,M10.5.0/3",1);
