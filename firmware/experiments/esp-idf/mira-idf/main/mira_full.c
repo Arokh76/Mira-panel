@@ -34,6 +34,8 @@
 static const char *TAG="mira-full-43";
 static const char *JSON_PATH="/spiffs/miralvgl.json";
 static volatile bool reload_pending=false;
+static volatile bool settings_reload_pending=false;
+void mira_full_request_settings_reload(void){settings_reload_pending=true;}
 void mira_full_request_reload(void){ reload_pending=true; }
 // Strict one-way UI state ingestion. Only the LVGL task can touch the widget tree.
 // No state update ever generates a Jeedom/MQTT command.
@@ -1053,7 +1055,7 @@ static void mira_touch_diagnostic_pressed(lv_event_t *event) {
     }
     ESP_LOGI(TAG,"LVGL button PRESS reached Mira UI");
 }
-void mira_full_ui_create(lv_display_t *disp){
+static void load_ui_configuration(void){
     nvs_handle_t ui_nvs;
     if(nvs_open("mira_idf_ui",NVS_READONLY,&ui_nvs)==ESP_OK){
         uint8_t stored=220;
@@ -1084,6 +1086,9 @@ void mira_full_ui_create(lv_display_t *disp){
             night_end_minute=parse_beta_clock(clock_time);
         nvs_close(ui_nvs);
     }
+}
+void mira_full_ui_create(lv_display_t *disp){
+    load_ui_configuration();
     applied_brightness_raw=display_brightness_raw;
     ESP_ERROR_CHECK_WITHOUT_ABORT(mira_display_set_brightness(applied_brightness_raw));
     screen=lv_obj_create(NULL);
@@ -1406,6 +1411,12 @@ static void apply_pending_states(void){
 
 void mira_full_ui_tick(void){
     if(reload_pending){reload_pending=false;camera_close();build_config();}
+    if(settings_reload_pending){
+        settings_reload_pending=false;
+        load_ui_configuration();
+        if(pages[3]){lv_obj_clean(pages[3]);settings();}
+        apply_auto_brightness();
+    }
     apply_pending_states();
     static uint32_t diag_last_tick;
     uint32_t now_tick=lv_tick_get();
