@@ -15,7 +15,7 @@ public:
             return false;
         }
         _initialized=true;
-        Serial.println("[MIRA][RGB9] native 12MHz PSRAM + GT911 ready");
+        Serial.println("[MIRA][RGB9] native 8MHz STABILITY PSRAM + GT911 ready");
         return true;
     }
     bool miraLvglBegin() { return _initialized; }
