@@ -54,6 +54,7 @@ static lv_obj_t *touch_diag_button;
 typedef struct {
     char name[96], unit[24], type[24], value[160];
     lv_obj_t *card,*control,*value_label;
+    lv_obj_t *fields[9]; // energy/media passive Jeedom composite infos
     int minv,maxv;
 } mira_widget_t;
 static mira_widget_t widgets[MAX_WIDGETS];
@@ -390,16 +391,35 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         lv_obj_align(w->control,LV_ALIGN_CENTER,0,12);
         return;
     }
-    // Full composite widget names are retained. Their complex sub-layouts
-    // (camera stream, weather artwork, energy flows, media transport) are
-    // not yet native: never suggest a working Jeedom control.
-    if(!strcmp(type,"energy")||!strcmp(type,"media")||!strcmp(type,"camera")){
-        w->card=card(pg,!strcmp(type,"camera")?390:786,190);
+    // Energy and media are native passive Jeedom data cards. Every subfield
+    // keeps its original <widget>__<field> name; no fake actions on receipt.
+    if(!strcmp(type,"energy")||!strcmp(type,"media")){
+        static const char *const energy_fields[]={"solar","home","grid","battery","soc","soc2","soc3"};
+        static const char *const energy_titles[]={"Solaire","Maison","Réseau","Batterie","SOC","SOC 2","SOC 3"};
+        static const char *const media_fields[]={"title","artist","album","state","progress","volume","cover","device","devices"};
+        static const char *const media_titles[]={"Titre","Artiste","Album","État","Progression","Volume","Pochette","Appareil","Appareils"};
+        bool media=!strcmp(type,"media");
+        int total=media?9:7;
+        w->card=card(pg,786,205);
+        lv_obj_t *heading=label(w->card,display,0xF3F6F7,&lv_font_montserrat_20);
+        lv_obj_set_pos(heading,10,4);
+        for(int n=0;n<total;n++){
+            int col=n/5,row=n%5;
+            int x=col?400:12,y=35+row*31;
+            const char *title=media?media_titles[n]:energy_titles[n];
+            lv_obj_t *name_label=label(w->card,title,0xA8B2B8,&lv_font_montserrat_16);
+            lv_obj_set_pos(name_label,x,y);
+            lv_obj_set_width(name_label,105);
+            w->fields[n]=label(w->card,"--",0x22BEEA,&lv_font_montserrat_16);
+            lv_obj_set_pos(w->fields[n],x+112,y);
+            lv_obj_set_width(w->fields[n],245);
+        }
+        return;
+    }
+    if(!strcmp(type,"camera")){
+        w->card=card(pg,390,190);
         label(w->card,display,0xF3F6F7,&lv_font_montserrat_20);
-        const char *msg=(!strcmp(type,"energy"))?"Énergie - champs Jeedom non connectés":
-                        (!strcmp(type,"media"))?"Multimédia - transport non connecté":
-                        "Caméra - flux non connecté";
-        lv_obj_t *note=label(w->card,msg,0xA8B2B8,&lv_font_montserrat_16);
+        lv_obj_t *note=label(w->card,"Caméra - flux non connecté",0xA8B2B8,&lv_font_montserrat_16);
         lv_obj_align(note,LV_ALIGN_CENTER,0,0);
         return;
     }
@@ -636,6 +656,24 @@ static void normalize_widget_name(const char *src,char *dst,size_t length){
 static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
     for(uint8_t i=0;i<widget_n;i++){
         mira_widget_t *w=&widgets[i];
+        if(!strcmp(w->type,"energy")||!strcmp(w->type,"media")){
+            static const char *const energy_fields[]={"solar","home","grid","battery","soc","soc2","soc3"};
+            static const char *const media_fields[]={"title","artist","album","state","progress","volume","cover","device","devices"};
+            const size_t prefix=strlen(w->name);
+            if(!strncmp(msg->name,w->name,prefix)&&
+               msg->name[prefix]=='_'&&msg->name[prefix+1]=='_'){
+                const char *field=msg->name+prefix+2;
+                const bool media=!strcmp(w->type,"media");
+                const int total=media?9:7;
+                for(int n=0;n<total;n++){
+                    const char *known=media?media_fields[n]:energy_fields[n];
+                    if(!strcmp(field,known)&&w->fields[n]){
+                        lv_label_set_text(w->fields[n],msg->value);
+                        return; // Passive infos never invoke UI callbacks.
+                    }
+                }
+            }
+        }
         char norm_name[96],norm_recv[96];
         normalize_widget_name(w->name,norm_name,sizeof(norm_name));
         normalize_widget_name(msg->name,norm_recv,sizeof(norm_recv));
