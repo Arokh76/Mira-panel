@@ -92,6 +92,74 @@ jobs:
           cp build-native/MIRA_PANEL.ino.bin release/Mira_0737_NATIVE_LVGL96_43C_OTA.bin
           sha256sum release/*.bin > release/SHA256.txt
           echo 'Experimental FULL original Mira 0.7.37 LVGL9.6; validate on board. OTA only.' > release/README.txt
+      - name: Build real USB recovery factory image at flash offset 0x0
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import struct, hashlib
+          base=Path('build-native')
+          files=list(base.iterdir())
+          print('Arduino build output:', [p.name for p in files if p.is_file()])
+          def find_one(suffix):
+              matches=[x for x in files if x.is_file() and x.name.endswith(suffix)]
+              if len(matches)!=1:
+                  raise SystemExit(f'Expected one {suffix}; got: {[str(x) for x in matches]}')
+              return matches[0].read_bytes()
+          boot=find_one('.bootloader.bin')
+          part=find_one('.partitions.bin')
+          app=find_one('.ino.bin')
+          assert boot[0]==0xE9 and app[0]==0xE9, 'invalid Espressif image magic'
+          assert part[0:2]==bytes([0xAA,0x50]), 'invalid partition image'
+          partitions={}
+          for off in range(0,len(part),32):
+              if part[off:off+2]!=bytes([0xAA,0x50]):break
+              magic,ptype,subtype,address,length,name,flags=struct.unpack_from('<HBBII16sI',part,off)
+              name=name.split(b'\\x00',1)[0].decode()
+              partitions[name]=(ptype,subtype,address,length)
+          print('Embedded partition table:',partitions)
+          # Fail rather than publishing a USB image that would invalidate
+          # Mira's existing original OTA and SPIFFS layout.
+          assert partitions.get('app0',(0,0,0,0))[2:]==(0x10000,0x300000)
+          assert partitions.get('app1',(0,0,0,0))[2:]==(0x310000,0x300000)
+          assert partitions.get('spiffs',(0,0,0,0))[2:]==(0x610000,0x9E0000)
+          assert len(boot)<=0x8000 and len(part)<=0x1000
+          assert len(app)<=0x300000
+          image=bytearray(b'\\xff'*(0x10000+len(app)))
+          image[0:len(boot)]=boot
+          image[0x8000:0x8000+len(part)]=part
+          image[0x10000:0x10000+len(app)]=app
+          factory=Path('release/Mira_0737_LVGL96_BETA2_USB_RECOVERY_0x0.bin')
+          factory.write_bytes(image)
+          # Individual flashing of three segments preserves NVS 0x9000-0xDFFF.
+          (Path('release/Mira_0737_LVGL96_BETA2_BOOTLOADER_0x0.bin')).write_bytes(boot)
+          (Path('release/Mira_0737_LVGL96_BETA2_PARTITIONS_0x8000.bin')).write_bytes(part)
+          assert factory.read_bytes()[0x10000:]==app
+          print('Factory USB:',len(image),'bytes; app:',len(app),'bytes')
+          print('factory SHA256:',hashlib.sha256(image).hexdigest())
+          print('SHA256 boot/part/app:',*[hashlib.sha256(x).hexdigest() for x in (boot,part,app)])
+          PY
+          sha256sum release/*.bin > release/SHA256.txt
+          cat > release/README_USB_RECOVERY.txt <<'TXT'
+          MIRA 0.7.37 FULL - LVGL 9.6 BETA 2 - FIX LOADPROHIBITED FRENCH FONT
+          Recovery USB image (single file):
+            Mira_0737_LVGL96_BETA2_USB_RECOVERY_0x0.bin => flash at address 0x0
+          WARNING: single factory 0x0 rewrites blank NVS space (Wi-Fi preferences),
+          but DOES NOT touch SPIFFS at 0x610000; configuration files persist.
+          If using esptool manually, prefer three segments to preserve NVS:
+            0x0 bootloader, 0x8000 partitions, 0x10000 OTA/application.
+          Do not erase the whole chip. Never flash OTA .bin at 0x0.
+          Boot crash fixed by decoding original A4 French glyph bitmaps to
+          LVGL 9.6's expected lv_draw_buf_t A8 buffer.
+          This is an untested hardware beta, compilation validated in CI.
+          TXT
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MIRA_0737_FULL_LVGL96_BETA2_USB_RECOVERY
+          path: release/
+          if-no-files-found: error
+          retention-days: 14
       - uses: actions/upload-artifact@v4
         with:
           name: MIRA_0737_FULL_ORIGINAL_LVGL96_4_3C_TEST
