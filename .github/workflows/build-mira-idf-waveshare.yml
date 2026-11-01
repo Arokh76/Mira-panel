@@ -35,10 +35,11 @@ jobs:
           grep -Fq 'mira_full_ui_create' "$ROOT/main/app_main.c"
           grep -Fq '/spiffs/miralvgl.json' "$ROOT/main/mira_full.c"
           grep -Fq 'format_if_mount_failed=false' "$ROOT/main/mira_full.c"
+          grep -Fq 'mira_jeedom_register_http(httpd);' "$ROOT/main/mira_recovery.c"
           grep -Fq 'ESP_ERROR_CHECK(mira_recovery_init())' "$ROOT/main/app_main.c"
           grep -Fq '0x610000, 0x9E0000' "$ROOT/partitions.csv"
           grep -Fq '0x310000, 0x300000' "$ROOT/partitions.csv"
-          grep -Fq 'conf.max_uri_handlers = 20;' "$ROOT/main/mira_recovery.c"
+          grep -Fq 'conf.max_uri_handlers = 28;' "$ROOT/main/mira_recovery.c"
           ! grep -Fq 'esp_vfs_spiffs_format' "$ROOT/main/mira_full.c"
       - name: Native ESP-IDF 5.5.6 build
         uses: espressif/esp-idf-ci-action@v1
