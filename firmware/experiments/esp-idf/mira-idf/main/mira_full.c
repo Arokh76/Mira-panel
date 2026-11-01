@@ -850,9 +850,19 @@ static void build_config(void){
         ESP_LOGE(TAG,"Invalid Mira JSON: expected lvgl array; existing SPIFFS left unchanged");
         return;
     }
+    // Reject structurally malformed programming before any screen changes.
+    // A valid export can legitimately have an empty lvgl array.
+    const int count=cJSON_GetArraySize(array);
+    for(int i=0;i<count;i++){
+        if(!cJSON_IsObject(cJSON_GetArrayItem(array,i))){
+            ESP_LOGE(TAG,"Invalid Mira widget at index %d; preserving live UI",i);
+            cJSON_Delete(root);
+            return;
+        }
+    }
     widget_n=0;clock_text=NULL;date_text=NULL;widget_count=0;
     for(int i=0;i<6;i++)if(i!=3)lv_obj_clean(pages[i]);
-    int count=cJSON_GetArraySize(array),home_info=0,seen=0;
+    int home_info=0,seen=0;
     for(int i=0;i<count;i++){
         cJSON *it=cJSON_GetArrayItem(array,i);
         if(!strcmp(str(it,"type",""),"info")&&!strcmp(str(it,"emplacement","accueil"),"accueil")
