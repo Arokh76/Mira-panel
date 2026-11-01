@@ -40,7 +40,9 @@ jobs:
           test -f "$HOME/Arduino/libraries/lvgl/library.properties"
           cp "$HOME/Arduino/libraries/lvgl/lv_conf_template.h" "$HOME/Arduino/libraries/lv_conf.h"
           sed -i 's/^#if 0 \/\* Set this to "1" to enable content \*\//#if 1 \/\* Mira 0.7.37 LVGL9 port \*\//' "$HOME/Arduino/libraries/lv_conf.h"
-          sed -i 's/^#define LV_MEM_SIZE 65536/#define LV_MEM_SIZE (256U * 1024U)/' "$HOME/Arduino/libraries/lv_conf.h"
+          # Avoid a 256KB static SRAM pool starving Wi-Fi/MQTT; let ESP-IDF's
+          # PSRAM-aware heap manage original Mira's LVGL objects.
+          sed -i 's/^#define LV_USE_STDLIB_MALLOC LV_STDLIB_BUILTIN/#define LV_USE_STDLIB_MALLOC LV_STDLIB_CLIB/' "$HOME/Arduino/libraries/lv_conf.h"
           for size in 12 16 20 28 40 48; do
             sed -i -E "s/^(#define LV_FONT_MONTSERRAT_${size}) 0$/\1 1/" "$HOME/Arduino/libraries/lv_conf.h"
           done
