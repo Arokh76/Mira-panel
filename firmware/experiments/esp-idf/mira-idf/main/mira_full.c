@@ -432,6 +432,13 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
     }
     if(!recognized){
         ESP_LOGW(TAG,"Unsupported widget type '%s' (name='%s')",type,name);
+        // Leave a visible, explicitly unsupported placeholder instead of
+        // silently losing a programmed Mira widget during migration.
+        lv_obj_t *notice=card(pg,390,64);
+        lv_obj_t *caption=label(notice,display,0xF3F6F7,&lv_font_montserrat_16);
+        lv_obj_set_width(caption,350);
+        lv_obj_t *warning=label(notice,"Widget non porté",0xFFB35C,&lv_font_montserrat_12);
+        lv_obj_align(warning,LV_ALIGN_BOTTOM_LEFT,0,0);
         return;
     }
     mira_widget_t *w=&widgets[widget_n++];
