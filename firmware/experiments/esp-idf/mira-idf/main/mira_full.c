@@ -1555,7 +1555,7 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                 char *end_number=NULL;
                 long numeric=strtol(msg->value,&end_number,10);
                 if(*msg->value&&end_number&&!*end_number&&numeric>=0){
-                    uint16_t total=lv_dropdown_get_option_cnt(w->control);
+                    uint16_t total=lv_dropdown_get_option_count(w->control);
                     if(numeric<total){
                         lv_dropdown_set_selected(w->control,(uint16_t)numeric);
                     }
