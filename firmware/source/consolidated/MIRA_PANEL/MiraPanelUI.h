@@ -309,6 +309,9 @@ private:
 #endif
   static MiraDisplay* _displayForLvgl;
   static MiraPanelUI* _uiForLvgl;
+#if defined(MIRA_LVGL9_NATIVE)
+  static bool onNativeTouch(bool pressed, uint16_t x, uint16_t y);
+#endif
   static void lockPressTargetTree(lv_obj_t* root);
   bool touchStartedOnAnalogControl(uint16_t x, uint16_t y) const;
   bool touchBlocksAction(bool analog = false) const;
