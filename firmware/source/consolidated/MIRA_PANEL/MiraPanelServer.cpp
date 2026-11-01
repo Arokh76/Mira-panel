@@ -3670,7 +3670,8 @@ void MiraPanelServer::IndexSetRange(int ID, float Value) {
   JsonArray Actions = SPIFFS_Config_Actions["actions"];
   for (int i = 0; i < Actions.size(); i++) {
     if (SPIFFS_Config_Actions["actions"][i]["id"].as<String>() == String(ID)) {
-      miraSetActionValue(i, Value);
+      // Keep range values numeric; String compaction applies to Info values.
+      SPIFFS_Config_Actions["actions"][i]["value"] = Value;
       char cID[5] = "";
       sprintf(cID, "%d", ID);
 
