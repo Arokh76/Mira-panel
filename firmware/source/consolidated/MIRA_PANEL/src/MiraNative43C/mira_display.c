@@ -19,13 +19,10 @@
 
 #define WIDTH 800
 #define HEIGHT 480
-// Full Mira 0.7.37 redraw + Wi-Fi cause more PSRAM traffic than the
-// lightweight native benchmark.  On ESP32-S3 RGB EDMA an underrun shifts
-// the displayed image horizontally until LCD VSYNC resynchronization.
-// Use a conservative 8 MHz pixel clock for this full-UI stability build;
-// retain BOTH PSRAM framebuffers and the already fixed GT911 0x814F path.
-// 800x480 + porch totals ~ (820*500), so 8 MHz is ~19 Hz scan refresh.
-#define LCD_PCLK_HZ (8 * 1000 * 1000)
+// Restore the validated 12 MHz RGB clock: 8 MHz produced LCD colour bars
+// on the user's 4.3C hardware. Correct display drift by DMA VSYNC restart,
+// not by silently changing the physical LCD timing again.
+#define LCD_PCLK_HZ (12 * 1000 * 1000)
 
 static const char *TAG = "mira-idf-rgb";
 static i2c_master_bus_handle_t i2c_bus;
@@ -119,6 +116,28 @@ typedef struct {
 static QueueHandle_t touch_events;
 static lv_point_t lv_touch_point = {0, 0};
 static bool lv_touch_pressed;
+static uint32_t rgb_touch_release_restarts;
+static int64_t rgb_last_restart_us;
+
+// Recovery counter for RGB DMA desynchronization during high-bandwidth
+// Mira redraws; only called in LVGL task, never in an ISR.
+static void rgb_resync_on_touch_release(void) {
+    if (!panel) return;
+    const int64_t now = esp_timer_get_time();
+    if (now - rgb_last_restart_us < 800000) return; // avoid restart flood
+    const esp_err_t err = esp_lcd_rgb_panel_restart(panel);
+    if (err == ESP_OK) {
+        rgb_last_restart_us = now;
+        rgb_touch_release_restarts++;
+        if (rgb_touch_release_restarts <= 5 ||
+            (rgb_touch_release_restarts % 20) == 0) {
+            ESP_LOGI(TAG, "RGB VSYNC DMA resync after touch release #%lu",
+                     (unsigned long)rgb_touch_release_restarts);
+        }
+    } else {
+        ESP_LOGW(TAG, "RGB VSYNC restart rejected: %s", esp_err_to_name(err));
+    }
+}
 
 static void touch_queue_event(bool pressed, int x, int y) {
     if (!touch_events) return;
@@ -209,9 +228,14 @@ void mira_display_touch_read(lv_indev_t *indev, lv_indev_data_t *data) {
     (void)indev;
     mira_touch_event_t event;
     if (touch_events && xQueueReceive(touch_events,&event,0)==pdTRUE) {
+        const bool was_pressed = lv_touch_pressed;
         lv_touch_pressed=(event.pressed!=0);
         lv_touch_point.x=event.x;
         lv_touch_point.y=event.y;
+        // ESP-IDF supported recovery for PSRAM EDMA RGB horizontal drift:
+        // queue a DMA restart on next VSYNC after a completed interaction.
+        // Does not touch the GT911 sampler, coordinates or LVGL objects.
+        if (was_pressed && !lv_touch_pressed) rgb_resync_on_touch_release();
         data->continue_reading = uxQueueMessagesWaiting(touch_events)>0;
     } else {
         data->continue_reading=false;
