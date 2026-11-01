@@ -1133,7 +1133,10 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                             }
                             suppress_events=false;
                         }
-                        return; // Passive infos never invoke UI callbacks.
+                        // Continue examining other widgets: the same media
+                        // or energy block can be reused on multiple pages.
+                        // Passive updates never invoke outgoing callbacks.
+                        break;
                     }
                 }
             }
