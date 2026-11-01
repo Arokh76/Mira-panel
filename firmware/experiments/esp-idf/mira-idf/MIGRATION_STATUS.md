@@ -91,3 +91,14 @@ Implémentations ajoutées sur la branche expérimentale 4,3″, sans modificati
 - HTTP : `/programui` refuse un tableau `lvgl` mal formé ou dépassant 64 entrées avant de remplacer l'export SPIFFS existant. `/getindex` conserve les trois informations météo liées au widget `datetime`, y compris lorsque ce dernier n'a pas de nom.
 
 **À vérifier impérativement avant distribution :** build GitHub Actions du dernier commit (les anciens essais ont signalé des erreurs `-Werror` corrigées ensuite), rendu réel des glyphes LVGL9, press/release/gestes, défilement des pages longues, liaison effective des quatre actions Jeedom et restauration d'interface après reprogrammation. Le 7″ reste dans ses branches expérimentales séparées.
+
+## Parité fonctionnelle ajoutée au port 4,3″ (lot suivant)
+
+- Thermostat : consigne par incréments **0,5 °C**, bornes et valeur initiale équivalentes à la bêta (5–30 °C par défaut), commandes HTTP avec une décimale, réception passive sans action.
+- Thermostat 800×480 : grand cadran 296 px et médaillon central, libellé de consigne, température réelle et sélecteur de mode repositionnés à partir du code `createThermostat` de `firmware-beta`.
+- `layout=free` : prise en charge des champs `lx`, `ly`, `lw`, `lh` dans l'espace logique **1000×1000**, comme `MIRA_LAYOUT_LOGICAL_WIDTH/HEIGHT` de `MiraDisplayProfile.h` ; positionnement appliqué après la création des cartes natives.
+- Liste simple et thermostat : séparateurs `|`, retours à la ligne et séquences littérales `\\n`, nettoyage des libellés et limite de 12 options cohérente avec `MAX_LIST_ITEMS` de la bêta. Même ordre pour la reconstruction des IDs des commandes Jeedom.
+- Couleur : amélioration du contrôle temporaire LVGL 9 (arc de teinte + deux curseurs saturation/luminosité) : toute la gamme RGB est disponible. Les états HTML hexadécimaux et RGB décimaux réinitialisent les trois composantes sans publier d'action. Le visuel exact `lv_colorwheel` de LVGL 8 reste à reproduire.
+- Listes et toggles : les états Jeedom reconnaissent aussi les libellés français de la bêta et les indices numériques sans créer d'événements sortants.
+
+Ces changements ne touchent **pas** aux timings RGB 12 MHz, au GT911 ou au contrôleur CH32 du 4,3″. La validation de compilation et surtout les essais sur matériel constituent des étapes distinctes. Le pilote 7″ CH422G reste sur sa branche stable dédiée.
