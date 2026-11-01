@@ -711,21 +711,28 @@ static void sleep_delay_changed(lv_event_t *event){
     int value=lv_slider_get_value(lv_event_get_target_obj(event));
     if(value<0)value=0;
     if(value>3600)value=3600;
-    sleep_timeout_seconds=(uint16_t)value;
-    save_sleep_setting_u16("sleep_delay",sleep_timeout_seconds);
+    if(sleep_timeout_seconds!=(uint16_t)value){
+        sleep_timeout_seconds=(uint16_t)value;
+        save_sleep_setting_u16("sleep_delay",sleep_timeout_seconds);
+    }
 }
 static void sleep_light_changed(lv_event_t *event){
     if(display_sleeping||suppress_events)return;
     int value=lv_slider_get_value(lv_event_get_target_obj(event));
     if(value<0)value=0;
     if(value>100)value=100;
-    sleep_brightness_percent=(uint8_t)value;
-    save_sleep_setting_u8("sleep_light",sleep_brightness_percent);
+    if(sleep_brightness_percent!=(uint8_t)value){
+        sleep_brightness_percent=(uint8_t)value;
+        save_sleep_setting_u8("sleep_light",sleep_brightness_percent);
+    }
 }
 static void sleep_clock_changed(lv_event_t *event){
     if(display_sleeping||suppress_events)return;
-    sleep_clock_enabled=lv_obj_has_state(lv_event_get_target_obj(event),LV_STATE_CHECKED);
-    save_sleep_setting_u8("sleep_clock",sleep_clock_enabled?1:0);
+    bool enabled=lv_obj_has_state(lv_event_get_target_obj(event),LV_STATE_CHECKED);
+    if(sleep_clock_enabled!=enabled){
+        sleep_clock_enabled=enabled;
+        save_sleep_setting_u8("sleep_clock",enabled?1:0);
+    }
 }
 static uint8_t raw_from_percent(uint8_t percentage){
     if(percentage==0)return 0;
