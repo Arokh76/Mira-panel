@@ -1183,6 +1183,32 @@ static void empty_notice(const char *message){
     lv_obj_center(l);
     lv_obj_set_style_text_align(l,LV_TEXT_ALIGN_CENTER,0);
 }
+// Mira beta's free layout uses a logical 1000x1000 workspace. Apply
+// the coordinates only after constructing a widget so every widget type
+// can use its existing builder. Ignore layout while positioning the card.
+static void apply_free_layout(const cJSON *config,mira_widget_t *widget){
+    if(!widget||!widget->card||strcmp(str(config,"layout","auto"),"free"))return;
+    const int32_t lx=integer(config,"lx",-1),ly=integer(config,"ly",-1);
+    const int32_t lw=integer(config,"lw",-1),lh=integer(config,"lh",-1);
+    if(lx<0||ly<0||lw<=0||lh<=0)return;
+    int64_t x=(int64_t)lx*MIRA_WIDTH/1000;
+    int64_t y=(int64_t)ly*CONTENT_H/1000;
+    int64_t width=(int64_t)lw*MIRA_WIDTH/1000;
+    int64_t height=(int64_t)lh*CONTENT_H/1000;
+    if(width<40)width=40;
+    if(height<32)height=32;
+    if(width>MIRA_WIDTH)width=MIRA_WIDTH;
+    if(x<0)x=0;
+    if(x+width>MIRA_WIDTH)x=MIRA_WIDTH-width;
+    if(y<0)y=0;
+    // Same behavior as the beta: allow overflow at the bottom so the
+    // parent page can scroll, rather than silently moving the widget.
+    if(y>INT32_MAX-height)return;
+    lv_obj_add_flag(widget->card,LV_OBJ_FLAG_IGNORE_LAYOUT);
+    lv_obj_set_pos(widget->card,(lv_coord_t)x,(lv_coord_t)y);
+    lv_obj_set_size(widget->card,(lv_coord_t)width,(lv_coord_t)height);
+    no_scroll(widget->card);
+}
 static void build_config(void){
     // Validate the new programming before deleting live LVGL objects.
     // A damaged/incomplete SPIFFS read must not blank a running panel.
@@ -1240,7 +1266,11 @@ static void build_config(void){
     }
     for(int i=0;i<count;i++){
         cJSON *it=cJSON_GetArrayItem(array,i);
-        if(cJSON_IsObject(it))make_widget(it,home_info,&seen);
+        if(cJSON_IsObject(it)){
+            const uint8_t before=widget_n;
+            make_widget(it,home_info,&seen);
+            if(widget_n>before)apply_free_layout(it,&widgets[widget_n-1]);
+        }
     }
     widget_count=(uint32_t)widget_n;
     cJSON_Delete(root);
