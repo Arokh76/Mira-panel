@@ -1538,6 +1538,27 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
         }
         // Remote information is authoritative, but must never trigger an
         // outgoing command. Color states accept legacy #RRGGBB / r,g,b.
+        if(w->control && !strcmp(w->type,"thermostat")){
+            // Jeedom's setpoint can be fractional. Only accept a complete,
+            // finite numeric value; never move the dial to 0 on invalid data.
+            char *end=NULL;
+            errno=0;
+            const float input=strtof(msg->value,&end);
+            if(!*msg->value||!end||*end||errno==ERANGE||!isfinite(input))
+                continue;
+            const int half=clamp((int)lroundf(input*2.0f),
+                                 w->minv*2,w->maxv*2);
+            suppress_events=true;
+            lv_arc_set_value(w->control,half);
+            suppress_events=false;
+            snprintf(w->value,sizeof(w->value),"%.1f",half*0.5f);
+            if(w->value_label){
+                char text[48];
+                snprintf(text,sizeof(text),"%.1f°",half*0.5f);
+                lv_label_set_text(w->value_label,text);
+            }
+            continue;
+        }
         if(w->control && !strcmp(w->type,"color")){
             unsigned r=0,g=0,b=0;
             bool valid=false;
