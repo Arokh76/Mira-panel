@@ -19,9 +19,9 @@
 
 #define WIDTH 800
 #define HEIGHT 480
-// Restore the validated 12 MHz RGB clock: 8 MHz produced LCD colour bars
-// on the user's 4.3C hardware. Correct display drift by DMA VSYNC restart,
-// not by silently changing the physical LCD timing again.
+// Keep the board-verified 12 MHz RGB clock.  8 MHz produced LCD colour bars.
+// ESP-IDF RGB hardware desynchronization under PSRAM bandwidth pressure
+// requires a buffered scan-out path, not touch-triggered DMA restarts.
 #define LCD_PCLK_HZ (12 * 1000 * 1000)
 
 static const char *TAG = "mira-idf-rgb";
@@ -118,28 +118,6 @@ static lv_point_t lv_touch_point = {0, 0};
 static bool lv_touch_pressed;
 static mira_touch_hook_t lv_touch_hook;
 void mira_display_set_touch_hook(mira_touch_hook_t hook) { lv_touch_hook = hook; }
-static uint32_t rgb_touch_release_restarts;
-static int64_t rgb_last_restart_us;
-
-// Recovery counter for RGB DMA desynchronization during high-bandwidth
-// Mira redraws; only called in LVGL task, never in an ISR.
-static void rgb_resync_on_touch_release(void) {
-    if (!panel) return;
-    const int64_t now = esp_timer_get_time();
-    if (now - rgb_last_restart_us < 800000) return; // avoid restart flood
-    const esp_err_t err = esp_lcd_rgb_panel_restart(panel);
-    if (err == ESP_OK) {
-        rgb_last_restart_us = now;
-        rgb_touch_release_restarts++;
-        if (rgb_touch_release_restarts <= 5 ||
-            (rgb_touch_release_restarts % 20) == 0) {
-            ESP_LOGI(TAG, "RGB VSYNC DMA resync after touch release #%lu",
-                     (unsigned long)rgb_touch_release_restarts);
-        }
-    } else {
-        ESP_LOGW(TAG, "RGB VSYNC restart rejected: %s", esp_err_to_name(err));
-    }
-}
 
 static void touch_queue_event(bool pressed, int x, int y) {
     if (!touch_events) return;
@@ -230,14 +208,11 @@ void mira_display_touch_read(lv_indev_t *indev, lv_indev_data_t *data) {
     (void)indev;
     mira_touch_event_t event;
     if (touch_events && xQueueReceive(touch_events,&event,0)==pdTRUE) {
-        const bool was_pressed = lv_touch_pressed;
         lv_touch_pressed=(event.pressed!=0);
         lv_touch_point.x=event.x;
         lv_touch_point.y=event.y;
-        // ESP-IDF supported recovery for PSRAM EDMA RGB horizontal drift:
-        // queue a DMA restart on next VSYNC after a completed interaction.
-        // Does not touch the GT911 sampler, coordinates or LVGL objects.
-        if (was_pressed && !lv_touch_pressed) rgb_resync_on_touch_release();
+        // No unconditional VSYNC restart on touch. BETA3 restarted RGB on
+        // every release but did not prevent horizontal drift; remove it.
         data->continue_reading = uxQueueMessagesWaiting(touch_events)>0;
     } else {
         data->continue_reading=false;
@@ -437,9 +412,12 @@ esp_err_t mira_display_init(void) {
         .data_width = 16,
         .bits_per_pixel = 16,
         .num_fbs = 2,
-        // At PCLK 12 MHz + octal PSRAM, direct EDMA avoids racing the
-        // LVGL rasterizer against ISR-driven PSRAM->SRAM bounce copies.
-        .bounce_buffer_size_px = 0,
+        // Espressif RGB drift workaround: two DMA bounce buffers in internal
+        // SRAM, 20 scanlines each. Prevents direct PSRAM EDMA FIFO underflow
+        // when the full Mira UI + Wi-Fi contend for octal PSRAM bandwidth.
+        // Requires enough internal SRAM. On failure, fallback below to the
+        // original display mode so OTA web recovery is still possible.
+        .bounce_buffer_size_px = WIDTH * 20,
         .dma_burst_size = 64,
         .sram_trans_align = 4,
         .psram_trans_align = 64,
@@ -451,7 +429,19 @@ esp_err_t mira_display_init(void) {
         .data_gpio_nums = {14, 38, 18, 17, 10, 39, 0, 45, 48, 47, 21, 1, 2, 42, 41, 40},
         .flags.fb_in_psram = 1,
     };
-    ESP_RETURN_ON_ERROR(esp_lcd_new_rgb_panel(&cfg, &panel), TAG, "RGB panel allocate");
+    ESP_LOGI(TAG,"RGB 12MHz bounce=%lu px (2 x %lu bytes SRAM), internal free=%lu largest=%lu",
+             (unsigned long)cfg.bounce_buffer_size_px,
+             (unsigned long)(cfg.bounce_buffer_size_px * 2U),
+             (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+    esp_err_t lcd_init_err = esp_lcd_new_rgb_panel(&cfg, &panel);
+    if (lcd_init_err != ESP_OK) {
+        ESP_LOGW(TAG, "RGB bounce allocation failed: %s; fallback to direct EDMA",
+                 esp_err_to_name(lcd_init_err));
+        cfg.bounce_buffer_size_px = 0;
+        ESP_RETURN_ON_ERROR(esp_lcd_new_rgb_panel(&cfg, &panel), TAG,
+                            "RGB panel allocate (direct fallback)");
+    }
     ESP_RETURN_ON_ERROR(esp_lcd_panel_reset(panel), TAG, "RGB reset");
     ESP_RETURN_ON_ERROR(esp_lcd_panel_init(panel), TAG, "RGB init");
     esp_lcd_rgb_panel_event_callbacks_t cb = {
@@ -461,7 +451,7 @@ esp_err_t mira_display_init(void) {
     ESP_RETURN_ON_ERROR(esp_lcd_rgb_panel_register_event_callbacks(panel, &cb, NULL), TAG, "VSYNC callback");
     void *fb1 = NULL, *fb2 = NULL;
     ESP_RETURN_ON_ERROR(esp_lcd_rgb_panel_get_frame_buffer(panel, 2, &fb1, &fb2), TAG, "RGB double buffers");
-    ESP_LOGI(TAG, "RGB565 %dx%d PCLK=%d NO_BOUNCE, fb1=%p fb2=%p, PSRAM=%zu", WIDTH,HEIGHT,
+    ESP_LOGI(TAG, "RGB565 %dx%d PCLK=%d bounce_lines=%lu, fb1=%p fb2=%p, PSRAM=%zu", WIDTH,HEIGHT, (unsigned long)(cfg.bounce_buffer_size_px / WIDTH),
          LCD_PCLK_HZ,fb1,fb2,heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
     lv_init();
     lvdisp = lv_display_create(WIDTH, HEIGHT);
