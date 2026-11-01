@@ -7,6 +7,10 @@
 #error "MiraLvgl9Compat requires LVGL 9"
 #endif
 
+#define LV_LABEL_LONG_DOT LV_LABEL_LONG_MODE_DOTS
+#define LV_LABEL_LONG_CLIP LV_LABEL_LONG_MODE_CLIP
+#define LV_LABEL_LONG_WRAP LV_LABEL_LONG_MODE_WRAP
+#define LV_LABEL_LONG_SCROLL LV_LABEL_LONG_MODE_SCROLL
 #define lv_btn_create lv_button_create
 #define lv_img_create lv_image_create
 #define lv_img_set_src lv_image_set_src
