@@ -79,6 +79,7 @@ typedef struct {
     char name[96], unit[24], type[24], value[160];
     lv_obj_t *card,*control,*value_label,*info_status;
     lv_obj_t *thermostat_temperature,*thermostat_mode,*thermostat_mode_select;
+    lv_obj_t *color_saturation,*color_brightness,*color_preview;
     lv_obj_t *fields[9]; // energy/media passive Jeedom composite infos
     lv_obj_t *media_slider,*media_device_dropdown,*media_play_caption;
     bool media_is_playing;
@@ -252,14 +253,17 @@ static void event_local(lv_event_t *e){
             lv_label_set_text(b->value_label,txt);
         }
     }else if(!strcmp(b->type,"color")){
-        // Match Mira 0.7.37's RGB CSV action payload. LVGL 9 no longer
-        // provides the old colour wheel; use a hue arc at full saturation.
-        const uint16_t hue=(uint16_t)lv_arc_get_value(src);
-        const lv_color_t col=lv_color_hsv_to_rgb(hue,100,100);
+        // Preserve full HSV (and therefore full RGB) rather than forcing
+        // every outgoing command to maximum saturation and brightness.
+        const uint16_t hue=(uint16_t)lv_arc_get_value(b->control);
+        const uint8_t saturation=(uint8_t)lv_slider_get_value(b->color_saturation);
+        const uint8_t brightness=(uint8_t)lv_slider_get_value(b->color_brightness);
+        const lv_color_t col=lv_color_hsv_to_rgb(hue,saturation,brightness);
         const uint32_t rgb=lv_color_to_u32(col);
         snprintf(b->value,sizeof(b->value),"%u,%u,%u",
                  (unsigned)((rgb>>16)&255u),(unsigned)((rgb>>8)&255u),
                  (unsigned)(rgb&255u));
+        if(b->color_preview)lv_obj_set_style_bg_color(b->color_preview,col,0);
     }else if(!strcmp(b->type,"list")||!strcmp(b->type,"listbutton")){
         // The selected label is the outward command value, as in the
         // original Mira list controls. No network command on passive state.
@@ -916,19 +920,44 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         return;
     }
     if(!strcmp(type,"color")){
-        w->card=card(pg,cw,206);
-        label(w->card,display,0xF3F6F7,&mira_font_fr_16);
-        // LVGL 9.6 dropped the LVGL8 colorwheel. A hue arc provides
-        // functional RGB output, sent once on finger release.
+        w->card=card(pg,390,216);
+        lv_obj_t *heading=label(w->card,display,0xF3F6F7,&mira_font_fr_16);
+        lv_obj_set_pos(heading,8,3);
+        // LVGL 9.6 has no LVGL 8 colorwheel. Hue arc plus saturation/value
+        // controls reproduces the full RGB color space over HTTP/Jeedom.
         w->control=lv_arc_create(w->card);
-        lv_obj_set_size(w->control,150,150);
+        lv_obj_set_size(w->control,152,152);
+        lv_obj_set_pos(w->control,8,37);
         lv_arc_set_range(w->control,0,360);
-        lv_arc_set_value(w->control,200);
         lv_arc_set_rotation(w->control,135);
         lv_arc_set_bg_angles(w->control,0,270);
         lv_obj_set_style_arc_color(w->control,cyan_c(),LV_PART_INDICATOR);
-        lv_obj_align(w->control,LV_ALIGN_CENTER,0,12);
+        const lv_color_hsv_t initial=lv_color_rgb_to_hsv(50,120,180);
+        lv_arc_set_value(w->control,initial.h);
+        lv_obj_t *sat_label=label(w->card,"Saturation",0xA8B2B8,&mira_font_fr_14);
+        lv_obj_set_pos(sat_label,202,53);
+        w->color_saturation=lv_slider_create(w->card);
+        lv_obj_set_size(w->color_saturation,151,12);
+        lv_obj_set_pos(w->color_saturation,202,81);
+        lv_slider_set_range(w->color_saturation,0,100);
+        lv_slider_set_value(w->color_saturation,initial.s,LV_ANIM_OFF);
+        lv_obj_t *brightness_label=label(w->card,"Luminosité",0xA8B2B8,&mira_font_fr_14);
+        lv_obj_set_pos(brightness_label,202,112);
+        w->color_brightness=lv_slider_create(w->card);
+        lv_obj_set_size(w->color_brightness,151,12);
+        lv_obj_set_pos(w->color_brightness,202,139);
+        lv_slider_set_range(w->color_brightness,0,100);
+        lv_slider_set_value(w->color_brightness,initial.v,LV_ANIM_OFF);
+        w->color_preview=lv_obj_create(w->card);
+        lv_obj_set_size(w->color_preview,32,22);
+        lv_obj_set_pos(w->color_preview,338,8);
+        lv_obj_set_style_pad_all(w->color_preview,0,0);
+        lv_obj_set_style_bg_color(w->color_preview,lv_color_make(50,120,180),0);
+        lv_obj_set_style_border_width(w->color_preview,1,0);
+        lv_obj_remove_flag(w->color_preview,LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(w->control,event_local,LV_EVENT_RELEASED,w);
+        lv_obj_add_event_cb(w->color_saturation,event_local,LV_EVENT_RELEASED,w);
+        lv_obj_add_event_cb(w->color_brightness,event_local,LV_EVENT_RELEASED,w);
         return;
     }
     // Energy and media are native passive Jeedom data cards. Every subfield
