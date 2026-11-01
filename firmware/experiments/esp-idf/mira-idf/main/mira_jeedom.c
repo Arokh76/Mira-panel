@@ -878,6 +878,53 @@ static void sync_jeedom_bindings(void){
     else ESP_LOGE(TAG,"Jeedom mapping validation/storage incomplete: %s",
                   esp_err_to_name(err));
 }
+
+static esp_err_t jeedom_status_get(httpd_req_t *req) {
+    if(!require_key(req))return ESP_FAIL;
+    char *raw=read_config(NULL);
+    uint32_t hash=raw?ui_config_hash(raw):0;
+    cJSON *index=raw?index_from_config(raw):NULL;
+    free(raw);
+    int total=0,valid=0;
+    const cJSON *items=index?cJSON_GetObjectItemCaseSensitive(index,"actions"):NULL,*item;
+    nvs_handle_t map;
+    bool nvs_ok=nvs_open("mira_idf_map",NVS_READONLY,&map)==ESP_OK;
+    char expected[12];
+    snprintf(expected,sizeof(expected),"%08" PRIx32 ":",hash);
+    cJSON_ArrayForEach(item,items) {
+        int id[2],amount=1;
+        if(!strcmp(jstr((cJSON*)item,"type",""),"toggle")) {
+            id[0]=jint((cJSON*)item,"id0",-1);
+            id[1]=jint((cJSON*)item,"id1",-1);
+            amount=2;
+        }else id[0]=jint((cJSON*)item,"id",-1);
+        for(int i=0;i<amount;i++) {
+            total++;
+            if(!nvs_ok||id[i]<1||id[i]>4096)continue;
+            char key[14],stored[48]={0};
+            snprintf(key,sizeof(key),"cmd%d",id[i]);
+            if(nvs_read_string(map,key,stored,sizeof(stored))&&
+               !strncmp(stored,expected,9)&&decimal_id(stored+9))valid++;
+        }
+    }
+    if(nvs_ok)nvs_close(map);
+    if(index)cJSON_Delete(index);
+    nvs_handle_t cfg;
+    bool enabled=false;
+    if(nvs_open("mira_idf_jeed",NVS_READONLY,&cfg)==ESP_OK){
+        char v[8]={0};
+        enabled=nvs_read_string(cfg,"Jeedom",v,sizeof(v))&&!strcmp(v,"1");
+        nvs_close(cfg);
+    }
+    char body[160];
+    snprintf(body,sizeof(body),
+        "{\"jeedom_enabled\":%s,\"mapping_valid\":%s,\"ids_valid\":%d,\"ids_expected\":%d}",
+        enabled?"true":"false",
+        (enabled&&total>0&&valid==total)?"true":"false",valid,total);
+    httpd_resp_set_type(req,"application/json");
+    return httpd_resp_sendstr(req,body);
+}
+
 static void request_binding_sync(void){
     if(!action_queue)return;
     mira_action_msg_t msg={0};
@@ -927,6 +974,7 @@ void mira_jeedom_register_http(httpd_handle_t server) {
         {.uri="/setjeedomid",.method=HTTP_GET,.handler=set_jeedom_id},
         {.uri="/setjeedomtoggleid",.method=HTTP_GET,.handler=set_jeedom_toggle_id},
         {.uri="/sendjeedomorderid",.method=HTTP_GET,.handler=set_jeedom_init_id},
+        {.uri="/mira/jeedom/status",.method=HTTP_GET,.handler=jeedom_status_get},
     };
     for(size_t i=0;i<sizeof(routes)/sizeof(routes[0]);i++) {
         esp_err_t err=httpd_register_uri_handler(server,&routes[i]);
