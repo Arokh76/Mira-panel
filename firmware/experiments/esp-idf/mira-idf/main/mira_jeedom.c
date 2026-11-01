@@ -999,6 +999,39 @@ static void import_legacy_screen_key(void){
     if(root)cJSON_Delete(root);
 }
 
+// Only migrate sleep settings with identical meaning and limits in IDF.
+// Do not change calibrated 4.3C day/night brightness or panel timings here.
+static void import_legacy_sleep_settings(const cJSON *params){
+    nvs_handle_t nv;
+    if(nvs_open("mira_idf_ui",NVS_READWRITE,&nv)!=ESP_OK)return;
+    int changed=0;
+    const cJSON *item;
+    cJSON_ArrayForEach(item,params){
+        const char *key=jstr((cJSON*)item,"param","");
+        const char *value=jstr((cJSON*)item,"value","");
+        if(!value[0]||strlen(value)>8)continue;
+        char *end=NULL;
+        long number=strtol(value,&end,10);
+        if(!end||*end)continue;
+        if(!strcmp(key,"DISPLAY_Delai")&&number>=0&&number<=3600){
+            uint16_t old=0;
+            if(nvs_get_u16(nv,"sleep_delay",&old)==ESP_ERR_NVS_NOT_FOUND &&
+               nvs_set_u16(nv,"sleep_delay",(uint16_t)number)==ESP_OK)changed++;
+        }else if(!strcmp(key,"DISPLAY_Veille")&&number>=0&&number<=100){
+            uint8_t old=0;
+            if(nvs_get_u8(nv,"sleep_light",&old)==ESP_ERR_NVS_NOT_FOUND &&
+               nvs_set_u8(nv,"sleep_light",(uint8_t)number)==ESP_OK)changed++;
+        }else if(!strcmp(key,"DISPLAY_HorlogeVeille")&&(number==0||number==1)){
+            uint8_t old=0;
+            if(nvs_get_u8(nv,"sleep_clock",&old)==ESP_ERR_NVS_NOT_FOUND &&
+               nvs_set_u8(nv,"sleep_clock",(uint8_t)number)==ESP_OK)changed++;
+        }
+    }
+    if(changed&&nvs_commit(nv)==ESP_OK)
+        ESP_LOGI(TAG,"Legacy Mira sleep settings imported: %d",changed);
+    nvs_close(nv);
+}
+
 // Import the previous Arduino firmware's /params.json only when there is no
 // newer ESP-IDF setting for a given key. Never modify the legacy SPIFFS file.
 // Mira beta uses {"params":[{"param":"Jeedom_IP","value":"...","type":"text"}]}.
@@ -1059,6 +1092,7 @@ static void import_legacy_http_settings(void) {
     }
     if(imported&&nvs_commit(nv)!=ESP_OK)errors++;
     nvs_close(nv);
+    import_legacy_sleep_settings(params);
     cJSON_Delete(root);
     ESP_LOGI(TAG,"Legacy HTTP parameters: imported=%d, encrypted examined=%d, errors=%d",
              imported,encrypted,errors);
