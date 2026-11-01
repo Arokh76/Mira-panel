@@ -2,6 +2,7 @@
 // States update only the LVGL task via its bounded queue; never emit actions.
 #include "mira_mqtt.h"
 #include "mira_full.h"
+#include "mira_setup_access.h"
 #include "mqtt_client.h"
 #include "nvs.h"
 #include "cJSON.h"
@@ -119,6 +120,7 @@ static esp_err_t mqtt_get(httpd_req_t *r) {
     return httpd_resp_sendstr(r,out);
 }
 static esp_err_t mqtt_post(httpd_req_t *r) {
+    if(!mira_setup_require_ap(r))return ESP_FAIL;
     if(r->content_len<2||r->content_len>768){
         httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"Invalid MQTT configuration size");
         return ESP_FAIL;
