@@ -20,6 +20,7 @@
 #include "freertos/queue.h"
 #include "mira_display.h"
 #include "mira_mqtt.h"
+#include "mira_jeedom.h"
 #include "mira_setup_access.h"
 
 #define MIRA_WIDTH 800
@@ -215,11 +216,12 @@ static void event_local(lv_event_t *e){
     }
     // Unlike MQTT States, only a real human LVGL action may publish Actions.
     const char *payload=(!strcmp(b->type,"toggle")) ? (!strcmp(b->value,"On")?"1":"0") : b->value;
-    const bool sent=mira_mqtt_publish_action(b->name,payload);
+    const bool mqtt_sent=mira_mqtt_publish_action(b->name,payload);
+    const bool jeedom_queued=mira_jeedom_queue_local_action(b->name,b->type,payload);
     if(feedback) {
         char result[180];
         snprintf(result,sizeof(result),"%s : %.60s = %.60s",
-                  sent?"Action MQTT":"Aperçu local",b->name,b->value);
+                  jeedom_queued?"Action Jeedom en file":(mqtt_sent?"Action MQTT":"Aperçu local"),b->name,b->value);
         lv_label_set_text(feedback,result);
     }
 }
