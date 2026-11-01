@@ -87,7 +87,7 @@ static bool read_exact(esp_http_client_handle_t client,uint8_t *buf,size_t size)
 // payloads or images that cannot be scaled to the 800x428 viewport.
 static bool decode_jpeg(esp_http_client_handle_t http,const uint8_t *prefix,
                         size_t initial,int64_t expected,mira_camera_frame_t *out){
-    if(expected>(int64_t)CAM_MAX_JPEG || initial>CAM_MAX_JPEG)return false;
+    if(!prefix || !out || initial<2 || expected>(int64_t)CAM_MAX_JPEG || initial>CAM_MAX_JPEG)return false;
     const size_t capacity=(expected>0)?(size_t)expected:CAM_MAX_JPEG;
     if(capacity<initial)return false;
     uint8_t *jpeg=heap_caps_malloc(capacity,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
@@ -189,6 +189,8 @@ static bool decode_mjpeg_first_frame(esp_http_client_handle_t http,
         int n=esp_http_client_read(http,(char*)chunk,sizeof(chunk));
         if(n<0)return false;
         if(!n){vTaskDelay(pdMS_TO_TICKS(10));continue;}
+        // Avoid spending beyond the header-scan budget on oversized chunks.
+        if((size_t)n>8192u-scanned)n=(int)(8192u-scanned);
         for(int i=0;i<n;i++){
             if(last_ff && chunk[i]==0xd8){
                 size_t remaining=(size_t)n-(size_t)i;
