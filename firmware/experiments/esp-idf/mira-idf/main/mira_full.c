@@ -380,7 +380,11 @@ static void camera_poll_on_lvgl_task(uint32_t tick){
     camera_last_update=tick;
     mira_camera_frame_t frame={0};
     if(!mira_camera_take(&frame))return;
-    if(!frame.pixels||!frame.width||!frame.height)return;
+    // A malformed frame must release ownership even if it cannot be shown.
+    if(!frame.pixels||!frame.width||!frame.height){
+        if(frame.pixels)heap_caps_free(frame.pixels);
+        return;
+    }
     if(camera_image)lv_image_set_src(camera_image,NULL);
     if(camera_image_pixels)heap_caps_free(camera_image_pixels);
     camera_image_pixels=frame.pixels;
