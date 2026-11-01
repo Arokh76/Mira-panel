@@ -681,12 +681,32 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
     }
     if(!strcmp(type,"range")||!strcmp(type,"roundrange")||!strcmp(type,"thermostat")){
         bool round=!strcmp(type,"roundrange")||!strcmp(type,"thermostat");
-        w->card=card(pg,round?(!strcmp(type,"thermostat")?786:390):cw,round?225:80);
+        w->card=card(pg,thermostat?786:(round?390:cw),
+                     thermostat?CONTENT_H-16:(round?225:80));
         if(round){
-            label(w->card,display,0xF3F6F7,&mira_font_fr_16);
+            if(thermostat){
+                lv_obj_set_layout(w->card,0);
+                lv_obj_set_style_pad_all(w->card,0,0);
+                no_scroll(w->card);
+                lv_obj_t *title=label(w->card,display,0xF3F6F7,&mira_font_fr_16);
+                lv_obj_set_pos(title,14,12);
+                lv_obj_set_width(title,310);
+            }else label(w->card,display,0xF3F6F7,&mira_font_fr_16);
+            if(thermostat){
+                lv_obj_t *plate=lv_obj_create(w->card);
+                lv_obj_set_size(319,319);
+                lv_obj_set_pos(plate,16,51);
+                lv_obj_set_style_radius(plate,LV_RADIUS_CIRCLE,0);
+                lv_obj_set_style_bg_color(plate,panel2_c(),0);
+                lv_obj_set_style_border_color(plate,border_c(),0);
+                lv_obj_set_style_pad_all(plate,0,0);
+                no_scroll(plate);
+                lv_obj_remove_flag(plate,LV_OBJ_FLAG_CLICKABLE);
+            }
             w->control=lv_arc_create(w->card);
-            lv_obj_set_size(w->control,165,165);
-            lv_obj_align(w->control,LV_ALIGN_CENTER,0,14);
+            lv_obj_set_size(w->control,thermostat?296:165,thermostat?296:165);
+            if(thermostat)lv_obj_set_pos(w->control,27,63);
+            else lv_obj_align(w->control,LV_ALIGN_CENTER,0,14);
             if(thermostat){
                 char *end=NULL;
                 const float incoming=strtof(w->value,&end);
@@ -701,22 +721,65 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
                 lv_arc_set_range(w->control,w->minv,w->maxv);
                 lv_arc_set_value(w->control,clamp(atoi(w->value),w->minv,w->maxv));
             }
-            lv_arc_set_rotation(w->control,135);
-            lv_arc_set_bg_angles(w->control,0,270);
+            if(thermostat){
+                lv_arc_set_bg_angles(w->control,135,45);
+                lv_obj_set_style_arc_width(w->control,24,LV_PART_MAIN);
+                lv_obj_set_style_arc_width(w->control,24,LV_PART_INDICATOR);
+                lv_obj_set_style_arc_color(w->control,panel2_c(),LV_PART_MAIN);
+            }else{
+                lv_arc_set_rotation(w->control,135);
+                lv_arc_set_bg_angles(w->control,0,270);
+            }
             lv_obj_set_style_arc_color(w->control,cyan_c(),LV_PART_INDICATOR);
             char initial_label[96];
             if(thermostat)snprintf(initial_label,sizeof(initial_label),"%s°",w->value);
             else snprintf(initial_label,sizeof(initial_label),"%s %s",w->value,w->unit);
-            w->value_label=label(w->card,initial_label,0xF3F6F7,&lv_font_montserrat_28);
-            lv_obj_align(w->value_label,LV_ALIGN_CENTER,0,14);
-            if(!strcmp(type,"thermostat")){
-                w->thermostat_temperature=label(w->card,"Température : --",0xA8B2B8,&mira_font_fr_16);
-                lv_obj_set_pos(w->thermostat_temperature,18,87);
-                w->thermostat_mode=label(w->card,"Mode : --",0xA8B2B8,&mira_font_fr_16);
-                lv_obj_set_pos(w->thermostat_mode,575,87);
+            if(thermostat){
+                lv_obj_t *inner=lv_obj_create(w->card);
+                lv_obj_set_size(inner,169,169);
+                lv_obj_set_pos(inner,90,126);
+                lv_obj_set_style_radius(inner,LV_RADIUS_CIRCLE,0);
+                lv_obj_set_style_bg_color(inner,bg_c(),0);
+                lv_obj_set_style_border_color(inner,border_c(),0);
+                lv_obj_set_style_border_width(inner,2,0);
+                lv_obj_set_style_pad_all(inner,0,0);
+                no_scroll(inner);
+                lv_obj_remove_flag(inner,LV_OBJ_FLAG_CLICKABLE);
+                w->value_label=label(inner,initial_label,0xF3F6F7,&lv_font_montserrat_40);
+                lv_obj_set_width(w->value_label,157);
+                lv_obj_set_style_text_align(w->value_label,LV_TEXT_ALIGN_CENTER,0);
+                lv_obj_align(w->value_label,LV_ALIGN_CENTER,0,-16);
+                lv_obj_t *hint=label(inner,"CONSIGNE",0xA8B2B8,&mira_font_fr_14);
+                lv_obj_set_width(hint,157);
+                lv_obj_set_style_text_align(hint,LV_TEXT_ALIGN_CENTER,0);
+                lv_obj_align(hint,LV_ALIGN_CENTER,0,26);
+            }else{
+                w->value_label=label(w->card,initial_label,0xF3F6F7,&lv_font_montserrat_28);
+                lv_obj_align(w->value_label,LV_ALIGN_CENTER,0,14);
+            }
+            if(thermostat){
+                lv_obj_t *heading=label(w->card,"Température actuelle",0xA8B2B8,&mira_font_fr_14);
+                lv_obj_set_pos(heading,389,122);
+                w->thermostat_temperature=label(w->card,"-- °C",0xF3F6F7,&lv_font_montserrat_40);
+                lv_obj_set_pos(w->thermostat_temperature,389,156);
+                lv_obj_set_width(w->thermostat_temperature,340);
+                lv_obj_t *separator=lv_obj_create(w->card);
+                lv_obj_set_size(separator,360,1);
+                lv_obj_set_pos(separator,386,237);
+                lv_obj_set_style_bg_color(separator,border_c(),0);
+                lv_obj_set_style_border_width(separator,0,0);
+                lv_obj_remove_flag(separator,LV_OBJ_FLAG_CLICKABLE);
+                lv_obj_t *mode_heading=label(w->card,"Mode",0xA8B2B8,&mira_font_fr_14);
+                lv_obj_set_pos(mode_heading,389,265);
+                w->thermostat_mode=label(w->card,"Confort",0x22BEEA,&mira_font_fr_14);
+                lv_obj_set_width(w->thermostat_mode,170);
+                lv_obj_set_pos(w->thermostat_mode,600,13);
+                lv_obj_set_style_text_align(w->thermostat_mode,LV_TEXT_ALIGN_RIGHT,0);
                 w->thermostat_mode_select=lv_dropdown_create(w->card);
-                lv_obj_set_size(w->thermostat_mode_select,184,43);
-                lv_obj_set_pos(w->thermostat_mode_select,572,121);
+                lv_obj_set_size(w->thermostat_mode_select,365,43);
+                lv_obj_set_pos(w->thermostat_mode_select,387,294);
+                lv_dropdown_set_dir(w->thermostat_mode_select,LV_DIR_TOP);
+                lv_obj_set_style_text_font(w->thermostat_mode_select,&mira_font_fr_16,0);
                 char modes[192];
                 snprintf(modes,sizeof(modes),"%s",str(o,"modes","Confort|Éco|Hors gel|Arrêt"));
                 for(char *p=modes;*p;p++)if(*p=='|')*p='\n';
@@ -1478,13 +1541,13 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
             snprintf(mode_name,sizeof(mode_name),"%.95s__mode",w->name);
             if(!strcmp(temp_name,msg->name)&&w->thermostat_temperature){
                 char text[185];
-                snprintf(text,sizeof(text),"Température : %.150s",msg->value);
+                snprintf(text,sizeof(text),"%.150s °C",msg->value);
                 lv_label_set_text(w->thermostat_temperature,text);
                 continue; // This is information, never a setpoint command.
             }
             if(!strcmp(mode_name,msg->name)&&w->thermostat_mode){
                 char text[185];
-                snprintf(text,sizeof(text),"Mode : %.150s",msg->value);
+                snprintf(text,sizeof(text),"%.150s",msg->value);
                 lv_label_set_text(w->thermostat_mode,text);
                 if(w->thermostat_mode_select){
                     const char *opts=lv_dropdown_get_options(w->thermostat_mode_select);
