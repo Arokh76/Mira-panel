@@ -841,6 +841,7 @@ static void build_config(void){
     if(!cJSON_IsArray(array)){
         empty_notice("Le JSON Mira ne contient pas de tableau lvgl");
         if(root)cJSON_Delete(root);
+        ESP_LOGE(TAG,"Invalid Mira JSON: expected lvgl array; existing SPIFFS left unchanged");
         return;
     }
     int count=cJSON_GetArraySize(array),home_info=0,seen=0;
