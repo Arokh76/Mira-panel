@@ -640,7 +640,7 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
         bool matches=strcmp(w->name,msg->name)==0||strcmp(norm_name,norm_recv)==0;
         if(!matches&&!strcmp(w->type,"thermostat")){
             char setpoint_name[128],setpoint_normalized[128];
-            snprintf(setpoint_name,sizeof(setpoint_name),"%s__consigne",w->name);
+            snprintf(setpoint_name,sizeof(setpoint_name),"%.95s__consigne",w->name);
             normalize_widget_name(setpoint_name,setpoint_normalized,sizeof(setpoint_normalized));
             matches=!strcmp(setpoint_name,msg->name)||!strcmp(setpoint_normalized,norm_recv);
         }
