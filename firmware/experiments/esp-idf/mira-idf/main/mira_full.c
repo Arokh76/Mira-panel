@@ -19,6 +19,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "mira_display.h"
+#include "mira_mqtt.h"
 
 #define MIRA_WIDTH 800
 #define MIRA_HEIGHT 480
@@ -210,7 +211,8 @@ static void event_local(lv_event_t *e){
     }else if(!strcmp(b->type,"button")||!strcmp(b->type,"multiaction")){
         strcpy(b->value,"1");
     }
-    // UI-only safety: interactive preview never triggers any Jeedom action.
+    // Unlike MQTT States, only a real human LVGL action may publish Actions.
+    const bool sent=mira_mqtt_publish_action(b->name,b->value);
     if(feedback) {
         char result[180];
         snprintf(result,sizeof(result),"Aperçu local : %.60s = %.60s (aucune commande Jeedom)",
@@ -609,10 +611,30 @@ void mira_full_ui_create(lv_display_t *disp){
     ESP_LOGI(TAG,"Mira LVGL 9.6 rendering tree ready, source 0.7.37 JSON");
 }
 
+bool mira_full_enqueue_state(const char *name,const char *value){
+    if(!state_queue||!name||!value||!*name||strlen(name)>=96||strlen(value)>=160)return false;
+    mira_state_update_t msg={0};
+    snprintf(msg.name,sizeof(msg.name),"%s",name);
+    snprintf(msg.value,sizeof(msg.value),"%s",value);
+    return xQueueSend(state_queue,&msg,0)==pdTRUE;
+}
+static void normalize_widget_name(const char *src,char *dst,size_t length){
+    size_t j=0;
+    for(size_t i=0;src[i]&&j+1<length;i++){
+        unsigned char c=(unsigned char)src[i];
+        if(c==' '||c=='/'||c=='#'||c=='+')c='_';
+        if(c>='A'&&c<='Z')c=(unsigned char)(c+('a'-'A'));
+        dst[j++]=(char)c;
+    }
+    dst[j]=0;
+}
 static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
     for(uint8_t i=0;i<widget_n;i++){
         mira_widget_t *w=&widgets[i];
-        if(strcmp(w->name,msg->name)!=0)continue;
+        char norm_name[96],norm_recv[96];
+        normalize_widget_name(w->name,norm_name,sizeof(norm_name));
+        normalize_widget_name(msg->name,norm_recv,sizeof(norm_recv));
+        if(strcmp(w->name,msg->name)!=0&&strcmp(norm_name,norm_recv)!=0)continue;
         snprintf(w->value,sizeof(w->value),"%s",msg->value);
         suppress_events=true;
         if(w->control && !strcmp(w->type,"toggle")){
