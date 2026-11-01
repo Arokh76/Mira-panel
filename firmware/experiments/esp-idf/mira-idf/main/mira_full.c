@@ -491,7 +491,10 @@ static void mira_touch_diagnostic_refresh(void) {
     if(!touch_diag_label)return;
     mira_display_stats_t st;
     mira_display_stats(&st);
-    lv_label_set_text_fmt(touch_diag_label,
+    // Do not rerasterize the screen if the hardware counters have not moved.
+    char new_line[110];
+    static char last_line[110];
+    snprintf(new_line,sizeof(new_line),
         "GT911:%s Appuis:%lu X:%lu Y:%lu Err:%lu Stat:%02lX",
         st.touch_ready ? "OK" : "ABSENT",
         (unsigned long)st.touch_presses,
@@ -499,6 +502,10 @@ static void mira_touch_diagnostic_refresh(void) {
         (unsigned long)st.touch_last_y,
         (unsigned long)st.touch_errors,
         (unsigned long)st.touch_last_status);
+    if(strcmp(new_line,last_line)!=0) {
+        lv_label_set_text(touch_diag_label,new_line);
+        snprintf(last_line,sizeof(last_line),"%s",new_line);
+    }
 }
 static void mira_touch_diagnostic_pressed(lv_event_t *event) {
     (void)event;
