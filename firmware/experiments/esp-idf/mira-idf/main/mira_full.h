@@ -9,3 +9,5 @@ void mira_full_ui_create(lv_display_t *disp);
 void mira_full_ui_tick(void);
 void mira_full_register_http(httpd_handle_t server);
 uint32_t mira_full_widget_count(void);
+// Network tasks may only queue passive states, never touch LVGL directly.
+bool mira_full_enqueue_state(const char *name,const char *value);
