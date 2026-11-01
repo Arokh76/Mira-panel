@@ -811,8 +811,8 @@ static void sync_jeedom_bindings(void){
     nvs_handle_t cfg;
     if(nvs_open("mira_idf_jeed",NVS_READONLY,&cfg)!=ESP_OK)return;
     char on[8]={0},base[192]={0},secret[256]={0},init[24]={0};
-    const bool ready=nvs_read_string(cfg,"Jeedom",on,sizeof(on))&&
-                     !strcmp(on,"1")&&
+    const bool saved_mode=nvs_read_string(cfg,"Jeedom",on,sizeof(on));
+    const bool ready=(!saved_mode||!strcmp(on,"1"))&&
                      nvs_read_string(cfg,"Jeedom_IP",base,sizeof(base))&&
                      nvs_read_string(cfg,"Jeedom_Key_mira",secret,sizeof(secret))&&
                      nvs_read_string(cfg,"Jeedom_Init_Cmd",init,sizeof(init));
@@ -928,10 +928,10 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
     if(nvs_ok)nvs_close(map);
     if(index)cJSON_Delete(index);
     nvs_handle_t cfg;
-    bool enabled=false;
+    bool enabled=true; // HTTP/Jeedom is the factory-default Mira protocol.
     if(nvs_open("mira_idf_jeed",NVS_READONLY,&cfg)==ESP_OK){
         char v[8]={0};
-        enabled=nvs_read_string(cfg,"Jeedom",v,sizeof(v))&&!strcmp(v,"1");
+        if(nvs_read_string(cfg,"Jeedom",v,sizeof(v)))enabled=strcmp(v,"0")!=0;
         nvs_close(cfg);
     }
     char body[160];
@@ -960,8 +960,62 @@ static void jeedom_action_worker(void *unused) {
         }
     }
 }
+// Import the previous Arduino firmware's /params.json only when there is no
+// newer ESP-IDF setting for a given key. Never modify the legacy SPIFFS file.
+// Mira beta uses {"params":[{"param":"Jeedom_IP","value":"...","type":"text"}]}.
+// "crypted-text" is AES data, NOT a usable plaintext Jeedom API key.
+static void import_legacy_http_settings(void) {
+    FILE *fp=fopen("/spiffs/params.json","rb");
+    if(!fp)return;
+    if(fseek(fp,0,SEEK_END)!=0){fclose(fp);return;}
+    const long size=ftell(fp);
+    if(size<2||size>32768){fclose(fp);return;}
+    rewind(fp);
+    char *contents=malloc((size_t)size+1);
+    if(!contents){fclose(fp);return;}
+    const size_t got=fread(contents,1,(size_t)size,fp);
+    fclose(fp);
+    if(got!=(size_t)size){free(contents);return;}
+    contents[got]=0;
+    cJSON *root=cJSON_ParseWithLength(contents,got);
+    free(contents);
+    const cJSON *params=root?cJSON_GetObjectItemCaseSensitive(root,"params"):NULL;
+    if(!cJSON_IsArray(params)){
+        if(root)cJSON_Delete(root);
+        ESP_LOGW(TAG,"Legacy params.json is not a valid Mira params array");
+        return;
+    }
+    nvs_handle_t nv;
+    if(nvs_open("mira_idf_jeed",NVS_READWRITE,&nv)!=ESP_OK){
+        cJSON_Delete(root);
+        return;
+    }
+    int imported=0,encrypted=0,errors=0;
+    const cJSON *entry;
+    cJSON_ArrayForEach(entry,params){
+        const char *key=jstr((cJSON*)entry,"param","");
+        const char *value=jstr((cJSON*)entry,"value","");
+        const char *type=jstr((cJSON*)entry,"type","");
+        if(!supported_jeedom_param(key)||!value[0]||
+           !strcmp(value,"null")||strlen(value)>=256)continue;
+        // The old beta encrypts some fields using its own AES format.
+        // Never write opaque ciphertext into a plaintext NVS setting.
+        if(!strcmp(type,"crypted-text")){encrypted++;continue;}
+        if(!strcmp(key,"Jeedom")&&strcmp(value,"0")&&strcmp(value,"1"))continue;
+        size_t existing=0;
+        if(nvs_get_str(nv,key,NULL,&existing)!=ESP_ERR_NVS_NOT_FOUND)continue;
+        if(nvs_set_str(nv,key,value)==ESP_OK)imported++;
+        else errors++;
+    }
+    if(imported&&nvs_commit(nv)!=ESP_OK)errors++;
+    nvs_close(nv);
+    cJSON_Delete(root);
+    ESP_LOGI(TAG,"Legacy HTTP parameters: imported=%d, encrypted skipped=%d, errors=%d",
+             imported,encrypted,errors);
+}
 esp_err_t mira_jeedom_action_init(void) {
     if(action_queue)return ESP_OK;
+    import_legacy_http_settings();
     nvs_handle_t settings;
     if(nvs_open("mira_idf_jeed",NVS_READONLY,&settings)==ESP_OK){
         char active[8]={0};size_t len=sizeof(active);
