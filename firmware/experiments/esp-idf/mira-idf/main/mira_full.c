@@ -31,6 +31,7 @@
 static const char *TAG="mira-full-43";
 static const char *JSON_PATH="/spiffs/miralvgl.json";
 static volatile bool reload_pending=false;
+void mira_full_request_reload(void){ reload_pending=true; }
 // Strict one-way UI state ingestion. Only the LVGL task can touch the widget tree.
 // No state update ever generates a Jeedom/MQTT command.
 typedef struct { char name[96]; char value[160]; } mira_state_update_t;
