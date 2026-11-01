@@ -344,7 +344,7 @@ static void listbutton_clicked(lv_event_t *event){
     if(strcmp(w->type,"listbutton")||index>=w->list_count)return;
     const char *value=listbutton_label(w,index);
     listbutton_mark_selected(w,index);
-    snprintf(w->value,sizeof(w->value),"%s",value);
+    memmove(w->value,value,strlen(value)+1u);
     bool sent=mira_jeedom_actions_enabled()
         ?mira_jeedom_queue_local_action(w->name,"listbutton",value)
         :mira_mqtt_publish_action(w->name,value);
@@ -718,7 +718,7 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         return;
     }
     if(!strcmp(type,"listbutton")){
-        snprintf(w->list_text,sizeof(w->list_text),"%s",w->value);
+        memmove(w->list_text,w->value,strlen(w->value)+1u);
         char *cursor=w->list_text;
         while(*cursor&&w->list_count<12){
             char *next=strchr(cursor,'|');
