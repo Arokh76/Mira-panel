@@ -87,8 +87,69 @@ static lv_obj_t *card(int page,int width,int height){
     lv_obj_t *c=lv_obj_create(pages[page]);
     lv_obj_set_size(c,width,height);
     panel_style(c,false);
+    // Match the benchmark's CARD_RELIEF_OUTLINE (mode 3): a cheap 2px
+    // outline, not a blurred LVGL shadow. Keep the 9.7-FPS relief strategy.
+    lv_obj_set_style_shadow_width(c,0,0);
+    lv_obj_set_style_outline_width(c,2,0);
+    lv_obj_set_style_outline_opa(c,LV_OPA_50,0);
+    lv_obj_set_style_outline_color(c,lv_color_hex(0x000000),0);
+    lv_obj_set_style_outline_pad(c,0,0);
     no_scroll(c);
     return c;
+}
+// 0.7.37 navigation pictograms, rebuilt with LVGL 9 objects: no icon font.
+static lv_obj_t *mira_nav_primitive(lv_obj_t *parent,int w,int h) {
+    lv_obj_t *o=lv_obj_create(parent);
+    lv_obj_set_size(o,w,h);
+    lv_obj_remove_flag(o,LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(o,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_opa(o,LV_OPA_TRANSP,0);
+    lv_obj_set_style_border_width(o,0,0);
+    lv_obj_set_style_pad_all(o,0,0);
+    lv_obj_set_style_shadow_width(o,0,0);
+    return o;
+}
+static void mira_nav_bulb(lv_obj_t *parent) {
+    lv_obj_t *icon=mira_nav_primitive(parent,25,28);
+    lv_obj_center(icon);
+    lv_obj_t *head=mira_nav_primitive(icon,16,16);
+    lv_obj_set_pos(head,5,0);
+    lv_obj_set_style_radius(head,LV_RADIUS_CIRCLE,0);
+    lv_obj_set_style_bg_color(head,lv_color_hex(0xDCEAF0),0);
+    lv_obj_set_style_bg_opa(head,LV_OPA_COVER,0);
+    lv_obj_t *neck=mira_nav_primitive(icon,10,4);
+    lv_obj_set_pos(neck,8,17);
+    lv_obj_set_style_radius(neck,2,0);
+    lv_obj_set_style_bg_color(neck,lv_color_hex(0xDCEAF0),0);
+    lv_obj_set_style_bg_opa(neck,LV_OPA_COVER,0);
+    lv_obj_t *base=mira_nav_primitive(icon,9,4);
+    lv_obj_set_pos(base,8,22);
+    lv_obj_set_style_radius(base,2,0);
+    lv_obj_set_style_bg_color(base,lv_color_hex(0xDCEAF0),0);
+    lv_obj_set_style_bg_opa(base,LV_OPA_COVER,0);
+}
+static void mira_nav_thermometer(lv_obj_t *parent) {
+    lv_obj_t *icon=mira_nav_primitive(parent,23,29);
+    lv_obj_center(icon);
+    lv_obj_t *stem=mira_nav_primitive(icon,7,20);
+    lv_obj_set_pos(stem,8,2);
+    lv_obj_set_style_radius(stem,4,0);
+    lv_obj_set_style_border_color(stem,lv_color_hex(0xDCEAF0),0);
+    lv_obj_set_style_border_width(stem,2,0);
+    lv_obj_t *bulb=mira_nav_primitive(icon,13,13);
+    lv_obj_set_pos(bulb,5,14);
+    lv_obj_set_style_radius(bulb,LV_RADIUS_CIRCLE,0);
+    lv_obj_set_style_bg_color(bulb,lv_color_hex(0xDCEAF0),0);
+    lv_obj_set_style_bg_opa(bulb,LV_OPA_COVER,0);
+}
+static void mira_nav_pages(lv_obj_t *parent) {
+    for(int dot=0;dot<4;dot++) {
+        lv_obj_t *sq=mira_nav_primitive(parent,9,9);
+        lv_obj_set_style_radius(sq,2,0);
+        lv_obj_set_style_bg_color(sq,cyan_c(),0);
+        lv_obj_set_style_bg_opa(sq,LV_OPA_COVER,0);
+        lv_obj_align(sq,LV_ALIGN_CENTER,(dot%2)*14-7,(dot/2)*14-7);
+    }
 }
 static void make_flex(lv_obj_t *obj,lv_flex_flow_t f,lv_flex_align_t main,lv_flex_align_t cross){
     lv_obj_set_flex_flow(obj,f);
@@ -459,9 +520,7 @@ void mira_full_ui_create(lv_display_t *disp){
     lv_obj_set_style_pad_all(nav,0,0);
     no_scroll(nav);
     const int fav[4]={0,1,2,6};
-    // Use built-in LVGL symbol glyphs (supported by the Montserrat symbol font).
-    // Unicode circles/grid were missing in lv_font_montserrat_28 (tofu boxes).
-    const char *icons[4]={LV_SYMBOL_HOME,LV_SYMBOL_LIST,LV_SYMBOL_IMAGE,LV_SYMBOL_SETTINGS};
+    // Original 0.7.37 bar: home, drawn bulb, drawn thermometer, 2x2 pages.
     for(int i=0;i<4;i++){
         lv_obj_t *bt=lv_button_create(nav);
         favorite_btn[i]=bt;
@@ -472,8 +531,12 @@ void mira_full_ui_create(lv_display_t *disp){
         lv_obj_set_style_border_width(bt,0,0);
         lv_obj_set_style_shadow_width(bt,0,0);
         lv_obj_add_event_cb(bt,nav_click,LV_EVENT_CLICKED,(void *)(intptr_t)fav[i]);
-        lv_obj_t *l=label(bt,icons[i],0x22BEEA,&lv_font_montserrat_28);
-        lv_obj_center(l);
+        if(i==0) {
+            lv_obj_t *l=label(bt,LV_SYMBOL_HOME,0x22BEEA,&lv_font_montserrat_16);
+            lv_obj_center(l);
+        } else if(i==1) mira_nav_bulb(bt);
+        else if(i==2) mira_nav_thermometer(bt);
+        else mira_nav_pages(bt);
     }
     settings();
     create_picker();
