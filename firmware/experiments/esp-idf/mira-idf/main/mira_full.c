@@ -1218,7 +1218,9 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
             lv_label_set_text(w->value_label,display);
         }
         suppress_events=false;
-        return;
+        // One Jeedom state may be represented on several Mira pages.
+        // Update all matching widgets; passive updates never send actions.
+        continue;
     }
 }
 static void apply_pending_states(void){
