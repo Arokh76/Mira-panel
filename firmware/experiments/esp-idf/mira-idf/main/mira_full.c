@@ -418,6 +418,22 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
     const char *display=str(o,"displayName","");
     if(!*display)display=name;
     if(!*type)return;
+    // Do not silently turn unsupported widgets into passive info cards or
+    // consume one of the 64 available action slots. Unknown commands would
+    // otherwise appear to work while having no functional control.
+    static const char *const supported[]={
+        "datetime","info","button","multiaction","toggle","range",
+        "roundrange","thermostat","list","listbutton","color",
+        "energy","media","camera"
+    };
+    bool recognized=false;
+    for(size_t n=0;n<sizeof(supported)/sizeof(supported[0]);n++){
+        if(!strcmp(type,supported[n])){recognized=true;break;}
+    }
+    if(!recognized){
+        ESP_LOGW(TAG,"Unsupported widget type '%s' (name='%s')",type,name);
+        return;
+    }
     mira_widget_t *w=&widgets[widget_n++];
     memset(w,0,sizeof(*w));
     snprintf(w->name,sizeof(w->name),"%s",name);
