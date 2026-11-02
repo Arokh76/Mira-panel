@@ -134,6 +134,26 @@ assert 'passive_unchanged' in full
 assert 'if(i<state_cache_count &&' in full
 assert 'state_queue_dropped' in jeedom and 'state_cache_evictions' in jeedom
 print("PASS Dimitri-inspired passive state cache diagnostics")
+# Visual parity with MiraPanelUI 0.7.37 (Waveshare 4.3C).
+beta_ui = (root / "firmware/source/consolidated/MIRA_PANEL/MiraPanelUI.cpp").read_text(encoding="utf-8")
+for color in ("0x071421", "0x071A28", "0x090D12", "0x0E2032",
+              "0x103047", "0x141B22", "0x173149", "0x17445D",
+              "0x202A33", "0x17354B", "0x2B6882", "0x33414C",
+              "0x2ABEFF", "0x5BDEFF", "0x31BDF2"):
+    assert color in beta_ui and color in full, f"Missing original beta palette value: {color}"
+assert 'lv_dropdown_set_options(theme_choice,"Mira\\nSombre\\nGlass")' in full
+assert 'save_sleep_setting_u8("theme",ui_theme)' in full
+assert 'theme_reload_pending=true;' in full
+assert 'theme_apply_on_lvgl_task();' in full
+assert 'wheel_prepare_bitmap()' in full and 'wheel_touch' in full
+assert 'wheel_mark_hue(w,hsv.h)' in full, "Passive RGB must update hue selector"
+assert 'lv_color_hsv_to_rgb(w->color_hue' in full or 'const uint16_t hue=b->color_hue;' in full
+assert 'mira_fit_info_value(w->value_label,w->card)' in full
+assert 'lv_text_get_size(&measured' in full, "Fit must use actual glyph width"
+assert 'scroll_cache_prepare(i)' in full and 'scroll_cache_activate(false)' in full
+assert 'lv_snapshot_take_to_buf' in full and 'LV_COLOR_FORMAT_RGB565' in full
+assert 'scroll_cache_reset(); // release every LVGL image reference' in full
+print("PASS original palette, 3 themes, hue wheel, dynamic text and safe RGB565 scroll cache")
 # Only a published IDF-specific target may result in 'available'; the
 # Arduino firmware target must never be silently reused.
 update = (idf / "mira_beta_update.c").read_text(encoding="utf-8")
