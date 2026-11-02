@@ -12,3 +12,6 @@ bool mira_beta_web_authorized(httpd_req_t *req);
 
 // Serve exact beta HTML_Index page with real Jeedom command controls.
 esp_err_t mira_beta_web_home(httpd_req_t *req);
+
+// Beta network saved-list forms (POST-only with expiring nonce).
+esp_err_t mira_beta_web_network_post(httpd_req_t *req);
