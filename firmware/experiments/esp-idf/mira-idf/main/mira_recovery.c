@@ -630,7 +630,7 @@ esp_err_t mira_recovery_init(void) {
     // 9 routes are registered below; ESP-IDF defaults to 8 URI handlers.
     // Exceeding that limit used to abort app_main() before LCD init, causing
     // a black screen + Wi-Fi reboot loop (ESP_ERR_HTTPD_HANDLERS_FULL).
-    conf.max_uri_handlers = 48;
+    conf.max_uri_handlers = 64;
     conf.uri_match_fn = httpd_uri_match_wildcard;
     conf.stack_size = 6144;
     conf.recv_wait_timeout = 15;
