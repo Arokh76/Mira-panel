@@ -7,6 +7,7 @@
 #include "mira_camera.h"
 #include "mira_setup_access.h"
 #include "mira_legacy_cipher.h"
+#include "mira_mqtt.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -280,6 +281,239 @@ static cJSON *index_from_config(const char *json) {
     }
     cJSON_Delete(root);
     return out;
+}
+// HTML part of the original beta home page. Use the SAME command ids from
+// index_from_config() that the Jeedom plugin sees, no parallel ID mapping.
+static esp_err_t beta_html(httpd_req_t *req,const char *s){
+    return httpd_resp_send_chunk(req,s,HTTPD_RESP_USE_STRLEN);
+}
+static esp_err_t beta_html_escape(httpd_req_t *req,const char *s){
+    if(!s)return ESP_OK;
+    const char *start=s;
+    for(const char *p=s;;p++){
+        const char *entity=NULL;
+        if(*p=='&')entity="&amp;";
+        else if(*p=='<')entity="&lt;";
+        else if(*p=='>')entity="&gt;";
+        else if(*p=='"')entity="&quot;";
+        else if(*p=='\'')entity="&#39;";
+        if(entity||!*p){
+            if(p>start&&httpd_resp_send_chunk(req,start,p-start)!=ESP_OK)return ESP_FAIL;
+            if(!*p)break;
+            if(beta_html(req,entity)!=ESP_OK)return ESP_FAIL;
+            start=p+1;
+        }
+    }
+    return ESP_OK;
+}
+static esp_err_t beta_html_id(httpd_req_t *req,int id){
+    char str[20];snprintf(str,sizeof(str),"%d",id);
+    return beta_html(req,str);
+}
+static esp_err_t beta_html_value(httpd_req_t *req,const char *name,const char *fallback){
+    char cached[160]={0};
+    return beta_html_escape(req,mira_full_cached_state(name,cached,sizeof(cached))?cached:fallback);
+}
+esp_err_t mira_jeedom_render_beta_actions(httpd_req_t *req){
+    char *raw=read_config(NULL);
+    cJSON *index=raw?index_from_config(raw):NULL;
+    free(raw);
+    if(!index)return beta_html(req,"<p>Aucune programmation Mira Panel.</p>");
+    const cJSON *actions=cJSON_GetObjectItemCaseSensitive(index,"actions");
+    const cJSON *item=NULL;
+    bool any=false;
+    esp_err_t status=ESP_OK;
+    char seen_groups[16][96]={{0}};
+    unsigned group_count=0;
+    cJSON_ArrayForEach(item,actions){
+        const char *type=jstr((cJSON*)item,"type","");
+        const char *name=jstr((cJSON*)item,"nom","");
+        const int id=jint((cJSON*)item,"id",-1);
+        if(!*name)continue;
+        if(!strcmp(type,"button")&&id>0){
+            any=true;
+            if((status=beta_html(req,"<button class=\"Bouton\" id=\""))!=ESP_OK||
+               (status=beta_html_id(req,id))!=ESP_OK||
+               (status=beta_html(req,"\" onclick=\"Click(this)\">"))!=ESP_OK||
+               (status=beta_html_escape(req,name))!=ESP_OK||
+               (status=beta_html(req,"</button>"))!=ESP_OK)break;
+        }else if(!strcmp(type,"toggle")){
+            int off=jint((cJSON*)item,"id0",-1),on=jint((cJSON*)item,"id1",-1);
+            if(off<1||on<1)continue;
+            char current[160]={0};
+            bool known=mira_full_cached_state(name,current,sizeof(current));
+            bool checked=known&&(!strcasecmp(current,"On")||!strcmp(current,"1")||
+                                  !strcasecmp(current,"true"));
+            any=true;
+            if((status=beta_html(req,"<div class=\"div_toogle\"><div class=\"div_toogle_name\">"))!=ESP_OK||
+               (status=beta_html_escape(req,name))!=ESP_OK||
+               (status=beta_html(req,"</div><label class=\"switch\"><input type=\"checkbox\" id=\""))!=ESP_OK||
+               (status=beta_html_id(req,off))!=ESP_OK||
+               (status=beta_html(req,"\" onclick=\"ClickToogle(this,'Off','On','"))!=ESP_OK||
+               (status=beta_html_id(req,off))!=ESP_OK||
+               (status=beta_html(req,"','"))!=ESP_OK||
+               (status=beta_html_id(req,on))!=ESP_OK||
+               (status=beta_html(req,"')\""))!=ESP_OK||
+               (checked&&(status=beta_html(req," checked"))!=ESP_OK)||
+               (status=beta_html(req,"><span class=\"slider round\"></span></label></div>"))!=ESP_OK)break;
+        }else if(!strcmp(type,"info")&&id>0){
+            any=true;
+            if((status=beta_html(req,"<div class=\"mira-info\">"))!=ESP_OK||
+               (status=beta_html_escape(req,name))!=ESP_OK||
+               (status=beta_html(req,": <b><span id=\""))!=ESP_OK||
+               (status=beta_html_id(req,id))!=ESP_OK||
+               (status=beta_html(req,"\">"))!=ESP_OK||
+               (status=beta_html_value(req,name,jstr((cJSON*)item,"value","--")))!=ESP_OK||
+               (status=beta_html(req,"</span></b> "))!=ESP_OK||
+               (status=beta_html_escape(req,jstr((cJSON*)item,"unit","")))!=ESP_OK||
+               (status=beta_html(req,"</div>"))!=ESP_OK)break;
+        }else if(!strcmp(type,"range")&&id>0){
+            any=true;
+            int lo=jint((cJSON*)item,"min",0),hi=jint((cJSON*)item,"max",100);
+            if(lo>=hi||hi>100000||lo<-100000)continue;
+            char bound[90];
+            if((status=beta_html(req,"<div><label for=\""))!=ESP_OK||
+               (status=beta_html_id(req,id))!=ESP_OK||
+               (status=beta_html(req,"\">"))!=ESP_OK||
+               (status=beta_html_escape(req,name))!=ESP_OK||
+               (status=beta_html(req,"</label><input type=\"range\" id=\""))!=ESP_OK||
+               (status=beta_html_id(req,id))!=ESP_OK)break;
+            snprintf(bound,sizeof(bound),"\" min=\"%d\" max=\"%d\" value=\"%d\" onchange=\"ValidRange(this)\"></div>",
+                     lo,hi,jint((cJSON*)item,"value",lo));
+            if((status=beta_html(req,bound))!=ESP_OK)break;
+        }else if(!strcmp(type,"list")&&id>0){
+            const char *group=jstr((cJSON*)item,"nomliste","");
+            if(!*group)continue;
+            bool seen=false;
+            for(unsigned k=0;k<group_count;k++)if(!strcmp(seen_groups[k],group)){seen=true;break;}
+            if(seen||group_count>=16)continue;
+            snprintf(seen_groups[group_count++],sizeof(seen_groups[0]),"%s",group);
+            any=true;
+            if((status=beta_html(req,"<div><label>"))!=ESP_OK||
+               (status=beta_html_escape(req,group))!=ESP_OK||
+               (status=beta_html(req,"</label><select class=\"box\" id=\""))!=ESP_OK||
+               (status=beta_html_escape(req,group))!=ESP_OK||
+               (status=beta_html(req,"\" onchange=\"Liste(this)\">"))!=ESP_OK)break;
+            const cJSON *opt=NULL;
+            cJSON_ArrayForEach(opt,actions){
+                if(strcmp(jstr((cJSON*)opt,"type",""),"list")||
+                   strcmp(jstr((cJSON*)opt,"nomliste",""),group))continue;
+                int option_id=jint((cJSON*)opt,"id",-1);
+                if(option_id<1)continue;
+                if((status=beta_html(req,"<option value=\""))!=ESP_OK||
+                   (status=beta_html_id(req,option_id))!=ESP_OK||
+                   (status=beta_html(req,"\">"))!=ESP_OK||
+                   (status=beta_html_escape(req,jstr((cJSON*)opt,"nom","")))!=ESP_OK||
+                   (status=beta_html(req,"</option>"))!=ESP_OK)break;
+            }
+            if(status!=ESP_OK|| (status=beta_html(req,"</select></div>"))!=ESP_OK)break;
+        }
+    }
+    cJSON_Delete(index);
+    if(status!=ESP_OK)return status;
+    if(!any)return beta_html(req,"<p>Aucune commande programmée.</p>");
+    return ESP_OK;
+}
+// Browser home commands on POST /update?send=ID, send_range, send_list, etc.
+// Only local user interactions can produce outbound actions; state updates
+// never invoke this endpoint.
+esp_err_t mira_jeedom_beta_web_action(httpd_req_t *req){
+    char idtext[24]={0},payload[160]="1",kind[24]={0};
+    static const char *const selectors[]={"send","send_range","send_list","send_color"};
+    for(size_t i=0;i<sizeof(selectors)/sizeof(selectors[0]);i++)
+        if(query_param(req,selectors[i],idtext,sizeof(idtext))){
+            snprintf(kind,sizeof(kind),"%s",selectors[i]);break;
+        }
+    if(!*kind||!decimal_id(idtext)){
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Commande historique invalide");
+        return ESP_FAIL;
+    }
+    long id=strtol(idtext,NULL,10);
+    if(id<1||id>4096){
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Identifiant de commande invalide");
+        return ESP_FAIL;
+    }
+    char *raw=read_config(NULL);
+    cJSON *index=raw?index_from_config(raw):NULL;
+    free(raw);
+    if(!index){
+        httpd_resp_send_err(req,HTTPD_404_NOT_FOUND,"Programmation Mira absente");
+        return ESP_FAIL;
+    }
+    const cJSON *array=cJSON_GetObjectItemCaseSensitive(index,"actions"),*entry=NULL;
+    char action_name[96]={0},action_type[24]={0};
+    bool matched=false;
+    cJSON_ArrayForEach(entry,array){
+        const char *type=jstr((cJSON*)entry,"type","");
+        const char *name=jstr((cJSON*)entry,"nom","");
+        if(!strcmp(kind,"send")&&
+           !strcmp(type,"toggle")&&
+           (jint((cJSON*)entry,"id0",-1)==id||jint((cJSON*)entry,"id1",-1)==id)){
+            snprintf(action_name,sizeof(action_name),"%s",name);
+            snprintf(action_type,sizeof(action_type),"toggle");
+            snprintf(payload,sizeof(payload),"%d",jint((cJSON*)entry,"id1",-1)==id);
+            matched=true;break;
+        }
+        if(jint((cJSON*)entry,"id",-1)!=id)continue;
+        if(!strcmp(kind,"send")&&!strcmp(type,"button")){
+            snprintf(action_name,sizeof(action_name),"%s",name);
+            snprintf(action_type,sizeof(action_type),"button");
+            matched=true;break;
+        }
+        if(!strcmp(kind,"send_list")&&!strcmp(type,"list")){
+            char name_given[96]={0};
+            if(!query_param(req,"list",name_given,sizeof(name_given))||
+               strcmp(name_given,jstr((cJSON*)entry,"nomliste","")))break;
+            snprintf(action_name,sizeof(action_name),"%s",name_given);
+            snprintf(action_type,sizeof(action_type),"list");
+            snprintf(payload,sizeof(payload),"%s",name);
+            matched=true;break;
+        }
+        if(!strcmp(kind,"send_range")&&!strcmp(type,"range")){
+            if(!query_param(req,"value",payload,sizeof(payload)))break;
+            char *end=NULL;long number=strtol(payload,&end,10);
+            if(!*payload||!end||*end||
+               number<jint((cJSON*)entry,"min",0)||
+               number>jint((cJSON*)entry,"max",100))break;
+            snprintf(action_name,sizeof(action_name),"%s",name);
+            snprintf(action_type,sizeof(action_type),"range");
+            matched=true;break;
+        }
+        if(!strcmp(kind,"send_color")&&!strcmp(type,"color")){
+            char channels[3][8]={{0}};
+            const char *const fields[]={"r","g","b"};
+            bool valid=true;
+            for(int j=0;j<3;j++){
+                if(!query_param(req,fields[j],channels[j],sizeof(channels[j]))){
+                    valid=false;break;
+                }
+                char *end=NULL;long channel=strtol(channels[j],&end,10);
+                if(!*channels[j]||!end||*end||channel<0||channel>255){
+                    valid=false;break;
+                }
+            }
+            if(!valid)break;
+            snprintf(payload,sizeof(payload),"%s,%s,%s",
+                     channels[0],channels[1],channels[2]);
+            snprintf(action_name,sizeof(action_name),"%s",name);
+            snprintf(action_type,sizeof(action_type),"color");
+            matched=true;break;
+        }
+    }
+    cJSON_Delete(index);
+    if(!matched||!action_name[0]){
+        httpd_resp_send_err(req,HTTPD_404_NOT_FOUND,"Commande non programmee");
+        return ESP_FAIL;
+    }
+    bool success=mira_jeedom_actions_enabled()?
+        mira_jeedom_queue_local_action(action_name,action_type,payload):
+        mira_mqtt_publish_action(action_name,payload);
+    if(!success){
+        httpd_resp_set_status(req,"503 Service Unavailable");
+        return httpd_resp_sendstr(req,"Transport inactif");
+    }
+    httpd_resp_set_type(req,"text/plain");
+    return httpd_resp_sendstr(req,"OK");
 }
 static esp_err_t getlvgl(httpd_req_t *req) {
     if(!require_key(req))return ESP_FAIL;
