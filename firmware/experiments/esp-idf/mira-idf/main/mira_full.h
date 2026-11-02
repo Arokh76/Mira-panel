@@ -21,3 +21,15 @@ bool mira_full_enqueue_display_command(const char *key,const char *value);
 
 // Latest passive HTTP/MQTT value, or false if no value has arrived.
 bool mira_full_cached_state(const char *name,char *out,size_t cap);
+
+// ESP-IDF counterpart of Dimitri JSON-B1 diagnostics. cJSON has no
+// ArduinoJson garbage collector; track cache pressure and dropped inputs.
+typedef struct {
+    uint32_t state_cache_used;
+    uint32_t state_cache_capacity;
+    uint32_t state_unchanged;
+    uint32_t state_cache_evictions;
+    uint32_t state_queue_dropped;
+    uint32_t state_queue_pending;
+} mira_full_state_diagnostics_t;
+void mira_full_state_diagnostics(mira_full_state_diagnostics_t *out);
