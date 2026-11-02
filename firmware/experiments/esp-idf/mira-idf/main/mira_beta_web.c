@@ -716,7 +716,31 @@ static esp_err_t save_beta_wifi(httpd_req_t *req,cJSON *form){
         return html_err(req,HTTPD_400_BAD_REQUEST,"Paramètres Wi-Fi ou IPv4 invalides");
     if(result!=ESP_OK)
         return html_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Enregistrement Wi-Fi impossible");
-    return go_to(req,"/load?nav=wifi");
+    // Match beta network history without touching the rollback reseau.json.
+    mira_beta_network_t previous[MIRA_NET_MAX]={0};
+    size_t count=0;
+    int id=0;
+    if(mira_beta_networks_list(previous,&count,MIRA_NET_MAX)==ESP_OK){
+        for(size_t i=0;i<count;i++){
+            if(previous[i].id>=id)id=previous[i].id+1;
+            if(!strcmp(previous[i].ssid,ssid)){
+                id=previous[i].id;
+                break;
+            }
+        }
+    }
+    mira_beta_network_t profile={0};
+    profile.id=id;
+    snprintf(profile.ssid,sizeof(profile.ssid),"%s",ssid);
+    snprintf(profile.ip_mode,sizeof(profile.ip_mode),"%s",mode);
+    snprintf(profile.ip,sizeof(profile.ip),"%s",ip?ip:"");
+    snprintf(profile.mask,sizeof(profile.mask),"%s",mask?mask:"");
+    snprintf(profile.gateway,sizeof(profile.gateway),"%s",gw?gw:"");
+    snprintf(profile.dns1,sizeof(profile.dns1),"%s",dns1?dns1:"");
+    snprintf(profile.dns2,sizeof(profile.dns2),"%s",dns2?dns2:"");
+    result=mira_beta_networks_upsert(&profile,password);
+    if(result!=ESP_OK)ESP_LOGW(TAG,"Wi-Fi connected but not indexed: %s",esp_err_to_name(result));
+    return go_to(req,"/load?nav=listnetwork");
 }
 static esp_err_t save_beta_ap(httpd_req_t *req,cJSON *form){
     const char *password=field(form,"pass");
@@ -737,16 +761,80 @@ static esp_err_t save_beta_ap(httpd_req_t *req,cJSON *form){
     esp_restart();
     return answer;
 }
+static esp_err_t save_beta_network_update(httpd_req_t *req,cJSON *form){
+    int id=network_id(req);
+    mira_beta_network_t profile={0};
+    if(id<0||mira_beta_networks_get(id,&profile)!=ESP_OK)
+        return html_err(req,HTTPD_404_NOT_FOUND,"Réseau introuvable");
+    const char *ssid=field(form,"ssid"),*password=field(form,"pass");
+    const char *mode=field(form,"ip_mode");
+    if(!ssid||!*ssid||strlen(ssid)>32||!password||!mode)
+        return html_err(req,HTTPD_400_BAD_REQUEST,"Paramètres Wi-Fi incomplets");
+    snprintf(profile.ssid,sizeof(profile.ssid),"%s",ssid);
+    snprintf(profile.ip_mode,sizeof(profile.ip_mode),"%s",mode);
+    const char *const fields[]={"ip","mask","gateway","dns1","dns2"};
+    char *const values[]={profile.ip,profile.mask,profile.gateway,profile.dns1,profile.dns2};
+    const size_t sizes[]={sizeof(profile.ip),sizeof(profile.mask),sizeof(profile.gateway),
+                          sizeof(profile.dns1),sizeof(profile.dns2)};
+    for(size_t i=0;i<5;i++){
+        const char *value=field(form,fields[i]);
+        if(!value||strlen(value)>=sizes[i])
+            return html_err(req,HTTPD_400_BAD_REQUEST,"Adresse réseau invalide");
+        snprintf(values[i],sizes[i],"%s",value);
+    }
+    if(strcmp(mode,"auto")&&strcmp(mode,"fixed_auto")&&strcmp(mode,"manual"))
+        return html_err(req,HTTPD_400_BAD_REQUEST,"Mode IP invalide");
+    esp_err_t saved=mira_beta_networks_upsert(&profile,password);
+    if(saved!=ESP_OK)return html_err(req,HTTPD_400_BAD_REQUEST,"Réseau non enregistré");
+    return go_to(req,"/load?nav=listnetwork");
+}
+esp_err_t mira_beta_web_network_post(httpd_req_t *req){
+    if(!mira_beta_web_authorized(req))return ESP_FAIL;
+    int id=network_id(req);
+    char query[160]={0},action[20]={0};
+    if(id<0||httpd_req_get_url_query_str(req,query,sizeof(query))!=ESP_OK||
+       httpd_query_key_value(query,"action",action,sizeof(action))!=ESP_OK||
+       (strcmp(action,"remove")&&strcmp(action,"activate")))
+        return html_err(req,HTTPD_400_BAD_REQUEST,"Opération réseau invalide");
+    cJSON *body=read_form(req);
+    const char *nonce=body?field(body,"nonce"):NULL;
+    unsigned long parsed=0;
+    char trailing=0;
+    bool verified=nonce&&sscanf(nonce,"%lx%c",&parsed,&trailing)==1&&
+        parsed>0&&parsed<=UINT32_MAX&&(uint32_t)parsed==network_action_nonce&&
+        network_nonce_time>0&&esp_timer_get_time()-network_nonce_time<180000000LL;
+    if(body)cJSON_Delete(body);
+    if(!verified)return html_err(req,HTTPD_403_FORBIDDEN,"Confirmation réseau expirée");
+    network_action_nonce=0;network_nonce_time=0;
+    if(!strcmp(action,"remove")){
+        esp_err_t err=mira_beta_networks_remove(id);
+        if(err!=ESP_OK)return html_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Suppression réseau impossible");
+        return go_to(req,"/load?nav=listnetwork");
+    }
+    httpd_resp_set_type(req,"text/html; charset=utf-8");
+    esp_err_t sent=httpd_resp_sendstr(req,
+       "<!doctype html><meta charset=\"utf-8\"><h2>Changement de réseau</h2>"
+       "<p>Mira Panel applique le réseau enregistré.</p>");
+    vTaskDelay(pdMS_TO_TICKS(250));
+    esp_err_t err=mira_beta_networks_activate(id);
+    if(err!=ESP_OK)ESP_LOGW(TAG,"Activation réseau %d échouée: %s",id,esp_err_to_name(err));
+    return sent;
+}
 esp_err_t mira_beta_web_save(httpd_req_t *req){
     if(!mira_beta_web_authorized(req))return ESP_FAIL;
     char query[96]={0},config[24]={0};
-    if(httpd_req_get_url_query_str(req,query,sizeof(query))!=ESP_OK||
-       httpd_query_key_value(query,"config",config,sizeof(config))!=ESP_OK||
-       (strcmp(config,"params")&&strcmp(config,"wifi")&&strcmp(config,"AP")))
+    if(httpd_req_get_url_query_str(req,query,sizeof(query))!=ESP_OK)
+        return html_err(req,HTTPD_400_BAD_REQUEST,"Configuration beta manquante");
+    bool editing=httpd_query_key_value(query,"update",config,sizeof(config))==ESP_OK;
+    if(!editing)
+        (void)httpd_query_key_value(query,"config",config,sizeof(config));
+    if((editing&&strcmp(config,"wifi"))||
+       (!editing&&strcmp(config,"params")&&strcmp(config,"wifi")&&strcmp(config,"AP")))
         return html_err(req,HTTPD_400_BAD_REQUEST,"Configuration beta non prise en charge");
     cJSON *form=read_form(req);
     if(!form)return html_err(req,HTTPD_400_BAD_REQUEST,"Formulaire invalide");
-    esp_err_t err=!strcmp(config,"AP")?save_beta_ap(req,form):
+    esp_err_t err=editing?save_beta_network_update(req,form):
+                 !strcmp(config,"AP")?save_beta_ap(req,form):
                  !strcmp(config,"wifi")?save_beta_wifi(req,form):
                  field(form,"MQTT_Actif")?save_mqtt(req,form):save_urls(req,form);
     cJSON_Delete(form);
