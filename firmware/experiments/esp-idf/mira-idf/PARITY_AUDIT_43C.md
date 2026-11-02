@@ -18,6 +18,21 @@
 > veille, FPS, reboot). Les endpoints GPIO optionnels de l'Arduino ne sont
 > pas actifs sur la 4.3C et ne sont pas un obstacle.
 >
+> **Complément portage du 2 novembre (suite)** : HTTPS caméra ajouté avec
+> vérification CA Espressif, pour les snapshots JPEG et la première image
+> d'un flux MJPEG multipart. Une session MJPEG persistante (sans reconnexion
+> par image) et ses tests physiques restent à qualifier.
+> Les diagnostics IDF ont été déplacés sous `/recovery/mira` ; `/mira`
+> redirige vers Mira, et `POST /mira/state` exige maintenant une
+> authentification avant l'injection d'un état passif.
+> Les routes historiques `/api/checkupdate`, `GET /update`,
+> `/updatemodule` ont un équivalent sécurisé : la vérification HTTPS
+> accepte seulement le profil `waveshare-esp32s3-touch-lcd-4.3c-idf`
+> dans le manifeste GitHub. **Aucun OTA Arduino n'est sélectionné
+> automatiquement**. L'activation réelle de mise à jour automatique
+> reste conditionnée à la publication d'un binaire officiel IDF.
+> La version de référence IDF demeure expérimentale et n'est pas distribuée.
+>
 > Le dernier build doit être vérifié sur **son SHA exact** : un ancien build
 > réussi ne suffit pas à valider les nouveaux commits. N'attribuer le statut
 > "firmware prêt à tester" qu'après validation du build courant et cohérence
