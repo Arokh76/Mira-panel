@@ -16,6 +16,7 @@
 #include <ctype.h>
 #include "esp_log.h"
 #include "esp_spiffs.h"
+#include "esp_partition.h"
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"
 #include "esp_wifi.h"
@@ -1927,17 +1928,39 @@ void mira_full_ui_tick(void){
         }
     }
 }
+// Fresh-install safeguard: a full-chip erase leaves the entire SPIFFS
+// partition at 0xff. Mounting it needs a one-time filesystem initialization.
+// Never format on a mount failure unless the WHOLE partition is confirmed
+// blank; this preserves partially damaged or legacy Mira files for recovery.
+static bool spiffs_partition_is_blank(void){
+    const esp_partition_t *p=esp_partition_find_first(ESP_PARTITION_TYPE_DATA,
+                              ESP_PARTITION_SUBTYPE_DATA_SPIFFS,"spiffs");
+    if(!p)return false;
+    uint8_t block[4096];
+    for(size_t offset=0;offset<p->size;offset+=sizeof(block)){
+        const size_t n=(p->size-offset)<sizeof(block)?
+                       (p->size-offset):sizeof(block);
+        if(esp_partition_read(p,offset,block,n)!=ESP_OK)return false;
+        for(size_t i=0;i<n;i++)if(block[i]!=0xff)return false;
+    }
+    return true;
+}
 bool mira_full_storage_init(void){
     if(!state_queue)state_queue=xQueueCreate(24,sizeof(mira_state_update_t));
     if(!state_queue)ESP_LOGE(TAG,"State queue allocation failed");
+    const bool blank=spiffs_partition_is_blank();
     const esp_vfs_spiffs_conf_t cfg={
         .base_path="/spiffs",.partition_label="spiffs",
-        .max_files=4,.format_if_mount_failed=false
+        .max_files=4,.format_if_mount_failed=blank
     };
+    if(blank)ESP_LOGW(TAG,"Fresh flash: blank SPIFFS detected; initializing empty filesystem");
     esp_err_t err=esp_vfs_spiffs_register(&cfg);
     spiffs_ready=(err==ESP_OK);
-    if(!spiffs_ready)ESP_LOGW(TAG,"SPIFFS read failed (%s), no format, import disabled",esp_err_to_name(err));
-    else ESP_LOGI(TAG,"SPIFFS mounted non-destructively; original 0.7.37 JSON is preserved");
+    if(!spiffs_ready)
+        ESP_LOGW(TAG,"SPIFFS mount failed (%s); existing data left unchanged, import disabled",
+                 esp_err_to_name(err));
+    else ESP_LOGI(TAG,blank?"Fresh Mira SPIFFS ready for JSON import":
+                        "Existing Mira SPIFFS mounted without formatting");
     return spiffs_ready;
 }
 static esp_err_t page_get(httpd_req_t *req){
@@ -1946,7 +1969,7 @@ static esp_err_t page_get(httpd_req_t *req){
         "<title>Mira LVGL 9.6 - Import JSON</title><h2>Mira LVGL 9.6 / Waveshare 4.3C</h2>"
         "<p>Rendu experimental des widgets reels depuis <code>/miralvgl.json</code> (firmware 0.7.37).</p>"
         "<p>Transport MQTT natif disponible apres configuration. API HTTP Jeedom historique, camera et widgets composites en cours de portage.</p>"
-        "<p><b>La partition SPIFFS n'est jamais formatée automatiquement.</b></p>"
+        "<p><b>Les anciennes donnees SPIFFS sont conservees. Seule une partition entierement vierge est initialisee.</b></p>"
         "<p>Charge uniquement un export JSON Mira contenant le tableau <code>lvgl</code>.</p>"
         "<h3>Jeedom - cle de l'ecran deja configuree dans le plugin</h3>"
         "<input id='jkey' type='password' placeholder='Cle Jeedom existante'>"
