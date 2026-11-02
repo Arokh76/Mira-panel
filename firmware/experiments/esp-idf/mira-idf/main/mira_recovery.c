@@ -3,6 +3,8 @@
 #include "mira_jeedom.h"
 #include "mira_setup_access.h"
 #include "mira_beta_setup.h"
+#include "mira_beta_web.h"
+#include "mira_jeedom.h"
 #include "mira_beta_captive_dns.h"
 // Isolated IDF test recovery AP. Uses raw .bin POST, not multipart/form-data.
 // Partition layout must match Mira's current Waveshare OTA partition layout.
@@ -159,8 +161,12 @@ static esp_err_t index_get(httpd_req_t *req) {
             else if (strcmp(requested, "off") == 0) pending_cache_request = 0;
         }
     }
-    httpd_resp_set_type(req, "text/html; charset=utf-8");
-    return httpd_resp_send(req, recovery_page, HTTPD_RESP_USE_STRLEN);
+    return mira_beta_web_home(req);
+}
+static esp_err_t recovery_debug_get(httpd_req_t *req){
+    if(!mira_beta_web_authorized(req))return ESP_FAIL;
+    httpd_resp_set_type(req,"text/html; charset=utf-8");
+    return httpd_resp_send(req,recovery_page,HTTPD_RESP_USE_STRLEN);
 }
 static esp_err_t shadow_on_get(httpd_req_t *req) {
     pending_shadow_request = 1;
@@ -231,6 +237,15 @@ static esp_err_t perf_get(httpd_req_t *req) {
     return httpd_resp_sendstr(req, text);
 }
 static esp_err_t update_post(httpd_req_t *req) {
+    // Original beta browser POST /update?send=ID, /update?send_range, etc.
+    // Only a local authenticated user can invoke this command route.
+    char query[500]={0};
+    if(httpd_req_get_url_query_str(req,query,sizeof(query))==ESP_OK&&
+       (strstr(query,"send=")||strstr(query,"send_range=")||
+        strstr(query,"send_list=")||strstr(query,"send_color="))){
+        if(!mira_beta_web_authorized(req))return ESP_FAIL;
+        return mira_jeedom_beta_web_action(req);
+    }
     if(!mira_setup_require_ap(req))return ESP_FAIL;
     const esp_partition_t *target = esp_ota_get_next_update_partition(NULL);
     if (!target || req->content_len <= 0 || req->content_len > target->size) {
@@ -760,6 +775,7 @@ esp_err_t mira_recovery_init(void) {
     httpd_handle_t httpd = NULL;
     ESP_RETURN_ON_ERROR(httpd_start(&httpd, &conf), TAG, "HTTP start");
     httpd_uri_t root = {.uri="/", .method=HTTP_GET, .handler=index_get};
+    httpd_uri_t debug = {.uri="/recovery", .method=HTTP_GET, .handler=recovery_debug_get};
     httpd_uri_t perf = {.uri="/perf", .method=HTTP_GET, .handler=perf_get};
     httpd_uri_t scroll_classic = {.uri="/scroll/classic", .method=HTTP_GET, .handler=scroll_classic_get};
     httpd_uri_t scroll_virtual = {.uri="/scroll/virtual", .method=HTTP_GET, .handler=scroll_virtual_get};
@@ -772,6 +788,7 @@ esp_err_t mira_recovery_init(void) {
     httpd_uri_t wifi_post={.uri="/mira/wifi",.method=HTTP_POST,.handler=wifi_profile_post};
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &root), TAG, "HTTP root");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &perf), TAG, "HTTP perf");
+    register_optional_route(httpd,&debug);
     // Prioritize OTA recovery: register it before experimental routes.
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &ota), TAG, "HTTP OTA");
     register_optional_route(httpd, &scroll_classic);
