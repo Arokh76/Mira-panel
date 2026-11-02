@@ -1,4 +1,4 @@
-// Mira Panel ESP-IDF + LVGL 9.6 scrolling performance baseline.
+// Mira Panel 0.7.37 full UI port on Waveshare 7 STD / ESP-IDF 5.5.6.
 // All display hardware details isolated in mira_display.c.
 #include <inttypes.h>
 #include <stdint.h>
@@ -73,7 +73,7 @@ static void lvgl_loop(void *arg) {
     }
 }
 void app_main(void) {
-    ESP_LOGI(TAG,"Mira native UI 0.7.37 -> ESP-IDF + LVGL %d.%d.%d on Waveshare 4.3C",
+    ESP_LOGI(TAG,"Mira native UI 0.7.37 -> ESP-IDF + LVGL %d.%d.%d on Waveshare 7 STD",
              LVGL_VERSION_MAJOR,LVGL_VERSION_MINOR,LVGL_VERSION_PATCH);
     ESP_LOGW(TAG,"EXPERIMENTAL Mira port: Jeedom/MQTT transports present, composite widgets, camera and hardware stability still require validation");
     mira_full_storage_init(); // no format, preserve original SPIFFS
@@ -81,7 +81,7 @@ void app_main(void) {
     ESP_ERROR_CHECK(mira_mqtt_init()); // native optional MQTT transport, read NVS settings
     ESP_ERROR_CHECK(mira_jeedom_action_init()); // queued HTTP actions, never block LVGL
     ESP_ERROR_CHECK(mira_camera_init()); // background RGB24 BMP snapshots, no LVGL in network task
-    ESP_ERROR_CHECK(mira_display_init());  // 4.3C known-good 12MHz RGB + GT911
+    ESP_ERROR_CHECK(mira_display_init());  // 7-inch validated 13MHz CH422G + GT911
     mira_full_ui_create(mira_display_lvgl());
     BaseType_t ok=xTaskCreatePinnedToCore(lvgl_loop,"mira_lvgl",8192,NULL,5,NULL,1);
     ESP_ERROR_CHECK(ok==pdPASS?ESP_OK:ESP_ERR_NO_MEM);
