@@ -35,7 +35,7 @@
 
 #define MIRA_WIDTH 800
 #define MIRA_HEIGHT 480
-#define NAV_H 52
+#define NAV_H 50
 #define CONTENT_H (MIRA_HEIGHT - NAV_H)
 #define MAX_WIDGETS 64
 #define JSON_MAX 49152
@@ -1615,7 +1615,7 @@ void mira_full_ui_create(lv_display_t *disp){
         lv_obj_t *bt=lv_button_create(nav);
         favorite_btn[i]=bt;
         lv_obj_set_pos(bt,1+i*200,1);
-        lv_obj_set_size(bt,200,50);
+        lv_obj_set_size(bt,199,48);
         lv_obj_set_style_bg_opa(bt,i==0?LV_OPA_70:LV_OPA_TRANSP,0);
         lv_obj_set_style_bg_color(bt,lv_color_hex(0x155A75),0);
         lv_obj_set_style_border_width(bt,0,0);
