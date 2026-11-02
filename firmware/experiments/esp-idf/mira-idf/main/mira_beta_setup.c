@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include "nvs.h"
 #include "esp_wifi.h"
+#include "lwip/ip4_addr.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
@@ -211,17 +212,34 @@ static esp_err_t save_post(httpd_req_t *req){
             httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"SSID ou mot de passe invalide");
             return ESP_FAIL;
         }
-        // The original wizard allows an IP; never quietly ignore a requested
-        // static address while the IDF static-IP editor is not ported.
-        if(ip[0]&&strcmp(ip,"Auto")&&strcmp(ip,"auto")&&strcmp(ip,"DHCP")){
-            httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,
-                "Pour ce premier test, utiliser Auto (DHCP). Configuration IP fixe encore en portage.");
-            return ESP_FAIL;
+        // Match beta first-run "Auto" or requested IPv4. As on the beta,
+        // a requested IP uses a DHCP lease to discover mask/gateway/DNS,
+        // then replaces only the client address on that same subnet.
+        const bool auto_ip=!ip[0]||!strcasecmp(ip,"Auto")||!strcasecmp(ip,"DHCP");
+        if(!auto_ip){
+            ip4_addr_t requested={0};
+            if(!ip4addr_aton(ip,&requested)||!requested.addr||
+               requested.addr==0xffffffffu||ip4_addr_isloopback(&requested)||
+               ip4_addr_ismulticast(&requested)){
+                httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,
+                                    "Adresse IP fixe invalide");
+                return ESP_FAIL;
+            }
         }
         wifi_config_t sta={0};
         memcpy(sta.sta.ssid,ssid,strlen(ssid));
         memcpy(sta.sta.password,password,strlen(password));
-        esp_err_t err=esp_wifi_set_config(WIFI_IF_STA,&sta);
+        // Persist the optional beta first-boot IP before joining Wi-Fi.
+        // Recovery validates the DHCP subnet before applying this address.
+        nvs_handle_t nv;
+        esp_err_t err=nvs_open("mira_idf_net",NVS_READWRITE,&nv);
+        if(err==ESP_OK){
+            err=auto_ip?nvs_erase_key(nv,"setup_ip"):nvs_set_str(nv,"setup_ip",ip);
+            if(auto_ip&&err==ESP_ERR_NVS_NOT_FOUND)err=ESP_OK;
+            if(err==ESP_OK)err=nvs_commit(nv);
+            nvs_close(nv);
+        }
+        if(err==ESP_OK)err=esp_wifi_set_config(WIFI_IF_STA,&sta);
         memset(password,0,sizeof(password));
         if(err!=ESP_OK){
             ESP_LOGE(TAG,"Wi-Fi profile save failed: %s",esp_err_to_name(err));
