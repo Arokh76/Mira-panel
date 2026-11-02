@@ -768,7 +768,9 @@ esp_err_t mira_recovery_init(void) {
     // a black screen + Wi-Fi reboot loop (ESP_ERR_HTTPD_HANDLERS_FULL).
     conf.max_uri_handlers = 64;
     conf.uri_match_fn = httpd_uri_match_wildcard;
-    conf.stack_size = 6144;
+    // Beta HTML templates, JSON status pages and multipart OTA need deeper
+    // handler call chains than the initial diagnostic web server.
+    conf.stack_size = 10240;
     conf.recv_wait_timeout = 15;
     ESP_LOGI(TAG, "HTTP URI capacity=%u, registered routes=9",
              (unsigned)conf.max_uri_handlers);
