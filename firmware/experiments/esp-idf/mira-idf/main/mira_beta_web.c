@@ -29,7 +29,7 @@ static const char *TAG="mira-beta-web";
 static esp_err_t html_err(httpd_req_t *req,httpd_err_code_t code,const char *msg){
     return httpd_resp_send_err(req,code,msg);
 }
-static bool authorized(httpd_req_t *req){
+bool mira_beta_web_authorized(httpd_req_t *req){
     nvs_handle_t nv;
     char key[97]={0};
     size_t key_len=sizeof(key);
@@ -299,6 +299,16 @@ static esp_err_t replacement(httpd_req_t *r,const char *name){
         snprintf(state,sizeof(state),"IP " IPSTR " | RSSI %d dBm",IP2STR(&ip.ip),(int)ap.rssi);
         return escaped(r,state);
     }
+    if(!strcmp(name,"VERSION"))return chunk(r,"IDF 4.3C beta");
+    if(!strcmp(name,"LOCALIP")){
+        esp_netif_t *netif=esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+        esp_netif_ip_info_t ip={0};
+        if(!netif||esp_netif_get_ip_info(netif,&ip)!=ESP_OK)
+            return chunk(r,"Non connecté");
+        char label[25]={0};
+        snprintf(label,sizeof(label),IPSTR,IP2STR(&ip.ip));
+        return escaped(r,label);
+    }
     if(!strcmp(name,"APP"))return chunk(r,"Mira Panel");
     if(!strcmp(name,"LIGHTCOLOR"))return chunk(r,"#7193A0");
     if(!strcmp(name,"DARKCOLOR"))return chunk(r,"#1E5064");
@@ -375,13 +385,14 @@ static esp_err_t render(httpd_req_t *r,const char *page){
     return httpd_resp_send_chunk(r,NULL,0);
 }
 esp_err_t mira_beta_web_load(httpd_req_t *req){
-    if(!authorized(req))return ESP_FAIL;
+    if(!mira_beta_web_authorized(req))return ESP_FAIL;
     char query[128]={0},nav[24]="params";
     if(httpd_req_get_url_query_str(req,query,sizeof(query))==ESP_OK)
         (void)httpd_query_key_value(query,"nav",nav,sizeof(nav));
     if(!strcmp(nav,"params"))return render(req,mira_beta_params_html);
     if(!strcmp(nav,"mqtt"))return render(req,mira_beta_mqtt_html);
     if(!strcmp(nav,"wifi"))return render(req,mira_beta_wifi_manager_html);
+    if(!strcmp(nav,"system"))return render(req,mira_beta_system_html);
     return html_err(req,HTTPD_404_NOT_FOUND,"Page beta pas encore portee");
 }
 static esp_err_t go_to(httpd_req_t *req,const char *nav){
@@ -391,7 +402,7 @@ static esp_err_t go_to(httpd_req_t *req,const char *nav){
     return httpd_resp_sendstr(req,"OK");
 }
 esp_err_t mira_beta_web_display_save(httpd_req_t *req){
-    if(!authorized(req))return ESP_FAIL;
+    if(!mira_beta_web_authorized(req))return ESP_FAIL;
     cJSON *form=read_form(req);
     if(!form)return html_err(req,HTTPD_400_BAD_REQUEST,"Formulaire d'affichage invalide");
     static const struct {const char *form,*key;unsigned max;unsigned min;} numbers[]={
@@ -534,7 +545,7 @@ static esp_err_t save_beta_wifi(httpd_req_t *req,cJSON *form){
     return go_to(req,"/load?nav=wifi");
 }
 esp_err_t mira_beta_web_save(httpd_req_t *req){
-    if(!authorized(req))return ESP_FAIL;
+    if(!mira_beta_web_authorized(req))return ESP_FAIL;
     char query[96]={0},config[24]={0};
     if(httpd_req_get_url_query_str(req,query,sizeof(query))!=ESP_OK||
        httpd_query_key_value(query,"config",config,sizeof(config))!=ESP_OK||
