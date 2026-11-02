@@ -22,6 +22,10 @@ pairs = {
     "HTML_Parametres.h": "mira_beta_params_html",
     "HTML_MQTT.h": "mira_beta_mqtt_html",
     "HTML_ManageurWiFi.h": "mira_beta_wifi_manager_html",
+    "HTML_Donnees.h": "mira_beta_data_html",
+    "HTML_ConfigAP.h": "mira_beta_config_ap_html",
+    "HTML_ReseauxEnreg.h": "mira_beta_known_networks_html",
+    "HTML_Message.h": "mira_beta_message_html",
 }
 
 
@@ -60,7 +64,8 @@ for route in ('mira_beta_web_home(req)', 'mira_jeedom_beta_web_action(req)',
 assert 'mira_beta_web_load(req)' in setup, "Missing beta /load bridge"
 for marker in ('mira_jeedom_render_beta_actions(r)', 'mira_beta_index_html',
                'mira_beta_params_html', 'mira_beta_mqtt_html',
-               'mira_beta_wifi_manager_html', 'mira_beta_system_html'):
+               'mira_beta_wifi_manager_html', 'mira_beta_system_html',
+               'mira_beta_data_html', 'mira_beta_config_ap_html'):
     assert marker in handlers, f"Missing page handler: {marker}"
 for marker in ('uri="/events"', 'mira_jeedom_beta_web_action',
                'mira_jeedom_render_beta_actions'):
