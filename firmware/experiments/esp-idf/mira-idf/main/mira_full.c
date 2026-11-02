@@ -2084,7 +2084,13 @@ static void build_config(void){
         if(cJSON_IsObject(it)){
             const uint8_t before=widget_n;
             make_widget(it,home_info,&seen);
-            if(widget_n>before)apply_free_layout(it,&widgets[widget_n-1]);
+            if(widget_n>before){
+                mira_widget_t *w=&widgets[widget_n-1];
+                apply_free_layout(it,w);
+                if(!strcmp(w->type,"info"))
+                    mira_decorate_info(w,str(it,"icon","auto"),
+                        str(it,"labelMode","auto"),str(it,"layout","auto"));
+            }
         }
     }
     widget_count=(uint32_t)widget_n;
@@ -2777,7 +2783,8 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
             if(!shown||strcmp(shown,display)){
                 lv_label_set_text(w->value_label,display);
                 if(!strcmp(w->type,"info")){
-                    mira_fit_info_value(w->value_label,w->card);
+                    if(w->info_icon)mira_fit_icon_info_value(w);
+                    else mira_fit_info_value(w->value_label,w->card);
                     scroll_cache_invalidate((uint8_t)(w-widgets));
                 }
             }
