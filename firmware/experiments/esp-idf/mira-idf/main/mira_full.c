@@ -2639,7 +2639,39 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                             lv_label_set_text(w->fields[n],playing?"En lecture":
                                               paused?"En pause":"État non disponible");
                         }else if(n!=6||!media)
-                            lv_label_set_text(w->fields[n],msg->value);
+                            lv_label_set_text(w->fields[n],
+                                              !media&&!*msg->value?"--":msg->value);
+                        if(!media&&n>=4&&n<=6){
+                            // Beta only displays battery gauges for values
+                            // that EXPLICITLY contain a percent sign.
+                            const bool has_percent=strchr(msg->value,'%')!=NULL;
+                            const int row=n-4;
+                            bool active=true;
+                            if(row){
+                                const int extra=row-1;
+                                active=*msg->value&&strcmp(msg->value,"--")!=0;
+                                w->energy_extra_active[extra]=active;
+                                if(w->energy_extra_names[extra]){
+                                    if(active)lv_obj_remove_flag(w->energy_extra_names[extra],LV_OBJ_FLAG_HIDDEN);
+                                    else lv_obj_add_flag(w->energy_extra_names[extra],LV_OBJ_FLAG_HIDDEN);
+                                }
+                                if(active)lv_obj_remove_flag(w->fields[n],LV_OBJ_FLAG_HIDDEN);
+                                else lv_obj_add_flag(w->fields[n],LV_OBJ_FLAG_HIDDEN);
+                                const int extra_rows=w->energy_extra_active[1]?2:
+                                                     (w->energy_extra_active[0]?1:0);
+                                lv_obj_set_height(w->card,344+47*extra_rows);
+                            }
+                            if(w->energy_gauge[row]){
+                                const bool show=active&&has_percent;
+                                if(show)lv_obj_remove_flag(w->energy_gauge[row],LV_OBJ_FLAG_HIDDEN);
+                                else lv_obj_add_flag(w->energy_gauge[row],LV_OBJ_FLAG_HIDDEN);
+                                int percent=atoi(msg->value);
+                                if(percent<0)percent=0;
+                                if(percent>100)percent=100;
+                                lv_bar_set_value(w->energy_gauge[row],
+                                                 show?percent:0,LV_ANIM_OFF);
+                            }
+                        }
                         if(media){
                             if(n==6){
                                 const uint8_t index=(uint8_t)(w-widgets);
