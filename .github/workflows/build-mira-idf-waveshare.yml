@@ -41,7 +41,7 @@ jobs:
           grep -Fq 'ESP_ERROR_CHECK(mira_recovery_init())' "$ROOT/main/app_main.c"
           grep -Fq '0x610000, 0x9E0000' "$ROOT/partitions.csv"
           grep -Fq '0x310000, 0x300000' "$ROOT/partitions.csv"
-          grep -Fq 'conf.max_uri_handlers = 48;' "$ROOT/main/mira_recovery.c"
+          grep -Fq 'conf.max_uri_handlers = 64;' "$ROOT/main/mira_recovery.c"
           grep -Fq 'mira_beta_setup_register_captive(httpd)' "$ROOT/main/mira_recovery.c"
           grep -Fq 'mira_beta_captive_dns_start()' "$ROOT/main/mira_recovery.c"
           ! grep -Fq 'esp_vfs_spiffs_format' "$ROOT/main/mira_full.c"
