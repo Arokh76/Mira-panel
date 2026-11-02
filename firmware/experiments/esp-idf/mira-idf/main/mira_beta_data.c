@@ -84,7 +84,19 @@ static esp_err_t do_scope(const char *scope){
     if(!strcmp(scope,"rstnetwork")){
         // Never restore the old imported Wi-Fi credentials after reset.
         if(!erase_named_file("/spiffs/reseau.json"))return ESP_FAIL;
-        clear_namespace("mira_idf_net");
+        // The beta's network reset retains its separate AP configuration.
+        // Do not erase mira_idf_net wholesale (it also stores ap_ip/ap_enabled).
+        nvs_handle_t net;
+        if(nvs_open("mira_idf_net",NVS_READWRITE,&net)==ESP_OK){
+            static const char *const keys[]={
+                "legacy_wifi","web_mode","web_ip","web_mask","web_gw",
+                "web_dns1","web_dns2","setup_ip"
+            };
+            for(size_t i=0;i<sizeof(keys)/sizeof(keys[0]);i++)
+                (void)nvs_erase_key(net,keys[i]);
+            (void)nvs_commit(net);
+            nvs_close(net);
+        }
         wifi_config_t empty={0};
         esp_err_t e=esp_wifi_disconnect();
         if(e!=ESP_OK && e!=ESP_ERR_WIFI_NOT_CONNECT)return e;
