@@ -15,3 +15,5 @@ void mira_full_request_reload(void);
 // HTTP settings handlers only signal; LVGL tree and backlight change on UI task.
 void mira_full_request_settings_reload(void);
 bool mira_full_enqueue_state(const char *name,const char *value);
+// Beta Display MQTT control: parsed by LVGL task, never by MQTT callback.
+bool mira_full_enqueue_display_command(const char *key,const char *value);
