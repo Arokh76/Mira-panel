@@ -1936,14 +1936,20 @@ static bool spiffs_partition_is_blank(void){
     const esp_partition_t *p=esp_partition_find_first(ESP_PARTITION_TYPE_DATA,
                               ESP_PARTITION_SUBTYPE_DATA_SPIFFS,"spiffs");
     if(!p)return false;
-    uint8_t block[4096];
-    for(size_t offset=0;offset<p->size;offset+=sizeof(block)){
-        const size_t n=(p->size-offset)<sizeof(block)?
-                       (p->size-offset):sizeof(block);
-        if(esp_partition_read(p,offset,block,n)!=ESP_OK)return false;
-        for(size_t i=0;i<n;i++)if(block[i]!=0xff)return false;
+    // app_main runs with a limited stack: allocate the sector-sized
+    // inspection buffer transiently instead of placing 4 KB on its stack.
+    const size_t block_size=4096;
+    uint8_t *block=malloc(block_size);
+    if(!block)return false;
+    bool empty=true;
+    for(size_t offset=0;offset<p->size&&empty;offset+=block_size){
+        const size_t n=(p->size-offset)<block_size?
+                       (p->size-offset):block_size;
+        if(esp_partition_read(p,offset,block,n)!=ESP_OK){empty=false;break;}
+        for(size_t i=0;i<n;i++)if(block[i]!=0xff){empty=false;break;}
     }
-    return true;
+    free(block);
+    return empty;
 }
 bool mira_full_storage_init(void){
     if(!state_queue)state_queue=xQueueCreate(24,sizeof(mira_state_update_t));
