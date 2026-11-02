@@ -1636,6 +1636,62 @@ static esp_err_t mira_health_get(httpd_req_t *req){
     httpd_resp_set_hdr(req,"Cache-Control","no-store");
     return httpd_resp_sendstr(req,result);
 }
+// Beta /sync/toggle: Jeedom synchronizes a switch passively by command ID.
+// Never publish an actuator command in response to this HTTP request.
+static esp_err_t sync_toggle_get(httpd_req_t *req){
+    if(!require_key(req))return ESP_FAIL;
+    char text_id[16]={0};
+    if(!query_param(req,"id",text_id,sizeof(text_id))){
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"ID manquant");
+        return ESP_FAIL;
+    }
+    size_t len=strlen(text_id);
+    if(len==0||len>6){
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"ID invalide");
+        return ESP_FAIL;
+    }
+    for(size_t i=0;i<len;i++){
+        if(!isdigit((unsigned char)text_id[i])){
+            httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"ID invalide");
+            return ESP_FAIL;
+        }
+    }
+    long id=strtol(text_id,NULL,10);
+    if(id<1||id>4096){
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"ID invalide");
+        return ESP_FAIL;
+    }
+    char *raw=read_config(NULL);
+    cJSON *index=raw?index_from_config(raw):NULL;
+    free(raw);
+    if(!index){
+        httpd_resp_send_err(req,HTTPD_404_NOT_FOUND,"Index absent");
+        return ESP_FAIL;
+    }
+    const cJSON *actions=cJSON_GetObjectItemCaseSensitive(index,"actions");
+    const cJSON *entry=NULL;
+    char name[96]={0},value[2]={0};
+    cJSON_ArrayForEach(entry,actions){
+        if(strcmp(jstr((cJSON*)entry,"type",""),"toggle"))continue;
+        int off=jint((cJSON*)entry,"id0",-1);
+        int on=jint((cJSON*)entry,"id1",-1);
+        if(id!=off&&id!=on)continue;
+        snprintf(name,sizeof(name),"%s",jstr((cJSON*)entry,"nom",""));
+        snprintf(value,sizeof(value),"%s",id==on?"1":"0");
+        break;
+    }
+    cJSON_Delete(index);
+    if(!*name){
+        httpd_resp_send_err(req,HTTPD_404_NOT_FOUND,"Interrupteur inconnu");
+        return ESP_FAIL;
+    }
+    if(!mira_full_enqueue_state(name,value)){
+        httpd_resp_set_status(req,"503 Service Unavailable");
+        return httpd_resp_sendstr(req,"File d'etats pleine");
+    }
+    httpd_resp_set_type(req,"text/plain");
+    return httpd_resp_sendstr(req,"OK");
+}
 static esp_err_t legacy_reboot_get(httpd_req_t *req){
     if(!require_key(req))return ESP_FAIL;
     esp_err_t sent=httpd_resp_sendstr(req,"OK");
@@ -1673,6 +1729,7 @@ void mira_jeedom_register_http(httpd_handle_t server) {
         {.uri="/navfavorites",.method=HTTP_POST,.handler=nav_favorites_post},
         {.uri="/mira-health",.method=HTTP_GET,.handler=mira_health_get},
         {.uri="/reboot",.method=HTTP_GET,.handler=legacy_reboot_get},
+        {.uri="/sync/toggle",.method=HTTP_GET,.handler=sync_toggle_get},
     };
     for(size_t i=0;i<sizeof(routes)/sizeof(routes[0]);i++) {
         esp_err_t err=httpd_register_uri_handler(server,&routes[i]);
