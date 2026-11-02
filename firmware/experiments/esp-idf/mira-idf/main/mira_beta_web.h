@@ -9,3 +9,6 @@ esp_err_t mira_beta_web_display_save(httpd_req_t *req);
 
 // Shared by beta System OTA and pages; enforces the original admin password.
 bool mira_beta_web_authorized(httpd_req_t *req);
+
+// Serve exact beta HTML_Index page with real Jeedom command controls.
+esp_err_t mira_beta_web_home(httpd_req_t *req);
