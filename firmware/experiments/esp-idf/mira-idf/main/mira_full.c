@@ -2334,7 +2334,11 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
             char display[200];
             if(*w->unit)snprintf(display,sizeof(display),"%s %s",msg->value,w->unit);
             else snprintf(display,sizeof(display),"%s",msg->value);
-            lv_label_set_text(w->value_label,display);
+            const char *shown=lv_label_get_text(w->value_label);
+            if(!shown||strcmp(shown,display)){
+                lv_label_set_text(w->value_label,display);
+                if(!strcmp(w->type,"info"))mira_fit_info_value(w->value_label,w->card);
+            }
         }
         suppress_events=false;
         // One Jeedom state may be represented on several Mira pages.
