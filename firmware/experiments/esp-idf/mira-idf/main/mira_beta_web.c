@@ -5,6 +5,9 @@
 #include "mira_beta_web_pages.h"
 #include "mira_full.h"
 #include "mira_mqtt.h"
+#include "mira_recovery.h"
+#include "esp_wifi.h"
+#include "esp_netif.h"
 #include "cJSON.h"
 #include "nvs.h"
 #include "mbedtls/base64.h"
@@ -236,12 +239,66 @@ static unsigned nvs_number(const char *ns,const char *key,unsigned fallback){
     nvs_close(nv);
     return v;
 }
+static esp_err_t wifi_choices(httpd_req_t *req){
+    if(chunk(req,"<label for=\"RS\">Réseaux détectés</label><select id=\"RS\" name=\"RS\" class=\"box\" onchange=\"Click(this.value)\"><option value=\"\">Saisir le SSID manuellement</option>")!=ESP_OK)
+        return ESP_FAIL;
+    wifi_scan_config_t scan={0};
+    if(esp_wifi_scan_start(&scan,true)==ESP_OK){
+        wifi_ap_record_t records[10]={0};
+        uint16_t count=10;
+        if(esp_wifi_scan_get_ap_records(&count,records)==ESP_OK){
+            for(uint16_t i=0;i<count;i++){
+                char ssid[33]={0};
+                memcpy(ssid,records[i].ssid,32);
+                if(!ssid[0])continue;
+                if(chunk(req,"<option value=\"")!=ESP_OK||escaped(req,ssid)!=ESP_OK||
+                   chunk(req,"\">")!=ESP_OK||escaped(req,ssid)!=ESP_OK||
+                   chunk(req,"</option>")!=ESP_OK)return ESP_FAIL;
+            }
+        }
+    }
+    return chunk(req,"</select>");
+}
 static esp_err_t replacement(httpd_req_t *r,const char *name){
     static const struct {const char *slot,*key;unsigned fallback;} display[]={
         {"DISPLAYDAY","day_pct",85},{"DISPLAYNIGHT","night_pct",20},
         {"DISPLAYSLEEPTIMEOUT","sleep_delay",120},{"DISPLAYSLEEPBRIGHT","sleep_light",8},
         {"DISPLAYNIGHTCHECKED","night_auto",0},{"DISPLAYCLOCKCHECKED","sleep_clock",1}
     };
+    if(!strcmp(name,"SCANRESEAUX"))return wifi_choices(r);
+    if(!strcmp(name,"SSID")){
+        wifi_config_t sta={0};
+        char ssid[33]={0};
+        if(esp_wifi_get_config(WIFI_IF_STA,&sta)==ESP_OK)
+            memcpy(ssid,sta.sta.ssid,sizeof(sta.sta.ssid));
+        return escaped(r,ssid);
+    }
+    if(!strcmp(name,"IPMODE")){
+        char value[24];
+        nvs_text("mira_idf_net","web_mode","auto",value,sizeof(value));
+        return escaped(r,value);
+    }
+    static const struct {const char *slot,*key;} network_fields[]={
+        {"IP","web_ip"},{"MASK","web_mask"},{"GATEWAY","web_gw"},
+        {"DNS1","web_dns1"},{"DNS2","web_dns2"}
+    };
+    for(size_t i=0;i<sizeof(network_fields)/sizeof(network_fields[0]);i++){
+        if(!strcmp(name,network_fields[i].slot)){
+            char value[40]={0};
+            nvs_text("mira_idf_net",network_fields[i].key,"",value,sizeof(value));
+            return escaped(r,value);
+        }
+    }
+    if(!strcmp(name,"WIFIACTIVE")){
+        wifi_ap_record_t ap={0};
+        if(esp_wifi_sta_get_ap_info(&ap)!=ESP_OK)return chunk(r,"Wi-Fi non connecté");
+        esp_netif_t *netif=esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+        esp_netif_ip_info_t ip={0};
+        if(!netif||esp_netif_get_ip_info(netif,&ip)!=ESP_OK)return chunk(r,"Wi-Fi connecté");
+        char state[130]={0};
+        snprintf(state,sizeof(state),"IP " IPSTR " | RSSI %d dBm",IP2STR(&ip.ip),(int)ap.rssi);
+        return escaped(r,state);
+    }
     if(!strcmp(name,"APP"))return chunk(r,"Mira Panel");
     if(!strcmp(name,"LIGHTCOLOR"))return chunk(r,"#7193A0");
     if(!strcmp(name,"DARKCOLOR"))return chunk(r,"#1E5064");
@@ -324,6 +381,7 @@ esp_err_t mira_beta_web_load(httpd_req_t *req){
         (void)httpd_query_key_value(query,"nav",nav,sizeof(nav));
     if(!strcmp(nav,"params"))return render(req,mira_beta_params_html);
     if(!strcmp(nav,"mqtt"))return render(req,mira_beta_mqtt_html);
+    if(!strcmp(nav,"wifi"))return render(req,mira_beta_wifi_manager_html);
     return html_err(req,HTTPD_404_NOT_FOUND,"Page beta pas encore portee");
 }
 static esp_err_t go_to(httpd_req_t *req,const char *nav){
@@ -456,16 +514,36 @@ static esp_err_t save_urls(httpd_req_t *req,cJSON *form){
     }else cJSON_Delete(root);
     return go_to(req,"/load?nav=params");
 }
+static esp_err_t save_beta_wifi(httpd_req_t *req,cJSON *form){
+    const char *ssid=field(form,"ssid");
+    const char *password=field(form,"pass");
+    const char *mode=field(form,"ip_mode");
+    const char *ip=field(form,"ip");
+    const char *mask=field(form,"mask");
+    const char *gw=field(form,"gateway");
+    const char *dns1=field(form,"dns1");
+    const char *dns2=field(form,"dns2");
+    if(!ssid||!password||!mode)
+        return html_err(req,HTTPD_400_BAD_REQUEST,"Formulaire réseau incomplet");
+    esp_err_t result=mira_recovery_save_beta_wifi(ssid,password,mode,
+        ip?ip:"",mask?mask:"",gw?gw:"",dns1?dns1:"",dns2?dns2:"");
+    if(result==ESP_ERR_INVALID_ARG)
+        return html_err(req,HTTPD_400_BAD_REQUEST,"Paramètres Wi-Fi ou IPv4 invalides");
+    if(result!=ESP_OK)
+        return html_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Enregistrement Wi-Fi impossible");
+    return go_to(req,"/load?nav=wifi");
+}
 esp_err_t mira_beta_web_save(httpd_req_t *req){
     if(!authorized(req))return ESP_FAIL;
     char query[96]={0},config[24]={0};
     if(httpd_req_get_url_query_str(req,query,sizeof(query))!=ESP_OK||
        httpd_query_key_value(query,"config",config,sizeof(config))!=ESP_OK||
-       strcmp(config,"params"))
+       (strcmp(config,"params")&&strcmp(config,"wifi")))
         return html_err(req,HTTPD_400_BAD_REQUEST,"Configuration beta non prise en charge");
     cJSON *form=read_form(req);
     if(!form)return html_err(req,HTTPD_400_BAD_REQUEST,"Formulaire invalide");
-    esp_err_t err=field(form,"MQTT_Actif")?save_mqtt(req,form):save_urls(req,form);
+    esp_err_t err=!strcmp(config,"wifi")?save_beta_wifi(req,form):
+                 field(form,"MQTT_Actif")?save_mqtt(req,form):save_urls(req,form);
     cJSON_Delete(form);
     return err;
 }
