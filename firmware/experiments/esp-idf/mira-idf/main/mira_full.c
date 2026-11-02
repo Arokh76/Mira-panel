@@ -4,6 +4,7 @@
 // All LVGL access is kept on the LVGL task. HTTP may only set reload_pending.
 #include "mira_full.h"
 #include "mira_french_font.h"
+#include "mira_info_glyphs.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -114,6 +115,7 @@ static uint32_t camera_last_update;
 typedef struct {
     char name[96], unit[24], type[24], value[160];
     lv_obj_t *card,*control,*value_label,*info_status;
+    lv_obj_t *info_icon,*info_name;
     lv_obj_t *thermostat_temperature,*thermostat_mode,*thermostat_mode_select;
     lv_obj_t *color_saturation,*color_brightness,*color_preview;
     lv_obj_t *color_knob;
@@ -1093,6 +1095,7 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
             w->card=card(pg,width,height);
             lv_obj_set_style_pad_all(w->card,4,0);
             lv_obj_t *nm=label(w->card,display,0xA8B2B8,&mira_font_fr_16);
+            w->info_name=nm;
             lv_obj_set_size(nm,width-16,34);
             lv_obj_set_style_text_align(nm,LV_TEXT_ALIGN_CENTER,0);
             lv_obj_align(nm,LV_ALIGN_TOP_MID,0,home_tile?12:1);
@@ -1114,7 +1117,7 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         bool wide=!strcmp(layout,"wide");
         w->card=card(pg,wide?786:cw,wide?56:36);
         make_flex(w->card,LV_FLEX_FLOW_ROW,wide?LV_FLEX_ALIGN_SPACE_BETWEEN:LV_FLEX_ALIGN_CENTER,LV_FLEX_ALIGN_CENTER);
-        label(w->card,display,0xA8B2B8,&mira_font_fr_16);
+        w->info_name=label(w->card,display,0xA8B2B8,&mira_font_fr_16);
         char value[198];snprintf(value,sizeof(value),"%s %s",*w->value?w->value:"--",w->unit);
         w->value_label=label(w->card,value,0x22BEEA,&lv_font_montserrat_20);
         mira_fit_info_value(w->value_label,w->card);
