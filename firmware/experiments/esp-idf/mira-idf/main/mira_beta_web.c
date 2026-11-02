@@ -13,6 +13,9 @@
 #include "mbedtls/base64.h"
 #include "esp_log.h"
 #include "esp_err.h"
+#include "esp_system.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -299,7 +302,7 @@ static esp_err_t replacement(httpd_req_t *r,const char *name){
         snprintf(state,sizeof(state),"IP " IPSTR " | RSSI %d dBm",IP2STR(&ip.ip),(int)ap.rssi);
         return escaped(r,state);
     }
-    if(!strcmp(name,"VERSION"))return chunk(r,"IDF 4.3C beta");
+    if(!strcmp(name,"VERSION"))return chunk(r,"0.7.37-IDF-beta");
     if(!strcmp(name,"LOCALIP")){
         esp_netif_t *netif=esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
         esp_netif_ip_info_t ip={0};
@@ -393,6 +396,13 @@ esp_err_t mira_beta_web_load(httpd_req_t *req){
     if(!strcmp(nav,"mqtt"))return render(req,mira_beta_mqtt_html);
     if(!strcmp(nav,"wifi"))return render(req,mira_beta_wifi_manager_html);
     if(!strcmp(nav,"system"))return render(req,mira_beta_system_html);
+    if(!strcmp(nav,"reboot")){
+        httpd_resp_set_type(req,"text/plain; charset=utf-8");
+        esp_err_t result=httpd_resp_sendstr(req,"Redémarrage de Mira Panel...");
+        vTaskDelay(pdMS_TO_TICKS(450));
+        esp_restart();
+        return result;
+    }
     return html_err(req,HTTPD_404_NOT_FOUND,"Page beta pas encore portee");
 }
 static esp_err_t go_to(httpd_req_t *req,const char *nav){
