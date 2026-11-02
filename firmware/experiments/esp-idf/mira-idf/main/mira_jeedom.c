@@ -66,7 +66,8 @@ static bool decode_url(char *value) {
     return true;
 }
 static bool query_param(httpd_req_t *req,const char *name,char *dst,size_t cap) {
-    char query[600];
+    // Free-layout widgets can carry coordinates, labels and URL-encoded values.
+    char query[2048];
     if(httpd_req_get_url_query_str(req,query,sizeof(query))!=ESP_OK)return false;
     char encoded[512];
     if(httpd_query_key_value(query,name,encoded,sizeof(encoded))!=ESP_OK)return false;
