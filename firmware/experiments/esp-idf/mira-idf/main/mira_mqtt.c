@@ -3,6 +3,7 @@
 #include "mira_mqtt.h"
 #include "mira_full.h"
 #include "mira_setup_access.h"
+#include "mira_legacy_cipher.h"
 #include "mqtt_client.h"
 #include "nvs.h"
 #include "cJSON.h"
@@ -84,6 +85,88 @@ static void start_client(void) {
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_mqtt_client_register_event(client,ESP_EVENT_ANY_ID,mqtt_event,NULL));
     if(esp_mqtt_client_start(client)!=ESP_OK)stop_client();
 }
+// Migrate the ORIGINAL beta MQTT parameters once, without rewriting params.json.
+// Native NVS settings always have precedence over old SPIFFS data.
+static void import_beta_mqtt_config(void){
+    FILE *fp=fopen("/spiffs/params.json","rb");
+    if(!fp)return;
+    if(fseek(fp,0,SEEK_END)!=0){fclose(fp);return;}
+    long size=ftell(fp);
+    if(size<2||size>32768||fseek(fp,0,SEEK_SET)!=0){fclose(fp);return;}
+    char *buf=malloc((size_t)size+1);
+    if(!buf){fclose(fp);return;}
+    size_t n=fread(buf,1,(size_t)size,fp);
+    fclose(fp);
+    if(n!=(size_t)size){free(buf);return;}
+    buf[n]=0;
+    cJSON *root=cJSON_ParseWithLength(buf,n);
+    free(buf);
+    const cJSON *params=root?cJSON_GetObjectItemCaseSensitive(root,"params"):NULL;
+    if(!cJSON_IsArray(params)){if(root)cJSON_Delete(root);return;}
+    nvs_handle_t nv;
+    if(nvs_open("mira_idf_mqtt",NVS_READWRITE,&nv)!=ESP_OK){
+        cJSON_Delete(root);return;
+    }
+    unsigned imported=0;
+    const cJSON *item=NULL;
+    cJSON_ArrayForEach(item,params){
+        const cJSON *p=cJSON_GetObjectItemCaseSensitive(item,"param");
+        const cJSON *v=cJSON_GetObjectItemCaseSensitive(item,"value");
+        const cJSON *t=cJSON_GetObjectItemCaseSensitive(item,"type");
+        if(!cJSON_IsString(p)||!cJSON_IsString(v)||!p->valuestring||!v->valuestring)continue;
+        const char *legacy=p->valuestring;
+        const char *stored=v->valuestring;
+        if(!*stored||!strcmp(stored,"null")||strlen(stored)>768)continue;
+        const char *key=NULL;
+        unsigned size_limit=0;
+        if(!strcmp(legacy,"MQTT_Nom")){key="screen";size_limit=48;}
+        else if(!strcmp(legacy,"MQTT_Serveur")){key="host";size_limit=128;}
+        else if(!strcmp(legacy,"MQTT_Utilisateur")){key="username";size_limit=64;}
+        else if(!strcmp(legacy,"MQTT_Mot_de_passe")){key="secret";size_limit=96;}
+        else if(strcmp(legacy,"MQTT_Port")&&strcmp(legacy,"MQTT_Actif"))continue;
+        char plaintext[769]={0};
+        const char *value=stored;
+        if(cJSON_IsString(t)&&t->valuestring&&!strcmp(t->valuestring,"crypted-text")){
+            if(!mira_legacy_decrypt(stored,plaintext,sizeof(plaintext)))continue;
+            value=plaintext;
+        }
+        if(key){
+            size_t used=strlen(value),found=0;
+            if(used>=size_limit)goto clear_value;
+            if(!strcmp(key,"screen")){
+                if(!used)goto clear_value;
+                for(const char *q=value;*q;q++)
+                    if(*q=='/'||*q=='#'||*q=='+')goto clear_value;
+            }
+            if(nvs_get_str(nv,key,NULL,&found)==ESP_ERR_NVS_NOT_FOUND &&
+               nvs_set_str(nv,key,value)==ESP_OK)imported++;
+        }else if(!strcmp(legacy,"MQTT_Port")){
+            unsigned long port=0;
+            char *end=NULL;
+            port=strtoul(value,&end,10);
+            uint16_t old=0;
+            if(end!=value&&!*end&&port>=1&&port<=65535 &&
+               nvs_get_u16(nv,"port",&old)==ESP_ERR_NVS_NOT_FOUND &&
+               nvs_set_u16(nv,"port",(uint16_t)port)==ESP_OK)imported++;
+        }else if(!strcmp(legacy,"MQTT_Actif")){
+            uint8_t old=0;
+            if((!strcmp(value,"1")||!strcmp(value,"0")||
+                !strcasecmp(value,"true")||!strcasecmp(value,"false")) &&
+               nvs_get_u8(nv,"enabled",&old)==ESP_ERR_NVS_NOT_FOUND &&
+               nvs_set_u8(nv,"enabled",
+                   (uint8_t)(!strcmp(value,"1")||!strcasecmp(value,"true")))==ESP_OK)imported++;
+        }
+clear_value:
+        memset(plaintext,0,sizeof(plaintext));
+    }
+    if(imported&&nvs_commit(nv)!=ESP_OK)
+        ESP_LOGW(TAG,"Legacy MQTT import could not be committed");
+    else if(imported)
+        ESP_LOGI(TAG,"Migrated %u beta MQTT settings into native NVS",imported);
+    nvs_close(nv);
+    cJSON_Delete(root);
+}
+
 static void read_config(void) {
     snprintf(screen_name,sizeof(screen_name),"panel");
     nvs_handle_t nvs;
@@ -100,6 +183,7 @@ static void read_config(void) {
     refresh_prefixes();
 }
 esp_err_t mira_mqtt_init(void) {
+    import_beta_mqtt_config();
     read_config();
     start_client();
     ESP_LOGI(TAG,"Native MQTT %s (disabled until provisioned)",enabled?"enabled":"disabled");
