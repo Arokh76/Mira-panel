@@ -602,6 +602,92 @@ static esp_err_t param_get(httpd_req_t *req){
     httpd_resp_set_type(req,"text/plain");
     return httpd_resp_sendstr(req,err==ESP_OK?value:(!strcmp(name,"Jeedom")?"1":"Null"));
 }
+// The original beta implements /get?key=...&toggle|info|infofa|id|param=...
+// Read-only: this endpoint MUST NOT issue an actuator or a Jeedom command.
+static esp_err_t beta_get(httpd_req_t *req){
+    if(!require_key(req))return ESP_FAIL;
+    char kind[16]={0},argument[64]={0};
+    static const char *const selectors[]={"toggle","toogle","info","infofa","id","param"};
+    for(size_t i=0;i<sizeof(selectors)/sizeof(selectors[0]);i++){
+        if(query_param(req,selectors[i],argument,sizeof(argument))){
+            snprintf(kind,sizeof(kind),"%s",selectors[i]);
+            break;
+        }
+    }
+    httpd_resp_set_type(req,"text/plain; charset=utf-8");
+    if(!*kind)return httpd_resp_sendstr(req,"Null");
+    if(!strcmp(kind,"param")){
+        if(!supported_jeedom_param(argument))return httpd_resp_sendstr(req,"Null");
+        const mira_display_field_t *df=display_field(argument);
+        if(df){
+            char display_value[48]={0};
+            if(display_field_read(df,display_value,sizeof(display_value)))
+                return httpd_resp_sendstr(req,display_value);
+            return httpd_resp_sendstr(req,"Null");
+        }
+        nvs_handle_t nv;
+        if(nvs_open("mira_idf_jeed",NVS_READONLY,&nv)==ESP_OK){
+            char result[256]={0};size_t z=sizeof(result);
+            esp_err_t got=nvs_get_str(nv,argument,result,&z);
+            nvs_close(nv);
+            if(got==ESP_OK){
+                esp_err_t sent=httpd_resp_sendstr(req,result);
+                memset(result,0,sizeof(result));
+                return sent;
+            }
+        }
+        return httpd_resp_sendstr(req,"Null");
+    }
+    char *raw=read_config(NULL);
+    cJSON *index=raw?index_from_config(raw):NULL;
+    free(raw);
+    if(!index)return httpd_resp_sendstr(req,"Null");
+    cJSON *actions=cJSON_GetObjectItemCaseSensitive(index,"actions");
+    const cJSON *entry=NULL;
+    if(!strcmp(kind,"id")){
+        esp_err_t out=httpd_resp_send_chunk(req,"Mira Panel: Identite des commandes.\n\n",HTTPD_RESP_USE_STRLEN);
+        cJSON_ArrayForEach(entry,actions){
+            const char *type=jstr((cJSON*)entry,"type","");
+            const char *name=jstr((cJSON*)entry,"nom","");
+            char line[340];
+            if(!strcmp(type,"toggle")){
+                snprintf(line,sizeof(line),"Nom: %s\nID %s: %d\nID %s: %d\n\n",name,
+                    jstr((cJSON*)entry,"value0","Off"),jint((cJSON*)entry,"id0",0),
+                    jstr((cJSON*)entry,"value1","On"),jint((cJSON*)entry,"id1",0));
+            }else if(!strcmp(type,"button")||!strcmp(type,"info")){
+                snprintf(line,sizeof(line),"Nom: %s\nID: %d\n\n",name,jint((cJSON*)entry,"id",0));
+            }else continue;
+            if(out==ESP_OK)out=httpd_resp_send_chunk(req,line,HTTPD_RESP_USE_STRLEN);
+        }
+        cJSON_Delete(index);
+        if(out!=ESP_OK)return out;
+        return httpd_resp_send_chunk(req,NULL,0);
+    }
+    char *end=NULL;
+    long local=strtol(argument,&end,10);
+    if(!argument[0]||!end||*end||local<1||local>4096){
+        cJSON_Delete(index);return httpd_resp_sendstr(req,"Null");
+    }
+    char result[160]={0};
+    bool found=false;
+    const bool is_toggle=!strcmp(kind,"toggle")||!strcmp(kind,"toogle");
+    cJSON_ArrayForEach(entry,actions){
+        const char *type=jstr((cJSON*)entry,"type","");
+        bool match=is_toggle?!strcmp(type,"toggle")&&
+            (jint((cJSON*)entry,"id0",-1)==local||jint((cJSON*)entry,"id1",-1)==local):
+            !strcmp(type,"info")&&jint((cJSON*)entry,"id",-1)==local;
+        if(!match)continue;
+        const char *name=jstr((cJSON*)entry,"nom","");
+        found=mira_full_cached_state(name,result,sizeof(result));
+        if(!found&&!is_toggle){
+            const char *initial=jstr((cJSON*)entry,"value","");
+            if(*initial){snprintf(result,sizeof(result),"%s",initial);found=true;}
+        }
+        break;
+    }
+    cJSON_Delete(index);
+    return httpd_resp_sendstr(req,found?result:"Null");
+}
 // Mirror beta /getallparams: return original params.json untouched when it
 // exists; on a clean IDF install synthesize the equivalent {params:[...]} from
 // the native NVS values so the Jeedom configuration editor can read them.
@@ -1704,6 +1790,7 @@ void mira_jeedom_register_http(httpd_handle_t server) {
     const httpd_uri_t routes[]={
         {.uri="/getlvgl",.method=HTTP_GET,.handler=getlvgl},
         {.uri="/getindex",.method=HTTP_GET,.handler=getindex},
+        {.uri="/get",.method=HTTP_GET,.handler=beta_get},
         {.uri="/testmodule",.method=HTTP_GET,.handler=testmodule},
         {.uri="/getmodule",.method=HTTP_GET,.handler=getmodule},
         {.uri="/displayinfo",.method=HTTP_GET,.handler=displayinfo},
