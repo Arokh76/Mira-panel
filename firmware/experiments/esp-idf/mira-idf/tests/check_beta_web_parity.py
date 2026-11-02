@@ -98,4 +98,9 @@ assert "beta_lvgl_dirty=true;" in jeedom
 assert "rename(MIRA_JSON_TMP,MIRA_JSON_PATH)" in jeedom
 assert "mira_full_request_reload();" in jeedom
 print("PASS beta staged LVGL programming routes")
+# Arduino firmware-beta and ESP-IDF use different binary formats/configurations;
+# they must never share the same OTA manifest target, even on a 4.3C panel.
+assert "HARDWARE_PROFILE='waveshare-esp32s3-touch-lcd-4.3c-idf'" in native
+assert "HARDWARE_PROFILE='waveshare-esp32s3-touch-lcd-4.3c';" not in native
+print("PASS IDF-only OTA release target guard")
 print("PASS beta page/control route wiring")
