@@ -3,6 +3,7 @@
 #include "mira_jeedom.h"
 #include "mira_setup_access.h"
 #include "mira_beta_setup.h"
+#include "mira_beta_networks.h"
 #include "mira_beta_web.h"
 #include "mira_jeedom.h"
 #include "mira_beta_captive_dns.h"
@@ -819,6 +820,30 @@ esp_err_t mira_recovery_init(void) {
     }
     // A network explicitly deleted from the native beta profile list must
     // NOT be silently imported again from its read-only Arduino backup.
+    if(has_native_profiles&&have_sta){
+        // If the user deleted the active SSID in Mira's native list, do not
+        // resurrect it from Wi-Fi flash storage after a reboot.
+        mira_beta_network_t profiles[MIRA_NET_MAX]={0};
+        size_t count=0;
+        if(mira_beta_networks_list(profiles,&count,MIRA_NET_MAX)==ESP_OK){
+            bool listed=false;
+            size_t active_len=strnlen((const char*)saved_sta.sta.ssid,sizeof(saved_sta.sta.ssid));
+            for(size_t i=0;i<count;i++){
+                if(strlen(profiles[i].ssid)==active_len&&
+                   !memcmp(profiles[i].ssid,saved_sta.sta.ssid,active_len)){
+                    listed=true;break;
+                }
+            }
+            if(!listed){
+                wifi_config_t blank={0};
+                if(esp_wifi_set_config(WIFI_IF_STA,&blank)==ESP_OK){
+                    have_sta=false;
+                    memset(&saved_sta,0,sizeof(saved_sta));
+                    ESP_LOGI(TAG,"Previously deleted Wi-Fi profile not restored");
+                }
+            }
+        }
+    }
     if(!has_native_profiles&&(!have_sta || legacy_saved)){
         bool imported=restore_legacy_wifi_profile(!have_sta);
         if(imported&&!have_sta){
