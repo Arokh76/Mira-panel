@@ -622,6 +622,51 @@ static esp_err_t getallparams(httpd_req_t *req){
                     bool valid=cJSON_IsArray(params);
                     if(root)cJSON_Delete(root);
                     if(valid){
+                        // Keep the legacy JSON structure and encrypted secrets, but
+                        // overlay native IDF settings written after migration.
+                        // Do not expose plaintext Jeedom keys stored in NVS.
+                        root=cJSON_ParseWithLength(buf,n);
+                        cJSON *entries=root?cJSON_GetObjectItemCaseSensitive(root,"params"):NULL;
+                        bool changed=false;
+                        if(cJSON_IsArray(entries)){
+                            cJSON *entry=NULL;
+                            cJSON_ArrayForEach(entry,entries){
+                                const char *name=jstr(entry,"param","");
+                                if(!*name||strstr(name,"Key"))continue;
+                                char value[256]={0};
+                                bool have=false;
+                                const mira_display_field_t *display=display_field(name);
+                                if(display){
+                                    have=display_field_read(display,value,sizeof(value));
+                                }else if(supported_jeedom_param(name)){
+                                    nvs_handle_t nv;
+                                    if(nvs_open("mira_idf_jeed",NVS_READONLY,&nv)==ESP_OK){
+                                        size_t cap=sizeof(value);
+                                        have=nvs_get_str(nv,name,value,&cap)==ESP_OK;
+                                        nvs_close(nv);
+                                    }
+                                }
+                                if(have){
+                                    cJSON *newvalue=cJSON_CreateString(value);
+                                    if(newvalue){
+                                        cJSON_ReplaceItemInObjectCaseSensitive(entry,"value",newvalue);
+                                        changed=true;
+                                    }
+                                }
+                                memset(value,0,sizeof(value));
+                            }
+                        }
+                        if(changed){
+                            char *updated=cJSON_PrintUnformatted(root);
+                            if(updated){
+                                fclose(fp);
+                                httpd_resp_set_type(req,"application/json");
+                                esp_err_t out=httpd_resp_sendstr(req,updated);
+                                free(updated);cJSON_Delete(root);free(buf);
+                                return out;
+                            }
+                        }
+                        if(root)cJSON_Delete(root);
                         fclose(fp);
                         httpd_resp_set_type(req,"application/json");
                         esp_err_t out=httpd_resp_send(req,buf,n);
