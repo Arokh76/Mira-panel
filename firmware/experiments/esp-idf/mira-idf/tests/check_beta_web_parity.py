@@ -110,7 +110,13 @@ config = (idf.parent / "sdkconfig.defaults").read_text(encoding="utf-8")
 assert 'strncmp(url,"https://",8)' in camera, "HTTPS URLs not supported"
 assert '.crt_bundle_attach=esp_crt_bundle_attach' in camera, "Camera TLS CA trust disabled"
 assert 'CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y' in config, "CA bundle missing"
-assert 'decode_mjpeg_first_frame' in camera, "Multipart JPEG decoder missing"
+assert 'decode_mjpeg_first_frame' in camera, "Multipart JPEG fallback missing"
+assert 'camera_stream_mjpeg(url,current)' in camera, "Persistent MJPEG worker missing"
+assert 'camera_stream_current(expected)' in camera, "Live camera cancellation missing"
+assert 'decode_jpeg_buffer(stream->jpeg,stream->used,&frame)' in camera, "Stream JPEG decoder missing"
+assert 'CAM_MAX_JPEG' in camera and '250000LL' in camera, "MJPEG memory/FPS limits missing"
+assert 'esp_http_client_is_complete_data_received(http)' in camera, "MJPEG EOF not handled"
+assert 'stream_detected=false;' in camera and 'stream_tested=false;' in camera, "Camera URL change not handled"
 print("PASS beta camera HTTPS/MJPEG compile configuration")
 # Normal routes must serve the actual beta, not the former experimental HTML.
 full = (idf / "mira_full.c").read_text(encoding="utf-8")
