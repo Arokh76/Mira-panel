@@ -32,6 +32,9 @@ static esp_err_t serve_page(httpd_req_t *req,const char *page){
     httpd_resp_set_type(req,"text/html; charset=utf-8");
     return httpd_resp_sendstr(req,page);
 }
+bool mira_beta_setup_unconfigured(void){
+    return !has_local_key()||!has_wifi_station();
+}
 bool mira_beta_setup_root(httpd_req_t *req){
     if(!has_local_key()){
         (void)serve_page(req,mira_beta_key_page);
