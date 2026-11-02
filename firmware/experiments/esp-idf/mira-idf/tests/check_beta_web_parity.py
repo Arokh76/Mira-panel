@@ -119,4 +119,15 @@ assert '.uri="/mira"' in full and 'legacy_mira_get' in full
 assert 'if(!mira_beta_web_authorized(req))return ESP_FAIL;' in full
 assert 'mira_full_enqueue_state(name->valuestring,val)' in full
 print("PASS production UI routing and authenticated state injection")
+# Only a published IDF-specific target may result in 'available'; the
+# Arduino firmware target must never be silently reused.
+update = (idf / "mira_beta_update.c").read_text(encoding="utf-8")
+assert 'MIRA_IDF_PROFILE "waveshare-esp32s3-touch-lcd-4.3c-idf"' in update
+assert 'if(!valid||newer==-2)' in update
+assert 'esp_crt_bundle_attach' in update
+assert 'mira_beta_update_check' in setup
+assert 'mira_beta_update_start' in setup
+assert 'mira_beta_update_legacy_page' in setup
+assert 'mira_beta_update.c' in (idf / "CMakeLists.txt").read_text(encoding="utf-8")
+print("PASS IDF-only update routes and trusted manifest HTTPS")
 print("PASS beta page/control route wiring")
