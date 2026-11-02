@@ -154,6 +154,20 @@ assert 'scroll_cache_prepare(i)' in full and 'scroll_cache_activate(false)' in f
 assert 'lv_snapshot_take_to_buf' in full and 'LV_COLOR_FORMAT_RGB565' in full
 assert 'scroll_cache_reset(); // release every LVGL image reference' in full
 print("PASS original palette, 3 themes, hue wheel, dynamic text and safe RGB565 scroll cache")
+# Multimedia is the native Spotify-like beta widget, NOT a key/value grid.
+album = (idf / "mira_album_art.c").read_text(encoding="utf-8")
+assert 'lv_obj_set_size(w->card,786,558)' not in full or 'w->card=card(pg,786,558)' in full
+assert 'media_add_button(w,0,261,LV_SYMBOL_PREV)' in full
+assert 'media_add_button(w,1,357,LV_SYMBOL_PLAY)' in full
+assert 'media_add_button(w,2,453,LV_SYMBOL_NEXT)' in full
+assert 'media_artwork_image' in full and 'artwork_poll();' in full
+assert 'mira_album_art_request(index,msg->value)' in full
+assert 'https://i.scdn.co/image/' in album
+assert 'https://mosaic.scdn.co/' in album
+assert 'https://yt3.googleusercontent.com/' in album
+assert 'mira_camera_fetch_url(url,&frame)' in album
+assert 'mira_album_art.c' in (idf / "CMakeLists.txt").read_text(encoding="utf-8")
+print("PASS beta media art/cover layout with HTTPS background decoding")
 # Only a published IDF-specific target may result in 'available'; the
 # Arduino firmware target must never be silently reused.
 update = (idf / "mira_beta_update.c").read_text(encoding="utf-8")
