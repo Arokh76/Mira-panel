@@ -817,8 +817,14 @@ static void scroll_cache_prepare(uint8_t idx){
        (t->ready&&!t->dirty))return;
     lv_obj_t *card_obj=widget->card;
     lv_obj_update_layout(card_obj);
-    uint32_t need_alpha=lv_snapshot_buf_size_needed(card_obj,LV_COLOR_FORMAT_ARGB8888);
-    uint32_t need_rgb=lv_snapshot_buf_size_needed(card_obj,LV_COLOR_FORMAT_RGB565);
+    // LVGL 9.6 removed lv_snapshot_buf_size_needed(). Allow bounded
+    // 16px margins for outlines and align every image row to 32 pixels.
+    const int32_t w=lv_obj_get_width(card_obj),h=lv_obj_get_height(card_obj);
+    if(w<=0||h<=0||w>800||h>428){t->disabled=true;return;}
+    const uint32_t stride=((uint32_t)(w+32)+31u)&~31u;
+    const uint32_t full_h=(uint32_t)h+32u;
+    const uint32_t need_alpha=stride*full_h*4u+128u;
+    const uint32_t need_rgb=stride*full_h*2u+128u;
     if(!need_alpha||!need_rgb||need_alpha>480u*1024u||
        need_rgb>320u*1024u){t->disabled=true;return;}
     if(t->ready){
