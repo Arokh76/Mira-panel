@@ -102,3 +102,14 @@ Implémentations ajoutées sur la branche expérimentale 4,3″, sans modificati
 - Listes et toggles : les états Jeedom reconnaissent aussi les libellés français de la bêta et les indices numériques sans créer d'événements sortants.
 
 Ces changements ne touchent **pas** aux timings RGB 12 MHz, au GT911 ou au contrôleur CH32 du 4,3″. La validation de compilation et surtout les essais sur matériel constituent des étapes distinctes. Le pilote 7″ CH422G reste sur sa branche stable dédiée.
+
+## Branche parallèle Waveshare 7 STD — moteur Mira complet
+
+**Branche** : `experiment/mira-idf-full-ui-7`. C'est une branche de portage isolée depuis la version 4,3″ ; elle ne remplace et ne modifie **ni** `experiment/mira-idf-waveshare7-pclk13-stable` **ni** les releases 7″.
+
+- Le nouveau `main/mira_display.c` est la copie du pilote 7″ validé dans `experiment/mira-idf-waveshare7-pclk13-stable` : **13 MHz**, GT911 et séquence CH422G (adresses **0x24/0x38**, reset spécifique au 7″). Aucune initialisation RGB/IO-expander du 4,3″ n'est reprise.
+- Le reste du code (`mira_full`, `mira_jeedom`, `mira_recovery`, `mira_mqtt`, `mira_camera`, décodeur et fontes) provient du portage commun 4,3″. HTTP/Jeedom reste le mode **par défaut**, MQTT est une option avancée.
+- `MIRA_PANEL_7_INCH=1` identifie cette cible. La valeur logique de luminosité est conservée, mais **aucun PWM de rétroéclairage n'est activé** sur le 7″ : seul le CH422G validé garde le panneau alimenté. Le curseur de luminosité du 4,3″ est remplacé par un avertissement explicite dans Paramètres.
+- Le workflow `build-mira-idf-waveshare.yml` de cette branche déclenche une compilation ESP-IDF 5.5.6 sur les commits de la nouvelle branche, bloque un profil RGB différent de 13 MHz et fabrique des artefacts USB/OTA nommés `Mira_LVGL96_7_STD_*` ; ils ne peuvent ainsi pas être confondus avec les binaires du 4,3″.
+
+**Non validé sur matériel** : compatibilité du moteur LVGL avec les timings 7″ en charge réelle, flash USB/OTA, profil CH422G en contexte de veille, rendu des widgets et consommation mémoire. Ne pas utiliser cette branche pour remplacer un 7″ stable sans vérification sur matériel.
