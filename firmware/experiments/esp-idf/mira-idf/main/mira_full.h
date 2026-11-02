@@ -1,6 +1,7 @@
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 #include "lvgl.h"
 #include "esp_http_server.h"
 
@@ -17,3 +18,6 @@ void mira_full_request_settings_reload(void);
 bool mira_full_enqueue_state(const char *name,const char *value);
 // Beta Display MQTT control: parsed by LVGL task, never by MQTT callback.
 bool mira_full_enqueue_display_command(const char *key,const char *value);
+
+// Latest passive HTTP/MQTT value, or false if no value has arrived.
+bool mira_full_cached_state(const char *name,char *out,size_t cap);
