@@ -204,47 +204,6 @@ static cJSON *index_from_config(const char *json) {
                 cJSON_AddStringToObject(a,"unit",jstr((cJSON*)w,"unit",""));
                 cJSON_AddStringToObject(a,"value",jstr((cJSON*)w,"value",""));
             }
-        }else if((!strcmp(type,"title")||!strcmp(type,"text_index"))){
-            int size=jint((cJSON*)item,"size",20);
-            if(size<10)size=10;
-            if(size>72)size=72;
-            char style[90];
-            snprintf(style,sizeof(style),
-                     "<div style=\"padding:10px 0;font-size:%dpx\">",size);
-            any=true;
-            if((status=beta_html(req,style))!=ESP_OK||
-               (status=beta_html_escape(req,name))!=ESP_OK||
-               (status=beta_html(req,"</div>"))!=ESP_OK)break;
-        }else if(!strcmp(type,"inputbox")&&id>0){
-            any=true;
-            if((status=beta_html(req,"<label>"))!=ESP_OK||
-               (status=beta_html_escape(req,name))!=ESP_OK||
-               (status=beta_html(req,"</label><input class=\"inputbox\" type=\"text\" id=\""))!=ESP_OK||
-               (status=beta_html_id(req,id))!=ESP_OK||
-               (status=beta_html(req,"\" value=\""))!=ESP_OK||
-               (status=beta_html_value(req,name,jstr((cJSON*)item,"value","")))!=ESP_OK||
-               (status=beta_html(req,"\" onblur=\"InputBoxValidate(this)\"><br>"))!=ESP_OK)break;
-        }else if(!strcmp(type,"infofa")&&id>0){
-            any=true;
-            if((status=beta_html(req,"<div class=\"mira-info\">"))!=ESP_OK||
-               (status=beta_html_escape(req,name))!=ESP_OK||
-               (status=beta_html(req,": <i id=\""))!=ESP_OK||
-               (status=beta_html_id(req,id))!=ESP_OK||
-               (status=beta_html(req,"\" class=\""))!=ESP_OK||
-               (status=beta_html_value(req,name,jstr((cJSON*)item,"value","")))!=ESP_OK||
-               (status=beta_html(req,"\"></i></div>"))!=ESP_OK)break;
-        }else if(!strcmp(type,"color")&&id>0){
-            int red=jint((cJSON*)item,"r",0),green=jint((cJSON*)item,"g",0),blue=jint((cJSON*)item,"b",0);
-            if(red<0||red>255||green<0||green>255||blue<0||blue>255)continue;
-            char color[16];snprintf(color,sizeof(color),"#%02x%02x%02x",red,green,blue);
-            any=true;
-            if((status=beta_html(req,"<div class=\"FondBlanc_Color\">"))!=ESP_OK||
-               (status=beta_html_escape(req,name))!=ESP_OK||
-               (status=beta_html(req,"<br><input class=\"input_color\" type=\"color\" id=\""))!=ESP_OK||
-               (status=beta_html_id(req,id))!=ESP_OK||
-               (status=beta_html(req,"\" value=\""))!=ESP_OK||
-               (status=beta_html(req,color))!=ESP_OK||
-               (status=beta_html(req,"\" onchange=\"printColor(this,event)\"></div>"))!=ESP_OK)break;
         }else if(!strcmp(type,"toggle")){
             cJSON *a=cJSON_CreateObject();if(!a)continue;
             cJSON_AddNumberToObject(a,"id0",id++);
@@ -382,6 +341,47 @@ esp_err_t mira_jeedom_render_beta_actions(httpd_req_t *req){
                (status=beta_html(req,"\" onclick=\"Click(this)\">"))!=ESP_OK||
                (status=beta_html_escape(req,name))!=ESP_OK||
                (status=beta_html(req,"</button>"))!=ESP_OK)break;
+        }else if((!strcmp(type,"title")||!strcmp(type,"text_index"))){
+            int size=jint((cJSON*)item,"size",20);
+            if(size<10)size=10;
+            if(size>72)size=72;
+            char style[90];
+            snprintf(style,sizeof(style),
+                     "<div style=\"padding:10px 0;font-size:%dpx\">",size);
+            any=true;
+            if((status=beta_html(req,style))!=ESP_OK||
+               (status=beta_html_escape(req,name))!=ESP_OK||
+               (status=beta_html(req,"</div>"))!=ESP_OK)break;
+        }else if(!strcmp(type,"inputbox")&&id>0){
+            any=true;
+            if((status=beta_html(req,"<label>"))!=ESP_OK||
+               (status=beta_html_escape(req,name))!=ESP_OK||
+               (status=beta_html(req,"</label><input class=\"inputbox\" type=\"text\" id=\""))!=ESP_OK||
+               (status=beta_html_id(req,id))!=ESP_OK||
+               (status=beta_html(req,"\" value=\""))!=ESP_OK||
+               (status=beta_html_value(req,name,jstr((cJSON*)item,"value","")))!=ESP_OK||
+               (status=beta_html(req,"\" onblur=\"InputBoxValidate(this)\"><br>"))!=ESP_OK)break;
+        }else if(!strcmp(type,"infofa")&&id>0){
+            any=true;
+            if((status=beta_html(req,"<div class=\"mira-info\">"))!=ESP_OK||
+               (status=beta_html_escape(req,name))!=ESP_OK||
+               (status=beta_html(req,": <i id=\""))!=ESP_OK||
+               (status=beta_html_id(req,id))!=ESP_OK||
+               (status=beta_html(req,"\" class=\""))!=ESP_OK||
+               (status=beta_html_value(req,name,jstr((cJSON*)item,"value","")))!=ESP_OK||
+               (status=beta_html(req,"\"></i></div>"))!=ESP_OK)break;
+        }else if(!strcmp(type,"color")&&id>0){
+            int red=jint((cJSON*)item,"r",0),green=jint((cJSON*)item,"g",0),blue=jint((cJSON*)item,"b",0);
+            if(red<0||red>255||green<0||green>255||blue<0||blue>255)continue;
+            char color[16];snprintf(color,sizeof(color),"#%02x%02x%02x",red,green,blue);
+            any=true;
+            if((status=beta_html(req,"<div class=\"FondBlanc_Color\">"))!=ESP_OK||
+               (status=beta_html_escape(req,name))!=ESP_OK||
+               (status=beta_html(req,"<br><input class=\"input_color\" type=\"color\" id=\""))!=ESP_OK||
+               (status=beta_html_id(req,id))!=ESP_OK||
+               (status=beta_html(req,"\" value=\""))!=ESP_OK||
+               (status=beta_html(req,color))!=ESP_OK||
+               (status=beta_html(req,"\" onchange=\"printColor(this,event)\"></div>"))!=ESP_OK)break;
         }else if(!strcmp(type,"toggle")){
             int off=jint((cJSON*)item,"id0",-1),on=jint((cJSON*)item,"id1",-1);
             if(off<1||on<1)continue;
