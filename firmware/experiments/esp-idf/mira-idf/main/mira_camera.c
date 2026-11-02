@@ -89,6 +89,49 @@ static bool read_exact(esp_http_client_handle_t client,uint8_t *buf,size_t size)
     return n==size;
 }
 
+// Decode one bounded JPEG already assembled by either a snapshot or a
+// persistent MJPEG TCP session. Never touch LVGL from this worker.
+static bool decode_jpeg_buffer(const uint8_t *jpeg,size_t used,mira_camera_frame_t *out){
+    if(!jpeg||!out||used<60||used>CAM_MAX_JPEG||
+       jpeg[0]!=0xff||jpeg[1]!=0xd8||jpeg[used-2]!=0xff||jpeg[used-1]!=0xd9)
+        return false;
+    esp_jpeg_image_cfg_t config={
+        .indata=jpeg,
+        .indata_size=(uint32_t)used,
+        .out_format=JPEG_IMAGE_FORMAT_RGB565,
+        .out_scale=JPEG_IMAGE_SCALE_0,
+    };
+    esp_jpeg_image_output_t info={0};
+    bool fit=false;
+    for(int scale=0;scale<=3;scale++){
+        config.out_scale=(esp_jpeg_image_scale_t)scale;
+        memset(&info,0,sizeof(info));
+        if(esp_jpeg_get_image_info(&config,&info)!=ESP_OK)break;
+        if(info.width && info.height &&
+           info.width<=CAM_WIDTH && info.height<=CAM_HEIGHT &&
+           info.output_len>=(size_t)info.width*(size_t)info.height*2u &&
+           info.output_len<=(size_t)CAM_WIDTH*CAM_HEIGHT*2u) {
+            fit=true;break;
+        }
+    }
+    if(!fit)return false;
+    uint16_t *pixels=heap_caps_malloc(info.output_len,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!pixels){return false;}
+    config.outbuf=(uint8_t*)pixels;
+    config.outbuf_size=(uint32_t)info.output_len;
+    esp_jpeg_image_output_t decoded={0};
+    bool ok=esp_jpeg_decode(&config,&decoded)==ESP_OK&&
+            decoded.width==info.width && decoded.height==info.height &&
+            decoded.output_len>=(size_t)decoded.width*(size_t)decoded.height*2u &&
+            decoded.output_len<=info.output_len;
+    
+    if(!ok){heap_caps_free(pixels);return false;}
+    out->pixels=pixels;
+    out->width=decoded.width;
+    out->height=decoded.height;
+    return true;
+}
+
 // Read a complete JPEG (Content-Length or end-of-image marker), then decode
 // off the GUI task into a PSRAM RGB565 frame. Refuse oversized compressed
 // payloads or images that cannot be scaled to the 800x428 viewport.
@@ -141,41 +184,9 @@ static bool decode_jpeg(esp_http_client_handle_t http,const uint8_t *prefix,
     if(!complete||used<60||jpeg[0]!=0xff||jpeg[1]!=0xd8){
         heap_caps_free(jpeg);return false;
     }
-    esp_jpeg_image_cfg_t config={
-        .indata=jpeg,
-        .indata_size=(uint32_t)used,
-        .out_format=JPEG_IMAGE_FORMAT_RGB565,
-        .out_scale=JPEG_IMAGE_SCALE_0,
-    };
-    esp_jpeg_image_output_t info={0};
-    bool fit=false;
-    for(int scale=0;scale<=3;scale++){
-        config.out_scale=(esp_jpeg_image_scale_t)scale;
-        memset(&info,0,sizeof(info));
-        if(esp_jpeg_get_image_info(&config,&info)!=ESP_OK)break;
-        if(info.width && info.height &&
-           info.width<=CAM_WIDTH && info.height<=CAM_HEIGHT &&
-           info.output_len>=(size_t)info.width*(size_t)info.height*2u &&
-           info.output_len<=(size_t)CAM_WIDTH*CAM_HEIGHT*2u) {
-            fit=true;break;
-        }
-    }
-    if(!fit){heap_caps_free(jpeg);return false;}
-    uint16_t *pixels=heap_caps_malloc(info.output_len,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
-    if(!pixels){heap_caps_free(jpeg);return false;}
-    config.outbuf=(uint8_t*)pixels;
-    config.outbuf_size=(uint32_t)info.output_len;
-    esp_jpeg_image_output_t decoded={0};
-    bool ok=esp_jpeg_decode(&config,&decoded)==ESP_OK&&
-            decoded.width==info.width && decoded.height==info.height &&
-            decoded.output_len>=(size_t)decoded.width*(size_t)decoded.height*2u &&
-            decoded.output_len<=info.output_len;
+    bool ok=decode_jpeg_buffer(jpeg,used,out);
     heap_caps_free(jpeg);
-    if(!ok){heap_caps_free(pixels);return false;}
-    out->pixels=pixels;
-    out->width=decoded.width;
-    out->height=decoded.height;
-    return true;
+    return ok;
 }
 
 // Read one complete JPEG from a multipart MJPEG stream, bounded to 8 KB of
@@ -299,6 +310,141 @@ static bool fetch_snapshot(const char *url,mira_camera_frame_t *out){
     esp_http_client_cleanup(http);
     return ok;
 }
+// A MJPEG stream stays on one TCP/TLS connection until the user closes the
+// camera, the URL changes, or the camera stalls. JPEG bytes are kept in PSRAM
+// and scanned for SOI/EOI across arbitrary socket chunk boundaries.
+// Preserve all bytes after EOI: they may contain the next multipart frame.
+static bool camera_stream_current(uint32_t expected){
+    bool current;
+    xSemaphoreTake(lock,portMAX_DELAY);
+    current=enabled&&generation==expected;
+    xSemaphoreGive(lock);
+    return current;
+}
+static bool camera_stream_publish(mira_camera_frame_t *frame,uint32_t expected){
+    if(!frame||!frame->pixels)return false;
+    xSemaphoreTake(lock,portMAX_DELAY);
+    bool current=enabled&&generation==expected;
+    if(current){
+        if(latest.pixels)heap_caps_free(latest.pixels);
+        latest=*frame;
+        frame->pixels=NULL;
+        frame->width=frame->height=0;
+    }
+    xSemaphoreGive(lock);
+    return current;
+}
+typedef struct {
+    uint8_t *jpeg;
+    size_t used;
+    bool capturing;
+    bool last_ff;
+    size_t bytes_before_image;
+    uint32_t received;
+    uint32_t rejected;
+    int64_t last_frame_us;
+} mjpeg_decoder_t;
+static void mjpeg_append(mjpeg_decoder_t *stream,const uint8_t *src,
+                         size_t count,uint32_t expected){
+    for(size_t i=0;i<count;i++){
+        const uint8_t byte=src[i];
+        if(!stream->capturing){
+            if(stream->last_ff&&byte==0xd8){
+                stream->capturing=true;
+                stream->jpeg[0]=0xff;
+                stream->jpeg[1]=0xd8;
+                stream->used=2;
+            }else if(++stream->bytes_before_image>8192u && !stream->received){
+                // A bogus multipart or non-JPEG response must be rejected.
+                stream->bytes_before_image=8193u;
+            }
+            stream->last_ff=byte==0xff;
+            continue;
+        }
+        if(stream->used>=CAM_MAX_JPEG){
+            stream->rejected++;
+            stream->capturing=false;
+            stream->used=0;
+            stream->last_ff=false;
+            continue;
+        }
+        stream->jpeg[stream->used++]=byte;
+        if(stream->last_ff&&byte==0xd9){
+            const int64_t now=esp_timer_get_time();
+            // Decode no faster than 4fps: screen redraw and PSRAM traffic
+            // stay bounded even if the camera serves 25-30 MJPEG frames/s.
+            if(now-stream->last_frame_us>=250000LL){
+                mira_camera_frame_t frame={0};
+                if(decode_jpeg_buffer(stream->jpeg,stream->used,&frame)){
+                    if(camera_stream_publish(&frame,expected)){
+                        stream->received++;
+                        stream->last_frame_us=now;
+                    }
+                    if(frame.pixels)heap_caps_free(frame.pixels);
+                }else stream->rejected++;
+            }
+            stream->capturing=false;
+            stream->used=0;
+        }
+        stream->last_ff=byte==0xff;
+    }
+}
+// Result: -1=not MJPEG -> use normal BMP/JPEG snapshot path.
+// >=0 indicates an actual multipart stream was opened; its frame count is
+// returned, and the worker retries on loss with bounded reconnect backoff.
+static int camera_stream_mjpeg(const char *url,uint32_t expected){
+    esp_http_client_config_t cfg={
+        .url=url,.timeout_ms=3500,.disable_auto_redirect=true,
+        .crt_bundle_attach=esp_crt_bundle_attach
+    };
+    esp_http_client_handle_t http=esp_http_client_init(&cfg);
+    if(!http)return -1;
+    int frames=-1;
+    do{
+        if(esp_http_client_open(http,0)!=ESP_OK)break;
+        (void)esp_http_client_fetch_headers(http);
+        if(esp_http_client_get_status_code(http)!=200)break;
+        uint8_t first[4]={0};
+        if(!read_exact(http,first,sizeof(first)))break;
+        if(!((first[0]=='-'&&first[1]=='-')||
+             (first[0]=='\r'&&first[1]=='\n'&&first[2]=='-'&&first[3]=='-')))
+            break;
+        frames=0;
+        mjpeg_decoder_t stream={0};
+        stream.jpeg=heap_caps_malloc(CAM_MAX_JPEG,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+        if(!stream.jpeg){
+            ESP_LOGW(TAG,"Not enough PSRAM for persistent MJPEG session");
+            break;
+        }
+        mjpeg_append(&stream,first,sizeof(first),expected);
+        int64_t last_data=esp_timer_get_time();
+        while(camera_stream_current(expected)){
+            uint8_t bytes[2048];
+            int n=esp_http_client_read(http,(char*)bytes,sizeof(bytes));
+            if(n<0)break;
+            if(n==0){
+                if(esp_timer_get_time()-last_data>7000000LL||
+                   esp_http_client_is_complete_data_received(http))
+                    break;
+                vTaskDelay(pdMS_TO_TICKS(20));
+                continue;
+            }
+            last_data=esp_timer_get_time();
+            mjpeg_append(&stream,bytes,(size_t)n,expected);
+            if(stream.bytes_before_image>8192u&&!stream.received)break;
+            frames=(int)stream.received;
+            // Bound network loop's CPU consumption without opening a new HTTP
+            // connection for each JPEG. Cancellation is checked every chunk.
+            vTaskDelay(pdMS_TO_TICKS(1));
+        }
+        ESP_LOGI(TAG,"MJPEG session closed (%" PRIu32 " frames, %" PRIu32 " rejects)",
+                 stream.received,stream.rejected);
+        heap_caps_free(stream.jpeg);
+    }while(0);
+    esp_http_client_close(http);
+    esp_http_client_cleanup(http);
+    return frames;
+}
 static void camera_worker(void *unused) {
     (void)unused;
     char url[CAM_MAX_URL+1];
@@ -314,6 +460,22 @@ static void camera_worker(void *unused) {
         xSemaphoreGive(lock);
         if(!should_run){vTaskDelay(pdMS_TO_TICKS(150));continue;}
         if(current!=seen_generation){seen_generation=current;failures=0;}
+        // Detect a multipart stream once per URL, then stay connected and
+        // publish subsequent JPEGs on the same socket until stopped.
+        static bool stream_detected=false,stream_tested=false;
+        if(current!=seen_generation){stream_detected=false;stream_tested=false;}
+        if(!stream_tested||stream_detected){
+            int frames=camera_stream_mjpeg(url,current);
+            stream_tested=true;
+            if(frames>=0){
+                stream_detected=true;
+                if(frames>0)failures=0;
+                else failures++;
+                vTaskDelay(pdMS_TO_TICKS(frames>0?200:1200));
+                continue;
+            }
+            stream_detected=false;
+        }
         mira_camera_frame_t frame={0};
         bool ok=fetch_snapshot(url,&frame);
         xSemaphoreTake(lock,portMAX_DELAY);
