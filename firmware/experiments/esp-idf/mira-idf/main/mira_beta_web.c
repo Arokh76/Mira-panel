@@ -270,6 +270,32 @@ static esp_err_t replacement(httpd_req_t *r,const char *name){
         {"DISPLAYSLEEPTIMEOUT","sleep_delay",120},{"DISPLAYSLEEPBRIGHT","sleep_light",8},
         {"DISPLAYNIGHTCHECKED","night_auto",0},{"DISPLAYCLOCKCHECKED","sleep_clock",1}
     };
+    if(!strcmp(name,"MDPAP")){
+        char key[97]={0};size_t n=sizeof(key);
+        nvs_handle_t nv;
+        if(nvs_open("mira_idf_auth",NVS_READONLY,&nv)==ESP_OK){
+            (void)nvs_get_str(nv,"jeedom_key",key,&n);
+            nvs_close(nv);
+        }
+        esp_err_t result=escaped(r,key);
+        memset(key,0,sizeof(key));
+        return result;
+    }
+    if(!strcmp(name,"IPAP")){
+        char ip[32]={0};
+        nvs_text("mira_idf_net","ap_ip","192.168.4.1",ip,sizeof(ip));
+        return escaped(r,ip);
+    }
+    if(!strcmp(name,"ACTIFAP")){
+        const bool active=nvs_number("mira_idf_net","ap_enabled",0)!=0;
+        return chunk(r,active?
+            "<div class=\"switchline\"><div><strong>Point d'accès</strong><div class=\"hint\" id=\"texte\">Actif</div></div>"
+            "<input type=\"checkbox\" onclick=\"ClickToogle(this)\" checked></div>"
+            "<input class=\"hide\" id=\"actif\" name=\"actif\" value=\"1\" type=\"text\">":
+            "<div class=\"switchline\"><div><strong>Point d'accès</strong><div class=\"hint\" id=\"texte\">Inactif</div></div>"
+            "<input type=\"checkbox\" onclick=\"ClickToogle(this)\"></div>"
+            "<input class=\"hide\" id=\"actif\" name=\"actif\" value=\"0\" type=\"text\">");
+    }
     if(!strcmp(name,"SCANRESEAUX"))return wifi_choices(r);
     if(!strcmp(name,"SSID")){
         wifi_config_t sta={0};
@@ -404,6 +430,7 @@ esp_err_t mira_beta_web_load(httpd_req_t *req){
     if(!strcmp(nav,"wifi"))return render(req,mira_beta_wifi_manager_html);
     if(!strcmp(nav,"system"))return render(req,mira_beta_system_html);
     if(!strcmp(nav,"rst"))return render(req,mira_beta_data_html);
+    if(!strcmp(nav,"configAP"))return render(req,mira_beta_config_ap_html);
     if(!strcmp(nav,"rstnetwork")||!strcmp(nav,"rstparams")||!strcmp(nav,"rstall"))
         return mira_beta_data_confirm(req,nav);
     if(!strcmp(nav,"reboot")){
@@ -564,16 +591,36 @@ static esp_err_t save_beta_wifi(httpd_req_t *req,cJSON *form){
         return html_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Enregistrement Wi-Fi impossible");
     return go_to(req,"/load?nav=wifi");
 }
+static esp_err_t save_beta_ap(httpd_req_t *req,cJSON *form){
+    const char *password=field(form,"pass");
+    const char *ip=field(form,"ip");
+    const char *active=field(form,"actif");
+    if(!password||!ip||!active|| (strcmp(active,"0")&&strcmp(active,"1")))
+        return html_err(req,HTTPD_400_BAD_REQUEST,"Configuration AP incomplète");
+    esp_err_t err=mira_recovery_save_beta_ap(password,ip,!strcmp(active,"1"));
+    if(err==ESP_ERR_INVALID_ARG)
+        return html_err(req,HTTPD_400_BAD_REQUEST,"Clé AP (8-63 caractères) ou IP invalide");
+    if(err!=ESP_OK)
+        return html_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Sauvegarde AP impossible");
+    httpd_resp_set_type(req,"text/html; charset=utf-8");
+    esp_err_t answer=httpd_resp_sendstr(req,
+        "<!doctype html><meta charset=\"utf-8\"><h2>Configuration du point d'accès enregistrée</h2>"
+        "<p>Mira Panel redémarre pour appliquer la nouvelle configuration.</p>");
+    vTaskDelay(pdMS_TO_TICKS(750));
+    esp_restart();
+    return answer;
+}
 esp_err_t mira_beta_web_save(httpd_req_t *req){
     if(!mira_beta_web_authorized(req))return ESP_FAIL;
     char query[96]={0},config[24]={0};
     if(httpd_req_get_url_query_str(req,query,sizeof(query))!=ESP_OK||
        httpd_query_key_value(query,"config",config,sizeof(config))!=ESP_OK||
-       (strcmp(config,"params")&&strcmp(config,"wifi")))
+       (strcmp(config,"params")&&strcmp(config,"wifi")&&strcmp(config,"AP")))
         return html_err(req,HTTPD_400_BAD_REQUEST,"Configuration beta non prise en charge");
     cJSON *form=read_form(req);
     if(!form)return html_err(req,HTTPD_400_BAD_REQUEST,"Formulaire invalide");
-    esp_err_t err=!strcmp(config,"wifi")?save_beta_wifi(req,form):
+    esp_err_t err=!strcmp(config,"AP")?save_beta_ap(req,form):
+                 !strcmp(config,"wifi")?save_beta_wifi(req,form):
                  field(form,"MQTT_Actif")?save_mqtt(req,form):save_urls(req,form);
     cJSON_Delete(form);
     return err;
