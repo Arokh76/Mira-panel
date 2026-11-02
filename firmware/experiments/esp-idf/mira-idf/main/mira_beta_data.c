@@ -6,7 +6,7 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "esp_wifi.h"
-#include "esp_vfs_spiffs.h"
+#include "esp_spiffs.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_log.h"
