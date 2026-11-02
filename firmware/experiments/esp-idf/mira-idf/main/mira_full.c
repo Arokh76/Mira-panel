@@ -263,6 +263,7 @@ static void nav_click(lv_event_t *e){
         if(page<6)show_page(page);
     }else show_page(index);
 }
+static void remember_passive_state(const mira_state_update_t *msg);
 static void event_local(lv_event_t *e){
     if(suppress_events||display_sleeping)return;
     mira_widget_t *b=(mira_widget_t*)lv_event_get_user_data(e);
@@ -304,6 +305,15 @@ static void event_local(lv_event_t *e){
     }
     // Unlike MQTT States, only a real human LVGL action may publish Actions.
     const char *payload=(!strcmp(b->type,"toggle")) ? (!strcmp(b->value,"On")?"1":"0") : b->value;
+    // The old beta exposes the displayed switch state through GET /get.
+    // Update the read-only HTTP cache for a real local touch, without
+    // feeding it through the passive queue or generating another action.
+    if(strcmp(b->type,"button")!=0){
+        mira_state_update_t observation={0};
+        snprintf(observation.name,sizeof(observation.name),"%s",b->name);
+        snprintf(observation.value,sizeof(observation.value),"%s",b->value);
+        remember_passive_state(&observation);
+    }
     const bool use_jeedom=mira_jeedom_actions_enabled();
     const bool mqtt_sent=!use_jeedom&&mira_mqtt_publish_action(b->name,payload);
     const bool jeedom_queued=use_jeedom&&mira_jeedom_queue_local_action(b->name,b->type,payload);
