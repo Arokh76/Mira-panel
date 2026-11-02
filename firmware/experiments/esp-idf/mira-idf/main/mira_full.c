@@ -182,13 +182,14 @@ static void mira_fit_info_value(lv_obj_t *text,lv_obj_t *card){
     if(room<=8)return;
     static const lv_font_t *const fonts[]={
         &lv_font_montserrat_28,&lv_font_montserrat_20,
-        &mira_font_fr_16,&mira_font_fr_12
+        &mira_font_fr_16,&lv_font_montserrat_14,&mira_font_fr_12
     };
-    const bool allow_large=room>=180&&lv_obj_get_height(card)>105;
-    const lv_font_t *chosen=fonts[3];
+    const int height=lv_obj_get_height(card);
+    const size_t start=(height<=40)?3u:((height>=68&&room>=180)?0u:1u);
+    const lv_font_t *chosen=fonts[4];
     bool fits=false;
     lv_point_t measured={0};
-    for(size_t i=allow_large?0:1;i<sizeof(fonts)/sizeof(fonts[0]);i++){
+    for(size_t i=start;i<sizeof(fonts)/sizeof(fonts[0]);i++){
         lv_text_get_size(&measured,value,fonts[i],
                          lv_obj_get_style_text_letter_space(text,0),0,
                          LV_COORD_MAX,LV_TEXT_FLAG_NONE);
@@ -1200,13 +1201,51 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
             }
             return;
         }
-        bool wide=!strcmp(layout,"wide");
-        w->card=card(pg,wide?786:cw,wide?56:36);
+        const bool hero=!strcmp(layout,"hero");
+        const bool value_style=!strcmp(style,"value");
+        const bool compact=!strcmp(style,"compact");
+        char value[198];
+        snprintf(value,sizeof(value),"%s%s%s",*w->value?w->value:"--",
+                 *w->unit?" ":"",w->unit);
+        if(hero||value_style){
+            w->card=card(pg,hero?786:cw,hero?84:72);
+            lv_obj_set_style_pad_all(w->card,4,0);
+            w->value_label=label(w->card,value,0x22BEEA,&lv_font_montserrat_28);
+            lv_obj_set_width(w->value_label,lv_obj_get_width(w->card)-12);
+            lv_obj_set_style_text_align(w->value_label,LV_TEXT_ALIGN_CENTER,0);
+            lv_obj_align(w->value_label,LV_ALIGN_TOP_MID,0,hero?4:2);
+            w->info_name=label(w->card,display,0xA8B2B8,&mira_font_fr_12);
+            lv_obj_set_width(w->info_name,lv_obj_get_width(w->card)-12);
+            lv_obj_set_style_text_align(w->info_name,LV_TEXT_ALIGN_CENTER,0);
+            lv_obj_align(w->info_name,LV_ALIGN_BOTTOM_MID,0,-4);
+            mira_fit_info_value(w->value_label,w->card);
+            return;
+        }
+        const bool wide=!strcmp(layout,"wide");
+        w->card=card(pg,wide?786:cw,wide?56:(compact?30:36));
+        lv_obj_set_style_pad_left(w->card,wide?16:4,0);
+        lv_obj_set_style_pad_right(w->card,wide?16:4,0);
+        lv_obj_set_style_pad_top(w->card,0,0);
+        lv_obj_set_style_pad_bottom(w->card,0,0);
         make_flex(w->card,LV_FLEX_FLOW_ROW,wide?LV_FLEX_ALIGN_SPACE_BETWEEN:LV_FLEX_ALIGN_CENTER,LV_FLEX_ALIGN_CENTER);
-        w->info_name=label(w->card,display,0xA8B2B8,&mira_font_fr_16);
-        char value[198];snprintf(value,sizeof(value),"%s %s",*w->value?w->value:"--",w->unit);
-        w->value_label=label(w->card,value,0x22BEEA,&lv_font_montserrat_20);
-        mira_fit_info_value(w->value_label,w->card);
+        char name_with_colon[110];
+        snprintf(name_with_colon,sizeof(name_with_colon),"%s%s",display,
+                 !wide&&*display&&display[strlen(display)-1]!=':'?":":"");
+        w->info_name=label(w->card,name_with_colon,wide?0xA8B2B8:0xF3F6F7,
+                           wide?&mira_font_fr_14:compact?&mira_font_fr_12:&mira_font_fr_14);
+        if(wide){
+            lv_obj_set_width(w->info_name,440);
+            lv_label_set_long_mode(w->info_name,LV_LABEL_LONG_CLIP);
+        }
+        w->value_label=label(w->card,value,0x22BEEA,
+                              wide?&lv_font_montserrat_20:
+                              compact?&lv_font_montserrat_14:&mira_font_fr_16);
+        if(wide){
+            lv_obj_set_width(w->value_label,292);
+            lv_obj_set_style_text_align(w->value_label,LV_TEXT_ALIGN_RIGHT,0);
+        }else lv_obj_set_style_pad_column(w->card,compact?4:6,0);
+        // Fixed-height compact cards must keep their original 14px value.
+        if(!compact)mira_fit_info_value(w->value_label,w->card);
         return;
     }
     if(!strcmp(type,"button")||!strcmp(type,"multiaction")){
