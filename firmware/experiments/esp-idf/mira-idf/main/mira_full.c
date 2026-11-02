@@ -1199,7 +1199,18 @@ static void display_wake(void){
     if(sleep_overlay)lv_obj_add_flag(sleep_overlay,LV_OBJ_FLAG_HIDDEN);
     applied_brightness_raw=desired_awake_brightness();
     ESP_ERROR_CHECK_WITHOUT_ABORT(mira_display_set_brightness(applied_brightness_raw));
-    ESP_LOGI(TAG,"Mira display awakened by physical GT911 touch");
+    ESP_LOGI(TAG,"Mira display awakened");
+}
+static void apply_sleep_settings_after_reload(void){
+    if(!display_sleeping)return;
+    const uint8_t raw=sleep_clock_enabled?raw_from_percent(sleep_brightness_percent):0;
+    if(raw!=applied_brightness_raw&&mira_display_set_brightness(raw)==ESP_OK)
+        applied_brightness_raw=raw;
+    if(sleep_overlay){
+        if(sleep_clock_enabled&&raw>0)
+            lv_obj_remove_flag(sleep_overlay,LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(sleep_overlay,LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 // Beta MiraPanelUI::handleMqttDisplayCommand, native ESP-IDF equivalent.
@@ -2077,6 +2088,7 @@ void mira_full_ui_tick(void){
         settings_reload_pending=false;
         load_ui_configuration();
         if(pages[3]){lv_obj_clean(pages[3]);settings();}
+        apply_sleep_settings_after_reload();
         apply_auto_brightness();
     }
     apply_pending_states();
