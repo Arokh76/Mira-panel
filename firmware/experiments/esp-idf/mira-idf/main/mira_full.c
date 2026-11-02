@@ -1197,6 +1197,16 @@ static void settings(void){
     lv_obj_t *display=card(3,640,130);
     make_flex(display,LV_FLEX_FLOW_COLUMN,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_START);
     label(display,"Affichage",0x22BEEA,&mira_font_fr_16);
+#ifdef MIRA_PANEL_7_INCH
+    // The known-good CH422G sequence has a binary display power gate only.
+    // Never expose a working-looking 4.3C PWM slider on the 7-inch target.
+    label(display,"Rétroéclairage 7 pouces : PWM non validé",
+          0xFFB35C,&mira_font_fr_16);
+    label(display,"Les réglages de luminosité restent en mémoire mais ne",
+          0xA8B2B8,&mira_font_fr_14);
+    label(display,"pilotent pas encore le rétroéclairage de ce modèle.",
+          0xA8B2B8,&mira_font_fr_14);
+#else
     label(display,"Luminosité écran",0xF3F6F7,&mira_font_fr_16);
     lv_obj_t *sl=lv_slider_create(display);
     lv_obj_set_size(sl,600,14);
@@ -1204,6 +1214,7 @@ static void settings(void){
     lv_slider_set_value(sl,desired_awake_brightness(),LV_ANIM_OFF);
     lv_obj_add_event_cb(sl,brightness_release,LV_EVENT_RELEASED,NULL);
     label(display,"Thème : Mira",0xA8B2B8,&mira_font_fr_16);
+#endif
     lv_obj_t *schedule=card(3,640,106);
     label(schedule,"Luminosité automatique jour / nuit",0x22BEEA,&mira_font_fr_16);
     lv_obj_t *auto_switch=lv_switch_create(schedule);
