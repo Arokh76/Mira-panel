@@ -30,6 +30,7 @@
 #include "mira_jeedom.h"
 #include "mira_camera.h"
 #include "mira_setup_access.h"
+#include "mira_beta_setup.h"
 
 #define MIRA_WIDTH 800
 #define MIRA_HEIGHT 480
@@ -1292,8 +1293,15 @@ static void build_config(void){
     // A damaged/incomplete SPIFFS read must not blank a running panel.
     FILE *f=spiffs_ready?fopen(JSON_PATH,"rb"):NULL;
     if(!f){
-        if(widget_n==0)empty_notice("Mira LVGL 9.6 : configuration non trouvée.\n"
-                     "Importer le vrai miralvgl.json via 192.168.4.1/mira");
+        if(widget_n==0){
+            if(mira_beta_setup_unconfigured())
+                empty_notice("Première configuration de Mira Panel\n"
+                             "Wi-Fi : Mira Panel  |  http://192.168.4.1\n"
+                             "Étape 1 : clé locale, puis étape 2 : Wi-Fi");
+            else
+                empty_notice("Mira Panel : programmation non trouvée.\n"
+                             "Configurer les widgets avec le plugin Jeedom");
+        }
         ESP_LOGW(TAG,"Mira 0.7.37 JSON absent, import via /mira");
         if(widget_n==0)show_page(0);
         return;
