@@ -479,6 +479,67 @@ static esp_err_t render(httpd_req_t *r,const char *page){
     if(p>from&&httpd_resp_send_chunk(r,from,p-from)!=ESP_OK)return ESP_FAIL;
     return httpd_resp_send_chunk(r,NULL,0);
 }
+// The original beta stores IDNetwork as a server global. Preserve the HTML
+// exactly, but bind its form/link to the explicit ?network= id of this request.
+// This avoids cross-client edits or deleting another network accidentally.
+static esp_err_t render_network_edit(httpd_req_t *req){
+    int id=network_id(req);
+    mira_beta_network_t profile;
+    if(id<0||mira_beta_networks_get(id,&profile)!=ESP_OK)
+        return html_err(req,HTTPD_404_NOT_FOUND,"Réseau enregistré introuvable");
+    const char *source=mira_beta_edit_network_html;
+    const char *const original_form="action=\"/save?update=wifi\"";
+    const char *const original_delete="window.location.href='/load?nav=removenetwork'";
+    const char *form=strstr(source,original_form),*del=strstr(source,original_delete);
+    if(!form||!del||del<form)
+        return html_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Modèle réseau beta invalide");
+    size_t n=strlen(source);
+    char *patched=malloc(n+140);
+    if(!patched)return html_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Mémoire insuffisante");
+    size_t before=(size_t)(form-source);
+    memcpy(patched,source,before);
+    int put=snprintf(patched+before,n+140-before,
+                     "action=\"/save?update=wifi&amp;network=%d\"",id);
+    if(put<0||put>=140){free(patched);return ESP_FAIL;}
+    size_t length=before+(size_t)put;
+    const char *after=form+strlen(original_form);
+    size_t middle=(size_t)(del-after);
+    memcpy(patched+length,after,middle);
+    length+=middle;
+    put=snprintf(patched+length,n+140-length,
+                 "window.location.href='/load?nav=removenetwork&network=%d'",id);
+    if(put<0||put>=140){free(patched);return ESP_FAIL;}
+    length+=(size_t)put;
+    snprintf(patched+length,n+140-length,"%s",del+strlen(original_delete));
+    esp_err_t result=render(req,patched);
+    free(patched);
+    return result;
+}
+static esp_err_t beta_network_remove_confirm(httpd_req_t *req){
+    int id=network_id(req);
+    mira_beta_network_t profile={0};
+    if(id<0||mira_beta_networks_get(id,&profile)!=ESP_OK)
+        return html_err(req,HTTPD_404_NOT_FOUND,"Réseau introuvable");
+    network_action_nonce=esp_random();
+    if(!network_action_nonce)network_action_nonce=1;
+    network_nonce_time=esp_timer_get_time();
+    char body[800]={0};
+    int n=snprintf(body,sizeof(body),
+       "<!doctype html><html lang=\"fr\"><meta charset=\"utf-8\">"
+       "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+       "<title>Mira Panel - Supprimer réseau</title><body>"
+       "<h1>Supprimer ce réseau enregistré ?</h1>"
+       "<p>Identifiant %d. Ce réseau ne sera plus proposé dans Mira Panel.</p>"
+       "<form method=\"POST\" action=\"/mira/network?action=remove&amp;network=%d\">"
+       "<input type=\"hidden\" name=\"nonce\" value=\"%08lx\">"
+       "<button type=\"submit\">Confirmer la suppression</button>"
+       "</form><p><a href=\"/load?nav=listnetwork\">Annuler</a></p></body></html>",
+       id,id,(unsigned long)network_action_nonce);
+    if(n<0||n>=(int)sizeof(body))return ESP_FAIL;
+    httpd_resp_set_type(req,"text/html; charset=utf-8");
+    httpd_resp_set_hdr(req,"Cache-Control","no-store");
+    return httpd_resp_sendstr(req,body);
+}
 esp_err_t mira_beta_web_home(httpd_req_t *req){
     if(!mira_beta_web_authorized(req))return ESP_FAIL;
     return render(req,mira_beta_index_html);
@@ -494,6 +555,9 @@ esp_err_t mira_beta_web_load(httpd_req_t *req){
     if(!strcmp(nav,"system"))return render(req,mira_beta_system_html);
     if(!strcmp(nav,"rst"))return render(req,mira_beta_data_html);
     if(!strcmp(nav,"configAP"))return render(req,mira_beta_config_ap_html);
+    if(!strcmp(nav,"listnetwork"))return render(req,mira_beta_known_networks_html);
+    if(!strcmp(nav,"update"))return render_network_edit(req);
+    if(!strcmp(nav,"removenetwork"))return beta_network_remove_confirm(req);
     if(!strcmp(nav,"rstnetwork")||!strcmp(nav,"rstparams")||!strcmp(nav,"rstall"))
         return mira_beta_data_confirm(req,nav);
     if(!strcmp(nav,"reboot")){
