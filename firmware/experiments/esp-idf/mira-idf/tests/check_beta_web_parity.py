@@ -193,6 +193,15 @@ assert 'char selected[24]={0},action_id[16]={0},value[769]={0};' in jeedom
 assert 'char encoded[1024];' in jeedom
 assert 'strlen(value)>(is_cover?768u:159u)' in jeedom
 print("PASS beta media art/cover layout with HTTPS background decoding")
+# The beta energy widget is a colored 2x2 dashboard with optional battery
+# SOC percentage bars; the old flat text table was not visual parity.
+assert 'w->card=card(pg,786,344)' in full
+for caption in ('"SOLAIRE"','"MAISON"','"RÉSEAU"','"BATTERIE"','"STOCKAGE"','"BATTERIE 2"','"BATTERIE 3"'):
+    assert caption in full, f"Energy dashboard missing: {caption}"
+assert 'w->energy_gauge[i]=lv_bar_create(w->card)' in full
+assert 'strchr(msg->value,\'%\')!=NULL' in full
+assert 'lv_obj_set_height(w->card,344+47*extra_rows)' in full
+print("PASS native beta energy dashboard, SOC display and optional battery rows")
 # Only a published IDF-specific target may result in 'available'; the
 # Arduino firmware target must never be silently reused.
 update = (idf / "mira_beta_update.c").read_text(encoding="utf-8")
