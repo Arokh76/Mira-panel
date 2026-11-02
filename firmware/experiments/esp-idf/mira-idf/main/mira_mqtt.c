@@ -35,17 +35,24 @@ static void stop_client(void) {
 }
 static void incoming_state(const char *topic, int tlen, const char *payload, int plen) {
     const size_t prefix_len=strlen(state_prefix);
-    if(tlen <= (int)prefix_len || tlen > (int)prefix_len + 95 || plen<0 || plen>159)return;
+    if(tlen <= (int)prefix_len || tlen > (int)prefix_len + 95 || plen<0)return;
     if(strncmp(topic,state_prefix,prefix_len)!=0)return;
-    char name[96]={0},value[160]={0};
+    char name[96]={0};
     memcpy(name,topic+prefix_len,(size_t)tlen-prefix_len);
+    const size_t n=strlen(name);
+    const bool cover=n>=7&&!strcmp(name+n-7,"__cover");
+    const size_t limit=cover?768u:159u;
+    if((size_t)plen>limit)return;
+    char value[769]={0};
     memcpy(value,payload,(size_t)plen);
+    if(memchr(value,'\\0',(size_t)plen))return;
     if(value[0]=='{'){
         cJSON *root=cJSON_Parse(value);
         const cJSON *v=root?cJSON_GetObjectItemCaseSensitive(root,"value"):NULL;
-        if(cJSON_IsString(v)&&v->valuestring)
+        if(cJSON_IsString(v)&&v->valuestring){
+            if(strlen(v->valuestring)>limit){cJSON_Delete(root);return;}
             snprintf(value,sizeof(value),"%s",v->valuestring);
-        else if(cJSON_IsNumber(v))
+        }else if(cJSON_IsNumber(v))
             snprintf(value,sizeof(value),"%.9g",v->valuedouble);
         else if(cJSON_IsBool(v))
             snprintf(value,sizeof(value),"%s",cJSON_IsTrue(v)?"1":"0");
