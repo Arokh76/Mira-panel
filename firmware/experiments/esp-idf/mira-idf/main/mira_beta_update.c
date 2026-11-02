@@ -34,7 +34,7 @@ static bool parse_version(const char *text,uint32_t *parts){
         uint32_t n=0;
         for(;*p>='0'&&*p<='9';p++){
             unsigned d=(unsigned)(*p-'0');
-            if(n>10000||(n==10000&&d))return false;
+            if(n>999u||(n==999u&&d>9u))return false;
             n=n*10u+d;
         }
         parts[i]=n;
