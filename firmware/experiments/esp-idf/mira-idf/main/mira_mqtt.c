@@ -19,11 +19,12 @@ static bool connected;
 static bool enabled;
 static char host[128], username[64], secret[96], screen_name[48];
 static uint16_t port=1883;
-static char state_prefix[112], action_prefix[112];
+static char state_prefix[112], action_prefix[112],display_prefix[112];
 
 static void refresh_prefixes(void) {
     snprintf(state_prefix,sizeof(state_prefix),"mira/%s/States/",screen_name);
     snprintf(action_prefix,sizeof(action_prefix),"mira/%s/Actions/",screen_name);
+    snprintf(display_prefix,sizeof(display_prefix),"mira/%s/Display/",screen_name);
 }
 static void stop_client(void) {
     connected=false;
@@ -52,6 +53,24 @@ static void incoming_state(const char *topic, int tlen, const char *payload, int
     }
     (void)mira_full_enqueue_state(name,value);
 }
+// Mira beta: mira/<screen>/Display/<key>/set
+// Queue only; no LVGL calls or state-to-action MQTT feedback here.
+static void incoming_display(const char *topic,int length,const char *payload,int plen){
+    const size_t prefix_len=strlen(display_prefix);
+    if(length<=(int)prefix_len+4||plen<1||plen>=48||
+       strncmp(topic,display_prefix,prefix_len)!=0)return;
+    const size_t remaining=(size_t)length-prefix_len;
+    if(remaining<=4||memcmp(topic+length-4,"/set",4)!=0)return;
+    const size_t key_len=remaining-4;
+    if(key_len==0||key_len>=32)return;
+    char key[32]={0},value[48]={0};
+    memcpy(key,topic+prefix_len,key_len);
+    for(size_t i=0;i<key_len;i++)
+        if(key[i]=='/'||key[i]=='+'||key[i]=='#')return;
+    memcpy(value,payload,(size_t)plen);
+    if(memchr(value,'\0',(size_t)plen)!=NULL)return;
+    (void)mira_full_enqueue_display_command(key,value);
+}
 static void mqtt_event(void *arg, esp_event_base_t base,int32_t event_id,void *event_data) {
     (void)arg;(void)base;
     esp_mqtt_event_handle_t e=(esp_mqtt_event_handle_t)event_data;
@@ -60,13 +79,17 @@ static void mqtt_event(void *arg, esp_event_base_t base,int32_t event_id,void *e
         char subscription[120];
         snprintf(subscription,sizeof(subscription),"%s#",state_prefix);
         esp_mqtt_client_subscribe(client,subscription,0);
-        ESP_LOGI(TAG,"Connected. Subscribed states %s",subscription);
+        snprintf(subscription,sizeof(subscription),"%s+/set",display_prefix);
+        esp_mqtt_client_subscribe(client,subscription,0);
+        ESP_LOGI(TAG,"Connected. Subscribed state and display controls for %s",screen_name);
     }else if(event_id==MQTT_EVENT_DISCONNECTED){
         connected=false;
     }else if(event_id==MQTT_EVENT_DATA) {
         // MQTT fragmented payloads must not be mistaken for full values.
-        if(e->current_data_offset==0 && e->data_len==e->total_data_len)
+        if(e->current_data_offset==0 && e->data_len==e->total_data_len){
             incoming_state(e->topic,e->topic_len,e->data,e->data_len);
+            incoming_display(e->topic,e->topic_len,e->data,e->data_len);
+        }
     }
 }
 static void start_client(void) {
