@@ -2597,6 +2597,46 @@ static void normalize_widget_name(const char *src,char *dst,size_t length){
     }
     dst[j]=0;
 }
+// Beta miraMediaDisplayText(): Spotify frequently sends NFD UTF-8 which
+// the small French bitmap fonts can't display. Normalize DISPLAY text only,
+// never rewrite Jeedom metadata, actions, device names or cover URLs.
+static void mira_media_display_text(const char *src,char *out,size_t cap){
+    if(!out||!cap)return;
+    if(!src){out[0]=0;return;}
+    static const struct {const char *from,*to;} replacements[]={
+        {"a\xCC\x80","\xC3\xA0"},{"a\xCC\x81","\xC3\xA1"},
+        {"a\xCC\x82","\xC3\xA2"},{"a\xCC\x88","\xC3\xA4"},
+        {"e\xCC\x80","\xC3\xA8"},{"e\xCC\x81","\xC3\xA9"},
+        {"e\xCC\x82","\xC3\xAA"},{"e\xCC\x88","\xC3\xAB"},
+        {"i\xCC\x81","\xC3\xAD"},{"i\xCC\x82","\xC3\xAE"},
+        {"i\xCC\x88","\xC3\xAF"},{"o\xCC\x81","\xC3\xB3"},
+        {"o\xCC\x82","\xC3\xB4"},{"o\xCC\x88","\xC3\xB6"},
+        {"u\xCC\x80","\xC3\xB9"},{"u\xCC\x81","\xC3\xBA"},
+        {"u\xCC\x82","\xC3\xBB"},{"u\xCC\x88","\xC3\xBC"},
+        {"c\xCC\xA7","\xC3\xA7"},{"n\xCC\x83","\xC3\xB1"},
+        {"A\xCC\x82","\xC3\x82"},{"E\xCC\x82","\xC3\x8A"},
+        {"I\xCC\x82","\xC3\x8E"},{"O\xCC\x82","\xC3\x94"},
+        {"U\xCC\x82","\xC3\x9B"},
+        {"\xE2\x80\x99","'"},{"\xE2\x80\x98","'"},
+        {"\xCA\xBC","'"},{"\xE2\x80\x9C","\""},
+        {"\xE2\x80\x9D","\""},{"\xE2\x80\x93","-"},
+        {"\xE2\x80\x94","-"},{"\xC2\xA0"," "}
+    };
+    size_t used=0;
+    while(*src&&used+1<cap){
+        bool replaced=false;
+        for(size_t i=0;i<sizeof(replacements)/sizeof(replacements[0]);i++){
+            const size_t n=strlen(replacements[i].from);
+            if(strncmp(src,replacements[i].from,n))continue;
+            const size_t m=strlen(replacements[i].to);
+            if(used+m>=cap)break;
+            memcpy(out+used,replacements[i].to,m);
+            used+=m;src+=n;replaced=true;break;
+        }
+        if(!replaced)out[used++]=*src++;
+    }
+    out[used]=0;
+}
 static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
     for(uint8_t i=0;i<widget_n;i++){
         mira_widget_t *w=&widgets[i];
@@ -2638,6 +2678,10 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                                               !strcasecmp(msg->value,"false");
                             lv_label_set_text(w->fields[n],playing?"En lecture":
                                               paused?"En pause":"État non disponible");
+                        }else if(media&&n<=2){
+                            char shown[256];
+                            mira_media_display_text(msg->value,shown,sizeof(shown));
+                            lv_label_set_text(w->fields[n],shown);
                         }else if(n!=6||!media)
                             lv_label_set_text(w->fields[n],
                                               !media&&!*msg->value?"--":msg->value);
