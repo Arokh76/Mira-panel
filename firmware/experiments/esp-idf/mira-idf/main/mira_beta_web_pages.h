@@ -275,7 +275,7 @@ static const char mira_beta_system_html[] =
     "  var VERSION_API='https://api.github.com/repos/Arokh76/Mira-panel/contents/firmware/version.json?ref=main';\n"
     "  var TARGETS_URL='https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/targets.json';\n"
     "  // Embedded by the C++ hardware profile in this firmware build.\n"
-    "  var HARDWARE_PROFILE='waveshare-esp32s3-touch-lcd-4.3c';\n"
+    "  var HARDWARE_PROFILE='waveshare-esp32s3-touch-lcd-4.3c-idf';\n"
     "  var CURRENT='%VERSION%';\n"
     "  var remoteBin='';\n"
     "  var remoteVer='';\n"
