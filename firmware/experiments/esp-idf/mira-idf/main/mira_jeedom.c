@@ -69,7 +69,7 @@ static bool query_param(httpd_req_t *req,const char *name,char *dst,size_t cap) 
     // Free-layout widgets can carry coordinates, labels and URL-encoded values.
     char query[2048];
     if(httpd_req_get_url_query_str(req,query,sizeof(query))!=ESP_OK)return false;
-    char encoded[512];
+    char encoded[1024];
     if(httpd_query_key_value(query,name,encoded,sizeof(encoded))!=ESP_OK)return false;
     if(!decode_url(encoded)||strlen(encoded)>=cap)return false;
     snprintf(dst,cap,"%s",encoded);
@@ -961,7 +961,7 @@ static esp_err_t programui(httpd_req_t *req) {
 static esp_err_t updatenr(httpd_req_t *req) {
     if(!require_key(req))return ESP_FAIL;
     const char *types[]={"info","toggle","toogle","range","list","color","button"};
-    char selected[24]={0},action_id[16]={0},value[160]={0};
+    char selected[24]={0},action_id[16]={0},value[769]={0};
     for(size_t i=0;i<sizeof(types)/sizeof(types[0]);i++){
         if(query_param(req,types[i],action_id,sizeof(action_id))){
             snprintf(selected,sizeof(selected),"%s",types[i]);break;
@@ -1020,6 +1020,14 @@ static esp_err_t updatenr(httpd_req_t *req) {
         httpd_resp_send_err(req,HTTPD_404_NOT_FOUND,"Commande inconnue");return ESP_FAIL;
     }
     if(strcmp(selected,"button")!=0) {
+        // The beta media JPEG URL may be 768 bytes; all other state values
+        // stay capped at 159 bytes and use the existing small queue.
+        const size_t namelen=strlen(name);
+        const bool is_cover=namelen>=7&&!strcmp(name+namelen-7,"__cover");
+        if(strlen(value)>(is_cover?768u:159u)){
+            httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Valeur d'info trop longue");
+            return ESP_FAIL;
+        }
         if(!mira_full_enqueue_state(name,value)){
             httpd_resp_set_status(req,"503 Service Unavailable");
             return httpd_resp_sendstr(req,"File d'etats pleine");
