@@ -373,7 +373,7 @@ esp_err_t mira_jeedom_render_beta_actions(httpd_req_t *req){
             any=true;
             int lo=jint((cJSON*)item,"min",0),hi=jint((cJSON*)item,"max",100);
             if(lo>=hi||hi>100000||lo<-100000)continue;
-            char bound[90];
+            char bound[160];
             if((status=beta_html(req,"<div><label for=\""))!=ESP_OK||
                (status=beta_html_id(req,id))!=ESP_OK||
                (status=beta_html(req,"\">"))!=ESP_OK||
@@ -427,7 +427,7 @@ esp_err_t mira_jeedom_render_beta_actions(httpd_req_t *req){
     cJSON_ArrayForEach(item,actions){
         if(status!=ESP_OK)break;
         const char *type=jstr((cJSON*)item,"type","");
-        char js[320];
+        char js[640];
         if(!strcmp(type,"toggle")){
             int off=jint((cJSON*)item,"id0",-1),on=jint((cJSON*)item,"id1",-1);
             if(off<1||on<1)continue;
