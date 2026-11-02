@@ -698,6 +698,197 @@ static esp_err_t displayinfo(httpd_req_t *req) {
              "\"widgetIcons\":\"auto,temperature,humidity,pressure,light,energy,plug,door\"}",profile);
     return httpd_resp_sendstr(req,response);
 }
+// Arduino beta's AddListLVGL()/RemoveListLVGL()/SaveListLVGL() contract.
+// A series of Jeedom GET requests edits a *staged* list, without touching the
+// on-flash configuration until /savelistlvgl or /screensave. The existing
+// root JSON object and its other keys are retained byte-semantically.
+static cJSON *beta_lvgl_stage;
+static bool beta_lvgl_dirty;
+
+static bool beta_lvgl_ensure_stage(void){
+    if(beta_lvgl_stage)return true;
+    char *raw=read_config(NULL);
+    if(raw){
+        beta_lvgl_stage=cJSON_Parse(raw);
+        free(raw);
+        if(!beta_lvgl_stage ||
+           !cJSON_IsObject(beta_lvgl_stage) ||
+           !cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(beta_lvgl_stage,"lvgl"))){
+            cJSON_Delete(beta_lvgl_stage);
+            beta_lvgl_stage=NULL;
+            return false; // Never overwrite a malformed existing backup.
+        }
+    }else{
+        beta_lvgl_stage=cJSON_CreateObject();
+        if(!beta_lvgl_stage)return false;
+        if(!cJSON_AddArrayToObject(beta_lvgl_stage,"lvgl")){
+            cJSON_Delete(beta_lvgl_stage);
+            beta_lvgl_stage=NULL;
+            return false;
+        }
+    }
+    return true;
+}
+static bool beta_lvgl_put(cJSON *obj,const char *name,const char *value){
+    return cJSON_AddStringToObject(obj,name,value)!=NULL;
+}
+static bool beta_lvgl_optional(httpd_req_t *req,const char *field,char *out,
+                               size_t length,const char *fallback){
+    if(query_param(req,field,out,length))return true;
+    snprintf(out,length,"%s",fallback?fallback:"");
+    return true;
+}
+static esp_err_t beta_lvgl_respond(httpd_req_t *req,const char *message){
+    httpd_resp_set_type(req,"text/plain; charset=utf-8");
+    return httpd_resp_sendstr(req,message);
+}
+static esp_err_t beta_lvgl_clear(httpd_req_t *req){
+    if(!require_key(req))return ESP_FAIL;
+    if(!beta_lvgl_ensure_stage()){
+        httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Configuration LVGL invalide");
+        return ESP_FAIL;
+    }
+    cJSON_DeleteItemFromObjectCaseSensitive(beta_lvgl_stage,"lvgl");
+    if(!cJSON_AddArrayToObject(beta_lvgl_stage,"lvgl")){
+        cJSON_Delete(beta_lvgl_stage);beta_lvgl_stage=NULL;
+        httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Memoire LVGL insuffisante");
+        return ESP_FAIL;
+    }
+    beta_lvgl_dirty=true;
+    return beta_lvgl_respond(req,!strcmp(req->uri,"/screenformat")?"Liste vidée!":"OK");
+}
+static esp_err_t beta_lvgl_append(httpd_req_t *req){
+    if(!require_key(req))return ESP_FAIL;
+    char type[40]={0},name[97]={0},location[24]={0};
+    char minimum[40]={0},maximum[40]={0},value[160]={0},unit[64]={0};
+    if(!query_param(req,"type",type,sizeof(type))||
+       !query_param(req,"name",name,sizeof(name))||
+       !query_param(req,"loc",location,sizeof(location))||
+       !query_param(req,"min",minimum,sizeof(minimum))||
+       !query_param(req,"max",maximum,sizeof(maximum))||
+       !query_param(req,"value",value,sizeof(value))||
+       !query_param(req,"unit",unit,sizeof(unit))||
+       !*type){
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Champs LVGL type/name/loc/min/max/value/unit requis");
+        return ESP_FAIL;
+    }
+    char style[32],layout[16],label[12],icon[32],display_name[97];
+    beta_lvgl_optional(req,"style",style,sizeof(style),"standard");
+    beta_lvgl_optional(req,"layout",layout,sizeof(layout),"auto");
+    beta_lvgl_optional(req,"labelMode",label,sizeof(label),"auto");
+    beta_lvgl_optional(req,"icon",icon,sizeof(icon),"auto");
+    beta_lvgl_optional(req,"displayName",display_name,sizeof(display_name),"");
+    if(strcmp(layout,"tile")&&strcmp(layout,"wide")&&
+       strcmp(layout,"hero")&&strcmp(layout,"free"))snprintf(layout,sizeof(layout),"auto");
+    if(strcmp(label,"text")&&strcmp(label,"icon")&&strcmp(label,"both"))
+        snprintf(label,sizeof(label),"auto");
+    if(!*style)snprintf(style,sizeof(style),"standard");
+    if(strlen(icon)>24)snprintf(icon,sizeof(icon),"auto");
+    int position[4]={0};
+    const char *const fields[]={"lx","ly","lw","lh"};
+    if(!strcmp(layout,"free")){
+        bool geometry_valid=true;
+        for(int i=0;i<4;i++){
+            char number[20]={0};char *end=NULL;
+            if(!query_param(req,fields[i],number,sizeof(number))||!*number){
+                geometry_valid=false;break;
+            }
+            long n=strtol(number,&end,10);
+            if(*end||n<0||n>1000){geometry_valid=false;break;}
+            position[i]=(int)n;
+        }
+        if(position[2]<=0||position[3]<=0)geometry_valid=false;
+        if(!geometry_valid)snprintf(layout,sizeof(layout),"auto");
+    }
+    if(!beta_lvgl_ensure_stage()){
+        httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Configuration LVGL invalide");
+        return ESP_FAIL;
+    }
+    cJSON *array=cJSON_GetObjectItemCaseSensitive(beta_lvgl_stage,"lvgl");
+    if(cJSON_GetArraySize(array)>=64){
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Maximum 64 widgets LVGL");
+        return ESP_FAIL;
+    }
+    cJSON *item=cJSON_CreateObject();
+    if(!item){
+        httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Memoire LVGL insuffisante");
+        return ESP_FAIL;
+    }
+    bool valid=beta_lvgl_put(item,"type",type)&&
+        beta_lvgl_put(item,"name",name)&&
+        beta_lvgl_put(item,"emplacement",location)&&
+        beta_lvgl_put(item,"min",minimum)&&beta_lvgl_put(item,"max",maximum)&&
+        beta_lvgl_put(item,"value",value)&&beta_lvgl_put(item,"unit",unit)&&
+        beta_lvgl_put(item,"style",style)&&beta_lvgl_put(item,"layout",layout)&&
+        beta_lvgl_put(item,"labelMode",label)&&beta_lvgl_put(item,"icon",icon)&&
+        beta_lvgl_put(item,"displayName",display_name);
+    if(valid&&!strcmp(layout,"free")){
+        const char *const coords[]={"lx","ly","lw","lh"};
+        for(int i=0;i<4&&valid;i++)
+            valid=cJSON_AddNumberToObject(item,coords[i],position[i])!=NULL;
+    }
+    if(valid&&strcmp(type,"info")&&strcmp(type,"datetime"))
+        valid=beta_lvgl_put(item,"url","");
+    if(!valid){
+        cJSON_Delete(item);
+        httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Allocation widget impossible");
+        return ESP_FAIL;
+    }
+    cJSON_AddItemToArray(array,item);
+    beta_lvgl_dirty=true;
+    if(!strcmp(req->uri,"/screenadd")){
+        char *preview=cJSON_Print(beta_lvgl_stage);
+        if(!preview){
+            httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Apercu JSON impossible");
+            return ESP_FAIL;
+        }
+        httpd_resp_set_type(req,"text/plain; charset=utf-8");
+        esp_err_t result=httpd_resp_sendstr(req,preview);
+        cJSON_free(preview);
+        return result;
+    }
+    return beta_lvgl_respond(req,"OK");
+}
+static esp_err_t beta_lvgl_save(httpd_req_t *req){
+    if(!require_key(req))return ESP_FAIL;
+    if(!beta_lvgl_dirty)return beta_lvgl_respond(req,
+            !strcmp(req->uri,"/screensave")?"Liste sauvegardée!":"OK");
+    if(!beta_lvgl_stage){
+        httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Aucune liste LVGL en attente");
+        return ESP_FAIL;
+    }
+    char *out=cJSON_PrintUnformatted(beta_lvgl_stage);
+    if(!out){
+        httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"JSON LVGL impossible");
+        return ESP_FAIL;
+    }
+    size_t len=strlen(out);
+    if(len>MIRA_JSON_MAX){
+        cJSON_free(out);
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Liste LVGL trop volumineuse");
+        return ESP_FAIL;
+    }
+    FILE *file=fopen(MIRA_JSON_TMP,"wb");
+    if(!file){
+        cJSON_free(out);
+        httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"SPIFFS non accessible");
+        return ESP_FAIL;
+    }
+    size_t bytes=fwrite(out,1,len,file);
+    int closed=fclose(file);
+    cJSON_free(out);
+    if(bytes!=len||closed!=0||rename(MIRA_JSON_TMP,MIRA_JSON_PATH)!=0){
+        remove(MIRA_JSON_TMP);
+        httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Sauvegarde LVGL impossible");
+        return ESP_FAIL;
+    }
+    cJSON_Delete(beta_lvgl_stage);beta_lvgl_stage=NULL;
+    beta_lvgl_dirty=false;
+    mira_full_request_reload(); // always reload within the LVGL task
+    request_binding_sync();      // command IDs from Jeedom may have changed
+    return beta_lvgl_respond(req,
+            !strcmp(req->uri,"/screensave")?"Liste sauvegardée!":"OK");
+}
 static esp_err_t programui(httpd_req_t *req) {
     const size_t n=req->content_len;
     if(n<10||n>MIRA_FORM_MAX) {
@@ -757,6 +948,7 @@ static esp_err_t programui(httpd_req_t *req) {
         remove(MIRA_JSON_TMP);
         httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Enregistrement Mira echoue");return ESP_FAIL;
     }
+    cJSON_Delete(beta_lvgl_stage);beta_lvgl_stage=NULL;beta_lvgl_dirty=false;
     mira_full_request_reload();
     request_binding_sync(); // get fresh Jeedom IDs; ignore stale index until plugin re-synchronizes
     ESP_LOGI(TAG,"Programmation Jeedom enregistree (%u octets), UI reload en file",(unsigned)len);
@@ -2166,6 +2358,12 @@ void mira_jeedom_register_http(httpd_handle_t server) {
         {.uri="/getmodule",.method=HTTP_GET,.handler=getmodule},
         {.uri="/displayinfo",.method=HTTP_GET,.handler=displayinfo},
         {.uri="/programui",.method=HTTP_POST,.handler=programui},
+        {.uri="/addlistlvgl",.method=HTTP_GET,.handler=beta_lvgl_append},
+        {.uri="/screenadd",.method=HTTP_GET,.handler=beta_lvgl_append},
+        {.uri="/removelistlvgl",.method=HTTP_GET,.handler=beta_lvgl_clear},
+        {.uri="/screenformat",.method=HTTP_GET,.handler=beta_lvgl_clear},
+        {.uri="/savelistlvgl",.method=HTTP_GET,.handler=beta_lvgl_save},
+        {.uri="/screensave",.method=HTTP_GET,.handler=beta_lvgl_save},
         {.uri="/updatenr",.method=HTTP_GET,.handler=updatenr},
         {.uri="/mira/jeedom/key",.method=HTTP_POST,.handler=provision_key},
         {.uri="/getparam",.method=HTTP_GET,.handler=param_get},
