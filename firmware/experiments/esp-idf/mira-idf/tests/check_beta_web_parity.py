@@ -103,4 +103,13 @@ print("PASS beta staged LVGL programming routes")
 assert "HARDWARE_PROFILE='waveshare-esp32s3-touch-lcd-4.3c-idf'" in native
 assert "HARDWARE_PROFILE='waveshare-esp32s3-touch-lcd-4.3c';" not in native
 print("PASS IDF-only OTA release target guard")
+# Camera parity: the beta supports HTTP and HTTPS MJPEG/JPEG cameras.
+# TLS verification must be enabled in the ESP-IDF build (never insecure).
+camera = (idf / "mira_camera.c").read_text(encoding="utf-8")
+config = (idf.parent / "sdkconfig.defaults").read_text(encoding="utf-8")
+assert 'strncmp(url,"https://",8)' in camera, "HTTPS URLs not supported"
+assert '.crt_bundle_attach=esp_crt_bundle_attach' in camera, "Camera TLS CA trust disabled"
+assert 'CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y' in config, "CA bundle missing"
+assert 'decode_mjpeg_first_frame' in camera, "Multipart JPEG decoder missing"
+print("PASS beta camera HTTPS/MJPEG compile configuration")
 print("PASS beta page/control route wiring")
