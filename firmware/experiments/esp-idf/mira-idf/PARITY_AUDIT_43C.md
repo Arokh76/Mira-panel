@@ -1,5 +1,29 @@
 # Mira Panel 4.3C — parité obligatoire avec firmware-beta 0.7.37
 
+> État réel au 2 novembre 2026 : ce document décrit une cible de parité, pas une
+> homologation. La branche a depuis porté les vraies pages Web beta (Accueil,
+> Paramètres, MQTT, Wi-Fi, ConfigAP, Système, Gestion des données, réseaux
+> enregistrés), l'import MQTT, les commandes d'affichage et les routes Jeedom
+> /get, /events, /sync/toggle. Les six routes historiques /addlistlvgl,
+> /removelistlvgl, /savelistlvgl, /screenadd, /screenformat, /screensave utilisent
+> désormais un document JSON temporaire (écriture atomique au "save").
+> Leurs tests de contrat statiques sont intégrés à la CI.
+>
+> **Toujours manquant / à valider** : mise à jour automatique IDF spécifique
+> (/api/checkupdate, /updatemodule, GET /update) : NE JAMAIS installer un OTA
+> Arduino de la même cible Waveshare sur un port IDF; MJPEG multipart et HTTPS
+> pour la caméra; fidélité de chaque widget, styles et interactions, migration
+> des secrets sur un appareil réel, sécurité des APIs et essais physiques
+> (premier démarrage, Wi-Fi, tactile GT911, actions Jeedom, stabilité PSRAM,
+> veille, FPS, reboot). Les endpoints GPIO optionnels de l'Arduino ne sont
+> pas actifs sur la 4.3C et ne sont pas un obstacle.
+>
+> Le dernier build doit être vérifié sur **son SHA exact** : un ancien build
+> réussi ne suffit pas à valider les nouveaux commits. N'attribuer le statut
+> "firmware prêt à tester" qu'après validation du build courant et cohérence
+> de tous les parcours critiques.
+
+
 **Source de vérité :** `firmware-beta/firmware/source/consolidated/MIRA_PANEL/` (sources `MiraPanelUI.cpp`, `MiraPanelServer.cpp`, `MiraDisplayProfile.h`, `SPIFFS_Process.h`, `HTML/*.h`). Ce portage ESP-IDF doit conserver les parcours et contrats, pas inventer un nouveau Mira.
 
 ## Étapes déjà implémentées dans experiment/mira-idf-mira-ui-43c
