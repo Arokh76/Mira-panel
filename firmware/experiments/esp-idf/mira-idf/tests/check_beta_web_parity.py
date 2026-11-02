@@ -70,4 +70,13 @@ for marker in ('mira_jeedom_render_beta_actions(r)', 'mira_beta_index_html',
 for marker in ('uri="/events"', 'mira_jeedom_beta_web_action',
                'mira_jeedom_render_beta_actions'):
     assert marker in jeedom, f"Missing Jeedom beta UI compatibility: {marker}"
+# Ensure destructive operations never execute from a GET /load navigation.
+data = (idf / "mira_beta_data.c").read_text(encoding="utf-8")
+setup = (idf / "mira_beta_setup.c").read_text(encoding="utf-8")
+recovery = (idf / "mira_recovery.c").read_text(encoding="utf-8")
+assert 'mira_beta_data_confirm(req,nav)' in handlers, "Missing reset confirmation"
+assert 'mira_beta_data_reset_post' in setup, "Missing POST-only reset endpoint"
+assert 'reset_token=0;' in data and 'do_scope(operation)' in data, "Reset confirmation not single-use"
+assert 'mira_recovery_save_beta_ap' in recovery and 'beta_ap_persistent||!station_connected' in recovery, "Beta AP settings not persisted/recovered"
+print("PASS beta Wi-Fi AP and reset safety contracts")
 print("PASS beta page/control route wiring")
