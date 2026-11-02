@@ -19,3 +19,9 @@ int mira_recovery_take_cache_request(void);
 void mira_recovery_set_cache_state(int state, int cards);
 
 void mira_recovery_set_scroll_state(uint32_t mode, uint32_t switches, uint32_t rebuild_us);
+
+// Native adapter for the ORIGINAL beta /save?config=wifi form.
+// Old /spiffs/reseau.json remains untouched for safe rollback.
+esp_err_t mira_recovery_save_beta_wifi(const char *ssid,const char *password,
+    const char *mode,const char *ip,const char *mask,
+    const char *gateway,const char *dns1,const char *dns2);
