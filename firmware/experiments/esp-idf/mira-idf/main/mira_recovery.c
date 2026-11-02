@@ -3,6 +3,7 @@
 #include "mira_jeedom.h"
 #include "mira_setup_access.h"
 #include "mira_beta_setup.h"
+#include "mira_beta_captive_dns.h"
 // Isolated IDF test recovery AP. Uses raw .bin POST, not multipart/form-data.
 // Partition layout must match Mira's current Waveshare OTA partition layout.
 #include <stdio.h>
@@ -584,6 +585,7 @@ esp_err_t mira_recovery_init(void) {
     ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_APSTA), TAG, "wifi mode");
     ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_AP, &ap), TAG, "wifi config");
     ESP_RETURN_ON_ERROR(esp_wifi_start(), TAG, "wifi start");
+    ESP_ERROR_CHECK_WITHOUT_ABORT(mira_beta_captive_dns_start());
     if(xTaskCreate(recovery_ap_supervisor,"mira_ap_guard",3072,NULL,3,NULL)!=pdPASS)
         ESP_LOGW(TAG,"Recovery AP supervisor unavailable; AP remains enabled");
     wifi_config_t saved_sta={0};
