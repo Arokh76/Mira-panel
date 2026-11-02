@@ -602,6 +602,85 @@ static esp_err_t param_get(httpd_req_t *req){
     httpd_resp_set_type(req,"text/plain");
     return httpd_resp_sendstr(req,err==ESP_OK?value:(!strcmp(name,"Jeedom")?"1":"Null"));
 }
+// Mirror beta /getallparams: return original params.json untouched when it
+// exists; on a clean IDF install synthesize the equivalent {params:[...]} from
+// the native NVS values so the Jeedom configuration editor can read them.
+static esp_err_t getallparams(httpd_req_t *req){
+    if(!require_key(req))return ESP_FAIL;
+    FILE *fp=fopen("/spiffs/params.json","rb");
+    if(fp){
+        long length=-1;
+        if(fseek(fp,0,SEEK_END)==0)length=ftell(fp);
+        if(length>1&&length<=32768&&fseek(fp,0,SEEK_SET)==0){
+            char *buf=malloc((size_t)length+1);
+            if(buf){
+                size_t n=fread(buf,1,(size_t)length,fp);
+                buf[n]=0;
+                if(n==(size_t)length){
+                    cJSON *root=cJSON_ParseWithLength(buf,n);
+                    const cJSON *params=root?cJSON_GetObjectItemCaseSensitive(root,"params"):NULL;
+                    bool valid=cJSON_IsArray(params);
+                    if(root)cJSON_Delete(root);
+                    if(valid){
+                        fclose(fp);
+                        httpd_resp_set_type(req,"application/json");
+                        esp_err_t out=httpd_resp_send(req,buf,n);
+                        free(buf);
+                        return out;
+                    }
+                }
+                free(buf);
+            }
+        }
+        fclose(fp);
+    }
+    cJSON *doc=cJSON_CreateObject();
+    cJSON *params=doc?cJSON_AddArrayToObject(doc,"params"):NULL;
+    if(!params){if(doc)cJSON_Delete(doc);return httpd_resp_send_err(
+        req,HTTPD_500_INTERNAL_SERVER_ERROR,"Memoire indisponible"),ESP_FAIL;}
+    nvs_handle_t nv;
+    const bool have_nvs=nvs_open("mira_idf_jeed",NVS_READONLY,&nv)==ESP_OK;
+    static const char *const names[]={
+        "Jeedom","Jeedom_IP","Jeedom_Key","Jeedom_Key_mira",
+        "Jeedom_Refresh","Jeedom_Init_Cmd"
+    };
+    for(size_t i=0;i<sizeof(names)/sizeof(names[0]);i++){
+        char value[256]={0};size_t cap=sizeof(value);
+        if(!have_nvs||nvs_get_str(nv,names[i],value,&cap)!=ESP_OK){
+            if(strcmp(names[i],"Jeedom"))continue;
+            strcpy(value,"1"); // Original Mira IDF default transport: HTTP
+        }
+        cJSON *entry=cJSON_CreateObject();
+        if(!entry)continue;
+        cJSON_AddStringToObject(entry,"param",names[i]);
+        cJSON_AddStringToObject(entry,"value",value);
+        cJSON_AddStringToObject(entry,"type",
+            strstr(names[i],"Key")?"hidden-text":"text");
+        cJSON_AddItemToArray(params,entry);
+        memset(value,0,sizeof(value));
+    }
+    if(have_nvs)nvs_close(nv);
+    for(size_t i=0;i<sizeof(display_fields)/sizeof(display_fields[0]);i++){
+        char value[48]={0};
+        if(!display_field_read(&display_fields[i],value,sizeof(value)))continue;
+        cJSON *entry=cJSON_CreateObject();
+        if(!entry)continue;
+        cJSON_AddStringToObject(entry,"param",display_fields[i].legacy);
+        cJSON_AddStringToObject(entry,"value",value);
+        cJSON_AddStringToObject(entry,"type","text");
+        cJSON_AddItemToArray(params,entry);
+    }
+    char *out=cJSON_PrintUnformatted(doc);
+    cJSON_Delete(doc);
+    if(!out){
+        httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"JSON indisponible");
+        return ESP_FAIL;
+    }
+    httpd_resp_set_type(req,"application/json");
+    esp_err_t err=httpd_resp_sendstr(req,out);
+    cJSON_free(out);
+    return err;
+}
 static esp_err_t param_set(httpd_req_t *req){
     if(!require_key(req))return ESP_FAIL;
     char name[32],value[256];
@@ -1527,6 +1606,9 @@ void mira_jeedom_register_http(httpd_handle_t server) {
         {.uri="/updatenr",.method=HTTP_GET,.handler=updatenr},
         {.uri="/mira/jeedom/key",.method=HTTP_POST,.handler=provision_key},
         {.uri="/getparam",.method=HTTP_GET,.handler=param_get},
+        {.uri="/getallparams",.method=HTTP_GET,.handler=getallparams},
+        {.uri="/updateparam",.method=HTTP_GET,.handler=param_set},
+        {.uri="/addparam",.method=HTTP_GET,.handler=param_set},
         {.uri="/addlistparam",.method=HTTP_GET,.handler=param_set},
         {.uri="/updatelistparam",.method=HTTP_GET,.handler=param_set},
         {.uri="/savelistparam",.method=HTTP_GET,.handler=param_saved},
