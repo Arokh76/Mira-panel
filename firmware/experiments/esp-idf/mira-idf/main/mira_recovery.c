@@ -2,6 +2,7 @@
 #include "mira_mqtt.h"
 #include "mira_jeedom.h"
 #include "mira_setup_access.h"
+#include "mira_beta_setup.h"
 // Isolated IDF test recovery AP. Uses raw .bin POST, not multipart/form-data.
 // Partition layout must match Mira's current Waveshare OTA partition layout.
 #include <stdio.h>
@@ -130,6 +131,9 @@ static const char recovery_page[] =
 "</script></html>";
 
 static esp_err_t index_get(httpd_req_t *req) {
+    // Mirror the 0.7.37 first-run workflow: beta key page then Wi-Fi page.
+    // The performance/recovery UI remains available after provisioning.
+    if(mira_beta_setup_root(req))return ESP_OK;
     // Reuse the already-registered root URI: NO new HTTP handler slots.
     char query[48], requested[12];
     if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
@@ -564,11 +568,11 @@ esp_err_t mira_recovery_init(void) {
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_event_handler_register(WIFI_EVENT,WIFI_EVENT_STA_DISCONNECTED,wifi_status_event,NULL));
     wifi_config_t ap = {
         .ap = {
-            .ssid = "Mira-LVGL96-43",
+            .ssid = "Mira Panel",
             .ssid_len = 0,
-            .password = "MiraIDF2026",
+            .password = "",
             .channel = 6,
-            .authmode = WIFI_AUTH_WPA2_PSK,
+            .authmode = WIFI_AUTH_OPEN,
             .max_connection = 2,
             .pmf_cfg = {.required = false},
         }
@@ -639,8 +643,9 @@ esp_err_t mira_recovery_init(void) {
     mira_full_register_http(httpd); // optional 0.7.37 SPIFFS config and upload
     mira_mqtt_register_http(httpd); // optional native MQTT settings
     mira_jeedom_register_http(httpd); // beta Jeedom protocol compatibility
+    ESP_RETURN_ON_ERROR(mira_beta_setup_register(httpd),TAG,"Mira beta first-run setup");
     ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_register_uri_handler(httpd,&wifi_get));
     ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_register_uri_handler(httpd,&wifi_post));
-    ESP_LOGW(TAG, "Recovery AP Mira-IDF-Test password MiraIDF2026 at http://192.168.4.1");
+    ESP_LOGI(TAG, "Mira 0.7.37 first-run AP SSID Mira Panel (open until setup); http://192.168.4.1");
     return ESP_OK;
 }
