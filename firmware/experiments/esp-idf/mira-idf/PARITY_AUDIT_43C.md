@@ -35,6 +35,24 @@
 > reste conditionnée à la publication d'un binaire officiel IDF.
 > La version de référence IDF demeure expérimentale et n'est pas distribuée.
 >
+> **Parité graphique LVGL 9.6 (lot du 2 novembre)** : palettes exactes des
+> trois thèmes Mira/Sombre/Glass, sélecteur enregistré en NVS et reconstruction
+> différée hors du callback LVGL; roue Hue de 150 px (carte 786×196 px,
+> saturation/luminosité conservées en interne, comme dans la bêta); valeurs
+> d'Info ajustées selon la largeur réelle UTF-8; cache RGB565 des tuiles
+> d'Info préparé au repos avec budget PSRAM et restauration des objets
+> interactifs à la fin du défilement. La carte multimédia retrouve la
+> présentation Jeedom/Spotify 786×558, pochettes HTTPS autorisées chargées
+> sur une tâche dédiée, actions et volume, avec transport de l'URL `__cover`
+> jusqu'à 768 octets sans augmenter la file des autres Infos.
+>
+> **Attention** : la compilation d'un lot précédent de cette parité a
+> réussi, mais seule la CI sur le SHA final confirme l'absence d'erreur de
+> build de l'ensemble. La comparaison visuelle et l'interaction sur écran
+> (toucher la roue, changer de thème, défilement et pochettes) restent à
+> effectuer. Ne pas annoncer une parité visuelle observée à 100 % avant
+> ces essais. Aucune modification des sources Arduino n'a été faite.
+>
 > Le dernier build doit être vérifié sur **son SHA exact** : un ancien build
 > réussi ne suffit pas à valider les nouveaux commits. N'attribuer le statut
 > "firmware prêt à tester" qu'après validation du build courant et cohérence
