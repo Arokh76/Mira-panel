@@ -125,6 +125,15 @@ assert '.uri="/mira"' in full and 'legacy_mira_get' in full
 assert 'if(!mira_beta_web_authorized(req))return ESP_FAIL;' in full
 assert 'mira_full_enqueue_state(name->valuestring,val)' in full
 print("PASS production UI routing and authenticated state injection")
+# Dimitri JSON-B1 lesson on IDF: bounded cJSON cache, no repeat writes and
+# observable state-pressure counters (not ArduinoJson garbageCollect()).
+assert 'mira_full_state_diagnostics' in full
+assert 'passive_queue_dropped' in full
+assert 'passive_evictions' in full
+assert 'passive_unchanged' in full
+assert 'if(i<state_cache_count &&' in full
+assert 'state_queue_dropped' in jeedom and 'state_cache_evictions' in jeedom
+print("PASS Dimitri-inspired passive state cache diagnostics")
 # Only a published IDF-specific target may result in 'available'; the
 # Arduino firmware target must never be silently reused.
 update = (idf / "mira_beta_update.c").read_text(encoding="utf-8")
