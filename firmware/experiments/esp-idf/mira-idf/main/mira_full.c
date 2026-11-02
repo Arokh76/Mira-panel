@@ -53,6 +53,10 @@ void mira_full_request_reload(void){ reload_pending=true; }
 // No state update ever generates a Jeedom/MQTT command.
 typedef struct { char name[96]; char value[160]; } mira_state_update_t;
 static QueueHandle_t state_queue;
+// Album artwork URLs are longer than ordinary Jeedom Infos (159 bytes).
+// Keep them OUT of the 24-entry general state queue to protect internal RAM.
+typedef struct {char name[96];char url[769];} mira_cover_update_t;
+static QueueHandle_t cover_update_queue;
 // Incoming values are tracked separately for the beta HTTP /get endpoint.
 // An absent entry is unknown, never treated as OFF or zero.
 #define MIRA_STATE_CACHE_LIMIT 96
@@ -2345,7 +2349,21 @@ static void remember_passive_state(const mira_state_update_t *msg){
     xSemaphoreGive(state_cache_lock);
 }
 bool mira_full_enqueue_state(const char *name,const char *value){
-    if(!state_queue||!name||!value||!*name||strlen(name)>=96||strlen(value)>=160)return false;
+    if(!name||!value||!*name||strlen(name)>=96)return false;
+    const size_t size=strlen(value),name_size=strlen(name);
+    if(name_size>=7&&!strcmp(name+name_size-7,"__cover")){
+        // Artwork is a special passive field, never a Jeedom actuator.
+        if(!cover_update_queue||size>768)return false;
+        mira_cover_update_t cover={0};
+        snprintf(cover.name,sizeof(cover.name),"%s",name);
+        memcpy(cover.url,value,size+1);
+        if(xQueueSend(cover_update_queue,&cover,0)!=pdTRUE){
+            __atomic_fetch_add(&passive_queue_dropped,1u,__ATOMIC_RELAXED);
+            return false;
+        }
+        return true;
+    }
+    if(!state_queue||size>=160)return false;
     mira_state_update_t msg={0};
     snprintf(msg.name,sizeof(msg.name),"%s",name);
     snprintf(msg.value,sizeof(msg.value),"%s",value);
@@ -2673,6 +2691,25 @@ void mira_full_ui_tick(void){
         apply_auto_brightness();
     }
     apply_pending_states();
+    if(cover_update_queue){
+        mira_cover_update_t cover;
+        // GUI task owns all image lifecycle; passive cover updates just
+        // hand off a URL to its bounded worker (no HTTP on the GUI).
+        for(int attempt=0;attempt<2&&xQueueReceive(cover_update_queue,&cover,0)==pdTRUE;attempt++){
+            for(uint8_t i=0;i<widget_n;i++){
+                mira_widget_t *w=&widgets[i];
+                if(strcmp(w->type,"media"))continue;
+                char expected[104];
+                snprintf(expected,sizeof(expected),"%.95s__cover",w->name);
+                if(strcmp(cover.name,expected))continue;
+                if(!mira_album_art_request(i,cover.url)){
+                    if(artwork_owner==i)artwork_reset();
+                    if(w->media_artwork_placeholder)
+                        lv_obj_remove_flag(w->media_artwork_placeholder,LV_OBJ_FLAG_HIDDEN);
+                }
+            }
+        }
+    }
     apply_pending_display_commands();
     // Reconcile pending single/double clicks after the gesture window.
     const uint32_t gesture_now=lv_tick_get();
@@ -2769,6 +2806,7 @@ static bool spiffs_partition_is_blank(void){
 }
 bool mira_full_storage_init(void){
     if(!state_queue)state_queue=xQueueCreate(24,sizeof(mira_state_update_t));
+    if(!cover_update_queue)cover_update_queue=xQueueCreate(2,sizeof(mira_cover_update_t));
     if(!state_queue)ESP_LOGE(TAG,"State queue allocation failed");
     if(!state_cache_lock)state_cache_lock=xSemaphoreCreateMutex();
     if(!state_cache)state_cache=heap_caps_calloc(MIRA_STATE_CACHE_LIMIT,sizeof(*state_cache),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
