@@ -1,6 +1,7 @@
 #pragma once
 #include "esp_err.h"
 #include <stdint.h>
+#include <stdbool.h>
 esp_err_t mira_recovery_init(void);
 // Called in the LVGL render task; -1 none, 0 shadows OFF, 1 ON.
 int mira_recovery_take_shadow_request(void);
@@ -25,3 +26,6 @@ void mira_recovery_set_scroll_state(uint32_t mode, uint32_t switches, uint32_t r
 esp_err_t mira_recovery_save_beta_wifi(const char *ssid,const char *password,
     const char *mode,const char *ip,const char *mask,
     const char *gateway,const char *dns1,const char *dns2);
+
+// Beta ConfigAP form, stored in native NVS; settings applied on next boot.
+esp_err_t mira_recovery_save_beta_ap(const char *password,const char *ip,bool active);
