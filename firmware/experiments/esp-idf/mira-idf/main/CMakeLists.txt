@@ -4,3 +4,6 @@ idf_component_register(
   REQUIRES lvgl esp_lcd esp_timer esp_driver_i2c esp_wifi esp_netif esp_event
            esp_http_server esp_http_client app_update nvs_flash spiffs json mqtt mbedtls
 )
+
+# UI behavior flags only; the validated 7-inch RGB/CH422G driver is separate.
+target_compile_definitions(${COMPONENT_LIB} PRIVATE MIRA_PANEL_7_INCH=1)
