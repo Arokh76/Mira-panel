@@ -256,6 +256,22 @@ static esp_err_t save_post(httpd_req_t *req){
     httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Configuration Mira inconnue");
     return ESP_FAIL;
 }
+static esp_err_t captive_probe(httpd_req_t *req){
+    if(mira_setup_ap_client(req)&&mira_beta_setup_unconfigured()){
+        httpd_resp_set_status(req,"302 Found");
+        httpd_resp_set_hdr(req,"Location","http://192.168.4.1/");
+        return httpd_resp_sendstr(req,"");
+    }
+    httpd_resp_send_err(req,HTTPD_404_NOT_FOUND,"Page introuvable");
+    return ESP_FAIL;
+}
+esp_err_t mira_beta_setup_register_captive(httpd_handle_t server){
+    // The wildcard is registered AFTER all explicit HTTP/Jeedom routes.
+    const httpd_uri_t fallback={
+        .uri="/*",.method=HTTP_GET,.handler=captive_probe
+    };
+    return httpd_register_uri_handler(server,&fallback);
+}
 esp_err_t mira_beta_setup_register(httpd_handle_t server){
     const httpd_uri_t load={.uri="/load",.method=HTTP_GET,.handler=load_get};
     const httpd_uri_t save={.uri="/save",.method=HTTP_POST,.handler=save_post};
