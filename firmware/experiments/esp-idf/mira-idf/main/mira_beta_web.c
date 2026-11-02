@@ -4,6 +4,7 @@
 #include "mira_beta_web.h"
 #include "mira_beta_web_pages.h"
 #include "mira_full.h"
+#include "mira_jeedom.h"
 #include "mira_mqtt.h"
 #include "mira_recovery.h"
 #include "esp_wifi.h"
@@ -317,6 +318,7 @@ static esp_err_t replacement(httpd_req_t *r,const char *name){
     if(!strcmp(name,"DARKCOLOR"))return chunk(r,"#1E5064");
     if(!strcmp(name,"ACTIVECOLOR"))return chunk(r,"#D39E55");
     if(!strcmp(name,"TEXTCOLOR"))return chunk(r,"#FFFFFF");
+    if(!strcmp(name,"ACTIONS"))return mira_jeedom_render_beta_actions(r);
     if(!strcmp(name,"PARAMS"))return widget_rows(r,false);
     if(!strcmp(name,"MQTTTABLE"))return widget_rows(r,true);
     if(!strcmp(name,"DISPLAYNIGHTSTART")||!strcmp(name,"DISPLAYNIGHTEND")){
@@ -386,6 +388,10 @@ static esp_err_t render(httpd_req_t *r,const char *page){
     }
     if(p>from&&httpd_resp_send_chunk(r,from,p-from)!=ESP_OK)return ESP_FAIL;
     return httpd_resp_send_chunk(r,NULL,0);
+}
+esp_err_t mira_beta_web_home(httpd_req_t *req){
+    if(!mira_beta_web_authorized(req))return ESP_FAIL;
+    return render(req,mira_beta_index_html);
 }
 esp_err_t mira_beta_web_load(httpd_req_t *req){
     if(!mira_beta_web_authorized(req))return ESP_FAIL;
