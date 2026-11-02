@@ -1163,6 +1163,15 @@ static uint8_t desired_awake_brightness(void){
                                                 day_brightness_percent);
 }
 static void apply_auto_brightness(void){
+    // Original beta releases temporary manual brightness at day/night switch.
+    if(night_auto_enabled&&night_start_minute>=0&&night_end_minute>=0&&
+       night_start_minute!=night_end_minute&&time(NULL)>=1700000000){
+        const bool night=current_night_period();
+        if(last_night_valid&&night!=last_night_period)
+            manual_brightness_override=false;
+        last_night_period=night;
+        last_night_valid=true;
+    }else last_night_valid=false;
     if(display_sleeping)return;
     const uint8_t wanted=desired_awake_brightness();
     if(wanted==applied_brightness_raw)return;
