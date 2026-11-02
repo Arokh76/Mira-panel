@@ -8,6 +8,9 @@
 #include "mira_jeedom.h"
 #include "mira_mqtt.h"
 #include "mira_recovery.h"
+#include "mira_beta_networks.h"
+#include "esp_random.h"
+#include "esp_timer.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
 #include "cJSON.h"
@@ -30,6 +33,8 @@
 #define MIRA_WEB_PATH "/spiffs/miralvgl.json"
 #define MIRA_WEB_TEMP "/spiffs/miralvgl.webnew"
 static const char *TAG="mira-beta-web";
+static uint32_t network_action_nonce;
+static int64_t network_nonce_time;
 
 static esp_err_t html_err(httpd_req_t *req,httpd_err_code_t code,const char *msg){
     return httpd_resp_send_err(req,code,msg);
@@ -264,12 +269,70 @@ static esp_err_t wifi_choices(httpd_req_t *req){
     }
     return chunk(req,"</select>");
 }
+static int network_id(httpd_req_t *req){
+    char query[160]={0},number[10]={0};
+    if(httpd_req_get_url_query_str(req,query,sizeof(query))!=ESP_OK||
+       httpd_query_key_value(query,"network",number,sizeof(number))!=ESP_OK||
+       !*number)return -1;
+    unsigned id=0;
+    if(!decimal(number,999,&id))return -1;
+    return (int)id;
+}
+static esp_err_t registered_network_rows(httpd_req_t *req){
+    mira_beta_network_t profiles[MIRA_NET_MAX]={0};
+    size_t count=0;
+    if(mira_beta_networks_list(profiles,&count,MIRA_NET_MAX)!=ESP_OK)
+        return chunk(req,"<div class=\"empty\">Impossible de lire les réseaux.</div>");
+    if(!count)return chunk(req,"<div class=\"empty\">Aucun réseau n'est enregistré.</div>");
+    network_action_nonce=esp_random();
+    if(!network_action_nonce)network_action_nonce=1;
+    network_nonce_time=esp_timer_get_time();
+    for(size_t i=0;i<count;i++){
+        char head[210]={0},tail[260]={0};
+        int id=profiles[i].id;
+        snprintf(head,sizeof(head),
+                 "<div class=\"network-item\"><span class=\"network-id\">%d</span>"
+                 "<button class=\"network-button\" onclick=\"window.location.href='/load?nav=update&amp;network=%d'\">",
+                 id,id);
+        if(chunk(req,head)!=ESP_OK||escaped(req,profiles[i].ssid)!=ESP_OK||
+           chunk(req,"</button>")!=ESP_OK)return ESP_FAIL;
+        snprintf(tail,sizeof(tail),
+                 "<form method=\"POST\" action=\"/mira/network?action=activate&amp;network=%d\" "
+                 "style=\"display:inline\">"
+                 "<input type=\"hidden\" name=\"nonce\" value=\"%08lx\">"
+                 "<button class=\"btn secondary\" type=\"submit\">Activer</button></form></div>",
+                 id,(unsigned long)network_action_nonce);
+        if(chunk(req,tail)!=ESP_OK)return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+static esp_err_t registered_network_field(httpd_req_t *req,const char *name){
+    const int id=network_id(req);
+    mira_beta_network_t profile={0};
+    if(id<0||mira_beta_networks_get(id,&profile)!=ESP_OK)return ESP_OK;
+    const char *val="";
+    if(!strcmp(name,"SSIDUPDATE"))val=profile.ssid;
+    else if(!strcmp(name,"PASSUPDATE"))val=""; // keep encrypted secret hidden
+    else if(!strcmp(name,"IPMODEUPDATE"))val=profile.ip_mode;
+    else if(!strcmp(name,"IPUPDATE"))val=profile.ip;
+    else if(!strcmp(name,"MASKUPDATE"))val=profile.mask;
+    else if(!strcmp(name,"GATEWAYUPDATE"))val=profile.gateway;
+    else if(!strcmp(name,"DNS1UPDATE"))val=profile.dns1;
+    else if(!strcmp(name,"DNS2UPDATE"))val=profile.dns2;
+    return escaped(req,val);
+}
 static esp_err_t replacement(httpd_req_t *r,const char *name){
     static const struct {const char *slot,*key;unsigned fallback;} display[]={
         {"DISPLAYDAY","day_pct",85},{"DISPLAYNIGHT","night_pct",20},
         {"DISPLAYSLEEPTIMEOUT","sleep_delay",120},{"DISPLAYSLEEPBRIGHT","sleep_light",8},
         {"DISPLAYNIGHTCHECKED","night_auto",0},{"DISPLAYCLOCKCHECKED","sleep_clock",1}
     };
+    if(!strcmp(name,"RESEAUXENREG"))return registered_network_rows(r);
+    if(!strcmp(name,"SSIDUPDATE")||!strcmp(name,"PASSUPDATE")||
+       !strcmp(name,"IPMODEUPDATE")||!strcmp(name,"IPUPDATE")||
+       !strcmp(name,"MASKUPDATE")||!strcmp(name,"GATEWAYUPDATE")||
+       !strcmp(name,"DNS1UPDATE")||!strcmp(name,"DNS2UPDATE"))
+        return registered_network_field(r,name);
     if(!strcmp(name,"MDPAP")){
         char key[97]={0};size_t n=sizeof(key);
         nvs_handle_t nv;
