@@ -122,6 +122,8 @@ typedef struct {
     uint16_t color_hue;
     uint8_t color_sat,color_val;
     lv_obj_t *fields[9]; // energy/media passive Jeedom composite infos
+    lv_obj_t *energy_gauge[3],*energy_extra_names[2];
+    bool energy_extra_active[2];
     lv_obj_t *media_slider,*media_device_dropdown,*media_play_caption;
     lv_obj_t *media_artwork_image,*media_artwork_placeholder;
     bool media_is_playing;
@@ -1518,19 +1520,76 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         return;
     }
     if(!strcmp(type,"energy")){
-        static const char *const energy_titles[]={
-            "Solaire","Maison","Réseau","Batterie","SOC","SOC 2","SOC 3"
+        // Restore the beta's 786x344 Jeedom energy dashboard. The generic
+        // 7-row table wasn't visually or functionally equivalent.
+        const int pad=13,gap=8,box_w=(786-2*pad-gap)/2,box_h=91;
+        const int y1=50,y2=y1+box_h+gap;
+        static const char *const titles[]={
+            "SOLAIRE","MAISON","RÉSEAU","BATTERIE"
         };
-        w->card=card(pg,786,205);
-        lv_obj_t *heading=label(w->card,display,0xF3F6F7,&lv_font_montserrat_20);
-        lv_obj_set_pos(heading,10,4);
-        for(int n=0;n<7;n++){
-            int col=n/5,row=n%5;
-            int x=col?400:12,y=35+row*31;
-            lv_obj_t *nm=label(w->card,energy_titles[n],0xA8B2B8,&mira_font_fr_16);
-            lv_obj_set_pos(nm,x,y);lv_obj_set_width(nm,105);
-            w->fields[n]=label(w->card,"--",0x22BEEA,&mira_font_fr_16);
-            lv_obj_set_pos(w->fields[n],x+112,y);lv_obj_set_width(w->fields[n],245);
+        static const uint32_t colors[]={
+            0xF6BF49,0xFF9F61,0x42C7EE,0x55DAAB
+        };
+        w->card=card(pg,786,344);
+        lv_obj_set_layout(w->card,LV_LAYOUT_NONE);
+        lv_obj_set_style_pad_all(w->card,0,0);
+        no_scroll(w->card);
+        lv_obj_t *heading=label(w->card,display,0xF3F6F7,&mira_font_fr_16);
+        lv_obj_set_pos(heading,pad,9);
+        lv_obj_set_width(heading,786-2*pad);
+        for(int n=0;n<4;n++){
+            const int x=pad+(n%2)*(box_w+gap);
+            const int y=y1+(n/2)*(box_h+gap);
+            lv_obj_t *cell=lv_obj_create(w->card);
+            lv_obj_set_pos(cell,x,y);
+            lv_obj_set_size(cell,box_w,box_h);
+            lv_obj_set_style_pad_all(cell,0,0);
+            lv_obj_set_style_radius(cell,11,0);
+            lv_obj_set_style_bg_color(cell,panel2_c(),0);
+            lv_obj_set_style_bg_opa(cell,LV_OPA_COVER,0);
+            lv_obj_set_style_border_color(cell,lv_color_hex(colors[n]),0);
+            lv_obj_set_style_border_width(cell,1,0);
+            lv_obj_set_style_shadow_width(cell,0,0);
+            no_scroll(cell);
+            lv_obj_remove_flag(cell,LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_t *name_label=label(cell,titles[n],0xA8B2B8,&mira_font_fr_14);
+            lv_obj_set_pos(name_label,10,9);
+            lv_obj_set_width(name_label,box_w-20);
+            w->fields[n]=label(cell,"--",colors[n],&lv_font_montserrat_20);
+            lv_obj_set_pos(w->fields[n],10,38);
+            lv_obj_set_width(w->fields[n],box_w-18);
+            lv_label_set_long_mode(w->fields[n],LV_LABEL_LONG_DOT);
+        }
+        const int section_y=y2+box_h+17;
+        lv_obj_t *storage=label(w->card,"STOCKAGE",0xA8B2B8,&mira_font_fr_14);
+        lv_obj_set_pos(storage,pad+3,section_y);
+        lv_obj_set_width(storage,200);
+        for(int i=0;i<3;i++){
+            int y=section_y+i*47;
+            if(i){
+                w->energy_extra_names[i-1]=label(w->card,
+                    i==1?"BATTERIE 2":"BATTERIE 3",0xA8B2B8,&mira_font_fr_14);
+                lv_obj_set_pos(w->energy_extra_names[i-1],pad+3,y);
+                lv_obj_set_width(w->energy_extra_names[i-1],210);
+                lv_obj_add_flag(w->energy_extra_names[i-1],LV_OBJ_FLAG_HIDDEN);
+            }
+            w->fields[4+i]=label(w->card,"--",0x55DAAB,&lv_font_montserrat_20);
+            lv_obj_set_width(w->fields[4+i],70);
+            lv_obj_set_style_text_align(w->fields[4+i],LV_TEXT_ALIGN_RIGHT,0);
+            lv_obj_set_pos(w->fields[4+i],786-pad-72,y-1);
+            w->energy_gauge[i]=lv_bar_create(w->card);
+            lv_obj_set_pos(w->energy_gauge[i],pad+3,y+32);
+            lv_obj_set_size(w->energy_gauge[i],786-2*pad-6,11);
+            lv_bar_set_range(w->energy_gauge[i],0,100);
+            lv_bar_set_value(w->energy_gauge[i],0,LV_ANIM_OFF);
+            lv_obj_set_style_bg_color(w->energy_gauge[i],panel2_c(),LV_PART_MAIN);
+            lv_obj_set_style_bg_color(w->energy_gauge[i],
+                                      lv_color_hex(0x55DAAB),LV_PART_INDICATOR);
+            lv_obj_set_style_radius(w->energy_gauge[i],LV_RADIUS_CIRCLE,LV_PART_MAIN);
+            lv_obj_set_style_radius(w->energy_gauge[i],LV_RADIUS_CIRCLE,LV_PART_INDICATOR);
+            lv_obj_remove_flag(w->energy_gauge[i],LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_add_flag(w->energy_gauge[i],LV_OBJ_FLAG_HIDDEN);
+            if(i)lv_obj_add_flag(w->fields[4+i],LV_OBJ_FLAG_HIDDEN);
         }
         return;
     }
