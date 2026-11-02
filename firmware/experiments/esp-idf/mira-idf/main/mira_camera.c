@@ -510,6 +510,12 @@ esp_err_t mira_camera_init(void){
     }
     return ESP_OK;
 }
+bool mira_camera_fetch_url(const char *url,mira_camera_frame_t *out){
+    if(!out)return false;
+    memset(out,0,sizeof(*out));
+    if(!mira_camera_url_valid(url))return false;
+    return fetch_snapshot(url,out);
+}
 bool mira_camera_start(const char *widget_name) {
     if(!lock)return false;
     char url[CAM_MAX_URL+1]={0};
