@@ -62,7 +62,10 @@ static bool sleep_clock_enabled=true,display_sleeping;
 static lv_obj_t *sleep_overlay,*sleep_clock_text;
 static bool spiffs_ready=false;
 static lv_obj_t *screen, *pages[6], *nav, *page_picker;
-static lv_obj_t *favorite_btn[4];
+static lv_obj_t *favorite_btn[4],*picker_buttons[6],*picker_card;
+static uint8_t favorite_pages[3]={0,1,2};
+static uint8_t visible_page_mask=0x3f;
+static uint32_t last_favorite_poll_ms;
 static uint8_t current_page=0;
 static const char *page_names[6]={"Accueil","Lumières","Températures","Paramètres","Énergie","Multimédia"};
 static const int page_order[6]={0,1,2,4,5,3};
@@ -218,7 +221,7 @@ static int to_page(const char *loc){
     return 0;
 }
 static void show_page(int idx){
-    if(idx<0||idx>5)return;
+    if(idx<0||idx>5||!(visible_page_mask&(1u<<idx)))return;
     current_page=(uint8_t)idx;
     for(int i=0;i<6;i++){
         if(i==idx)lv_obj_remove_flag(pages[i],LV_OBJ_FLAG_HIDDEN);
@@ -233,7 +236,10 @@ static void nav_click(lv_event_t *e){
         if(lv_obj_has_flag(page_picker,LV_OBJ_FLAG_HIDDEN))
             lv_obj_remove_flag(page_picker,LV_OBJ_FLAG_HIDDEN);
         else lv_obj_add_flag(page_picker,LV_OBJ_FLAG_HIDDEN);
-    } else show_page(index);
+    }else if(index>=7&&index<=9){
+        const uint8_t page=favorite_pages[index-7];
+        if(page<6)show_page(page);
+    }else show_page(index);
 }
 static void event_local(lv_event_t *e){
     if(suppress_events||display_sleeping)return;
@@ -1365,6 +1371,84 @@ static void build_config(void){
              widget_n,(unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
     show_page(0);
 }
+// Match Mira beta: favorites (three independently saved slots) and a
+// configurable page visibility mask are polled from legacy NVS on LVGL task.
+static void refresh_nav_favorites(void){
+    for(uint8_t slot=0;slot<3;slot++){
+        lv_obj_t *bt=favorite_btn[slot];
+        if(!bt)continue;
+        lv_obj_clean(bt);
+        const uint8_t page=favorite_pages[slot];
+        if(page<6 && !(visible_page_mask&(1u<<page))){
+            lv_obj_add_flag(bt,LV_OBJ_FLAG_HIDDEN);
+            continue;
+        }
+        lv_obj_remove_flag(bt,LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_bg_opa(bt,page==0?LV_OPA_70:LV_OPA_TRANSP,0);
+        if(page==1)mira_nav_bulb(bt);
+        else if(page==2)mira_nav_thermometer(bt);
+        else{
+            const char *symbol=page==0?LV_SYMBOL_HOME:
+                               page==3?LV_SYMBOL_SETTINGS:
+                               page==4?LV_SYMBOL_CHARGE:
+                               page==5?LV_SYMBOL_AUDIO:LV_SYMBOL_PLUS;
+            lv_obj_t *l=label(bt,symbol,page==255?0xA8B2B8:0x22BEEA,
+                              &lv_font_montserrat_20);
+            lv_obj_center(l);
+        }
+    }
+}
+static void refresh_page_picker(void){
+    if(!picker_card)return;
+    uint8_t row=0;
+    for(uint8_t i=0;i<6;i++){
+        const uint8_t page=(uint8_t)page_order[i];
+        lv_obj_t *bt=picker_buttons[page];
+        if(!bt)continue;
+        if(!(visible_page_mask&(1u<<page))){
+            lv_obj_add_flag(bt,LV_OBJ_FLAG_HIDDEN);
+        }else{
+            lv_obj_remove_flag(bt,LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_pos(bt,10,38+row*54);
+            row++;
+        }
+    }
+    lv_obj_set_height(picker_card,52+row*54);
+    lv_obj_center(picker_card);
+}
+static void poll_navigation_settings(void){
+    const uint32_t now=lv_tick_get();
+    if(now-last_favorite_poll_ms<1000)return;
+    last_favorite_poll_ms=now;
+    nvs_handle_t nv;
+    if(nvs_open("miraui",NVS_READONLY,&nv)!=ESP_OK)return;
+    uint8_t mask=0x3f;
+    if(nvs_get_u8(nv,"pageMask",&mask)!=ESP_OK)mask=0x3f;
+    mask=(mask&0x3fu)|1u;
+    uint8_t favorites[3]={0,1,2};
+    bool valid=true;
+    for(uint8_t i=0;i<3;i++){
+        char key[8];
+        snprintf(key,sizeof(key),"fav%u",(unsigned)i);
+        (void)nvs_get_u8(nv,key,&favorites[i]);
+        if(favorites[i]!=255&&favorites[i]>=6)valid=false;
+        for(uint8_t j=0;j<i;j++)
+            if(favorites[i]!=255&&favorites[i]==favorites[j])valid=false;
+    }
+    nvs_close(nv);
+    bool changed=visible_page_mask!=mask;
+    visible_page_mask=mask;
+    if(valid){
+        for(uint8_t i=0;i<3;i++)if(favorite_pages[i]!=favorites[i]){
+            favorite_pages[i]=favorites[i];changed=true;
+        }
+    }
+    if(changed){
+        refresh_page_picker();
+        refresh_nav_favorites();
+        if(!(visible_page_mask&(1u<<current_page)))show_page(0);
+    }
+}
 static void create_picker(void){
     page_picker=lv_obj_create(screen);
     lv_obj_set_size(page_picker,800,CONTENT_H);
@@ -1374,6 +1458,7 @@ static void create_picker(void){
     lv_obj_set_style_bg_opa(page_picker,LV_OPA_90,0);
     no_scroll(page_picker);
     lv_obj_t *c=lv_obj_create(page_picker);
+    picker_card=c;
     lv_obj_set_size(c,460,376);
     panel_style(c,true);lv_obj_center(c);no_scroll(c);
     lv_obj_t *t=label(c,"Toutes les pages",0xF3F6F7,&mira_font_fr_16);
@@ -1381,6 +1466,7 @@ static void create_picker(void){
     for(int j=0;j<6;j++){
         int p=page_order[j];
         lv_obj_t *bt=lv_button_create(c);
+        picker_buttons[p]=bt;
         lv_obj_set_size(bt,420,43);
         lv_obj_set_pos(bt,10,38+j*54);
         panel_style(bt,false);
@@ -1389,6 +1475,7 @@ static void create_picker(void){
         lv_obj_add_event_cb(bt,nav_click,LV_EVENT_CLICKED,(void *)(intptr_t)p);
     }
     lv_obj_add_flag(page_picker,LV_OBJ_FLAG_HIDDEN);
+    refresh_page_picker();
 }
 // Visible diagnostic independent from all Jeedom configuration / settings.
 // The GT911 counters are sampled by the board driver.  Even when LVGL click
@@ -1512,8 +1599,7 @@ void mira_full_ui_create(lv_display_t *disp){
     lv_obj_set_style_radius(nav,0,0);
     lv_obj_set_style_pad_all(nav,0,0);
     no_scroll(nav);
-    const int fav[4]={0,1,2,6};
-    // Original 0.7.37 bar: home, drawn bulb, drawn thermometer, 2x2 pages.
+    // Original beta: 3 configurable favorite slots + one Pages button.
     for(int i=0;i<4;i++){
         lv_obj_t *bt=lv_button_create(nav);
         favorite_btn[i]=bt;
@@ -1523,16 +1609,14 @@ void mira_full_ui_create(lv_display_t *disp){
         lv_obj_set_style_bg_color(bt,lv_color_hex(0x155A75),0);
         lv_obj_set_style_border_width(bt,0,0);
         lv_obj_set_style_shadow_width(bt,0,0);
-        lv_obj_add_event_cb(bt,nav_click,LV_EVENT_CLICKED,(void *)(intptr_t)fav[i]);
-        if(i==0) {
-            lv_obj_t *l=label(bt,LV_SYMBOL_HOME,0x22BEEA,&mira_font_fr_16);
-            lv_obj_center(l);
-        } else if(i==1) mira_nav_bulb(bt);
-        else if(i==2) mira_nav_thermometer(bt);
-        else mira_nav_pages(bt);
+        lv_obj_add_event_cb(bt,nav_click,LV_EVENT_CLICKED,
+                            (void *)(intptr_t)(i==3?6:7+i));
+        if(i==3)mira_nav_pages(bt);
     }
     settings();
     create_picker();
+    poll_navigation_settings();
+    refresh_nav_favorites();
     build_config();
     sleep_overlay=lv_obj_create(lv_layer_top());
     lv_obj_set_size(sleep_overlay,800,480);
@@ -1860,6 +1944,7 @@ static void apply_pending_states(void){
 }
 
 void mira_full_ui_tick(void){
+    poll_navigation_settings();
     if(reload_pending){reload_pending=false;camera_close();build_config();}
     if(settings_reload_pending){
         settings_reload_pending=false;
