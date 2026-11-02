@@ -4,7 +4,7 @@
 #pragma once
 // Original page: HTML_Key.h
 static const char mira_beta_key_page[] =
-"\\n"
+"\n"
 "<!DOCTYPE html>\\n"
 "<html lang=\"fr\">\\n"
 "<head>\\n"
@@ -44,11 +44,11 @@ static const char mira_beta_key_page[] =
 "</script>\\n"
 "</body>\\n"
 "</html>\\n"
-"\\n"
+"\n"
 ;
 // Original page: HTML_ManageurWiFiSansR.h
 static const char mira_beta_wifi_page[] =
-"\\n"
+"\n"
 "<!DOCTYPE html>\\n"
 "<html lang=\"fr\">\\n"
 "<head>\\n"
@@ -84,5 +84,5 @@ static const char mira_beta_wifi_page[] =
 "</script>\\n"
 "</body>\\n"
 "</html>\\n"
-"\\n"
+"\n"
 ;
