@@ -202,6 +202,10 @@ assert 'w->energy_gauge[i]=lv_bar_create(w->card)' in full
 assert 'strchr(msg->value,\'%\')!=NULL' in full
 assert 'lv_obj_set_height(w->card,344+47*extra_rows)' in full
 print("PASS native beta energy dashboard, SOC display and optional battery rows")
+assert 'static void mira_media_display_text(' in full
+assert 'mira_media_display_text(msg->value,shown,sizeof(shown))' in full
+assert '"i\\xCC\\x82"' in full and '"\\xE2\\x80\\x99"' in full
+print("PASS Spotify NFC display labels and punctuation compatibility")
 # Only a published IDF-specific target may result in 'available'; the
 # Arduino firmware target must never be silently reused.
 update = (idf / "mira_beta_update.c").read_text(encoding="utf-8")
