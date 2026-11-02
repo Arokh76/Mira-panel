@@ -321,6 +321,123 @@ static void legacy_apply_manual_ip(void){
         (void)esp_netif_dhcpc_start(sta_netif);
     }
 }
+// The original beta Wi-Fi form uses auto/manual/fixed_auto. Keep the
+// profiles in the native NVS namespace; never alter reseau.json from Arduino.
+static bool beta_web_load_ip_mode(void){
+    nvs_handle_t nv;
+    if(nvs_open("mira_idf_net",NVS_READONLY,&nv)!=ESP_OK)return false;
+    char mode[16]={0},ip[32]={0},mask[32]={0},gw[32]={0},dns1[32]={0},dns2[32]={0};
+    size_t n=sizeof(mode);
+    bool stored=nvs_get_str(nv,"web_mode",mode,&n)==ESP_OK;
+    if(stored){
+        n=sizeof(ip);(void)nvs_get_str(nv,"web_ip",ip,&n);
+        n=sizeof(mask);(void)nvs_get_str(nv,"web_mask",mask,&n);
+        n=sizeof(gw);(void)nvs_get_str(nv,"web_gw",gw,&n);
+        n=sizeof(dns1);(void)nvs_get_str(nv,"web_dns1",dns1,&n);
+        n=sizeof(dns2);(void)nvs_get_str(nv,"web_dns2",dns2,&n);
+    }
+    nvs_close(nv);
+    if(!stored)return false;
+    legacy_ip_mode=PROFILE_DHCP;
+    legacy_fixed_auto_attempted=false;
+    legacy_fixed_auto_applied=false;
+    if(!strcmp(mode,"auto"))return true;
+    esp_ip4_addr_t address={0};
+    if(!legacy_parse_ipv4(ip,&address)){
+        ESP_LOGW(TAG,"Saved beta web IPv4 invalid; DHCP fallback");
+        return true;
+    }
+    if(!strcmp(mode,"fixed_auto")){
+        legacy_requested_ip=address;
+        legacy_ip_mode=PROFILE_FIXED_AUTO;
+        return true;
+    }
+    if(strcmp(mode,"manual"))return true;
+    esp_ip4_addr_t nm={0},gateway={0},primary={0},backup={0};
+    bool valid=legacy_parse_ipv4(mask,&nm)&&legacy_mask_valid(nm)&&
+               legacy_parse_ipv4(gw,&gateway)&&legacy_parse_ipv4(dns1,&primary)&&
+               legacy_same_subnet(address,gateway,nm)&&address.addr!=gateway.addr;
+    if(dns2[0]&& !legacy_parse_ipv4(dns2,&backup))valid=false;
+    uint32_t host=address.addr&~nm.addr;
+    if(!valid||host==0||host==~nm.addr){
+        ESP_LOGW(TAG,"Saved beta web manual network invalid; DHCP fallback");
+        return true;
+    }
+    legacy_manual_ip.ip=address;
+    legacy_manual_ip.gw=gateway;
+    legacy_manual_ip.netmask=nm;
+    memset(legacy_manual_dns,0,sizeof(legacy_manual_dns));
+    legacy_manual_dns[0].ip.type=ESP_IPADDR_TYPE_V4;
+    legacy_manual_dns[0].ip.u_addr.ip4.addr=primary.addr;
+    legacy_manual_dns[1].ip.type=ESP_IPADDR_TYPE_V4;
+    legacy_manual_dns[1].ip.u_addr.ip4.addr=backup.addr;
+    legacy_ip_mode=PROFILE_MANUAL;
+    return true;
+}
+esp_err_t mira_recovery_save_beta_wifi(const char *ssid,const char *password,
+    const char *mode,const char *ip,const char *mask,
+    const char *gateway,const char *dns1,const char *dns2){
+    if(!ssid||!password||!mode||!ip||!mask||!gateway||!dns1||!dns2)return ESP_ERR_INVALID_ARG;
+    const size_t ssid_len=strlen(ssid),pwd_len=strlen(password);
+    if(!ssid_len||ssid_len>32||pwd_len>63||
+       (pwd_len>0&&pwd_len<8))return ESP_ERR_INVALID_ARG;
+    if(strcmp(mode,"auto")&&strcmp(mode,"manual")&&strcmp(mode,"fixed_auto"))
+        return ESP_ERR_INVALID_ARG;
+    if(strcmp(mode,"auto")){
+        esp_ip4_addr_t addr={0};
+        if(!legacy_parse_ipv4(ip,&addr))return ESP_ERR_INVALID_ARG;
+        if(!strcmp(mode,"manual")){
+            esp_ip4_addr_t nm={0},gw={0},dn={0},backup={0};
+            if(!legacy_parse_ipv4(mask,&nm)||!legacy_mask_valid(nm)||
+               !legacy_parse_ipv4(gateway,&gw)||
+               !legacy_parse_ipv4(dns1,&dn)||
+               (dns2[0]&&!legacy_parse_ipv4(dns2,&backup))||
+               !legacy_same_subnet(addr,gw,nm)||addr.addr==gw.addr)
+                return ESP_ERR_INVALID_ARG;
+            uint32_t host=addr.addr&~nm.addr;
+            if(host==0||host==~nm.addr)return ESP_ERR_INVALID_ARG;
+        }
+    }
+    if(strlen(ip)>31||strlen(mask)>31||strlen(gateway)>31||
+       strlen(dns1)>31||strlen(dns2)>31)return ESP_ERR_INVALID_ARG;
+    // An empty password on the same SSID means retain its existing secret.
+    wifi_config_t sta={0},prior={0};
+    if(esp_wifi_get_config(WIFI_IF_STA,&prior)!=ESP_OK)return ESP_FAIL;
+    memcpy(sta.sta.ssid,ssid,ssid_len);
+    if(!pwd_len&&!strcmp((const char*)prior.sta.ssid,ssid))
+        memcpy(sta.sta.password,prior.sta.password,sizeof(sta.sta.password));
+    else if(pwd_len)memcpy(sta.sta.password,password,pwd_len);
+    nvs_handle_t nv;
+    esp_err_t err=nvs_open("mira_idf_net",NVS_READWRITE,&nv);
+    if(err!=ESP_OK)return err;
+    err=nvs_set_str(nv,"web_mode",mode);
+    if(err==ESP_OK)err=nvs_set_str(nv,"web_ip",ip);
+    if(err==ESP_OK)err=nvs_set_str(nv,"web_mask",mask);
+    if(err==ESP_OK)err=nvs_set_str(nv,"web_gw",gateway);
+    if(err==ESP_OK)err=nvs_set_str(nv,"web_dns1",dns1);
+    if(err==ESP_OK)err=nvs_set_str(nv,"web_dns2",dns2);
+    if(err==ESP_OK)err=nvs_set_u8(nv,"legacy_wifi",0);
+    if(err==ESP_OK){
+        esp_err_t er=nvs_erase_key(nv,"setup_ip");
+        if(er!=ESP_OK&&er!=ESP_ERR_NVS_NOT_FOUND)err=er;
+    }
+    if(err==ESP_OK)err=nvs_commit(nv);
+    nvs_close(nv);
+    if(err!=ESP_OK)return err;
+    (void)esp_wifi_disconnect();
+    err=esp_wifi_set_config(WIFI_IF_STA,&sta);
+    memset(&sta,0,sizeof(sta));
+    memset(&prior,0,sizeof(prior));
+    if(err!=ESP_OK)return err;
+    (void)beta_web_load_ip_mode();
+    if(sta_netif){
+        if(legacy_ip_mode==PROFILE_MANUAL)legacy_apply_manual_ip();
+        else (void)esp_netif_dhcpc_start(sta_netif);
+    }
+    station_configured=true;
+    ESP_LOGI(TAG,"Beta Wi-Fi form applied (%s); station reconnecting",mode);
+    return esp_wifi_connect();
+}
 static void legacy_finish_fixed_auto(void){
     if(legacy_ip_mode!=PROFILE_FIXED_AUTO||legacy_fixed_auto_attempted||!sta_netif)return;
     legacy_fixed_auto_attempted=true;
@@ -609,9 +726,11 @@ esp_err_t mira_recovery_init(void) {
         have_sta=esp_wifi_get_config(WIFI_IF_STA,&saved_sta)==ESP_OK&&saved_sta.sta.ssid[0];
     }
     if(have_sta){
+        // Explicit IDF web configuration takes priority over imported beta files.
+        const bool web_profile=beta_web_load_ip_mode();
         // A fresh Mira beta wizard may have saved a requested IP with
         // DHCP-assisted gateway/mask/DNS, just like fixed_auto on the beta.
-        if(legacy_ip_mode==PROFILE_DHCP &&
+        if(!web_profile&&legacy_ip_mode==PROFILE_DHCP &&
            nvs_open("mira_idf_net",NVS_READONLY,&profile_nv)==ESP_OK){
             char requested[32]={0};size_t n=sizeof(requested);
             if(nvs_get_str(profile_nv,"setup_ip",requested,&n)==ESP_OK &&
