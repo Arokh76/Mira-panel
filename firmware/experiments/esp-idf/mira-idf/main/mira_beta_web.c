@@ -111,7 +111,8 @@ static cJSON *read_form(httpd_req_t *req){
         }
         cJSON *value=cJSON_CreateString(sep);
         if(!value){cJSON_Delete(form);free(buf);return NULL;}
-        cJSON_ReplaceItemInObjectCaseSensitive(form,pair,value);
+        if(cJSON_HasObjectItem(form,pair))cJSON_ReplaceItemInObjectCaseSensitive(form,pair,value);
+        else cJSON_AddItemToObject(form,pair,value);
     }
     free(buf);
     return form;
@@ -298,6 +299,16 @@ static esp_err_t render(httpd_req_t *r,const char *page){
         }
         char token[44]={0};
         memcpy(token,p+1,(size_t)(end-p-1));
+        bool placeholder=token[0]!=0;
+        for(const char *t=token;*t;t++){
+            if(!((*t>='A'&&*t<='Z')||(*t>='0'&&*t<='9')||*t=='_')){
+                placeholder=false;break;
+            }
+        }
+        if(!placeholder){
+            if(chunk(r,"%")!=ESP_OK)return ESP_FAIL;
+            p++;from=p;continue;
+        }
         if(replacement(r,token)!=ESP_OK)return ESP_FAIL;
         p=end+1;from=p;
     }
@@ -421,7 +432,8 @@ static esp_err_t save_urls(httpd_req_t *req,cJSON *form){
         if(cJSON_IsString(prior)&&!strcmp(prior->valuestring,url))continue;
         cJSON *value=cJSON_CreateString(url);
         if(!value){cJSON_Delete(root);return html_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Memoire indisponible");}
-        cJSON_ReplaceItemInObjectCaseSensitive(item,"url",value);
+        if(prior)cJSON_ReplaceItemInObjectCaseSensitive(item,"url",value);
+        else cJSON_AddItemToObject(item,"url",value);
         changed=true;
     }
     if(changed){
