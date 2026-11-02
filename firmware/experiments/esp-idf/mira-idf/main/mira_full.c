@@ -2773,8 +2773,17 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                 }
             }
         }
-        if(w->info_status)
-            lv_label_set_text(w->info_status,"Donnée reçue");
+        if(w->info_status){
+            // Same arrival notation as beta MiraPanelUI::miraMarkInfoArrival.
+            time_t epoch=time(NULL);
+            char seen[24]="Valeur reçue";
+            if(epoch>=1700000000){
+                struct tm tmv={0};
+                if(localtime_r(&epoch,&tmv))
+                    snprintf(seen,sizeof(seen),"MAJ %02d:%02d",tmv.tm_hour,tmv.tm_min);
+            }
+            lv_label_set_text(w->info_status,seen);
+        }
         if(w->value_label){
             char display[200];
             if(*w->unit)snprintf(display,sizeof(display),"%s %s",msg->value,w->unit);
