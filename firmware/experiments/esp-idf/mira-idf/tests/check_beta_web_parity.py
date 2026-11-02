@@ -8,7 +8,7 @@ from pathlib import Path
 import json
 import re
 
-root = Path(__file__).resolve().parents[4]
+root = Path(__file__).resolve().parents[5]
 src = root / "firmware/source/consolidated/MIRA_PANEL/HTML"
 idf = root / "firmware/experiments/esp-idf/mira-idf/main"
 native = (idf / "mira_beta_web_pages.h").read_text(encoding="utf-8")
