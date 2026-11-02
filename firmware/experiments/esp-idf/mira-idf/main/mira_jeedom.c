@@ -645,6 +645,10 @@ static esp_err_t getallparams(httpd_req_t *req){
         "Jeedom_Refresh","Jeedom_Init_Cmd"
     };
     for(size_t i=0;i<sizeof(names)/sizeof(names[0]);i++){
+        // Beta params.json contains encrypted ciphertext for secret keys.
+        // IDF stores those in NVS but has no compatible beta encryption
+        // writer: never export raw secrets in synthesized JSON responses.
+        if(strstr(names[i],"Key"))continue;
         char value[256]={0};size_t cap=sizeof(value);
         if(!have_nvs||nvs_get_str(nv,names[i],value,&cap)!=ESP_OK){
             if(strcmp(names[i],"Jeedom"))continue;
