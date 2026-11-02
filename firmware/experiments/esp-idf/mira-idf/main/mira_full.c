@@ -56,6 +56,8 @@ static QueueHandle_t state_queue;
 #define MIRA_STATE_CACHE_LIMIT 96
 static mira_state_update_t *state_cache;
 static size_t state_cache_count;
+// Monotonic counters: do not allocate additional heap in diagnostics.
+static uint32_t passive_unchanged,passive_evictions,passive_queue_dropped;
 static SemaphoreHandle_t state_cache_lock;
 typedef struct { char key[32]; char value[48]; } mira_display_command_t;
 static QueueHandle_t display_command_queue;
@@ -1840,10 +1842,18 @@ static void remember_passive_state(const mira_state_update_t *msg){
     size_t i=0;
     for(;i<state_cache_count;i++)
         if(!strcmp(state_cache[i].name,msg->name))break;
+    if(i<state_cache_count &&
+       !strcmp(state_cache[i].value,msg->value)){
+        // Dimitri fix principle: do not repeatedly write unchanged info.
+        __atomic_fetch_add(&passive_unchanged,1u,__ATOMIC_RELAXED);
+        xSemaphoreGive(state_cache_lock);
+        return;
+    }
     if(i==state_cache_count){
         if(state_cache_count<MIRA_STATE_CACHE_LIMIT)state_cache_count++;
         else {
             // Bounded memory: evict oldest observed name, never allocate per MQTT event.
+            __atomic_fetch_add(&passive_evictions,1u,__ATOMIC_RELAXED);
             memmove(state_cache,state_cache+1,
                     (MIRA_STATE_CACHE_LIMIT-1)*sizeof(*state_cache));
             i=MIRA_STATE_CACHE_LIMIT-1;
@@ -1858,9 +1868,25 @@ bool mira_full_enqueue_state(const char *name,const char *value){
     mira_state_update_t msg={0};
     snprintf(msg.name,sizeof(msg.name),"%s",name);
     snprintf(msg.value,sizeof(msg.value),"%s",value);
-    if(xQueueSend(state_queue,&msg,0)!=pdTRUE)return false;
+    if(xQueueSend(state_queue,&msg,0)!=pdTRUE){
+        __atomic_fetch_add(&passive_queue_dropped,1u,__ATOMIC_RELAXED);
+        return false;
+    }
     remember_passive_state(&msg);
     return true;
+}
+void mira_full_state_diagnostics(mira_full_state_diagnostics_t *out){
+    if(!out)return;
+    memset(out,0,sizeof(*out));
+    out->state_cache_capacity=MIRA_STATE_CACHE_LIMIT;
+    out->state_unchanged=__atomic_load_n(&passive_unchanged,__ATOMIC_RELAXED);
+    out->state_cache_evictions=__atomic_load_n(&passive_evictions,__ATOMIC_RELAXED);
+    out->state_queue_dropped=__atomic_load_n(&passive_queue_dropped,__ATOMIC_RELAXED);
+    if(state_queue)out->state_queue_pending=(uint32_t)uxQueueMessagesWaiting(state_queue);
+    if(state_cache_lock&&xSemaphoreTake(state_cache_lock,pdMS_TO_TICKS(30))==pdTRUE){
+        out->state_cache_used=(uint32_t)state_cache_count;
+        xSemaphoreGive(state_cache_lock);
+    }
 }
 static void normalize_widget_name(const char *src,char *dst,size_t length){
     size_t j=0;
