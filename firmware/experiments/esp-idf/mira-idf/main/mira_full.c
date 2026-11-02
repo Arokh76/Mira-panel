@@ -26,6 +26,7 @@
 #include "lvgl.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "mira_display.h"
 #include "mira_mqtt.h"
 #include "mira_jeedom.h"
@@ -49,6 +50,12 @@ void mira_full_request_reload(void){ reload_pending=true; }
 // No state update ever generates a Jeedom/MQTT command.
 typedef struct { char name[96]; char value[160]; } mira_state_update_t;
 static QueueHandle_t state_queue;
+// Incoming values are tracked separately for the beta HTTP /get endpoint.
+// An absent entry is unknown, never treated as OFF or zero.
+#define MIRA_STATE_CACHE_LIMIT 96
+static mira_state_update_t *state_cache;
+static size_t state_cache_count;
+static SemaphoreHandle_t state_cache_lock;
 typedef struct { char key[32]; char value[48]; } mira_display_command_t;
 static QueueHandle_t display_command_queue;
 static bool suppress_events;
@@ -1803,12 +1810,46 @@ bool mira_full_enqueue_display_command(const char *key,const char *value){
     snprintf(msg.value,sizeof(msg.value),"%s",value);
     return xQueueSend(display_command_queue,&msg,0)==pdTRUE;
 }
+bool mira_full_cached_state(const char *name,char *out,size_t cap){
+    if(!state_cache||!state_cache_lock||!name||!out||!cap)return false;
+    if(xSemaphoreTake(state_cache_lock,pdMS_TO_TICKS(40))!=pdTRUE)return false;
+    bool found=false;
+    for(size_t i=0;i<state_cache_count;i++){
+        if(!strcmp(state_cache[i].name,name)){
+            snprintf(out,cap,"%s",state_cache[i].value);
+            found=true;break;
+        }
+    }
+    xSemaphoreGive(state_cache_lock);
+    return found;
+}
+static void remember_passive_state(const mira_state_update_t *msg){
+    if(!state_cache||!state_cache_lock||
+       xSemaphoreTake(state_cache_lock,pdMS_TO_TICKS(30))!=pdTRUE)return;
+    size_t i=0;
+    for(;i<state_cache_count;i++)
+        if(!strcmp(state_cache[i].name,msg->name))break;
+    if(i==state_cache_count){
+        if(state_cache_count<MIRA_STATE_CACHE_LIMIT)state_cache_count++;
+        else {
+            // Bounded memory: evict oldest observed name, never allocate per MQTT event.
+            memmove(state_cache,state_cache+1,
+                    (MIRA_STATE_CACHE_LIMIT-1)*sizeof(*state_cache));
+            i=MIRA_STATE_CACHE_LIMIT-1;
+        }
+        snprintf(state_cache[i].name,sizeof(state_cache[i].name),"%s",msg->name);
+    }
+    snprintf(state_cache[i].value,sizeof(state_cache[i].value),"%s",msg->value);
+    xSemaphoreGive(state_cache_lock);
+}
 bool mira_full_enqueue_state(const char *name,const char *value){
     if(!state_queue||!name||!value||!*name||strlen(name)>=96||strlen(value)>=160)return false;
     mira_state_update_t msg={0};
     snprintf(msg.name,sizeof(msg.name),"%s",name);
     snprintf(msg.value,sizeof(msg.value),"%s",value);
-    return xQueueSend(state_queue,&msg,0)==pdTRUE;
+    if(xQueueSend(state_queue,&msg,0)!=pdTRUE)return false;
+    remember_passive_state(&msg);
+    return true;
 }
 static void normalize_widget_name(const char *src,char *dst,size_t length){
     size_t j=0;
@@ -2187,6 +2228,9 @@ static bool spiffs_partition_is_blank(void){
 bool mira_full_storage_init(void){
     if(!state_queue)state_queue=xQueueCreate(24,sizeof(mira_state_update_t));
     if(!state_queue)ESP_LOGE(TAG,"State queue allocation failed");
+    if(!state_cache_lock)state_cache_lock=xSemaphoreCreateMutex();
+    if(!state_cache)state_cache=heap_caps_calloc(MIRA_STATE_CACHE_LIMIT,sizeof(*state_cache),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!state_cache||!state_cache_lock)ESP_LOGW(TAG,"Passive state cache unavailable; HTTP /get will return Null");
     if(!display_command_queue)display_command_queue=xQueueCreate(12,sizeof(mira_display_command_t));
     if(!display_command_queue)ESP_LOGE(TAG,"Display command queue allocation failed");
     const bool blank=spiffs_partition_is_blank();
