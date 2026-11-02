@@ -321,7 +321,7 @@ static esp_err_t displayinfo(httpd_req_t *req) {
     char response[320];
     snprintf(response,sizeof(response),
              "{\"profile\":\"%s\",\"width\":800,\"height\":480,"
-             "\"contentWidth\":800,\"contentHeight\":428,\"navHeight\":52,"
+             "\"contentWidth\":800,\"contentHeight\":430,\"navHeight\":50,"
              "\"rotation\":0,\"logicalWidth\":1000,\"logicalHeight\":1000,"
              "\"httpPrimary\":true,\"mqttOptional\":true,\"freeLayout\":true}",profile);
     return httpd_resp_sendstr(req,response);
