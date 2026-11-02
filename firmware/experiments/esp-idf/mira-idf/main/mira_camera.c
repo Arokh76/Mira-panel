@@ -1,8 +1,9 @@
-// ESP-IDF native Mira camera - asynchronous RGB24 BMP and JPEG snapshots.
+// ESP-IDF native Mira camera - asynchronous RGB24 BMP, JPEG and MJPEG snapshots.
 // Uses Espressif esp_jpeg for RGB565 software decode; supports multipart MJPEG first frames.
 // Never call LVGL from the network task.
 #include "mira_camera.h"
 #include "esp_http_client.h"
+#include "esp_crt_bundle.h"
 #include "jpeg_decoder.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -36,7 +37,13 @@ bool mira_camera_url_valid(const char *url){
     if(!url)return false;
     size_t n=strlen(url);
     if(!n)return true; // An empty URL deliberately disables the stream.
-    if(n>CAM_MAX_URL||strncmp(url,"http://",7)!=0)return false;
+    // HTTPS verifies the server certificate against the embedded CA store.
+    // Never silently downgrade HTTPS to plain HTTP or skip verification.
+    bool http=!strncmp(url,"http://",7);
+    bool https=!strncmp(url,"https://",8);
+    if(n>CAM_MAX_URL||(!http&&!https))return false;
+    const char *host=url+(https?8:7);
+    if(!*host||*host=='/'||*host=='?'||*host=='#')return false;
     for(const char *p=url;*p;p++)
         if(*p=='\n'||*p=='\r'||*p==' '||*p=='@')return false;
     return true;
@@ -211,7 +218,8 @@ static bool decode_mjpeg_first_frame(esp_http_client_handle_t http,
 static bool fetch_snapshot(const char *url,mira_camera_frame_t *out){
     memset(out,0,sizeof(*out));
     esp_http_client_config_t cfg={
-        .url=url,.timeout_ms=3500,.disable_auto_redirect=true
+        .url=url,.timeout_ms=3500,.disable_auto_redirect=true,
+        .crt_bundle_attach=esp_crt_bundle_attach
     };
     esp_http_client_handle_t http=esp_http_client_init(&cfg);
     if(!http)return false;
