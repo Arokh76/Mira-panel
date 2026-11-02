@@ -110,6 +110,8 @@ typedef struct {
     lv_obj_t *card,*control,*value_label,*info_status;
     lv_obj_t *thermostat_temperature,*thermostat_mode,*thermostat_mode_select;
     lv_obj_t *color_saturation,*color_brightness,*color_preview;
+    lv_obj_t *color_knob;
+    uint16_t color_hue;
     lv_obj_t *fields[9]; // energy/media passive Jeedom composite infos
     lv_obj_t *media_slider,*media_device_dropdown,*media_play_caption;
     bool media_is_playing;
@@ -272,6 +274,95 @@ static void nav_click(lv_event_t *e){
     }else show_page(index);
 }
 static void remember_passive_state(const mira_state_update_t *msg);
+// LVGL 9 removed the LVGL 8 colorwheel: recreate the ORIGINAL 150px
+// hue ring as a cached RGB565 bitmap. Hue uses a real circular touch target;
+// saturation/value sliders preserve the complete RGB gamut. One bitmap is
+// shared by every card and rebuilt only when the theme palette changes.
+#define MIRA_WHEEL_SIZE 150
+#define MIRA_WHEEL_CENTER (MIRA_WHEEL_SIZE/2)
+static uint16_t *wheel_pixels;
+static lv_image_dsc_t wheel_dsc;
+static uint8_t wheel_bitmap_theme=255;
+static uint16_t wheel_rgb565(uint32_t c){
+    return (uint16_t)(((c>>19)&31u)<<11|((c>>10)&63u)<<5|((c>>3)&31u));
+}
+static bool wheel_prepare_bitmap(void){
+    if(wheel_pixels&&wheel_bitmap_theme==ui_theme)return true;
+    if(!wheel_pixels){
+        wheel_pixels=heap_caps_malloc(MIRA_WHEEL_SIZE*MIRA_WHEEL_SIZE*2u,
+                                      MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+        if(!wheel_pixels)return false;
+    }
+    uint32_t bg=lv_color_to_u32(panel_c())&0xffffffu;
+    const uint16_t fill=wheel_rgb565(bg);
+    for(int y=0;y<MIRA_WHEEL_SIZE;y++){
+        for(int x=0;x<MIRA_WHEEL_SIZE;x++){
+            float dx=(float)(x-MIRA_WHEEL_CENTER)+0.5f;
+            float dy=(float)(y-MIRA_WHEEL_CENTER)+0.5f;
+            float distance2=dx*dx+dy*dy;
+            uint16_t pixel=fill;
+            if(distance2>=58.0f*58.0f&&distance2<=74.0f*74.0f){
+                float angle=atan2f(dx,-dy);
+                if(angle<0)angle+=6.2831853f;
+                int hue=(int)lroundf(angle*(180.0f/3.14159265f))%360;
+                const lv_color_t color=lv_color_hsv_to_rgb(hue,100,100);
+                pixel=wheel_rgb565(lv_color_to_u32(color)&0xffffffu);
+            }
+            wheel_pixels[y*MIRA_WHEEL_SIZE+x]=pixel;
+        }
+    }
+    memset(&wheel_dsc,0,sizeof(wheel_dsc));
+    wheel_dsc.header.magic=LV_IMAGE_HEADER_MAGIC;
+    wheel_dsc.header.cf=LV_COLOR_FORMAT_RGB565;
+    wheel_dsc.header.w=MIRA_WHEEL_SIZE;
+    wheel_dsc.header.h=MIRA_WHEEL_SIZE;
+    wheel_dsc.data_size=MIRA_WHEEL_SIZE*MIRA_WHEEL_SIZE*2u;
+    wheel_dsc.data=(const uint8_t *)wheel_pixels;
+    wheel_bitmap_theme=ui_theme;
+    return true;
+}
+static void wheel_mark_hue(mira_widget_t *w,int hue){
+    if(!w||!w->control)return;
+    if(hue<0)hue=0;
+    w->color_hue=(uint16_t)(hue%360);
+    if(w->color_knob){
+        const float angle=(float)w->color_hue*(3.14159265f/180.0f);
+        const int x=MIRA_WHEEL_CENTER+(int)lroundf(66.0f*sinf(angle))-7;
+        const int y=MIRA_WHEEL_CENTER-(int)lroundf(66.0f*cosf(angle))-7;
+        lv_obj_set_pos(w->color_knob,x,y);
+        lv_obj_set_style_bg_color(w->color_knob,
+            lv_color_hsv_to_rgb(w->color_hue,100,100),0);
+    }
+}
+static void wheel_touch(lv_event_t *event){
+    const lv_event_code_t code=lv_event_get_code(event);
+    if(code!=LV_EVENT_PRESSED&&code!=LV_EVENT_PRESSING)return;
+    if(suppress_events||display_sleeping)return;
+    mira_widget_t *w=(mira_widget_t *)lv_event_get_user_data(event);
+    if(!w||!w->control)return;
+    lv_indev_t *touch=lv_indev_get_act();
+    if(!touch)return;
+    lv_point_t p={0};
+    lv_indev_get_point(touch,&p);
+    lv_area_t area;
+    lv_obj_get_coords(w->control,&area);
+    const float dx=(float)p.x-(float)(area.x1+MIRA_WHEEL_CENTER);
+    const float dy=(float)p.y-(float)(area.y1+MIRA_WHEEL_CENTER);
+    const float r2=dx*dx+dy*dy;
+    if(r2<44.0f*44.0f||r2>84.0f*84.0f)return;
+    float angle=atan2f(dx,-dy);
+    if(angle<0)angle+=6.2831853f;
+    int hue=(int)lroundf(angle*57.2957795f)%360;
+    if(w->color_hue!=hue){
+        wheel_mark_hue(w,hue);
+        const int sat=lv_slider_get_value(w->color_saturation);
+        const int brightness=lv_slider_get_value(w->color_brightness);
+        if(w->color_preview)
+            lv_obj_set_style_bg_color(w->color_preview,
+              lv_color_hsv_to_rgb(w->color_hue,sat,brightness),0);
+    }
+}
+
 static void event_local(lv_event_t *e){
     if(suppress_events||display_sleeping)return;
     mira_widget_t *b=(mira_widget_t*)lv_event_get_user_data(e);
@@ -295,7 +386,7 @@ static void event_local(lv_event_t *e){
     }else if(!strcmp(b->type,"color")){
         // Preserve full HSV (and therefore full RGB) rather than forcing
         // every outgoing command to maximum saturation and brightness.
-        const uint16_t hue=(uint16_t)lv_arc_get_value(b->control);
+        const uint16_t hue=b->color_hue;
         const uint8_t saturation=(uint8_t)lv_slider_get_value(b->color_saturation);
         const uint8_t brightness=(uint8_t)lv_slider_get_value(b->color_brightness);
         const lv_color_t col=lv_color_hsv_to_rgb(hue,saturation,brightness);
@@ -972,17 +1063,38 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         w->card=card(pg,390,216);
         lv_obj_t *heading=label(w->card,display,0xF3F6F7,&mira_font_fr_16);
         lv_obj_set_pos(heading,8,3);
-        // LVGL 9.6 has no LVGL 8 colorwheel. Hue arc plus saturation/value
-        // controls reproduces the full RGB color space over HTTP/Jeedom.
-        w->control=lv_arc_create(w->card);
-        lv_obj_set_size(w->control,152,152);
-        lv_obj_set_pos(w->control,8,37);
-        lv_arc_set_range(w->control,0,360);
-        lv_arc_set_rotation(w->control,135);
-        lv_arc_set_bg_angles(w->control,0,270);
-        lv_obj_set_style_arc_color(w->control,cyan_c(),LV_PART_INDICATOR);
+        // Restore the beta hue WHEEL (not a linear arc). The shared image
+        // costs only 45KB PSRAM and does not recompute on scroll/redraw.
         const lv_color_hsv_t initial=lv_color_rgb_to_hsv(50,120,180);
-        lv_arc_set_value(w->control,initial.h);
+        w->control=lv_obj_create(w->card);
+        lv_obj_set_size(w->control,MIRA_WHEEL_SIZE,MIRA_WHEEL_SIZE);
+        lv_obj_set_pos(w->control,8,37);
+        lv_obj_set_style_pad_all(w->control,0,0);
+        lv_obj_set_style_bg_color(w->control,panel_c(),0);
+        lv_obj_set_style_border_width(w->control,0,0);
+        lv_obj_set_style_radius(w->control,LV_RADIUS_CIRCLE,0);
+        lv_obj_set_style_shadow_width(w->control,0,0);
+        no_scroll(w->control);
+        if(wheel_prepare_bitmap()){
+            lv_obj_t *ring=lv_image_create(w->control);
+            lv_image_set_src(ring,&wheel_dsc);
+            lv_obj_set_pos(ring,0,0);
+            lv_obj_remove_flag(ring,LV_OBJ_FLAG_CLICKABLE);
+        }else{
+            ESP_LOGW(TAG,"No PSRAM for hue ring; color sliders still functional");
+        }
+        w->color_knob=lv_obj_create(w->control);
+        lv_obj_set_size(w->color_knob,14,14);
+        lv_obj_set_style_pad_all(w->color_knob,0,0);
+        lv_obj_set_style_radius(w->color_knob,LV_RADIUS_CIRCLE,0);
+        lv_obj_set_style_border_color(w->color_knob,cyan_c(),0);
+        lv_obj_set_style_border_width(w->color_knob,2,0);
+        lv_obj_set_style_shadow_width(w->color_knob,0,0);
+        no_scroll(w->color_knob);
+        lv_obj_remove_flag(w->color_knob,LV_OBJ_FLAG_CLICKABLE);
+        wheel_mark_hue(w,initial.h);
+        lv_obj_add_event_cb(w->control,wheel_touch,LV_EVENT_PRESSED,w);
+        lv_obj_add_event_cb(w->control,wheel_touch,LV_EVENT_PRESSING,w);
         lv_obj_t *sat_label=label(w->card,"Saturation",0xA8B2B8,&mira_font_fr_14);
         lv_obj_set_pos(sat_label,202,53);
         w->color_saturation=lv_slider_create(w->card);
@@ -2131,7 +2243,7 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
             if(valid){
                 const lv_color_hsv_t hsv=lv_color_rgb_to_hsv((uint8_t)r,(uint8_t)g,(uint8_t)b);
                 suppress_events=true;
-                lv_arc_set_value(w->control,hsv.h);
+                wheel_mark_hue(w,hsv.h);
                 if(w->color_saturation)
                     lv_slider_set_value(w->color_saturation,hsv.s,LV_ANIM_OFF);
                 if(w->color_brightness)
