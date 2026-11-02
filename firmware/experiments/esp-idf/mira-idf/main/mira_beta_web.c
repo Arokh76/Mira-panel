@@ -3,6 +3,7 @@
 // from firmware-beta/HTML/HTML_Parametres.h and HTML_MQTT.h.
 #include "mira_beta_web.h"
 #include "mira_beta_web_pages.h"
+#include "mira_beta_data.h"
 #include "mira_full.h"
 #include "mira_jeedom.h"
 #include "mira_mqtt.h"
@@ -402,6 +403,9 @@ esp_err_t mira_beta_web_load(httpd_req_t *req){
     if(!strcmp(nav,"mqtt"))return render(req,mira_beta_mqtt_html);
     if(!strcmp(nav,"wifi"))return render(req,mira_beta_wifi_manager_html);
     if(!strcmp(nav,"system"))return render(req,mira_beta_system_html);
+    if(!strcmp(nav,"rst"))return render(req,mira_beta_data_html);
+    if(!strcmp(nav,"rstnetwork")||!strcmp(nav,"rstparams")||!strcmp(nav,"rstall"))
+        return mira_beta_data_confirm(req,nav);
     if(!strcmp(nav,"reboot")){
         httpd_resp_set_type(req,"text/plain; charset=utf-8");
         esp_err_t result=httpd_resp_sendstr(req,"Redémarrage de Mira Panel...");
