@@ -1342,6 +1342,138 @@ static esp_err_t camera_config_post(httpd_req_t *req){
     return httpd_resp_sendstr(req,"OK");
 }
 
+// Original beta navigation API: exact HTTP method, form field names,
+// NVS namespace and payload shape. LVGL polls miraui on its own thread.
+static bool nav_post_form(httpd_req_t *req,char *value,size_t capacity){
+    if(req->content_len<2||req->content_len>900)return false;
+    char *form=malloc((size_t)req->content_len+1);
+    if(!form)return false;
+    const size_t len=(size_t)req->content_len;
+    bool ok=read_exact_request(req,form,len);
+    char key[112]={0};
+    if(ok){
+        char raw[112]={0};
+        ok=httpd_query_key_value(form,"key",raw,sizeof(raw))==ESP_OK &&
+           decode_url(raw) && correct_key(raw);
+        if(ok)memcpy(key,raw,strlen(raw)+1);
+    }
+    if(ok){
+        // Favorites POST contains 'json'; page-mask POST contains 'mask'.
+        const char *field=strstr(req->uri,"/navfavorites")?"json":"mask";
+        char encoded[512]={0};
+        ok=httpd_query_key_value(form,field,encoded,sizeof(encoded))==ESP_OK &&
+           decode_url(encoded) && strlen(encoded)<capacity;
+        if(ok)memcpy(value,encoded,strlen(encoded)+1);
+    }
+    memset(key,0,sizeof(key));
+    memset(form,0,len);
+    free(form);
+    return ok;
+}
+static esp_err_t nav_pages_get(httpd_req_t *req){
+    if(!require_key(req))return ESP_FAIL;
+    uint8_t mask=0x3f;
+    nvs_handle_t nv;
+    if(nvs_open("miraui",NVS_READONLY,&nv)==ESP_OK){
+        (void)nvs_get_u8(nv,"pageMask",&mask);
+        nvs_close(nv);
+    }
+    char response[40];
+    snprintf(response,sizeof(response),"{\"mask\":%u}",(unsigned)((mask&0x3f)|1));
+    httpd_resp_set_type(req,"application/json");
+    return httpd_resp_sendstr(req,response);
+}
+static esp_err_t nav_pages_post(httpd_req_t *req){
+    char value[80]={0};
+    if(!nav_post_form(req,value,sizeof(value))){
+        httpd_resp_send_err(req,HTTPD_403_FORBIDDEN,"Cle ou formulaire invalide");
+        return ESP_FAIL;
+    }
+    if(!value[0]){
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Masque absent");
+        return ESP_FAIL;
+    }
+    for(const char *p=value;*p;p++)if(!isdigit((unsigned char)*p)){
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Masque invalide");
+        return ESP_FAIL;
+    }
+    long mask=strtol(value,NULL,10);
+    if(mask<1||mask>63||!(mask&1)){
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Accueil obligatoire");
+        return ESP_FAIL;
+    }
+    nvs_handle_t nv;
+    esp_err_t err=nvs_open("miraui",NVS_READWRITE,&nv);
+    if(err==ESP_OK){
+        err=nvs_set_u8(nv,"pageMask",(uint8_t)mask);
+        if(err==ESP_OK)err=nvs_commit(nv);
+        nvs_close(nv);
+    }
+    if(err!=ESP_OK){
+        httpd_resp_send_err(req,HTTPD_503_SERVICE_UNAVAILABLE,"Ecriture masque impossible");
+        return ESP_FAIL;
+    }
+    return httpd_resp_sendstr(req,"OK");
+}
+static esp_err_t nav_favorites_get(httpd_req_t *req){
+    if(!require_key(req))return ESP_FAIL;
+    uint8_t fav[3]={0,1,2};
+    nvs_handle_t nv;
+    if(nvs_open("miraui",NVS_READONLY,&nv)==ESP_OK){
+        for(uint8_t i=0;i<3;i++){
+            char key[8];
+            snprintf(key,sizeof(key),"fav%u",(unsigned)i);
+            (void)nvs_get_u8(nv,key,&fav[i]);
+        }
+        nvs_close(nv);
+    }
+    char response[96];
+    snprintf(response,sizeof(response),"{\"favorites\":[%u,%u,%u]}",
+             (unsigned)fav[0],(unsigned)fav[1],(unsigned)fav[2]);
+    httpd_resp_set_type(req,"application/json");
+    return httpd_resp_sendstr(req,response);
+}
+static esp_err_t nav_favorites_post(httpd_req_t *req){
+    char json[480]={0};
+    if(!nav_post_form(req,json,sizeof(json))){
+        httpd_resp_send_err(req,HTTPD_403_FORBIDDEN,"Cle ou formulaire invalide");
+        return ESP_FAIL;
+    }
+    cJSON *doc=cJSON_Parse(json);
+    const cJSON *items=doc?cJSON_GetObjectItemCaseSensitive(doc,"favorites"):NULL;
+    bool valid=cJSON_IsArray(items)&&cJSON_GetArraySize(items)==3;
+    uint8_t fav[3]={0};
+    if(valid)for(int i=0;i<3;i++){
+        const cJSON *v=cJSON_GetArrayItem(items,i);
+        if(!cJSON_IsNumber(v)||v->valuedouble!=v->valueint||
+           (v->valueint!=255&&(v->valueint<0||v->valueint>5))){
+            valid=false;break;
+        }
+        fav[i]=(uint8_t)v->valueint;
+        for(int j=0;j<i;j++)if(fav[i]!=255&&fav[i]==fav[j])valid=false;
+    }
+    if(doc)cJSON_Delete(doc);
+    if(!valid){
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Favoris invalides ou dupliques");
+        return ESP_FAIL;
+    }
+    nvs_handle_t nv;
+    esp_err_t err=nvs_open("miraui",NVS_READWRITE,&nv);
+    if(err==ESP_OK){
+        for(uint8_t i=0;i<3&&err==ESP_OK;i++){
+            char key[8];
+            snprintf(key,sizeof(key),"fav%u",(unsigned)i);
+            err=nvs_set_u8(nv,key,fav[i]);
+        }
+        if(err==ESP_OK)err=nvs_commit(nv);
+        nvs_close(nv);
+    }
+    if(err!=ESP_OK){
+        httpd_resp_send_err(req,HTTPD_503_SERVICE_UNAVAILABLE,"Ecriture favoris impossible");
+        return ESP_FAIL;
+    }
+    return httpd_resp_sendstr(req,"OK");
+}
 void mira_jeedom_register_http(httpd_handle_t server) {
     const httpd_uri_t routes[]={
         {.uri="/getlvgl",.method=HTTP_GET,.handler=getlvgl},
@@ -1362,6 +1494,10 @@ void mira_jeedom_register_http(httpd_handle_t server) {
         {.uri="/sendjeedomorderid",.method=HTTP_GET,.handler=set_jeedom_init_id},
         {.uri="/mira/jeedom/status",.method=HTTP_GET,.handler=jeedom_status_get},
         {.uri="/camera/config",.method=HTTP_POST,.handler=camera_config_post},
+        {.uri="/navpages",.method=HTTP_GET,.handler=nav_pages_get},
+        {.uri="/navpages",.method=HTTP_POST,.handler=nav_pages_post},
+        {.uri="/navfavorites",.method=HTTP_GET,.handler=nav_favorites_get},
+        {.uri="/navfavorites",.method=HTTP_POST,.handler=nav_favorites_post},
     };
     for(size_t i=0;i<sizeof(routes)/sizeof(routes[0]);i++) {
         esp_err_t err=httpd_register_uri_handler(server,&routes[i]);
