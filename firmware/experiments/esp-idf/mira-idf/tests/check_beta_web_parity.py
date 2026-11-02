@@ -88,4 +88,14 @@ assert 'mira_beta_networks_remove(id)' in handlers and 'mira_beta_networks_activ
 assert 'mira_beta_known_networks_html' in handlers and 'mira_beta_edit_network_html' in handlers
 print("PASS beta network list, edit, activation and removal routes")
 print("PASS beta Wi-Fi AP and reset safety contracts")
+# Original beta LVGL programming is a staged sequence, not a write on
+# every /addlistlvgl. All six routes must operate on the same pending list.
+for name in ("addlistlvgl", "removelistlvgl", "savelistlvgl",
+             "screenadd", "screenformat", "screensave"):
+    assert f'uri="/{name}"' in jeedom, f"Missing beta /{name}"
+assert "static cJSON *beta_lvgl_stage;" in jeedom
+assert "beta_lvgl_dirty=true;" in jeedom
+assert "rename(MIRA_JSON_TMP,MIRA_JSON_PATH)" in jeedom
+assert "mira_full_request_reload();" in jeedom
+print("PASS beta staged LVGL programming routes")
 print("PASS beta page/control route wiring")
