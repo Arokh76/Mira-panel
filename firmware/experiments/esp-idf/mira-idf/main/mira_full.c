@@ -906,6 +906,63 @@ static void scroll_cache_service(uint32_t now){
         }
     }
 }
+// Safe LVGL ownership transfer for a decoded Spotify cover. The HTTP/JPEG
+// worker never changes an LVGL object and never frees pixels in use by LVGL.
+static uint16_t *artwork_pixels;
+static lv_image_dsc_t artwork_desc;
+static uint8_t artwork_owner=255;
+static void artwork_reset(void){
+    mira_album_art_stop();
+    if(artwork_owner<widget_n){
+        mira_widget_t *w=&widgets[artwork_owner];
+        if(w->media_artwork_image)lv_image_set_src(w->media_artwork_image,NULL);
+    }
+    if(artwork_pixels)heap_caps_free(artwork_pixels);
+    artwork_pixels=NULL;
+    artwork_owner=255;
+    memset(&artwork_desc,0,sizeof(artwork_desc));
+}
+static void artwork_poll(void){
+    uint8_t index=0;
+    mira_camera_frame_t frame={0};
+    if(!mira_album_art_take(&index,&frame))return;
+    if(index>=widget_n||strcmp(widgets[index].type,"media")||
+       !widgets[index].media_artwork_image||!frame.pixels||
+       !frame.width||!frame.height){
+        if(frame.pixels)heap_caps_free(frame.pixels);
+        return;
+    }
+    if(artwork_owner<widget_n){
+        mira_widget_t *old=&widgets[artwork_owner];
+        if(old->media_artwork_image){
+            lv_image_set_src(old->media_artwork_image,NULL);
+            lv_obj_add_flag(old->media_artwork_image,LV_OBJ_FLAG_HIDDEN);
+            if(old->media_artwork_placeholder)
+                lv_obj_remove_flag(old->media_artwork_placeholder,LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    if(artwork_pixels)heap_caps_free(artwork_pixels);
+    artwork_pixels=frame.pixels;
+    artwork_owner=index;
+    memset(&artwork_desc,0,sizeof(artwork_desc));
+    artwork_desc.header.magic=LV_IMAGE_HEADER_MAGIC;
+    artwork_desc.header.cf=LV_COLOR_FORMAT_RGB565;
+    artwork_desc.header.w=frame.width;
+    artwork_desc.header.h=frame.height;
+    artwork_desc.data=(const uint8_t *)artwork_pixels;
+    artwork_desc.data_size=(uint32_t)frame.width*frame.height*2u;
+    mira_widget_t *w=&widgets[index];
+    lv_image_set_src(w->media_artwork_image,&artwork_desc);
+    const uint32_t biggest=frame.width>frame.height?frame.width:frame.height;
+    uint32_t scale=biggest?(230u*256u/biggest):256u;
+    if(scale<16)scale=16;
+    if(scale>512)scale=512;
+    lv_image_set_scale(w->media_artwork_image,scale);
+    lv_obj_align(w->media_artwork_image,LV_ALIGN_CENTER,0,0);
+    lv_obj_remove_flag(w->media_artwork_image,LV_OBJ_FLAG_HIDDEN);
+    if(w->media_artwork_placeholder)
+        lv_obj_add_flag(w->media_artwork_placeholder,LV_OBJ_FLAG_HIDDEN);
+}
 static void make_widget(const cJSON *o,int info_total,int *info_seen){
     if(widget_n>=MAX_WIDGETS){ESP_LOGW(TAG,"Widget capacity reached (%d)",MAX_WIDGETS);return;}
     const char *type=str(o,"type",""),*loc=str(o,"emplacement","accueil");
@@ -1906,6 +1963,7 @@ static void build_config(void){
             return;
         }
     }
+    artwork_reset(); // detach any old cover before deleting media cards
     scroll_cache_reset(); // release every LVGL image reference BEFORE card deletion
     widget_n=0;clock_text=NULL;date_text=NULL;clock_status_text=NULL;widget_count=0;
     for(int i=0;i<6;i++)if(i!=3)lv_obj_clean(pages[i]);
@@ -2333,6 +2391,16 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                     if(!strcmp(field,known)&&w->fields[n]){
                         lv_label_set_text(w->fields[n],msg->value);
                         if(media){
+                            if(n==6){
+                                const uint8_t index=(uint8_t)(w-widgets);
+                                if(!mira_album_art_request(index,msg->value) &&
+                                   artwork_owner==index){
+                                    // Invalid or empty cover: do not retain old song's art.
+                                    artwork_reset();
+                                    if(w->media_artwork_placeholder)
+                                        lv_obj_remove_flag(w->media_artwork_placeholder,LV_OBJ_FLAG_HIDDEN);
+                                }
+                            }
                             suppress_events=true;
                             if(n==3){
                                 const bool playing=!strcasecmp(msg->value,"playing")||
@@ -2613,6 +2681,7 @@ void mira_full_ui_tick(void){
     static uint32_t diag_last_tick;
     uint32_t now_tick=lv_tick_get();
     camera_poll_on_lvgl_task(now_tick);
+    artwork_poll();
     scroll_cache_service(now_tick);
     // Original Mira's 60-second auto return: use verified GT911 physical
     // press counter, not LVGL redraw/Info traffic (which is not user activity).
@@ -2698,6 +2767,8 @@ bool mira_full_storage_init(void){
     if(!state_cache_lock)state_cache_lock=xSemaphoreCreateMutex();
     if(!state_cache)state_cache=heap_caps_calloc(MIRA_STATE_CACHE_LIMIT,sizeof(*state_cache),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(!state_cache||!state_cache_lock)ESP_LOGW(TAG,"Passive state cache unavailable; HTTP /get will return Null");
+    if(mira_album_art_init()!=ESP_OK)
+        ESP_LOGW(TAG,"Album cover worker unavailable; other media controls still work");
     if(!display_command_queue)display_command_queue=xQueueCreate(12,sizeof(mira_display_command_t));
     if(!display_command_queue)ESP_LOGE(TAG,"Display command queue allocation failed");
     const bool blank=spiffs_partition_is_blank();
