@@ -112,4 +112,11 @@ assert '.crt_bundle_attach=esp_crt_bundle_attach' in camera, "Camera TLS CA trus
 assert 'CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y' in config, "CA bundle missing"
 assert 'decode_mjpeg_first_frame' in camera, "Multipart JPEG decoder missing"
 print("PASS beta camera HTTPS/MJPEG compile configuration")
+# Normal routes must serve the actual beta, not the former experimental HTML.
+full = (idf / "mira_full.c").read_text(encoding="utf-8")
+assert '.uri="/recovery/mira"' in full
+assert '.uri="/mira"' in full and 'legacy_mira_get' in full
+assert 'if(!mira_beta_web_authorized(req))return ESP_FAIL;' in full
+assert 'mira_full_enqueue_state(name->valuestring,val)' in full
+print("PASS production UI routing and authenticated state injection")
 print("PASS beta page/control route wiring")
