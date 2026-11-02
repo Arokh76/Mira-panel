@@ -810,11 +810,16 @@ esp_err_t mira_recovery_init(void) {
     bool have_sta=esp_wifi_get_config(WIFI_IF_STA,&saved_sta)==ESP_OK&&saved_sta.sta.ssid[0];
     nvs_handle_t profile_nv;
     uint8_t legacy_saved=0;
+    bool has_native_profiles=false;
     if(nvs_open("mira_idf_net",NVS_READONLY,&profile_nv)==ESP_OK){
         (void)nvs_get_u8(profile_nv,"legacy_wifi",&legacy_saved);
+        size_t n=0;
+        has_native_profiles=nvs_get_str(profile_nv,"wifi_profiles",NULL,&n)==ESP_OK&&n>2;
         nvs_close(profile_nv);
     }
-    if(!have_sta || legacy_saved){
+    // A network explicitly deleted from the native beta profile list must
+    // NOT be silently imported again from its read-only Arduino backup.
+    if(!has_native_profiles&&(!have_sta || legacy_saved)){
         bool imported=restore_legacy_wifi_profile(!have_sta);
         if(imported&&!have_sta){
             if(nvs_open("mira_idf_net",NVS_READWRITE,&profile_nv)==ESP_OK){
