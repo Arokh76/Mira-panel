@@ -91,7 +91,7 @@ static bool read_exact(esp_http_client_handle_t client,uint8_t *buf,size_t size)
 
 // Decode one bounded JPEG already assembled by either a snapshot or a
 // persistent MJPEG TCP session. Never touch LVGL from this worker.
-static bool decode_jpeg_buffer(const uint8_t *jpeg,size_t used,mira_camera_frame_t *out){
+static bool decode_jpeg_buffer(uint8_t *jpeg,size_t used,mira_camera_frame_t *out){
     if(!jpeg||!out||used<60||used>CAM_MAX_JPEG||
        jpeg[0]!=0xff||jpeg[1]!=0xd8||jpeg[used-2]!=0xff||jpeg[used-1]!=0xd9)
         return false;
