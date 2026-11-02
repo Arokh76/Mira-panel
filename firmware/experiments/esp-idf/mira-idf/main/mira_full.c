@@ -2393,7 +2393,33 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                 for(int n=0;n<total;n++){
                     const char *known=media?media_fields[n]:energy_fields[n];
                     if(!strcmp(field,known)&&w->fields[n]){
-                        lv_label_set_text(w->fields[n],msg->value);
+                        if(media&&n==5){
+                            char *end=NULL;
+                            long vol=strtol(msg->value,&end,10);
+                            char volume_text[24]="-- %";
+                            if(*msg->value&&end&&!*end&&vol>=0&&vol<=100)
+                                snprintf(volume_text,sizeof(volume_text),"%ld %%",vol);
+                            lv_label_set_text(w->fields[n],volume_text);
+                        }else if(media&&n==3){
+                            const bool playing=!strcasecmp(msg->value,"playing")||
+                                               !strcasecmp(msg->value,"lecture")||
+                                               !strcasecmp(msg->value,"play")||
+                                               !strcasecmp(msg->value,"en lecture")||
+                                               !strcasecmp(msg->value,"on")||
+                                               !strcmp(msg->value,"1")||
+                                               !strcasecmp(msg->value,"true");
+                            const bool paused=!strcasecmp(msg->value,"paused")||
+                                              !strcasecmp(msg->value,"pause")||
+                                              !strcasecmp(msg->value,"en pause")||
+                                              !strcasecmp(msg->value,"stopped")||
+                                              !strcasecmp(msg->value,"arrêt")||
+                                              !strcasecmp(msg->value,"off")||
+                                              !strcmp(msg->value,"0")||
+                                              !strcasecmp(msg->value,"false");
+                            lv_label_set_text(w->fields[n],playing?"En lecture":
+                                              paused?"En pause":"État non disponible");
+                        }else if(n!=6||!media)
+                            lv_label_set_text(w->fields[n],msg->value);
                         if(media){
                             if(n==6){
                                 const uint8_t index=(uint8_t)(w-widgets);
