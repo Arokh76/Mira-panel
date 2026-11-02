@@ -1,13 +1,11 @@
-// Mira ESP-IDF Waveshare 4.3C board adapter -- not part of the production firmware.
+// Mira ESP-IDF Waveshare 7-inch STANDARD 800x480 -- independent experimental firmware.
 // Native ESP-IDF RGB frame swap + LVGL 9 direct mode, no Arduino/Waveshare LVGL port.
 #include <assert.h>
 #include <string.h>
-#include <stdlib.h>
 #include <inttypes.h>
 #include "mira_display.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/queue.h"
 #include "driver/i2c_master.h"
 #include "driver/gpio.h"
 #include "esp_lcd_panel_rgb.h"
@@ -19,13 +17,11 @@
 
 #define WIDTH 800
 #define HEIGHT 480
-#define LCD_PCLK_HZ (12 * 1000 * 1000)
+#define LCD_PCLK_HZ (13 * 1000 * 1000) // 7-inch RGB stable clock: 16MHz may cause continuous horizontal drift with PSRAM EDMA
 
 static const char *TAG = "mira-idf-rgb";
 static i2c_master_bus_handle_t i2c_bus;
 static i2c_master_dev_handle_t gt911;
-static i2c_master_dev_handle_t ioexp_device;
-static uint8_t ioexp_output_shadow=0xff;
 static bool touch_ready;
 static uint8_t touch_addr;
 static volatile uint32_t touch_reads;
@@ -80,7 +76,7 @@ void mira_display_stats(mira_display_stats_t *out) {
 }
 lv_display_t *mira_display_lvgl(void) { return lvdisp; }
 
-// Waveshare ESP32-S3-Touch-LCD-4.3C: GT911 reset = IO expander EXIO1,
+// Waveshare ESP32-S3-Touch-LCD-7: GT911 reset = IO expander EXIO1,
 // GT911 IRQ/address select = ESP32 GPIO4. Matches Waveshare official
 // 12_lvgl_transplant/components/touch/gt911.c bring-up sequence.
 // Keep EXIO2 backlight HIGH and preserve the existing working RGB pin map.
@@ -102,150 +98,65 @@ static void touch_clear(void) {
     if (gt911 && touch_ready &&
         i2c_master_transmit(gt911, cmd, sizeof(cmd), 30) != ESP_OK) touch_errors++;
 }
-// Independent 10 ms GT911 sampler.  At ~9.7 render FPS the LVGL task can
-// block for ~100 ms, so polling inside LVGL misses quick taps.  A FreeRTOS
-// queue records press/move/release while the RGB renderer is busy.
-typedef struct {
-    int16_t x;
-    int16_t y;
-    uint8_t pressed;
-} mira_touch_event_t;
-static QueueHandle_t touch_events;
-static lv_point_t lv_touch_point = {0, 0};
-static bool lv_touch_pressed;
-
-static void touch_queue_event(bool pressed, int x, int y) {
-    if (!touch_events) return;
-    mira_touch_event_t e = {.x=(int16_t)x,.y=(int16_t)y,
-                            .pressed=pressed ? 1 : 0};
-    if (xQueueSend(touch_events,&e,0)!=pdTRUE) {
-        mira_touch_event_t discard;
-        (void)xQueueReceive(touch_events,&discard,0);
-        (void)xQueueSend(touch_events,&e,0);
-    }
-}
-
-static void gt911_poll_task(void *arg) {
-    (void)arg;
-    bool down=false;
-    int last_x=0, last_y=0;
-    int64_t last_good_us=0;
-    for (;;) {
-        if (touch_ready && gt911) {
-            touch_irq_level=(uint8_t)gpio_get_level(GPIO_NUM_4);
-            uint8_t status=0;
-            const int64_t now=esp_timer_get_time();
-            if (i2c_reg_read(0x814e,&status,1)==ESP_OK) {
-                touch_last_status=status;
-                if (status & 0x80) {
-                    touch_ready_events++;
-                    const uint8_t count=status & 0x0f;
-                    if (count>=1 && count<=5) {
-                        uint8_t xy[8]={0};
-                        // GT911 point 0 starts at 0x814F (track ID), then X/Y little endian.
-                        // Starting at 0x8150 shifts every field and creates absurd coordinates.
-                        if (i2c_reg_read(0x814f,xy,sizeof(xy))==ESP_OK) {
-                            const int raw_x=xy[1] | (xy[2]<<8);
-                            const int raw_y=xy[3] | (xy[4]<<8);
-                            touch_raw_x=(uint32_t)raw_x;
-                            touch_raw_y=(uint32_t)raw_y;
-                            int x=raw_x, y=raw_y;
-                            const bool portrait=(touch_config_x>0 && touch_config_y>0 &&
-                                touch_config_x<=HEIGHT && touch_config_y>=WIDTH);
-                            if (portrait ||
-                                ((x>=WIDTH || y>=HEIGHT) && raw_x<HEIGHT && raw_y<WIDTH)) {
-                                x=raw_y;
-                                y=raw_x;
-                            }
-                            if (x>=0 && x<WIDTH && y>=0 && y<HEIGHT) {
-                                if (!down) {
-                                    touch_presses++;
-                                    ESP_LOGI(TAG,"GT911 DOWN (%d,%d) raw (%d,%d)",x,y,raw_x,raw_y);
-                                    touch_queue_event(true,x,y);
-                                } else if (abs(x-last_x)>=3 || abs(y-last_y)>=3) {
-                                    touch_queue_event(true,x,y);
-                                }
-                                down=true;
-                                last_x=x;last_y=y;last_good_us=now;
-                                touch_last_x=(uint32_t)x;touch_last_y=(uint32_t)y;
-                            } else {
-                                touch_invalid_coords++;
-                                if (touch_invalid_coords<=5 || touch_invalid_coords%50==0)
-                                    ESP_LOGW(TAG,"GT911 invalid touch (%d,%d)",raw_x,raw_y);
-                            }
-                        }
-                    } else if (count==0 && down) {
-                        down=false;
-                        touch_queue_event(false,last_x,last_y);
-                    }
-                    touch_clear();
-                } else {
-                    // Waveshare reference driver acknowledges status even when
-                    // DATA_READY is clear.  Hold a press between 10ms samples.
-                    touch_clear();
-                }
-                // Some GT911 firmwares do not produce an explicit zero-touch
-                // sample: release after a short interval without a fresh point.
-                if (down && now-last_good_us > 100000) {
-                    down=false;
-                    touch_queue_event(false,last_x,last_y);
-                }
-            } else if (down && now-last_good_us > 100000) {
-                down=false;
-                touch_queue_event(false,last_x,last_y);
-            }
-        }
-        vTaskDelay(pdMS_TO_TICKS(10));
-    }
-}
-
 void mira_display_touch_read(lv_indev_t *indev, lv_indev_data_t *data) {
     (void)indev;
-    mira_touch_event_t event;
-    if (touch_events && xQueueReceive(touch_events,&event,0)==pdTRUE) {
-        lv_touch_pressed=(event.pressed!=0);
-        lv_touch_point.x=event.x;
-        lv_touch_point.y=event.y;
-        data->continue_reading = uxQueueMessagesWaiting(touch_events)>0;
+    data->state = LV_INDEV_STATE_RELEASED;
+    if (!touch_ready) return;
+    touch_irq_level = (uint8_t)gpio_get_level(GPIO_NUM_4);
+    uint8_t status = 0;
+    if (i2c_reg_read(0x814e, &status, 1) != ESP_OK) {
+        finger_down = false;
+        return;
+    }
+    touch_last_status = status;
+    if (!(status & 0x80)) return; // Not ready yet; keep the raw status observable.
+    touch_ready_events++;
+    const uint8_t count = status & 0x0f;
+    if (count > 0 && count <= 5) {
+        uint8_t xy[8] = {};
+        if (i2c_reg_read(0x8150, xy, sizeof(xy)) == ESP_OK) {
+            // GT911 0x8150: track ID, X low, X high, Y low, Y high, ...
+            const int raw_x = xy[1] | (xy[2] << 8);
+            const int raw_y = xy[3] | (xy[4] << 8);
+            touch_raw_x = raw_x;
+            touch_raw_y = raw_y;
+            int x = raw_x;
+            int y = raw_y;
+            // Some GT911 panel configurations report portrait (480x800)
+            // coordinates despite our landscape RGB 800x480 display.
+            // Recover a swapped orientation while reporting RAW values.
+            if ((x >= WIDTH || y >= HEIGHT) && raw_x < HEIGHT && raw_y < WIDTH) {
+                x = raw_y;
+                y = raw_x;
+            }
+            if (x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT) {
+                data->point.x = x;
+                data->point.y = y;
+                data->state = LV_INDEV_STATE_PRESSED;
+                touch_last_x = (uint32_t)x;
+                touch_last_y = (uint32_t)y;
+                if (!finger_down) {
+                    touch_presses++;
+                    ESP_LOGI(TAG, "GT911 touch press x=%d y=%d", x, y);
+                }
+                finger_down = true;
+            } else {
+                touch_invalid_coords++;
+                if (touch_invalid_coords < 5 || touch_invalid_coords % 50 == 0)
+                    ESP_LOGW(TAG, "GT911 invalid raw touch x=%d y=%d status=0x%02x", raw_x, raw_y, status);
+            }
+        }
     } else {
-        data->continue_reading=false;
+        finger_down = false;
     }
-    data->state=lv_touch_pressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
-    data->point=lv_touch_point;
+    touch_clear();
 }
 
-static esp_err_t ioexp_write(i2c_master_dev_handle_t ioexp, uint8_t reg, uint8_t value) {
-    uint8_t cmd[] = {reg, value};
-    return i2c_master_transmit(ioexp, cmd, sizeof(cmd), 80);
-}
-
-
-// Backlight port copied from the historically validated Arduino Waveshare43CDisplay
-// policy. The 4.3C uses a CH32 I2C controller at 0x24; EXIO2 enables the lamp
-// and PWM register 0x05 dims it. No ESP32 LEDC/GPIO pin is used.
-// Do not use 7-inch CH422G brightness profiles here.
-esp_err_t mira_display_set_brightness(uint8_t raw) {
-    if(!ioexp_device)return ESP_ERR_INVALID_STATE;
-    if(raw==0){
-        const uint8_t next=ioexp_output_shadow & (uint8_t)~(1u<<2);
-        esp_err_t err=ioexp_write(ioexp_device,0x03,next);
-        if(err==ESP_OK)ioexp_output_shadow=next;
-        return err;
-    }
-    const uint8_t enabled=ioexp_output_shadow | (uint8_t)(1u<<2);
-    esp_err_t err=ioexp_write(ioexp_device,0x03,enabled);
-    if(err!=ESP_OK)return err;
-    ioexp_output_shadow=enabled;
-    uint8_t percentage=1;
-    if(raw>30){
-        uint32_t value=1u+(((uint32_t)(raw-30)*99u+112u)/225u);
-        percentage=(uint8_t)(value>100u?100u:value);
-    }
-    // Hardware duty is inverted on this panel: 100% brightness => PWM 0;
-    // clamp interactive minimum to the already tested Waveshare duty 80/100.
-    const uint8_t pwm100=(uint8_t)(((100u-percentage)*80u+49u)/99u);
-    const uint8_t pwm8=(uint8_t)((pwm100*255u+50u)/100u);
-    return ioexp_write(ioexp_device,0x05,pwm8);
+// Waveshare 7 STANDARD CH422G protocol (unlike 4.3C's former register/value driver):
+// each CH422G command has its own 7-bit I2C address, and receives ONE data byte.
+// 0x24: working mode (bit 0 enables outputs); 0x38: IO0..7 output values.
+static esp_err_t ioexp_write(i2c_master_dev_handle_t ioexp, uint8_t value) {
+    return i2c_master_transmit(ioexp, &value, sizeof(value), 80);
 }
 
 static void init_i2c(void) {
@@ -263,12 +174,47 @@ static void init_i2c(void) {
         .device_address = 0x24,
         .scl_speed_hz = 400000,
     };
-    ESP_ERROR_CHECK(i2c_master_bus_add_device(i2c_bus, &ext_cfg, &ioexp_device));
+    i2c_master_dev_handle_t ioexp_mode = NULL;
+    i2c_master_dev_handle_t ioexp_out = NULL;
+    esp_err_t err = i2c_master_bus_add_device(i2c_bus, &ext_cfg, &ioexp_mode);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "CH422G mode device creation: %s", esp_err_to_name(err));
+        return; // HTTP recovery stays available; no boot-loop.
+    }
+    ext_cfg.device_address = 0x38;
+    err = i2c_master_bus_add_device(i2c_bus, &ext_cfg, &ioexp_out);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "CH422G output device creation: %s", esp_err_to_name(err));
+        return;
+    }
 
-    // Configure IO0..IO7 outputs; our original 0xff keeps LCD/USB state
-    // identical to the last working no-bounce firmware.
-    ESP_ERROR_CHECK(ioexp_write(ioexp_device, 0x02, 0xff));
-    ESP_ERROR_CHECK(ioexp_write(ioexp_device, 0x03, 0xff));
+    // CH422G 7-inch output bit map: bit1 TP_RST, bit2 DISP,
+    // bit3 LCD_RST, bit4 SD_CS, bit5 USB/CAN select, bit6 LCD_VDD_EN.
+    // Keep USB selected (bit5 LOW), enable panel power (bit6 HIGH).
+    // 0x5E: TP_RST/DISP/LCD_RST/SD_CS/VDD high; USB_SEL low.
+    const uint8_t lcd_normal = 0x5E;
+    err = ioexp_write(ioexp_mode, 0x01);
+    if (err == ESP_OK) err = ioexp_write(ioexp_out, lcd_normal);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "CH422G 7-inch initialize failed: %s (no panic; Wi-Fi stays up)",
+                 esp_err_to_name(err));
+        return;
+    }
+    ESP_LOGI(TAG, "CH422G 7-inch ready: MODE@0x24=0x01 OUT@0x38=0x5E");
+    // Critical Waveshare 7 LCD controller cold start: assert EXIO3
+    // reset LOW, release HIGH only after panel power has settled.
+    vTaskDelay(pdMS_TO_TICKS(40));
+    err = ioexp_write(ioexp_out, lcd_normal & ~(1U << 3));
+    if (err == ESP_OK) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+        err = ioexp_write(ioexp_out, lcd_normal);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "LCD_RST EXIO3 pulse failed: %s", esp_err_to_name(err));
+        return;
+    }
+    vTaskDelay(pdMS_TO_TICKS(120));
+    ESP_LOGI(TAG, "LCD_RST EXIO3 pulse OK, panel power and DISP enabled");
 
     // Correct missing GT911 hard reset / address selection:
     // (1) EXIO1 low, (2) GPIO4 low => choose GT911 0x5d,
@@ -282,11 +228,19 @@ static void init_i2c(void) {
     };
     ESP_ERROR_CHECK(gpio_config(&irq_cfg));
     ESP_ERROR_CHECK(gpio_set_level(GPIO_NUM_4, 0));
-    ESP_ERROR_CHECK(ioexp_write(ioexp_device, 0x03, 0xfd)); // EXIO1 low; EXIO2 backlight stays on
+    err = ioexp_write(ioexp_out, 0x5c); // TP_RST bit1 LOW; DISP and LCD_VDD_EN stay HIGH
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "CH422G touch reset LOW failed: %s", esp_err_to_name(err));
+        return;
+    }
     vTaskDelay(pdMS_TO_TICKS(100));
     ESP_ERROR_CHECK(gpio_set_level(GPIO_NUM_4, 0));
     vTaskDelay(pdMS_TO_TICKS(100));
-    ESP_ERROR_CHECK(ioexp_write(ioexp_device, 0x03, 0xff)); // EXIO1 high => GT911 exits reset
+    err = ioexp_write(ioexp_out, 0x5e); // TP_RST bit1 HIGH => GT911 exits reset
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "CH422G touch reset HIGH failed: %s", esp_err_to_name(err));
+        return;
+    }
     vTaskDelay(pdMS_TO_TICKS(200));
 
     // GPIO4 is GT911 interrupt input during operation. Poll coordinates using I2C.
@@ -308,7 +262,7 @@ static void init_i2c(void) {
         .device_address = touch_addr,
         .scl_speed_hz = 400000,
     };
-    esp_err_t err = i2c_master_bus_add_device(i2c_bus, &touch_cfg, &gt911);
+    err = i2c_master_bus_add_device(i2c_bus, &touch_cfg, &gt911);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "GT911 add I2C device failed: %s", esp_err_to_name(err));
         touch_addr = 0;
@@ -397,12 +351,12 @@ esp_err_t mira_display_init(void) {
             .pclk_hz = LCD_PCLK_HZ,
             .h_res = WIDTH,
             .v_res = HEIGHT,
-            .hsync_pulse_width = 8,
+            .hsync_pulse_width = 4,
             .hsync_back_porch = 8,
-            .hsync_front_porch = 4,
-            .vsync_pulse_width = 8,
+            .hsync_front_porch = 8,
+            .vsync_pulse_width = 4,
             .vsync_back_porch = 8,
-            .vsync_front_porch = 4,
+            .vsync_front_porch = 8,
             .flags.pclk_active_neg = 1,
         },
         .data_width = 16,
@@ -425,6 +379,7 @@ esp_err_t mira_display_init(void) {
     ESP_RETURN_ON_ERROR(esp_lcd_new_rgb_panel(&cfg, &panel), TAG, "RGB panel allocate");
     ESP_RETURN_ON_ERROR(esp_lcd_panel_reset(panel), TAG, "RGB reset");
     ESP_RETURN_ON_ERROR(esp_lcd_panel_init(panel), TAG, "RGB init");
+    ESP_LOGI(TAG, "Waveshare 7 LCD RGB panel started at %d Hz (800x480, 4/8/8 porch)", LCD_PCLK_HZ);
     esp_lcd_rgb_panel_event_callbacks_t cb = {
         .on_frame_buf_complete = lcd_frame_complete,
         .on_vsync = lcd_vsync_event,
@@ -451,12 +406,20 @@ esp_err_t mira_display_init(void) {
     const esp_timer_create_args_t timer_cfg = {.callback = tick_cb, .name="lv_tick"};
     ESP_RETURN_ON_ERROR(esp_timer_create(&timer_cfg, &timer), TAG, "LVGL tick");
     ESP_RETURN_ON_ERROR(esp_timer_start_periodic(timer, 2000), TAG, "LVGL tick start");
-    if (touch_ready) {
-        touch_events=xQueueCreate(64,sizeof(mira_touch_event_t));
-        if (!touch_events) return ESP_ERR_NO_MEM;
-        BaseType_t task_ok=xTaskCreatePinnedToCore(gt911_poll_task,"gt911_10ms",4096,NULL,5,NULL,0);
-        if (task_ok!=pdPASS) return ESP_ERR_NO_MEM;
-        ESP_LOGI(TAG,"GT911 independent 10ms sampler active; LVGL receives queued events");
+    return ESP_OK;
+}
+
+esp_err_t mira_display_set_brightness(uint8_t raw) {
+    // The Waveshare 7-inch STD has a CH422G binary display/backlight gate,
+    // not the 4.3C's CH32 register-0x05 PWM. Never send CH32 writes to CH422G.
+    // Keep validated 7-inch IO output / panel power sequence intact.
+    // UI brightness slider and sleep dimming are software-only until hardware
+    // dimming support is independently verified for the 7-inch panel.
+    (void)raw;
+    static bool noted=false;
+    if(!noted){
+        noted=true;
+        ESP_LOGW(TAG,"7-inch: hardware PWM brightness unavailable; display power left unchanged");
     }
     return ESP_OK;
 }
