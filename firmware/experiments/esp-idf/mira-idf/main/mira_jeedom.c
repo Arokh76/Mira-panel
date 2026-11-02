@@ -8,6 +8,7 @@
 #include "mira_setup_access.h"
 #include "mira_legacy_cipher.h"
 #include "mira_mqtt.h"
+#include "mira_beta_web.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -413,7 +414,90 @@ esp_err_t mira_jeedom_render_beta_actions(httpd_req_t *req){
     cJSON_Delete(index);
     if(status!=ESP_OK)return status;
     if(!any)return beta_html(req,"<p>Aucune commande programmée.</p>");
-    return ESP_OK;
+    // The beta's live states are delivered by /events, which sends a bounded
+    // snapshot and lets EventSource reconnect. No HTTP worker remains blocked.
+    // Regenerate listeners from the same command index, never from the DOM.
+    raw=read_config(NULL);
+    index=raw?index_from_config(raw):NULL;
+    free(raw);
+    if(!index)return ESP_OK;
+    actions=cJSON_GetObjectItemCaseSensitive(index,"actions");
+    status=beta_html(req,"<script>(function(){if(!window.EventSource)return;"
+                              "var source=new EventSource('/events');");
+    cJSON_ArrayForEach(item,actions){
+        if(status!=ESP_OK)break;
+        const char *type=jstr((cJSON*)item,"type","");
+        char js[320];
+        if(!strcmp(type,"toggle")){
+            int off=jint((cJSON*)item,"id0",-1),on=jint((cJSON*)item,"id1",-1);
+            if(off<1||on<1)continue;
+            snprintf(js,sizeof(js),
+                "source.addEventListener('%d',function(){var e=document.getElementById('%d');if(e)e.checked=false;});"
+                "source.addEventListener('%d',function(){var e=document.getElementById('%d');if(e)e.checked=true;});",
+                off,off,on,off);
+        }else if(!strcmp(type,"info")||!strcmp(type,"range")){
+            int id=jint((cJSON*)item,"id",-1);
+            if(id<1)continue;
+            snprintf(js,sizeof(js),
+                "source.addEventListener('%d',function(v){var e=document.getElementById('%d');"
+                "if(e)e.%s=v.data;});",id,id,!strcmp(type,"info")?"textContent":"value");
+        }else if(!strcmp(type,"list")){
+            int id=jint((cJSON*)item,"id",-1);
+            if(id<1)continue;
+            // List selectors do not expose raw names to JavaScript: find by
+            // option id, then assign their parent select's selected value.
+            snprintf(js,sizeof(js),
+                "source.addEventListener('%d',function(){var o=document.querySelector('option[value=\"%d\"]');"
+                "if(o&&o.parentElement)o.parentElement.value='%d';});",id,id,id);
+        }else continue;
+        status=beta_html(req,js);
+    }
+    if(status==ESP_OK)status=beta_html(req,"})();</script>");
+    cJSON_Delete(index);
+    return status;
+}
+static esp_err_t beta_events_get(httpd_req_t *req){
+    if(!mira_beta_web_authorized(req))return ESP_FAIL;
+    char *raw=read_config(NULL);
+    cJSON *index=raw?index_from_config(raw):NULL;
+    free(raw);
+    httpd_resp_set_type(req,"text/event-stream; charset=utf-8");
+    httpd_resp_set_hdr(req,"Cache-Control","no-cache");
+    esp_err_t err=httpd_resp_send_chunk(req,"retry: 3000\n\n",HTTPD_RESP_USE_STRLEN);
+    if(index){
+        const cJSON *actions=cJSON_GetObjectItemCaseSensitive(index,"actions");
+        const cJSON *item=NULL;
+        cJSON_ArrayForEach(item,actions){
+            if(err!=ESP_OK)break;
+            const char *type=jstr((cJSON*)item,"type","");
+            const char *name=jstr((cJSON*)item,"nom","");
+            if(!*name)continue;
+            char value[160]={0};
+            int id=jint((cJSON*)item,"id",-1);
+            if(!strcmp(type,"list")){
+                const char *group=jstr((cJSON*)item,"nomliste","");
+                if(!mira_full_cached_state(group,value,sizeof(value))||
+                   strcmp(value,name))continue;
+            }else if(!mira_full_cached_state(name,value,sizeof(value)))continue;
+            if(!strcmp(type,"toggle")){
+                const bool on=!strcmp(value,"1")||!strcasecmp(value,"On")||
+                              !strcasecmp(value,"true");
+                id=jint((cJSON*)item,on?"id1":"id0",-1);
+            }else if(strcmp(type,"info")&&strcmp(type,"range")&&strcmp(type,"list"))
+                continue;
+            if(id<1||id>4096)continue;
+            // Prevent an incoming MQTT newline from becoming a forged SSE event.
+            for(char *p=value;*p;p++)if(*p=='\r'||*p=='\n')*p=' ';
+            char event[30];
+            snprintf(event,sizeof(event),"event: %d\ndata: ",id);
+            if((err=beta_html(req,event))!=ESP_OK||
+               (err=beta_html(req,value))!=ESP_OK||
+               (err=beta_html(req,"\n\n"))!=ESP_OK)break;
+        }
+        cJSON_Delete(index);
+    }
+    if(err!=ESP_OK)return err;
+    return httpd_resp_send_chunk(req,NULL,0);
 }
 // Browser home commands on POST /update?send=ID, send_range, send_list, etc.
 // Only local user interactions can produce outbound actions; state updates
@@ -2026,6 +2110,7 @@ void mira_jeedom_register_http(httpd_handle_t server) {
         {.uri="/getlvgl",.method=HTTP_GET,.handler=getlvgl},
         {.uri="/getindex",.method=HTTP_GET,.handler=getindex},
         {.uri="/get",.method=HTTP_GET,.handler=beta_get},
+        {.uri="/events",.method=HTTP_GET,.handler=beta_events_get},
         {.uri="/testmodule",.method=HTTP_GET,.handler=testmodule},
         {.uri="/getmodule",.method=HTTP_GET,.handler=getmodule},
         {.uri="/displayinfo",.method=HTTP_GET,.handler=displayinfo},
