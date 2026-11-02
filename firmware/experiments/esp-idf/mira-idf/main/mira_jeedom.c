@@ -323,7 +323,9 @@ static esp_err_t displayinfo(httpd_req_t *req) {
              "{\"profile\":\"%s\",\"width\":800,\"height\":480,"
              "\"contentWidth\":800,\"contentHeight\":430,\"navHeight\":50,"
              "\"rotation\":0,\"logicalWidth\":1000,\"logicalHeight\":1000,"
-             "\"httpPrimary\":true,\"mqttOptional\":true,\"freeLayout\":true}",profile);
+             "\"httpPrimary\":true,\"mqttOptional\":true,\"freeLayout\":true,"
+             "\"widgetLabelModes\":\"auto,text,icon,both\","
+             "\"widgetIcons\":\"auto,temperature,humidity,pressure,light,energy,plug,door\"}",profile);
     return httpd_resp_sendstr(req,response);
 }
 static esp_err_t programui(httpd_req_t *req) {
