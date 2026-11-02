@@ -441,7 +441,11 @@ static esp_err_t wifi_profile_post(httpd_req_t *req){
         legacy_fixed_auto_applied=false;
         nvs_handle_t nv;
         if(nvs_open("mira_idf_net",NVS_READWRITE,&nv)==ESP_OK){
-            if(nvs_set_u8(nv,"legacy_wifi",0)==ESP_OK)(void)nvs_commit(nv);
+            if(nvs_set_u8(nv,"legacy_wifi",0)==ESP_OK){
+                esp_err_t gone=nvs_erase_key(nv,"setup_ip");
+                if(gone==ESP_OK||gone==ESP_ERR_NVS_NOT_FOUND)
+                    (void)nvs_commit(nv);
+            }
             nvs_close(nv);
         }
         if(sta_netif)(void)esp_netif_dhcpc_start(sta_netif);
@@ -603,6 +607,18 @@ esp_err_t mira_recovery_init(void) {
         have_sta=esp_wifi_get_config(WIFI_IF_STA,&saved_sta)==ESP_OK&&saved_sta.sta.ssid[0];
     }
     if(have_sta){
+        // A fresh Mira beta wizard may have saved a requested IP with
+        // DHCP-assisted gateway/mask/DNS, just like fixed_auto on the beta.
+        if(legacy_ip_mode==PROFILE_DHCP &&
+           nvs_open("mira_idf_net",NVS_READONLY,&profile_nv)==ESP_OK){
+            char requested[32]={0};size_t n=sizeof(requested);
+            if(nvs_get_str(profile_nv,"setup_ip",requested,&n)==ESP_OK &&
+               legacy_parse_ipv4(requested,&legacy_requested_ip)){
+                legacy_ip_mode=PROFILE_FIXED_AUTO;
+                ESP_LOGI(TAG,"Mira first-run requested IP will be checked against DHCP subnet");
+            }
+            nvs_close(profile_nv);
+        }
         station_configured=true;
         legacy_apply_manual_ip();
         ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_connect());
