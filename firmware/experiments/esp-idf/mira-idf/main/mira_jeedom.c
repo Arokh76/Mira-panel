@@ -282,6 +282,7 @@ static cJSON *index_from_config(const char *json) {
     cJSON_Delete(root);
     return out;
 }
+static bool decimal_id(const char *str);
 // HTML part of the original beta home page. Use the SAME command ids from
 // index_from_config() that the Jeedom plugin sees, no parallel ID mapping.
 static esp_err_t beta_html(httpd_req_t *req,const char *s){
