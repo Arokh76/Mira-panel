@@ -630,7 +630,8 @@ esp_err_t mira_recovery_init(void) {
     // 9 routes are registered below; ESP-IDF defaults to 8 URI handlers.
     // Exceeding that limit used to abort app_main() before LCD init, causing
     // a black screen + Wi-Fi reboot loop (ESP_ERR_HTTPD_HANDLERS_FULL).
-    conf.max_uri_handlers = 40;
+    conf.max_uri_handlers = 48;
+    conf.uri_match_fn = httpd_uri_match_wildcard;
     conf.stack_size = 6144;
     conf.recv_wait_timeout = 15;
     ESP_LOGI(TAG, "HTTP URI capacity=%u, registered routes=9",
@@ -664,6 +665,9 @@ esp_err_t mira_recovery_init(void) {
     ESP_RETURN_ON_ERROR(mira_beta_setup_register(httpd),TAG,"Mira beta first-run setup");
     ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_register_uri_handler(httpd,&wifi_get));
     ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_register_uri_handler(httpd,&wifi_post));
+    // Catch Android/iOS/Windows captive-portal probe paths only after all
+    // explicit Jeedom/API/OTA handlers have been registered.
+    ESP_ERROR_CHECK_WITHOUT_ABORT(mira_beta_setup_register_captive(httpd));
     ESP_LOGI(TAG, "Mira 0.7.37 first-run AP SSID Mira Panel (open until setup); http://192.168.4.1");
     return ESP_OK;
 }
