@@ -318,7 +318,7 @@ static esp_err_t displayinfo(httpd_req_t *req) {
 #else
     const char *profile="waveshare-esp32s3-touch-lcd-4.3c";
 #endif
-    char response[320];
+    char response[512];
     snprintf(response,sizeof(response),
              "{\"profile\":\"%s\",\"width\":800,\"height\":480,"
              "\"contentWidth\":800,\"contentHeight\":430,\"navHeight\":50,"
