@@ -14,15 +14,21 @@ static bool has(const char *text,const char *word){
     return false;
 }
 static bool known(const char *kind){
-    return kind&&(!strcmp(kind,"temperature")||!strcmp(kind,"humidity")||
-                 !strcmp(kind,"pressure")||!strcmp(kind,"light")||
-                 !strcmp(kind,"energy")||!strcmp(kind,"plug")||
-                 !strcmp(kind,"door"));
+    return kind&&(!strcasecmp(kind,"temperature")||!strcasecmp(kind,"humidity")||
+                 !strcasecmp(kind,"pressure")||!strcasecmp(kind,"light")||
+                 !strcasecmp(kind,"energy")||!strcasecmp(kind,"plug")||
+                 !strcasecmp(kind,"door"));
 }
 const char *mira_info_glyph_kind(const char *override,const char *name,const char *unit){
     // Explicit unknown icons are NOT replaced with guessed ones.
-    if(known(override))return override;
-    if(override&&*override&&strcmp(override,"auto"))return NULL;
+    if(known(override)){
+        static const char *const names[]={
+            "temperature","humidity","pressure","light","energy","plug","door"
+        };
+        for(size_t i=0;i<sizeof(names)/sizeof(names[0]);i++)
+            if(!strcasecmp(override,names[i]))return names[i];
+    }
+    if(override&&*override&&strcasecmp(override,"auto"))return NULL;
     if(has(name,"temp")||has(name,"thermo")||has(unit,"°"))return "temperature";
     if(has(name,"humid")||has(name,"hygro"))return "humidity";
     if(has(name,"press")||!strcasecmp(unit?unit:"","hpa")||
