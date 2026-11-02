@@ -489,11 +489,13 @@ static volatile bool station_connected;
 // disabled without changing or deleting any saved configuration. On network
 // loss it is restored, so the firmware remains reachable for recovery.
 static volatile bool recovery_ap_active=true;
+static volatile bool beta_ap_persistent;
+static esp_netif_t *ap_netif;
 static void recovery_ap_supervisor(void *arg){
     (void)arg;
     for(;;){
         vTaskDelay(pdMS_TO_TICKS(3000));
-        const bool want_ap=!station_connected;
+        const bool want_ap=beta_ap_persistent||!station_connected;
         if(want_ap==recovery_ap_active)continue;
         esp_err_t err=esp_wifi_set_mode(want_ap?WIFI_MODE_APSTA:WIFI_MODE_STA);
         if(err==ESP_OK){
@@ -679,6 +681,86 @@ static bool restore_legacy_wifi_profile(bool import_station){
     return restored;
 }
 
+// Same fields as beta HTML_ConfigAP.h: pass, ip, actif. Do not replace
+// the existing identity/setup workflow or any SPIFFS file in this path.
+esp_err_t mira_recovery_save_beta_ap(const char *password,const char *ip,bool active){
+    if(!password||!ip)return ESP_ERR_INVALID_ARG;
+    size_t len=strlen(password);
+    if((len>0&&len<8)||len>63)return ESP_ERR_INVALID_ARG;
+    esp_ip4_addr_t address={0};
+    if(!legacy_parse_ipv4(ip,&address))return ESP_ERR_INVALID_ARG;
+    // /24 is the beta AP's default; reject network and broadcast addresses.
+    const uint32_t ip_host=ntohl(address.addr);
+    if((ip_host&255u)==0u||(ip_host&255u)==255u)
+        return ESP_ERR_INVALID_ARG;
+    // A configured AP cannot share the STA subnet.
+    esp_netif_ip_info_t sta_info={0};
+    if(sta_netif&&esp_netif_get_ip_info(sta_netif,&sta_info)==ESP_OK&&
+       sta_info.ip.addr&&
+       (address.addr&sta_info.netmask.addr)==(sta_info.ip.addr&sta_info.netmask.addr))
+        return ESP_ERR_INVALID_ARG;
+    nvs_handle_t nv;
+    esp_err_t err=nvs_open("mira_idf_net",NVS_READWRITE,&nv);
+    if(err!=ESP_OK)return err;
+    err=nvs_set_str(nv,"ap_ip",ip);
+    if(err==ESP_OK)err=nvs_set_u8(nv,"ap_enabled",active?1:0);
+    if(err==ESP_OK)err=nvs_commit(nv);
+    nvs_close(nv);
+    if(err!=ESP_OK)return err;
+    if(len){
+        // In the original beta, AP password doubles as the admin password.
+        // Explicitly changing this field updates the same native auth key.
+        err=nvs_open("mira_idf_auth",NVS_READWRITE,&nv);
+        if(err!=ESP_OK)return err;
+        err=nvs_set_str(nv,"jeedom_key",password);
+        if(err==ESP_OK)err=nvs_commit(nv);
+        nvs_close(nv);
+    }
+    return err;
+}
+static void configure_beta_ap_profile(void){
+    nvs_handle_t nv;
+    char ip[32]="192.168.4.1",password[65]={0};
+    size_t n=sizeof(ip);
+    uint8_t active=0;
+    if(nvs_open("mira_idf_net",NVS_READONLY,&nv)==ESP_OK){
+        (void)nvs_get_str(nv,"ap_ip",ip,&n);
+        (void)nvs_get_u8(nv,"ap_enabled",&active);
+        nvs_close(nv);
+    }
+    beta_ap_persistent=active!=0;
+    n=sizeof(password);
+    if(nvs_open("mira_idf_auth",NVS_READONLY,&nv)==ESP_OK){
+        (void)nvs_get_str(nv,"jeedom_key",password,&n);
+        nvs_close(nv);
+    }
+    if(strlen(password)>=8&&strlen(password)<=63){
+        wifi_config_t ap={0};
+        snprintf((char*)ap.ap.ssid,sizeof(ap.ap.ssid),"%s","Mira Panel");
+        memcpy(ap.ap.password,password,strlen(password));
+        ap.ap.channel=6;
+        ap.ap.max_connection=2;
+        ap.ap.authmode=WIFI_AUTH_WPA2_PSK;
+        esp_err_t err=esp_wifi_set_config(WIFI_IF_AP,&ap);
+        if(err!=ESP_OK)ESP_LOGW(TAG,"Unable to configure beta AP password: %s",esp_err_to_name(err));
+    }
+    memset(password,0,sizeof(password));
+    if(ap_netif&&strcmp(ip,"192.168.4.1")){
+        esp_ip4_addr_t addr={0};
+        if(legacy_parse_ipv4(ip,&addr)){
+            esp_netif_ip_info_t info={0};
+            info.ip=addr;info.gw=addr;
+            info.netmask.addr=htonl(0xffffff00u);
+            esp_err_t err=esp_netif_dhcps_stop(ap_netif);
+            if(err==ESP_OK||err==ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED){
+                err=esp_netif_set_ip_info(ap_netif,&info);
+                if(err==ESP_OK)(void)esp_netif_dhcps_start(ap_netif);
+                else ESP_LOGW(TAG,"Beta AP IP update rejected: %s",esp_err_to_name(err));
+            }
+        }
+    }
+}
+
 esp_err_t mira_recovery_init(void) {
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -689,7 +771,8 @@ esp_err_t mira_recovery_init(void) {
     ESP_RETURN_ON_ERROR(err, TAG, "NVS");
     ESP_RETURN_ON_ERROR(esp_netif_init(), TAG, "netif");
     ESP_RETURN_ON_ERROR(esp_event_loop_create_default(), TAG, "event loop");
-    esp_netif_create_default_wifi_ap();
+    ap_netif=esp_netif_create_default_wifi_ap();
+    if(!ap_netif)return ESP_ERR_NO_MEM;
     sta_netif=esp_netif_create_default_wifi_sta();
     if(!sta_netif)return ESP_ERR_NO_MEM;
     // France / Europe-Paris local time, including automatic summer-time changes.
@@ -718,6 +801,7 @@ esp_err_t mira_recovery_init(void) {
     };
     ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_APSTA), TAG, "wifi mode");
     ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_AP, &ap), TAG, "wifi config");
+    configure_beta_ap_profile();
     ESP_RETURN_ON_ERROR(esp_wifi_start(), TAG, "wifi start");
     ESP_ERROR_CHECK_WITHOUT_ABORT(mira_beta_captive_dns_start());
     if(xTaskCreate(recovery_ap_supervisor,"mira_ap_guard",3072,NULL,3,NULL)!=pdPASS)
