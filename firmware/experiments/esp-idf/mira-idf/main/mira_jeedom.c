@@ -18,6 +18,10 @@
 #include "esp_log.h"
 #include "esp_err.h"
 #include "esp_http_client.h"
+#include "esp_system.h"
+#include "esp_wifi.h"
+#include "esp_timer.h"
+#include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -1474,6 +1478,40 @@ static esp_err_t nav_favorites_post(httpd_req_t *req){
     }
     return httpd_resp_sendstr(req,"OK");
 }
+// Original beta 0.7.37 diagnostic contract, with real heap/nav counters.
+static esp_err_t mira_health_get(httpd_req_t *req){
+    wifi_ap_record_t ap={0};
+    const bool connected=esp_wifi_sta_get_ap_info(&ap)==ESP_OK;
+    uint32_t count=0,last_heap=0,lowest_heap=0;
+    mira_full_navigation_stats(&count,&last_heap,&lowest_heap);
+    char result[580];
+    snprintf(result,sizeof(result),
+        "{\"uptime_ms\":%llu,\"wifi\":%d,\"rssi_dbm\":%d,"
+        "\"heap_free\":%u,\"heap_min\":%u,\"heap_largest_block\":%u,"
+        "\"psram_free\":%u,\"nav_count\":%u,\"nav_last_heap\":%u,"
+        "\"nav_lowest_heap\":%u,\"internal_heap_free\":%u,"
+        "\"internal_largest_block\":%u}",
+        (unsigned long long)(esp_timer_get_time()/1000),
+        connected?3:6,connected?(int)ap.rssi:0,
+        (unsigned)esp_get_free_heap_size(),
+        (unsigned)esp_get_minimum_free_heap_size(),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+        (unsigned)count,(unsigned)last_heap,(unsigned)lowest_heap,
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+    httpd_resp_set_type(req,"application/json");
+    httpd_resp_set_hdr(req,"Cache-Control","no-store");
+    return httpd_resp_sendstr(req,result);
+}
+static esp_err_t legacy_reboot_get(httpd_req_t *req){
+    if(!require_key(req))return ESP_FAIL;
+    esp_err_t sent=httpd_resp_sendstr(req,"OK");
+    if(sent!=ESP_OK)return sent;
+    vTaskDelay(pdMS_TO_TICKS(350));
+    esp_restart();
+    return ESP_OK;
+}
 void mira_jeedom_register_http(httpd_handle_t server) {
     const httpd_uri_t routes[]={
         {.uri="/getlvgl",.method=HTTP_GET,.handler=getlvgl},
@@ -1498,6 +1536,8 @@ void mira_jeedom_register_http(httpd_handle_t server) {
         {.uri="/navpages",.method=HTTP_POST,.handler=nav_pages_post},
         {.uri="/navfavorites",.method=HTTP_GET,.handler=nav_favorites_get},
         {.uri="/navfavorites",.method=HTTP_POST,.handler=nav_favorites_post},
+        {.uri="/mira-health",.method=HTTP_GET,.handler=mira_health_get},
+        {.uri="/reboot",.method=HTTP_GET,.handler=legacy_reboot_get},
     };
     for(size_t i=0;i<sizeof(routes)/sizeof(routes[0]);i++) {
         esp_err_t err=httpd_register_uri_handler(server,&routes[i]);
