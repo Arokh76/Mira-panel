@@ -44,6 +44,11 @@ static volatile bool reload_pending=false;
 static volatile bool settings_reload_pending=false;
 void mira_full_request_settings_reload(void){settings_reload_pending=true;}
 void mira_full_request_reload(void){ reload_pending=true; }
+void mira_full_navigation_stats(uint32_t *count,uint32_t *last_heap,uint32_t *min_heap){
+    if(count)*count=nav_count;
+    if(last_heap)*last_heap=nav_last_heap;
+    if(min_heap)*min_heap=nav_lowest_heap;
+}
 // Strict one-way UI state ingestion. Only the LVGL task can touch the widget tree.
 // No state update ever generates a Jeedom/MQTT command.
 typedef struct { char name[96]; char value[160]; } mira_state_update_t;
@@ -73,6 +78,7 @@ static lv_obj_t *clock_text,*date_text,*clock_status_text;
 static uint32_t widget_count;
 static uint32_t last_clock_ms;
 static uint32_t last_user_touch_ms,last_user_touch_count;
+static volatile uint32_t nav_count,nav_last_heap,nav_lowest_heap;
 static lv_obj_t *feedback;
 static lv_obj_t *touch_diag_label;
 static lv_obj_t *touch_diag_button;
@@ -223,6 +229,9 @@ static int to_page(const char *loc){
 static void show_page(int idx){
     if(idx<0||idx>5||!(visible_page_mask&(1u<<idx)))return;
     current_page=(uint8_t)idx;
+    nav_count++;
+    nav_last_heap=esp_get_free_heap_size();
+    if(!nav_lowest_heap||nav_last_heap<nav_lowest_heap)nav_lowest_heap=nav_last_heap;
     for(int i=0;i<6;i++){
         if(i==idx)lv_obj_remove_flag(pages[i],LV_OBJ_FLAG_HIDDEN);
         else lv_obj_add_flag(pages[i],LV_OBJ_FLAG_HIDDEN);
