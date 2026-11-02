@@ -34,10 +34,13 @@ def extract_native(name: str) -> str:
         line = line.strip()
         if not line:
             continue
-        if line == ";":
-            break
+        done = line.endswith(";")
+        if done:
+            line = line[:-1].rstrip()
         assert line.startswith('"') and line.endswith('"'), (name, line[:100])
         literals.append(json.loads(line))
+        if done:
+            break
     assert literals, f"Empty template {name}"
     return "".join(literals)
 
