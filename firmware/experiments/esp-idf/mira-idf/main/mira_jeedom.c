@@ -203,6 +203,46 @@ static cJSON *index_from_config(const char *json) {
                 cJSON_AddStringToObject(a,"unit",jstr((cJSON*)w,"unit",""));
                 cJSON_AddStringToObject(a,"value",jstr((cJSON*)w,"value",""));
             }
+        }else if((!strcmp(type,"title")||!strcmp(type,"text_index"))){
+            int size=jint((cJSON*)item,"size",20);
+            if(size<10)size=10;if(size>72)size=72;
+            char style[90];
+            snprintf(style,sizeof(style),
+                     "<div style=\"padding:10px 0;font-size:%dpx\">",size);
+            any=true;
+            if((status=beta_html(req,style))!=ESP_OK||
+               (status=beta_html_escape(req,name))!=ESP_OK||
+               (status=beta_html(req,"</div>"))!=ESP_OK)break;
+        }else if(!strcmp(type,"inputbox")&&id>0){
+            any=true;
+            if((status=beta_html(req,"<label>"))!=ESP_OK||
+               (status=beta_html_escape(req,name))!=ESP_OK||
+               (status=beta_html(req,"</label><input class=\"inputbox\" type=\"text\" id=\""))!=ESP_OK||
+               (status=beta_html_id(req,id))!=ESP_OK||
+               (status=beta_html(req,"\" value=\""))!=ESP_OK||
+               (status=beta_html_value(req,name,jstr((cJSON*)item,"value","")))!=ESP_OK||
+               (status=beta_html(req,"\" onblur=\"InputBoxValidate(this)\"><br>"))!=ESP_OK)break;
+        }else if(!strcmp(type,"infofa")&&id>0){
+            any=true;
+            if((status=beta_html(req,"<div class=\"mira-info\">"))!=ESP_OK||
+               (status=beta_html_escape(req,name))!=ESP_OK||
+               (status=beta_html(req,": <i id=\""))!=ESP_OK||
+               (status=beta_html_id(req,id))!=ESP_OK||
+               (status=beta_html(req,"\" class=\""))!=ESP_OK||
+               (status=beta_html_value(req,name,jstr((cJSON*)item,"value","")))!=ESP_OK||
+               (status=beta_html(req,"\"></i></div>"))!=ESP_OK)break;
+        }else if(!strcmp(type,"color")&&id>0){
+            int red=jint((cJSON*)item,"r",0),green=jint((cJSON*)item,"g",0),blue=jint((cJSON*)item,"b",0);
+            if(red<0||red>255||green<0||green>255||blue<0||blue>255)continue;
+            char color[16];snprintf(color,sizeof(color),"#%02x%02x%02x",red,green,blue);
+            any=true;
+            if((status=beta_html(req,"<div class=\"FondBlanc_Color\">"))!=ESP_OK||
+               (status=beta_html_escape(req,name))!=ESP_OK||
+               (status=beta_html(req,"<br><input class=\"input_color\" type=\"color\" id=\""))!=ESP_OK||
+               (status=beta_html_id(req,id))!=ESP_OK||
+               (status=beta_html(req,"\" value=\""))!=ESP_OK||
+               (status=beta_html(req,color))!=ESP_OK||
+               (status=beta_html(req,"\" onchange=\"printColor(this,event)\"></div>"))!=ESP_OK)break;
         }else if(!strcmp(type,"toggle")){
             cJSON *a=cJSON_CreateObject();if(!a)continue;
             cJSON_AddNumberToObject(a,"id0",id++);
@@ -332,7 +372,7 @@ esp_err_t mira_jeedom_render_beta_actions(httpd_req_t *req){
         const char *name=jstr((cJSON*)item,"nom","");
         const int id=jint((cJSON*)item,"id",-1);
         if(!*name)continue;
-        if(!strcmp(type,"button")&&id>0){
+        if((!strcmp(type,"button")||!strcmp(type,"little_button"))&&id>0){
             any=true;
             if((status=beta_html(req,"<button class=\"Bouton\" id=\""))!=ESP_OK||
                (status=beta_html_id(req,id))!=ESP_OK||
@@ -435,12 +475,14 @@ esp_err_t mira_jeedom_render_beta_actions(httpd_req_t *req){
                 "source.addEventListener('%d',function(){var e=document.getElementById('%d');if(e)e.checked=false;});"
                 "source.addEventListener('%d',function(){var e=document.getElementById('%d');if(e)e.checked=true;});",
                 off,off,on,off);
-        }else if(!strcmp(type,"info")||!strcmp(type,"range")){
+        }else if(!strcmp(type,"info")||!strcmp(type,"range")||
+                  !strcmp(type,"inputbox")||!strcmp(type,"infofa")){
             int id=jint((cJSON*)item,"id",-1);
             if(id<1)continue;
             snprintf(js,sizeof(js),
                 "source.addEventListener('%d',function(v){var e=document.getElementById('%d');"
-                "if(e)e.%s=v.data;});",id,id,!strcmp(type,"info")?"textContent":"value");
+                "if(e)e.%s=v.data;});",id,id,
+                !strcmp(type,"info")?"textContent":(!strcmp(type,"infofa")?"className":"value"));
         }else if(!strcmp(type,"list")){
             int id=jint((cJSON*)item,"id",-1);
             if(id<1)continue;
@@ -483,7 +525,8 @@ static esp_err_t beta_events_get(httpd_req_t *req){
                 const bool on=!strcmp(value,"1")||!strcasecmp(value,"On")||
                               !strcasecmp(value,"true");
                 id=jint((cJSON*)item,on?"id1":"id0",-1);
-            }else if(strcmp(type,"info")&&strcmp(type,"range")&&strcmp(type,"list"))
+            }else if(strcmp(type,"info")&&strcmp(type,"range")&&strcmp(type,"list")&&
+                     strcmp(type,"inputbox")&&strcmp(type,"infofa"))
                 continue;
             if(id<1||id>4096)continue;
             // Prevent an incoming MQTT newline from becoming a forged SSE event.
@@ -504,7 +547,7 @@ static esp_err_t beta_events_get(httpd_req_t *req){
 // never invoke this endpoint.
 esp_err_t mira_jeedom_beta_web_action(httpd_req_t *req){
     char idtext[24]={0},payload[160]="1",kind[24]={0};
-    static const char *const selectors[]={"send","send_range","send_list","send_color"};
+    static const char *const selectors[]={"send","send_range","send_list","send_color","send_textbox"};
     for(size_t i=0;i<sizeof(selectors)/sizeof(selectors[0]);i++)
         if(query_param(req,selectors[i],idtext,sizeof(idtext))){
             snprintf(kind,sizeof(kind),"%s",selectors[i]);break;
@@ -540,7 +583,7 @@ esp_err_t mira_jeedom_beta_web_action(httpd_req_t *req){
             matched=true;break;
         }
         if(jint((cJSON*)entry,"id",-1)!=id)continue;
-        if(!strcmp(kind,"send")&&!strcmp(type,"button")){
+        if(!strcmp(kind,"send")&&(!strcmp(type,"button")||!strcmp(type,"little_button"))){
             snprintf(action_name,sizeof(action_name),"%s",name);
             snprintf(action_type,sizeof(action_type),"button");
             matched=true;break;
@@ -552,6 +595,12 @@ esp_err_t mira_jeedom_beta_web_action(httpd_req_t *req){
             snprintf(action_name,sizeof(action_name),"%s",name_given);
             snprintf(action_type,sizeof(action_type),"list");
             snprintf(payload,sizeof(payload),"%s",name);
+            matched=true;break;
+        }
+        if(!strcmp(kind,"send_textbox")&&!strcmp(type,"inputbox")){
+            if(!query_param(req,"text",payload,sizeof(payload)))break;
+            snprintf(action_name,sizeof(action_name),"%s",name);
+            snprintf(action_type,sizeof(action_type),"inputbox");
             matched=true;break;
         }
         if(!strcmp(kind,"send_range")&&!strcmp(type,"range")){
