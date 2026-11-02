@@ -1,4 +1,4 @@
-name: EXP Mira 0.7.37 UI - IDF 5.5.6 + LVGL 9.6 Waveshare 4.3C
+name: EXP Mira 0.7.37 FULL UI - IDF 5.5.6 + LVGL 9.6 Waveshare 7 STD
 on:
   workflow_dispatch:
   pull_request:
@@ -7,7 +7,7 @@ on:
       - '.github/workflows/build-mira-idf-waveshare.yml'
       - 'firmware/experiments/esp-idf/mira-idf/**'
   push:
-    branches: [experiment/mira-idf-mira-ui-43c]
+    branches: [experiment/mira-idf-full-ui-7]
     paths:
       - '.github/workflows/build-mira-idf-waveshare.yml'
       - 'firmware/experiments/esp-idf/mira-idf/**'
@@ -26,7 +26,7 @@ jobs:
           ref: v9.6.0
           path: firmware/experiments/esp-idf/mira-idf/components/lvgl
           submodules: false
-      - name: Verify Mira real-data safety and hardware profile
+      - name: Verify Mira beta HTTP compatibility and validated 7-inch hardware profile
         shell: bash
         run: |
           set -euo pipefail
@@ -40,6 +40,14 @@ jobs:
           grep -Fq '0x610000, 0x9E0000' "$ROOT/partitions.csv"
           grep -Fq '0x310000, 0x300000' "$ROOT/partitions.csv"
           grep -Fq 'conf.max_uri_handlers = 40;' "$ROOT/main/mira_recovery.c"
+          # Never flash a 4.3C RGB/EXIO binary on a Waveshare 7-inch STD.
+          grep -Fq '#define LCD_PCLK_HZ (13 * 1000 * 1000)' "$ROOT/main/mira_display.c"
+          grep -Fq 'ext_cfg.device_address = 0x38;' "$ROOT/main/mira_display.c"
+          grep -Fq 'ioexp_write(ioexp_mode, 0x01)' "$ROOT/main/mira_display.c"
+          grep -Fq 'CH422G' "$ROOT/main/mira_display.c"
+          grep -Fq '7-inch validated 13MHz CH422G + GT911' "$ROOT/main/app_main.c"
+          grep -Fq 'mira_jeedom_action_init' "$ROOT/main/app_main.c"
+          grep -Fq 'mira_full_ui_create' "$ROOT/main/app_main.c"
           ! grep -Fq 'esp_vfs_spiffs_format' "$ROOT/main/mira_full.c"
       - name: Native ESP-IDF 5.5.6 build
         uses: espressif/esp-idf-ci-action@v1
@@ -54,7 +62,7 @@ jobs:
           set -euo pipefail
           ROOT=firmware/experiments/esp-idf/mira-idf/build
           mkdir -p mira_idf_release
-          cp "$ROOT/mira_idf_scroll.bin" mira_idf_release/Mira_LVGL96_43C_UI_OTA.bin
+          cp "$ROOT/mira_idf_scroll.bin" mira_idf_release/Mira_LVGL96_7_STD_UI_OTA.bin
           export ROOT
           python3 - <<'PY'
           import os
@@ -69,14 +77,14 @@ jobs:
               assert off+len(data)<=limit
               if len(out)<off:out.extend(b'\xff'*(off-len(out)))
               out.extend(data)
-          Path('mira_idf_release/Mira_LVGL96_43C_UI_FACTORY_USB_0x0.bin').write_bytes(out)
+          Path('mira_idf_release/Mira_LVGL96_7_STD_UI_FACTORY_USB_0x0.bin').write_bytes(out)
           print('Factory bytes',len(out))
           PY
-          test $(stat -c '%s' mira_idf_release/Mira_LVGL96_43C_UI_OTA.bin) -lt 3145728
+          test $(stat -c '%s' mira_idf_release/Mira_LVGL96_7_STD_UI_OTA.bin) -lt 3145728
       - name: Upload build (hardware validation still required)
         uses: actions/upload-artifact@v4
         with:
-          name: MIRA_0_7_37_UI_LVGL96_4_3C_FACTORY_OTA
+          name: MIRA_0_7_37_UI_LVGL96_7_STD_FACTORY_OTA
           path: mira_idf_release/
           retention-days: 14
           if-no-files-found: error
