@@ -118,6 +118,7 @@ typedef struct {
     lv_obj_t *color_saturation,*color_brightness,*color_preview;
     lv_obj_t *color_knob;
     uint16_t color_hue;
+    uint8_t color_sat,color_val;
     lv_obj_t *fields[9]; // energy/media passive Jeedom composite infos
     lv_obj_t *media_slider,*media_device_dropdown,*media_play_caption;
     lv_obj_t *media_artwork_image,*media_artwork_placeholder;
@@ -395,8 +396,8 @@ static void wheel_touch(lv_event_t *event){
     int hue=(int)lroundf(angle*57.2957795f)%360;
     if(w->color_hue!=hue){
         wheel_mark_hue(w,hue);
-        const int sat=lv_slider_get_value(w->color_saturation);
-        const int brightness=lv_slider_get_value(w->color_brightness);
+        const int sat=w->color_sat;
+        const int brightness=w->color_val;
         if(w->color_preview)
             lv_obj_set_style_bg_color(w->color_preview,
               lv_color_hsv_to_rgb(w->color_hue,sat,brightness),0);
@@ -427,8 +428,8 @@ static void event_local(lv_event_t *e){
         // Preserve full HSV (and therefore full RGB) rather than forcing
         // every outgoing command to maximum saturation and brightness.
         const uint16_t hue=b->color_hue;
-        const uint8_t saturation=(uint8_t)lv_slider_get_value(b->color_saturation);
-        const uint8_t brightness=(uint8_t)lv_slider_get_value(b->color_brightness);
+        const uint8_t saturation=b->color_sat;
+        const uint8_t brightness=b->color_val;
         const lv_color_t col=lv_color_hsv_to_rgb(hue,saturation,brightness);
         const uint32_t rgb=lv_color_to_u32(col);
         snprintf(b->value,sizeof(b->value),"%u,%u,%u",
@@ -1321,15 +1322,17 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         return;
     }
     if(!strcmp(type,"color")){
-        w->card=card(pg,390,216);
+        w->card=card(pg,786,196);
         lv_obj_t *heading=label(w->card,display,0xF3F6F7,&mira_font_fr_16);
         lv_obj_set_pos(heading,8,3);
         // Restore the beta hue WHEEL (not a linear arc). The shared image
         // costs only 45KB PSRAM and does not recompute on scroll/redraw.
         const lv_color_hsv_t initial=lv_color_rgb_to_hsv(50,120,180);
+        w->color_sat=initial.s;
+        w->color_val=initial.v;
         w->control=lv_obj_create(w->card);
         lv_obj_set_size(w->control,MIRA_WHEEL_SIZE,MIRA_WHEEL_SIZE);
-        lv_obj_set_pos(w->control,8,37);
+        lv_obj_set_pos(w->control,318,36);
         lv_obj_set_style_pad_all(w->control,0,0);
         lv_obj_set_style_bg_color(w->control,panel_c(),0);
         lv_obj_set_style_border_width(w->control,0,0);
@@ -1342,7 +1345,7 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
             lv_obj_set_pos(ring,0,0);
             lv_obj_remove_flag(ring,LV_OBJ_FLAG_CLICKABLE);
         }else{
-            ESP_LOGW(TAG,"No PSRAM for hue ring; color sliders still functional");
+            ESP_LOGW(TAG,"No PSRAM for the beta hue wheel");
         }
         w->color_knob=lv_obj_create(w->control);
         lv_obj_set_size(w->color_knob,14,14);
@@ -1356,30 +1359,7 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         wheel_mark_hue(w,initial.h);
         lv_obj_add_event_cb(w->control,wheel_touch,LV_EVENT_PRESSED,w);
         lv_obj_add_event_cb(w->control,wheel_touch,LV_EVENT_PRESSING,w);
-        lv_obj_t *sat_label=label(w->card,"Saturation",0xA8B2B8,&mira_font_fr_14);
-        lv_obj_set_pos(sat_label,202,53);
-        w->color_saturation=lv_slider_create(w->card);
-        lv_obj_set_size(w->color_saturation,151,12);
-        lv_obj_set_pos(w->color_saturation,202,81);
-        lv_slider_set_range(w->color_saturation,0,100);
-        lv_slider_set_value(w->color_saturation,initial.s,LV_ANIM_OFF);
-        lv_obj_t *brightness_label=label(w->card,"Luminosité",0xA8B2B8,&mira_font_fr_14);
-        lv_obj_set_pos(brightness_label,202,112);
-        w->color_brightness=lv_slider_create(w->card);
-        lv_obj_set_size(w->color_brightness,151,12);
-        lv_obj_set_pos(w->color_brightness,202,139);
-        lv_slider_set_range(w->color_brightness,0,100);
-        lv_slider_set_value(w->color_brightness,initial.v,LV_ANIM_OFF);
-        w->color_preview=lv_obj_create(w->card);
-        lv_obj_set_size(w->color_preview,32,22);
-        lv_obj_set_pos(w->color_preview,338,8);
-        lv_obj_set_style_pad_all(w->color_preview,0,0);
-        lv_obj_set_style_bg_color(w->color_preview,lv_color_make(50,120,180),0);
-        lv_obj_set_style_border_width(w->color_preview,1,0);
-        lv_obj_remove_flag(w->color_preview,LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(w->control,event_local,LV_EVENT_RELEASED,w);
-        lv_obj_add_event_cb(w->color_saturation,event_local,LV_EVENT_RELEASED,w);
-        lv_obj_add_event_cb(w->color_brightness,event_local,LV_EVENT_RELEASED,w);
         return;
     }
     if(!strcmp(type,"energy")){
@@ -2598,10 +2578,8 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                 const lv_color_hsv_t hsv=lv_color_rgb_to_hsv((uint8_t)r,(uint8_t)g,(uint8_t)b);
                 suppress_events=true;
                 wheel_mark_hue(w,hsv.h);
-                if(w->color_saturation)
-                    lv_slider_set_value(w->color_saturation,hsv.s,LV_ANIM_OFF);
-                if(w->color_brightness)
-                    lv_slider_set_value(w->color_brightness,hsv.v,LV_ANIM_OFF);
+                w->color_sat=hsv.s;
+                w->color_val=hsv.v;
                 if(w->color_preview)
                     lv_obj_set_style_bg_color(w->color_preview,
                                               lv_color_make(r,g,b),0);
