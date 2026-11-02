@@ -404,7 +404,9 @@ esp_err_t mira_recovery_save_beta_wifi(const char *ssid,const char *password,
     wifi_config_t sta={0},prior={0};
     if(esp_wifi_get_config(WIFI_IF_STA,&prior)!=ESP_OK)return ESP_FAIL;
     memcpy(sta.sta.ssid,ssid,ssid_len);
-    if(!pwd_len&&!strcmp((const char*)prior.sta.ssid,ssid))
+    // The ESP-IDF SSID field can contain exactly 32 bytes (no NUL terminator).
+    const size_t old_len=strnlen((const char*)prior.sta.ssid,sizeof(prior.sta.ssid));
+    if(!pwd_len&&old_len==ssid_len&&!memcmp(prior.sta.ssid,ssid,ssid_len))
         memcpy(sta.sta.password,prior.sta.password,sizeof(sta.sta.password));
     else if(pwd_len)memcpy(sta.sta.password,password,pwd_len);
     nvs_handle_t nv;
