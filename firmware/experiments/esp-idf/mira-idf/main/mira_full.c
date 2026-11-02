@@ -779,6 +779,7 @@ static void scroll_cache_activate(bool active){
     for(uint8_t i=0;i<widget_n;i++){
         mira_scroll_tile_t *tile=&scroll_tiles[i];
         if(!tile->ready||!tile->image||!tile->card)continue;
+        if(active&&tile->dirty)continue; // never show old Jeedom values
         if(active){
             int32_t edge=((int32_t)tile->dsc.header.w-
                           lv_obj_get_width(tile->card))/2;
@@ -807,7 +808,15 @@ static void scroll_cache_reset(void){
     scroll_last_build_ms=0;
 }
 static void scroll_cache_invalidate(uint8_t index){
-    if(index<MAX_WIDGETS)scroll_tiles[index].dirty=true;
+    if(index>=MAX_WIDGETS)return;
+    mira_scroll_tile_t *tile=&scroll_tiles[index];
+    tile->dirty=true;
+    // Jeedom can update values DURING an active swipe. Show the live card
+    // immediately rather than exposing an outdated cached measurement.
+    if(scroll_cache_active&&tile->ready&&tile->card&&tile->image){
+        lv_obj_set_style_opa(tile->card,LV_OPA_COVER,0);
+        lv_obj_add_flag(tile->image,LV_OBJ_FLAG_HIDDEN);
+    }
 }
 static void scroll_cache_on_move(lv_event_t *event){
     if(lv_event_get_code(event)!=LV_EVENT_SCROLL||display_sleeping)return;
