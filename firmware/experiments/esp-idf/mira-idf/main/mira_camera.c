@@ -189,8 +189,8 @@ static bool decode_jpeg(esp_http_client_handle_t http,const uint8_t *prefix,
     return ok;
 }
 
-// Read one complete JPEG from a multipart MJPEG stream, bounded to 8 KB of
-// headers and 900 KB of JPEG data. Reconnect per frame; no LVGL on this task.
+// Fallback: read the first MJPEG JPEG from a camera that doesn't support
+// an uninterrupted streaming session. The main path retains its socket.
 static bool decode_mjpeg_first_frame(esp_http_client_handle_t http,
                                       const uint8_t *prefix,size_t count,
                                       mira_camera_frame_t *out){
@@ -450,6 +450,7 @@ static void camera_worker(void *unused) {
     char url[CAM_MAX_URL+1];
     uint32_t seen_generation=UINT32_MAX;
     uint32_t failures=0;
+    bool stream_detected=false,stream_tested=false;
     for(;;) {
         bool should_run;
         uint32_t current;
@@ -459,11 +460,14 @@ static void camera_worker(void *unused) {
         snprintf(url,sizeof(url),"%s",active_url);
         xSemaphoreGive(lock);
         if(!should_run){vTaskDelay(pdMS_TO_TICKS(150));continue;}
-        if(current!=seen_generation){seen_generation=current;failures=0;}
+        if(current!=seen_generation){
+            seen_generation=current;
+            failures=0;
+            stream_detected=false;
+            stream_tested=false;
+        }
         // Detect a multipart stream once per URL, then stay connected and
         // publish subsequent JPEGs on the same socket until stopped.
-        static bool stream_detected=false,stream_tested=false;
-        if(current!=seen_generation){stream_detected=false;stream_tested=false;}
         if(!stream_tested||stream_detected){
             int frames=camera_stream_mjpeg(url,current);
             stream_tested=true;
