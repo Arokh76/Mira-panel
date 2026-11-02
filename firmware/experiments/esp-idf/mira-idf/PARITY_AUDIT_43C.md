@@ -56,6 +56,13 @@
 > identique à la bêta. Ces changements restent sous validation CI
 > et devront être comparés sur l'écran réel.
 >
+> **Tableau Énergie** : le rendu ESP-IDF est passé de 7 lignes
+> génériques au cadran de la bêta 786×344 : quatre blocs teintés
+> Solaire/Maison/Réseau/Batterie, section STOCKAGE et jauge uniquement
+> lorsqu'un pourcentage est fourni. Les sections Batterie 2 / Batterie 3
+> restent masquées tant que leurs données n'existent pas, puis ajoutent
+> chacune 47 px à la carte. Les mises à jour sont passives Jeedom/MQTT.
+>
 > **Attention** : la compilation d'un lot précédent de cette parité a
 > réussi, mais seule la CI sur le SHA final confirme l'absence d'erreur de
 > build de l'ensemble. La comparaison visuelle et l'interaction sur écran
