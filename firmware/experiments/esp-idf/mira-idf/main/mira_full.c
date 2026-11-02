@@ -49,10 +49,14 @@ void mira_full_request_reload(void){ reload_pending=true; }
 // No state update ever generates a Jeedom/MQTT command.
 typedef struct { char name[96]; char value[160]; } mira_state_update_t;
 static QueueHandle_t state_queue;
+typedef struct { char key[32]; char value[48]; } mira_display_command_t;
+static QueueHandle_t display_command_queue;
 static bool suppress_events;
 static uint8_t display_brightness_raw=220;
 static uint8_t day_brightness_percent=85,night_brightness_percent=20;
 static bool night_auto_enabled;
+static bool manual_brightness_override;
+static bool last_night_valid,last_night_period;
 static int night_start_minute=-1,night_end_minute=-1;
 static uint8_t applied_brightness_raw;
 
@@ -1150,6 +1154,7 @@ static bool current_night_period(void){
     return minute>=night_start_minute&&minute<night_end_minute;
 }
 static uint8_t desired_awake_brightness(void){
+    if(manual_brightness_override)return display_brightness_raw;
     if(!night_auto_enabled||night_start_minute<0||night_end_minute<0||
        night_start_minute==night_end_minute)return display_brightness_raw;
     time_t now=time(NULL);
@@ -1188,6 +1193,100 @@ static void display_wake(void){
     ESP_LOGI(TAG,"Mira display awakened by physical GT911 touch");
 }
 
+// Beta MiraPanelUI::handleMqttDisplayCommand, native ESP-IDF equivalent.
+// This function runs ONLY from the LVGL task; the MQTT callback queues data.
+static bool display_true(const char *value){
+    return !strcasecmp(value,"1")||!strcasecmp(value,"true")||
+           !strcasecmp(value,"on")||!strcasecmp(value,"yes");
+}
+static bool display_false(const char *value){
+    return !strcasecmp(value,"0")||!strcasecmp(value,"false")||
+           !strcasecmp(value,"off")||!strcasecmp(value,"no");
+}
+static bool display_number(const char *value,int max,int *result){
+    if(!value||!*value)return false;
+    int n=0;
+    for(const unsigned char *p=(const unsigned char*)value;*p;p++){
+        if(*p<'0'||*p>'9'||n>(max-(*p-'0'))/10)return false;
+        n=n*10+(*p-'0');
+    }
+    *result=n;return true;
+}
+static void display_command_apply(const mira_display_command_t *cmd){
+    char key[32],value[48];
+    snprintf(key,sizeof(key),"%s",cmd->key);
+    snprintf(value,sizeof(value),"%s",cmd->value);
+    for(char *p=key;*p;p++)*p=(char)tolower((unsigned char)*p);
+    size_t used=strlen(value);
+    while(used&&isspace((unsigned char)value[used-1]))value[--used]=0;
+    char *trim=value;
+    while(*trim&&isspace((unsigned char)*trim))trim++;
+    if(!strcmp(key,"wake")||!strcmp(key,"sleep")){
+        if(!display_true(trim))return;
+        if(!strcmp(key,"wake")){
+            display_wake();
+            // A remote wake is user activity: do not immediately re-enter sleep.
+            last_user_touch_ms=lv_tick_get();
+        }else display_enter_sleep();
+        return;
+    }
+    if(!strcmp(key,"brightness")){
+        if(!strcasecmp(trim,"auto")){
+            manual_brightness_override=false;
+        }else{
+            int brightness=0;
+            if(!display_number(trim,100,&brightness))return;
+            display_brightness_raw=raw_from_percent((uint8_t)brightness);
+            manual_brightness_override=true;
+        }
+        apply_auto_brightness();
+        return;
+    }
+    const char *nvs_key=NULL;
+    enum {VALUE_U8,VALUE_U32,VALUE_CLOCK} kind=VALUE_U8;
+    int value_number=0,minimum=0,maximum=100;
+    if(!strcmp(key,"day")){nvs_key="day_pct";minimum=1;}
+    else if(!strcmp(key,"night")){nvs_key="night_pct";minimum=1;}
+    else if(!strcmp(key,"sleep_brightness"))nvs_key="sleep_light";
+    else if(!strcmp(key,"sleep_timeout")){nvs_key="sleep_delay";maximum=86400;kind=VALUE_U32;}
+    else if(!strcmp(key,"night_auto")){nvs_key="night_auto";maximum=1;}
+    else if(!strcmp(key,"clock_sleep")){nvs_key="sleep_clock";maximum=1;}
+    else if(!strcmp(key,"night_start")){nvs_key="night_start";kind=VALUE_CLOCK;}
+    else if(!strcmp(key,"night_end")){nvs_key="night_end";kind=VALUE_CLOCK;}
+    else return;
+    char clock[6]={0};
+    if(kind==VALUE_CLOCK){
+        if(strlen(trim)==4&&strspn(trim,"0123456789")==4){
+            snprintf(clock,sizeof(clock),"%.2s:%.2s",trim,trim+2);
+        }else if(strlen(trim)==5){memcpy(clock,trim,5);}
+        if(parse_beta_clock(clock)<0)return;
+    }else if(!strcmp(key,"night_auto")||!strcmp(key,"clock_sleep")){
+        if(display_true(trim))value_number=1;
+        else if(display_false(trim))value_number=0;
+        else return;
+    }else if(!display_number(trim,maximum,&value_number)||value_number<minimum)return;
+    nvs_handle_t nv;
+    if(nvs_open("mira_idf_ui",NVS_READWRITE,&nv)!=ESP_OK)return;
+    esp_err_t err;
+    if(kind==VALUE_CLOCK)err=nvs_set_str(nv,nvs_key,clock);
+    else if(kind==VALUE_U32)err=nvs_set_u32(nv,nvs_key,(uint32_t)value_number);
+    else err=nvs_set_u8(nv,nvs_key,(uint8_t)value_number);
+    if(err==ESP_OK)err=nvs_commit(nv);
+    nvs_close(nv);
+    if(err!=ESP_OK){
+        ESP_LOGW(TAG,"MQTT display parameter %s could not be saved",key);
+        return;
+    }
+    // The existing reload path owns settings and LVGL tree refresh.
+    // No command is sent to an actuator and no MQTT echo is published.
+    settings_reload_pending=true;
+}
+static void apply_pending_display_commands(void){
+    if(!display_command_queue)return;
+    mira_display_command_t cmd;
+    for(int i=0;i<8&&xQueueReceive(display_command_queue,&cmd,0)==pdTRUE;i++)
+        display_command_apply(&cmd);
+}
 static void return_home_changed(lv_event_t *event){
     if(suppress_events)return;
     lv_obj_t *src=lv_event_get_target_obj(event);
@@ -1676,6 +1775,14 @@ void mira_full_ui_create(lv_display_t *disp){
     ESP_LOGI(TAG,"Mira LVGL 9.6 rendering tree ready, source 0.7.37 JSON");
 }
 
+bool mira_full_enqueue_display_command(const char *key,const char *value){
+    if(!display_command_queue||!key||!value||!*key||
+       strlen(key)>=32||strlen(value)>=48)return false;
+    mira_display_command_t msg={0};
+    snprintf(msg.key,sizeof(msg.key),"%s",key);
+    snprintf(msg.value,sizeof(msg.value),"%s",value);
+    return xQueueSend(display_command_queue,&msg,0)==pdTRUE;
+}
 bool mira_full_enqueue_state(const char *name,const char *value){
     if(!state_queue||!name||!value||!*name||strlen(name)>=96||strlen(value)>=160)return false;
     mira_state_update_t msg={0};
@@ -1964,6 +2071,7 @@ void mira_full_ui_tick(void){
         apply_auto_brightness();
     }
     apply_pending_states();
+    apply_pending_display_commands();
     // Reconcile pending single/double clicks after the gesture window.
     const uint32_t gesture_now=lv_tick_get();
     for(uint8_t n=0;n<widget_n;n++){
@@ -2058,6 +2166,8 @@ static bool spiffs_partition_is_blank(void){
 bool mira_full_storage_init(void){
     if(!state_queue)state_queue=xQueueCreate(24,sizeof(mira_state_update_t));
     if(!state_queue)ESP_LOGE(TAG,"State queue allocation failed");
+    if(!display_command_queue)display_command_queue=xQueueCreate(12,sizeof(mira_display_command_t));
+    if(!display_command_queue)ESP_LOGE(TAG,"Display command queue allocation failed");
     const bool blank=spiffs_partition_is_blank();
     const esp_vfs_spiffs_conf_t cfg={
         .base_path="/spiffs",.partition_label="spiffs",
