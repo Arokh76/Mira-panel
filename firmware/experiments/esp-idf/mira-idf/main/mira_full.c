@@ -1951,10 +1951,15 @@ bool mira_full_storage_init(void){
     else ESP_LOGI(TAG,"SPIFFS mounted non-destructively; original 0.7.37 JSON is preserved");
     return spiffs_ready;
 }
+#ifdef MIRA_PANEL_7_INCH
+#define MIRA_BOARD_PORTAL_TITLE "Waveshare 7 STD"
+#else
+#define MIRA_BOARD_PORTAL_TITLE "Waveshare 4.3C"
+#endif
 static esp_err_t page_get(httpd_req_t *req){
     const char *html=
         "<!doctype html><html lang='fr'><meta name='viewport' content='width=device-width,initial-scale=1'>"
-        "<title>Mira LVGL 9.6 - Import JSON</title><h2>Mira LVGL 9.6 / Waveshare 4.3C</h2>"
+        "<title>Mira LVGL 9.6 - Import JSON</title><h2>Mira LVGL 9.6 / " MIRA_BOARD_PORTAL_TITLE "</h2>"
         "<p>Rendu experimental des widgets reels depuis <code>/miralvgl.json</code> (firmware 0.7.37).</p>"
         "<p>Transport MQTT natif disponible apres configuration. API HTTP Jeedom historique, camera et widgets composites en cours de portage.</p>"
         "<p><b>La partition SPIFFS n'est jamais formatée automatiquement.</b></p>"
