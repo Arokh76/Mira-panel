@@ -32,6 +32,61 @@ static esp_err_t serve_page(httpd_req_t *req,const char *page){
     httpd_resp_set_type(req,"text/html; charset=utf-8");
     return httpd_resp_sendstr(req,page);
 }
+// The beta fills SCANRESEAUX with a 10-network select box that copies the
+// choice to the SSID text field. Reuse that original behavior/markup.
+// Scanning failure must never block manual SSID entry.
+static esp_err_t send_html_escaped(httpd_req_t *req,const char *value){
+    for(const unsigned char *p=(const unsigned char *)value;*p;p++){
+        const char *entity=NULL;
+        if(*p=='&')entity="&amp;";
+        else if(*p=='<')entity="&lt;";
+        else if(*p=='>')entity="&gt;";
+        else if(*p=='"')entity="&quot;";
+        else if(*p==39)entity="&#39;";
+        if(entity){
+            if(httpd_resp_send_chunk(req,entity,HTTPD_RESP_USE_STRLEN)!=ESP_OK)
+                return ESP_FAIL;
+        }else if(httpd_resp_send_chunk(req,(const char *)p,1)!=ESP_OK)
+            return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+static esp_err_t serve_wifi_page(httpd_req_t *req){
+    const char *token="MIRA_SCAN_SLOT";
+    const char *slot=strstr(mira_beta_wifi_page,token);
+    if(!slot)return serve_wifi_page(req);
+    httpd_resp_set_type(req,"text/html; charset=utf-8");
+    if(httpd_resp_send_chunk(req,mira_beta_wifi_page,
+                            (ssize_t)(slot-mira_beta_wifi_page))!=ESP_OK)
+        return ESP_FAIL;
+    const char *intro="<label for=\"RS\">Réseaux détectés</label>"
+        "<select id=\"RS\" name=\"RS\" class=\"box\" onchange=\"Click(this.value)\">"
+        "<option value=\"\">Saisir le nom du réseau manuellement</option>";
+    if(httpd_resp_send_chunk(req,intro,HTTPD_RESP_USE_STRLEN)!=ESP_OK)
+        return ESP_FAIL;
+    wifi_scan_config_t scan={0};
+    if(esp_wifi_scan_start(&scan,true)==ESP_OK){
+        wifi_ap_record_t records[10]={0};
+        uint16_t count=10;
+        if(esp_wifi_scan_get_ap_records(&count,records)==ESP_OK){
+            for(uint16_t i=0;i<count;i++){
+                char ssid[33]={0};
+                memcpy(ssid,records[i].ssid,32);
+                if(!ssid[0])continue;
+                if(httpd_resp_send_chunk(req,"<option value=\"",HTTPD_RESP_USE_STRLEN)!=ESP_OK ||
+                   send_html_escaped(req,ssid)!=ESP_OK ||
+                   httpd_resp_send_chunk(req,"\">",2)!=ESP_OK ||
+                   send_html_escaped(req,ssid)!=ESP_OK ||
+                   httpd_resp_send_chunk(req,"</option>",HTTPD_RESP_USE_STRLEN)!=ESP_OK)
+                    return ESP_FAIL;
+            }
+        }
+    }else ESP_LOGW(TAG,"Wi-Fi scan failed; manual SSID setup remains available");
+    if(httpd_resp_send_chunk(req,"</select>",HTTPD_RESP_USE_STRLEN)!=ESP_OK ||
+       httpd_resp_send_chunk(req,slot+strlen(token),HTTPD_RESP_USE_STRLEN)!=ESP_OK)
+        return ESP_FAIL;
+    return httpd_resp_send_chunk(req,NULL,0);
+}
 bool mira_beta_setup_unconfigured(void){
     return !has_local_key()||!has_wifi_station();
 }
@@ -41,7 +96,7 @@ bool mira_beta_setup_root(httpd_req_t *req){
         return true;
     }
     if(!has_wifi_station()){
-        (void)serve_page(req,mira_beta_wifi_page);
+        (void)serve_wifi_page(req);
         return true;
     }
     return false;
@@ -77,15 +132,15 @@ static esp_err_t load_get(httpd_req_t *req){
     char query[96],nav[24];
     if(httpd_req_get_url_query_str(req,query,sizeof(query))!=ESP_OK||
        httpd_query_key_value(query,"nav",nav,sizeof(nav))!=ESP_OK){
-        return serve_page(req,has_local_key()?mira_beta_wifi_page:mira_beta_key_page);
+        return has_local_key()?serve_wifi_page(req):serve_page(req,mira_beta_key_page);
     }
     if(!strcmp(nav,"key")&&!has_wifi_station())
         return serve_page(req,mira_beta_key_page);
     if(!strcmp(nav,"wifisr")&&has_local_key())
-        return serve_page(req,mira_beta_wifi_page);
+        return serve_wifi_page(req);
     if(!strcmp(nav,"reboot")&&has_local_key()&&!has_wifi_station()){
         // The beta permits remaining in AP mode without a station.
-        return serve_page(req,mira_beta_wifi_page);
+        return serve_wifi_page(req);
     }
     httpd_resp_send_err(req,HTTPD_403_FORBIDDEN,"Configuration Mira indisponible");
     return ESP_FAIL;
@@ -141,7 +196,7 @@ static esp_err_t save_post(httpd_req_t *req){
             return ESP_FAIL;
         }
         ESP_LOGI(TAG,"Mira beta setup step 1/2: local screen key saved");
-        return serve_page(req,mira_beta_wifi_page);
+        return serve_wifi_page(req);
     }
     if(!strcmp(config,"wifi")){
         if(!has_local_key()||has_wifi_station()){
