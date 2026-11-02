@@ -297,5 +297,9 @@ esp_err_t mira_beta_setup_register(httpd_handle_t server){
     if(err!=ESP_OK)return err;
     const httpd_uri_t reset={.uri="/mira/reset",.method=HTTP_POST,
                               .handler=mira_beta_data_reset_post};
-    return httpd_register_uri_handler(server,&reset);
+    err=httpd_register_uri_handler(server,&reset);
+    if(err!=ESP_OK)return err;
+    const httpd_uri_t network={.uri="/mira/network",.method=HTTP_POST,
+                                .handler=mira_beta_web_network_post};
+    return httpd_register_uri_handler(server,&network);
 }
