@@ -3,7 +3,7 @@
 #pragma once
 
 static const char mira_beta_params_html[] =
-    "(\n"
+    "\n"
     "<!DOCTYPE html>\n"
     "<html lang=\"fr\">\n"
     "<head>\n"
@@ -57,7 +57,7 @@ static const char mira_beta_params_html[] =
     "\n";
 
 static const char mira_beta_mqtt_html[] =
-    "(\n"
+    "\n"
     "<!DOCTYPE html>\n"
     "<html lang=\"fr\">\n"
     "<head>\n"
