@@ -1959,8 +1959,8 @@ bool mira_full_storage_init(void){
     if(!spiffs_ready)
         ESP_LOGW(TAG,"SPIFFS mount failed (%s); existing data left unchanged, import disabled",
                  esp_err_to_name(err));
-    else ESP_LOGI(TAG,blank?"Fresh Mira SPIFFS ready for JSON import":
-                        "Existing Mira SPIFFS mounted without formatting");
+    else if(blank)ESP_LOGI(TAG,"Fresh Mira SPIFFS ready for JSON import");
+    else ESP_LOGI(TAG,"Existing Mira SPIFFS mounted without formatting");
     return spiffs_ready;
 }
 static esp_err_t page_get(httpd_req_t *req){
