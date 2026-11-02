@@ -95,6 +95,16 @@ static esp_err_t do_scope(const char *scope){
         // but preserve network, setup key and OTA boot partitions.
         if(!erase_named_file("/spiffs/params.json")||
            !erase_named_file("/spiffs/miralvgl.json"))return ESP_FAIL;
+        // The Arduino beta recreates BOTH files after a parameters reset.
+        // Match that schema instead of leaving missing files behind.
+        FILE *params=fopen("/spiffs/params.json","wb");
+        if(!params)return ESP_FAIL;
+        bool saved=fwrite("{\"params\":[]}",1,13,params)==13&&fclose(params)==0;
+        if(!saved)return ESP_FAIL;
+        FILE *lvgl=fopen("/spiffs/miralvgl.json","wb");
+        if(!lvgl)return ESP_FAIL;
+        saved=fwrite("{\"lvgl\":[]}",1,11,lvgl)==11&&fclose(lvgl)==0;
+        if(!saved)return ESP_FAIL;
         clear_namespace("mira_idf_ui");
         clear_namespace("mira_idf_mqtt");
         clear_namespace("mira_idf_jeed");
