@@ -309,11 +309,18 @@ static esp_err_t testmodule(httpd_req_t *req) {
 static esp_err_t displayinfo(httpd_req_t *req) {
     if(!require_key(req))return ESP_FAIL;
     httpd_resp_set_type(req,"application/json");
-    return httpd_resp_sendstr(req,
-      "{\"profile\":\"waveshare43c\",\"width\":800,\"height\":480,"
-      "\"contentWidth\":800,\"contentHeight\":428,\"navHeight\":52,"
-      "\"rotation\":0,\"logicalWidth\":800,\"logicalHeight\":480,"
-      "\"httpPrimary\":true,\"mqttOptional\":true,\"freeLayout\":false}");
+#ifdef MIRA_PANEL_7_INCH
+    const char *profile="waveshare-esp32s3-touch-lcd-7";
+#else
+    const char *profile="waveshare-esp32s3-touch-lcd-4.3c";
+#endif
+    char response[320];
+    snprintf(response,sizeof(response),
+             "{\"profile\":\"%s\",\"width\":800,\"height\":480,"
+             "\"contentWidth\":800,\"contentHeight\":428,\"navHeight\":52,"
+             "\"rotation\":0,\"logicalWidth\":1000,\"logicalHeight\":1000,"
+             "\"httpPrimary\":true,\"mqttOptional\":true,\"freeLayout\":true}",profile);
+    return httpd_resp_sendstr(req,response);
 }
 static esp_err_t programui(httpd_req_t *req) {
     const size_t n=req->content_len;
