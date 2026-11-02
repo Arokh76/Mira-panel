@@ -827,8 +827,8 @@ static void scroll_cache_prepare(uint8_t idx){
     mira_widget_t *widget=&widgets[idx];
     mira_scroll_tile_t *t=&scroll_tiles[idx];
     if(strcmp(widget->type,"info")||!widget->card||
-       lv_obj_get_parent(widget->card)==pages[3]||t->disabled||
-       (t->ready&&!t->dirty))return;
+       lv_obj_get_parent(widget->card)!=pages[current_page]||
+       t->disabled||(t->ready&&!t->dirty))return;
     lv_obj_t *card_obj=widget->card;
     lv_obj_update_layout(card_obj);
     // LVGL 9.6 removed lv_snapshot_buf_size_needed(). Allow bounded
@@ -847,15 +847,17 @@ static void scroll_cache_prepare(uint8_t idx){
         scroll_cache_bytes-=t->bytes;
         t->image=NULL;t->pixels=NULL;t->bytes=0;t->ready=false;
     }
+    // Pressure can be temporary (camera/cover is using PSRAM). Retry after
+    // the idle interval instead of permanently disabling the tile.
     if(scroll_cache_bytes+need_rgb>MIRA_SCROLL_CACHE_BUDGET||
        heap_caps_get_free_size(MALLOC_CAP_SPIRAM)<
-           need_alpha+need_rgb+256u*1024u){t->disabled=true;return;}
+           need_alpha+need_rgb+256u*1024u)return;
     uint8_t *opaque=heap_caps_malloc(need_rgb,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     uint8_t *alpha=heap_caps_malloc(need_alpha,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(!opaque||!alpha){
         if(opaque)heap_caps_free(opaque);
         if(alpha)heap_caps_free(alpha);
-        t->disabled=true;return;
+        return;  // transient allocation failure; no stale/partial image
     }
     lv_image_dsc_t snapshot={0};
     lv_result_t result=lv_snapshot_take_to_buf(card_obj,LV_COLOR_FORMAT_ARGB8888,
@@ -867,20 +869,34 @@ static void scroll_cache_prepare(uint8_t idx){
         heap_caps_free(alpha);heap_caps_free(opaque);
         t->disabled=true;return;
     }
+    // Snapshot ARGB8888 rows may be aligned with padding. Never assume
+    // 4*width stride, and NEVER keep that stride in an RGB565 descriptor.
+    const uint32_t width=snapshot.header.w,height=snapshot.header.h;
+    const uint32_t src_stride=snapshot.header.stride?
+                              snapshot.header.stride:width*4u;
+    const uint32_t dst_stride=width*2u;
+    if(src_stride<width*4u||
+       (uint64_t)src_stride*height>need_alpha||
+       (uint64_t)dst_stride*height>need_rgb){
+        heap_caps_free(alpha);heap_caps_free(opaque);
+        t->disabled=true;return;
+    }
     const uint32_t background=lv_color_to_u32(bg_c())&0xffffffu;
-    const uint32_t pixels=(uint32_t)snapshot.header.w*snapshot.header.h;
-    uint16_t *out=(uint16_t *)opaque;
-    for(uint32_t n=0;n<pixels;n++){
-        const uint8_t *pixel=alpha+n*4u;
-        // LVGL ARGB8888 is BGRA in memory on the ESP32-S3 (little endian).
-        uint32_t opacity=pixel[3];
-        uint32_t r=((uint32_t)pixel[2]*opacity+
-                   ((background>>16)&255u)*(255u-opacity)+127u)/255u;
-        uint32_t g=((uint32_t)pixel[1]*opacity+
-                   ((background>>8)&255u)*(255u-opacity)+127u)/255u;
-        uint32_t b=((uint32_t)pixel[0]*opacity+
-                    (background&255u)*(255u-opacity)+127u)/255u;
-        out[n]=(uint16_t)(((r>>3)<<11)|((g>>2)<<5)|(b>>3));
+    for(uint32_t y=0;y<height;y++){
+        const uint8_t *src_row=alpha+y*src_stride;
+        uint16_t *dst_row=(uint16_t *)(opaque+y*dst_stride);
+        for(uint32_t x=0;x<width;x++){
+            const uint8_t *pixel=src_row+x*4u;
+            // ESP32-S3 uses little-endian BGRA for LVGL ARGB8888.
+            uint32_t opacity=pixel[3];
+            uint32_t red=((uint32_t)pixel[2]*opacity+
+                        ((background>>16)&255u)*(255u-opacity)+127u)/255u;
+            uint32_t green=((uint32_t)pixel[1]*opacity+
+                          ((background>>8)&255u)*(255u-opacity)+127u)/255u;
+            uint32_t blue=((uint32_t)pixel[0]*opacity+
+                         (background&255u)*(255u-opacity)+127u)/255u;
+            dst_row[x]=(uint16_t)(((red>>3)<<11)|((green>>2)<<5)|(blue>>3));
+        }
     }
     heap_caps_free(alpha);
     t->pixels=opaque;
@@ -888,8 +904,9 @@ static void scroll_cache_prepare(uint8_t idx){
     t->card=card_obj;
     t->dsc=snapshot;
     t->dsc.header.cf=LV_COLOR_FORMAT_RGB565;
+    t->dsc.header.stride=dst_stride;
     t->dsc.data=opaque;
-    t->dsc.data_size=need_rgb;
+    t->dsc.data_size=dst_stride*height;
     t->image=lv_image_create(lv_obj_get_parent(card_obj));
     if(!t->image){
         heap_caps_free(opaque);
@@ -920,6 +937,7 @@ static void scroll_cache_service(uint32_t now){
     for(uint8_t i=0;i<widget_n;i++){
         mira_scroll_tile_t *t=&scroll_tiles[i];
         if(!strcmp(widgets[i].type,"info")&&widgets[i].card&&
+           lv_obj_get_parent(widgets[i].card)==pages[current_page]&&
            !t->disabled&&(!t->ready||t->dirty)){
             scroll_cache_prepare(i);
             break;
