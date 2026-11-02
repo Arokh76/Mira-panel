@@ -65,9 +65,11 @@ static cJSON *load(void){
             char *buf=malloc(length);
             if(buf&&nvs_get_str(nv,BETA_OVERLAY_KEY,buf,&length)==ESP_OK){
                 cJSON *root=cJSON_Parse(buf);
-                free(buf);nvs_close(nv);
-                if(root&&cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(root,"reseau")))
+                free(buf);
+                if(root&&cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(root,"reseau"))){
+                    nvs_close(nv);
                     return root;
+                }
                 cJSON_Delete(root);
                 ESP_LOGW(TAG,"Saved native network overlay invalid; reading beta original");
             }else free(buf);
@@ -180,6 +182,14 @@ esp_err_t mira_beta_networks_upsert(const mira_beta_network_t *profile,const cha
     cJSON_ArrayForEach(entry,arr)
         if(record_id(entry)==profile->id)break;
     bool existed=entry!=NULL;
+    // Renaming a saved network without a password must not reuse the old
+    // network's secret for a different SSID.
+    char old_ssid[33]={0};
+    if(existed)(void)field(entry,"ssid",old_ssid,sizeof(old_ssid));
+    if(existed&&strcmp(old_ssid,profile->ssid)!=0&&!password[0]){
+        cJSON_Delete(root);
+        return ESP_ERR_INVALID_ARG;
+    }
     if(!entry){
         if(count==MIRA_NET_MAX){cJSON_Delete(root);return ESP_ERR_INVALID_SIZE;}
         entry=cJSON_CreateObject();
