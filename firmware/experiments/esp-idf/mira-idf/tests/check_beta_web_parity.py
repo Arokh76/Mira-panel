@@ -15,6 +15,7 @@ native = (idf / "mira_beta_web_pages.h").read_text(encoding="utf-8")
 handlers = (idf / "mira_beta_web.c").read_text(encoding="utf-8")
 jeedom = (idf / "mira_jeedom.c").read_text(encoding="utf-8")
 recovery = (idf / "mira_recovery.c").read_text(encoding="utf-8")
+setup = (idf / "mira_beta_setup.c").read_text(encoding="utf-8")
 
 pairs = {
     "HTML_Index.h": "mira_beta_index_html",
@@ -50,9 +51,10 @@ for filename, symbol in pairs.items():
     assert imported[len(chunks[0]):] in ("", "\n"), f"{filename} has appended content"
     print(f"PASS {filename}: original HTML preserved")
 
-for route in ('mira_beta_web_home(req)', 'mira_beta_web_load(req)',
-              'mira_jeedom_beta_web_action(req)', 'mira_beta_web_authorized(req)'):
+for route in ('mira_beta_web_home(req)', 'mira_jeedom_beta_web_action(req)',
+              'mira_beta_web_authorized(req)'):
     assert route in recovery, f"Missing HTTP route dispatch: {route}"
+assert 'mira_beta_web_load(req)' in setup, "Missing beta /load bridge"
 for marker in ('mira_jeedom_render_beta_actions(r)', 'mira_beta_index_html',
                'mira_beta_params_html', 'mira_beta_mqtt_html',
                'mira_beta_wifi_manager_html', 'mira_beta_system_html'):
