@@ -19,9 +19,11 @@
 > pas actifs sur la 4.3C et ne sont pas un obstacle.
 >
 > **Complément portage du 2 novembre (suite)** : HTTPS caméra ajouté avec
-> vérification CA Espressif, pour les snapshots JPEG et la première image
-> d'un flux MJPEG multipart. Une session MJPEG persistante (sans reconnexion
-> par image) et ses tests physiques restent à qualifier.
+> vérification CA Espressif, pour les snapshots JPEG et les flux MJPEG
+> multipart. Une session MJPEG persistante sur une seule connexion TCP/TLS
+> est désormais codée, avec détection des images JPEG SOI/EOI entre les blocs
+> réseau, tampon PSRAM borné, 4 FPS maximum et arrêt sur changement de caméra.
+> Sa compilation au SHA courant et ses tests physiques restent à qualifier.
 > Les diagnostics IDF ont été déplacés sous `/recovery/mira` ; `/mira`
 > redirige vers Mira, et `POST /mira/state` exige maintenant une
 > authentification avant l'injection d'un état passif.
