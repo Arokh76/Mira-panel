@@ -243,7 +243,8 @@ static esp_err_t update_post(httpd_req_t *req) {
     char query[500]={0};
     if(httpd_req_get_url_query_str(req,query,sizeof(query))==ESP_OK&&
        (strstr(query,"send=")||strstr(query,"send_range=")||
-        strstr(query,"send_list=")||strstr(query,"send_color="))){
+        strstr(query,"send_list=")||strstr(query,"send_color=")||
+        strstr(query,"send_textbox="))){
         if(!mira_beta_web_authorized(req))return ESP_FAIL;
         return mira_jeedom_beta_web_action(req);
     }
