@@ -91,13 +91,14 @@ static esp_err_t do_scope(const char *scope){
         if(nvs_open("mira_idf_net",NVS_READWRITE,&net)==ESP_OK){
             static const char *const keys[]={
                 "legacy_wifi","web_mode","web_ip","web_mask","web_gw",
-                "web_dns1","web_dns2","setup_ip"
+                "web_dns1","web_dns2","setup_ip","wifi_profiles"
             };
             for(size_t i=0;i<sizeof(keys)/sizeof(keys[0]);i++)
                 (void)nvs_erase_key(net,keys[i]);
             (void)nvs_commit(net);
             nvs_close(net);
         }
+        clear_namespace("mira_idf_pw");
         wifi_config_t empty={0};
         esp_err_t e=esp_wifi_disconnect();
         if(e!=ESP_OK && e!=ESP_ERR_WIFI_NOT_CONNECT)return e;
