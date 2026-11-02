@@ -755,7 +755,7 @@ static esp_err_t beta_lvgl_clear(httpd_req_t *req){
         return ESP_FAIL;
     }
     beta_lvgl_dirty=true;
-    return beta_lvgl_respond(req,!strcmp(req->uri,"/screenformat")?"Liste vidée!":"OK");
+    return beta_lvgl_respond(req,!strncmp(req->uri,"/screenformat",13)?"Liste vidée!":"OK");
 }
 static esp_err_t beta_lvgl_append(httpd_req_t *req){
     if(!require_key(req))return ESP_FAIL;
@@ -836,7 +836,7 @@ static esp_err_t beta_lvgl_append(httpd_req_t *req){
     }
     cJSON_AddItemToArray(array,item);
     beta_lvgl_dirty=true;
-    if(!strcmp(req->uri,"/screenadd")){
+    if(!strncmp(req->uri,"/screenadd",10)){
         char *preview=cJSON_Print(beta_lvgl_stage);
         if(!preview){
             httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Apercu JSON impossible");
@@ -852,7 +852,7 @@ static esp_err_t beta_lvgl_append(httpd_req_t *req){
 static esp_err_t beta_lvgl_save(httpd_req_t *req){
     if(!require_key(req))return ESP_FAIL;
     if(!beta_lvgl_dirty)return beta_lvgl_respond(req,
-            !strcmp(req->uri,"/screensave")?"Liste sauvegardée!":"OK");
+            !strncmp(req->uri,"/screensave",11)?"Liste sauvegardée!":"OK");
     if(!beta_lvgl_stage){
         httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Aucune liste LVGL en attente");
         return ESP_FAIL;
@@ -887,7 +887,7 @@ static esp_err_t beta_lvgl_save(httpd_req_t *req){
     mira_full_request_reload(); // always reload within the LVGL task
     request_binding_sync();      // command IDs from Jeedom may have changed
     return beta_lvgl_respond(req,
-            !strcmp(req->uri,"/screensave")?"Liste sauvegardée!":"OK");
+            !strncmp(req->uri,"/screensave",11)?"Liste sauvegardée!":"OK");
 }
 static esp_err_t programui(httpd_req_t *req) {
     const size_t n=req->content_len;
