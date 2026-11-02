@@ -154,6 +154,20 @@ assert 'scroll_cache_prepare(i)' in full and 'scroll_cache_activate(false)' in f
 assert 'lv_snapshot_take_to_buf' in full and 'LV_COLOR_FORMAT_RGB565' in full
 assert 'scroll_cache_reset(); // release every LVGL image reference' in full
 print("PASS original palette, 3 themes, hue wheel, dynamic text and safe RGB565 scroll cache")
+glyph = (idf / "mira_info_glyphs.c").read_text(encoding="utf-8")
+for kind in ("temperature","humidity","pressure","light","door","energy","plug"):
+    assert f'"{kind}"' in glyph, f"Original beta glyph missing: {kind}"
+assert 'mira_info_glyph_create' in glyph and 'mira_info_glyphs.c' in (idf / "CMakeLists.txt").read_text(encoding="utf-8")
+assert 'mira_decorate_info(w,str(it,"icon","auto")' in full
+assert 'str(it,"labelMode","auto")' in full
+assert 'mira_fit_icon_info_value(w)' in full
+assert 'w->info_name=nm;' in full
+assert 'if(hero||value_style)' in full and 'hero?84:72' in full
+assert 'wide?56:(compact?30:36)' in full
+assert '"MAJ %02d:%02d"' in full
+assert 't->dsc.header.stride=dst_stride;' in full, "RGB565 cached tiles require own row stride"
+assert 'lv_obj_get_parent(widgets[i].card)==pages[current_page]' in full
+print("PASS beta INFO icons, display modes, dimensions, last-seen and snapshot stride")
 # Multimedia is the native Spotify-like beta widget, NOT a key/value grid.
 album = (idf / "mira_album_art.c").read_text(encoding="utf-8")
 assert 'w->card=card(pg,786,558)' in full
