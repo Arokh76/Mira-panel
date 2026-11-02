@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <stdint.h>
 #include "nvs.h"
 #include "esp_wifi.h"
@@ -218,9 +219,11 @@ static esp_err_t save_post(httpd_req_t *req){
         const bool auto_ip=!ip[0]||!strcasecmp(ip,"Auto")||!strcasecmp(ip,"DHCP");
         if(!auto_ip){
             ip4_addr_t requested={0};
-            if(!ip4addr_aton(ip,&requested)||!requested.addr||
-               requested.addr==0xffffffffu||ip4_addr_isloopback(&requested)||
-               ip4_addr_ismulticast(&requested)){
+            const bool parsed=ip4addr_aton(ip,&requested)!=0;
+            const uint32_t addr=ntohl(requested.addr);
+            const uint8_t first=(uint8_t)(addr>>24);
+            if(!parsed||!addr||addr==0xffffffffu||
+               first==0||first==127||first>=224){
                 httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,
                                     "Adresse IP fixe invalide");
                 return ESP_FAIL;
