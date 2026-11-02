@@ -45,7 +45,7 @@ static void incoming_state(const char *topic, int tlen, const char *payload, int
     if((size_t)plen>limit)return;
     char value[769]={0};
     memcpy(value,payload,(size_t)plen);
-    if(memchr(value,'\\0',(size_t)plen))return;
+    if(memchr(value,'\0',(size_t)plen))return;
     if(value[0]=='{'){
         cJSON *root=cJSON_Parse(value);
         const cJSON *v=root?cJSON_GetObjectItemCaseSensitive(root,"value"):NULL;
