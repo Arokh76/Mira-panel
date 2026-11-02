@@ -3,6 +3,7 @@
 // and storage are adapted. No new user-facing setup design.
 #include "mira_beta_setup.h"
 #include "mira_beta_setup_pages.h"
+#include "mira_beta_web.h"
 #include "mira_setup_access.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -130,6 +131,7 @@ static bool parse_form_param(const char *body,const char *key,char *dest,size_t 
     return true;
 }
 static esp_err_t load_get(httpd_req_t *req){
+    if(!mira_beta_setup_unconfigured())return mira_beta_web_load(req);
     if(!mira_setup_require_ap(req))return ESP_FAIL;
     char query[96],nav[24];
     if(httpd_req_get_url_query_str(req,query,sizeof(query))!=ESP_OK||
@@ -148,6 +150,7 @@ static esp_err_t load_get(httpd_req_t *req){
     return ESP_FAIL;
 }
 static esp_err_t save_post(httpd_req_t *req){
+    if(!mira_beta_setup_unconfigured())return mira_beta_web_save(req);
     if(!mira_setup_require_ap(req))return ESP_FAIL;
     char query[64],config[12];
     if(httpd_req_get_url_query_str(req,query,sizeof(query))!=ESP_OK||
@@ -280,5 +283,9 @@ esp_err_t mira_beta_setup_register(httpd_handle_t server){
     const httpd_uri_t save={.uri="/save",.method=HTTP_POST,.handler=save_post};
     esp_err_t err=httpd_register_uri_handler(server,&load);
     if(err!=ESP_OK)return err;
-    return httpd_register_uri_handler(server,&save);
+    err=httpd_register_uri_handler(server,&save);
+    if(err!=ESP_OK)return err;
+    const httpd_uri_t display={.uri="/display-save",.method=HTTP_POST,
+                               .handler=mira_beta_web_display_save};
+    return httpd_register_uri_handler(server,&display);
 }
