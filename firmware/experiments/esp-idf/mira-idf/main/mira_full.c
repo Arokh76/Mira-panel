@@ -2370,11 +2370,11 @@ static esp_err_t state_post(httpd_req_t *req){
         httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Expected name (1..95) and value (max 159)");
         return ESP_FAIL;
     }
-    mira_state_update_t update={0};
-    snprintf(update.name,sizeof(update.name),"%s",name->valuestring);
-    snprintf(update.value,sizeof(update.value),"%s",val);
+    // Share the same bounded state ingestion + HTTP /get cache as Jeedom
+    // /updatenr and MQTT; never invent a second state synchronization path.
+    bool queued=mira_full_enqueue_state(name->valuestring,val);
     cJSON_Delete(json);
-    if(xQueueSend(state_queue,&update,0)!=pdTRUE){
+    if(!queued){
         httpd_resp_set_status(req,"503 Service Unavailable");
         return httpd_resp_sendstr(req,"State queue full");
     }
