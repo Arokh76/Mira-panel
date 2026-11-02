@@ -31,6 +31,7 @@
 #include "mira_mqtt.h"
 #include "mira_jeedom.h"
 #include "mira_camera.h"
+#include "mira_album_art.h"
 #include "mira_setup_access.h"
 #include "mira_beta_setup.h"
 #include "mira_beta_web.h"
@@ -115,6 +116,7 @@ typedef struct {
     uint16_t color_hue;
     lv_obj_t *fields[9]; // energy/media passive Jeedom composite infos
     lv_obj_t *media_slider,*media_device_dropdown,*media_play_caption;
+    lv_obj_t *media_artwork_image,*media_artwork_placeholder;
     bool media_is_playing;
     // Distinguish Mira beta simple, double, triple and long-click commands.
     uint8_t multi_clicks;
@@ -652,7 +654,7 @@ static void media_direct_action(lv_event_t *event) {
     const bool published=!jeedom&&mira_mqtt_publish_action(command,payload);
     if(action==1&&(queued||published)){
         w->media_is_playing=!w->media_is_playing;
-        if(w->media_play_caption)lv_label_set_text(w->media_play_caption,w->media_is_playing?"Pause":"Lecture");
+        if(w->media_play_caption)lv_label_set_text(w->media_play_caption,w->media_is_playing?LV_SYMBOL_PAUSE:LV_SYMBOL_PLAY);
     }
     if(feedback){
         char result[180];
@@ -663,10 +665,10 @@ static void media_direct_action(lv_event_t *event) {
 }
 static void media_add_button(mira_widget_t *w,int action,int x,const char *text){
     lv_obj_t *button=lv_button_create(w->card);
-    lv_obj_set_size(button,142,43);
-    lv_obj_set_pos(button,x,203);
+    lv_obj_set_size(button,72,57);
+    lv_obj_set_pos(button,x,380);
     panel_style(button,true);
-    lv_obj_t *caption=label(button,text,0xF3F6F7,&mira_font_fr_16);
+    lv_obj_t *caption=label(button,text,0xF3F6F7,&lv_font_montserrat_20);
     lv_obj_center(caption);
     if(action==1)w->media_play_caption=caption;
     uintptr_t context=((uintptr_t)(w-widgets)<<3)|(uintptr_t)action;
@@ -1313,52 +1315,111 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         lv_obj_add_event_cb(w->color_brightness,event_local,LV_EVENT_RELEASED,w);
         return;
     }
-    // Energy and media are native passive Jeedom data cards. Every subfield
-    // keeps its original <widget>__<field> name; no fake actions on receipt.
-    if(!strcmp(type,"energy")||!strcmp(type,"media")){
-        static const char *const energy_fields[]={"solar","home","grid","battery","soc","soc2","soc3"};
-        static const char *const energy_titles[]={"Solaire","Maison","Réseau","Batterie","SOC","SOC 2","SOC 3"};
-        static const char *const media_fields[]={"title","artist","album","state","progress","volume","cover","device","devices"};
-        static const char *const media_titles[]={"Titre","Artiste","Album","État","Progression","Volume","Pochette","Appareil","Appareils"};
-        bool media=!strcmp(type,"media");
-        int total=media?9:7;
-        w->card=card(pg,786,media?355:205);
+    if(!strcmp(type,"energy")){
+        static const char *const energy_titles[]={
+            "Solaire","Maison","Réseau","Batterie","SOC","SOC 2","SOC 3"
+        };
+        w->card=card(pg,786,205);
         lv_obj_t *heading=label(w->card,display,0xF3F6F7,&lv_font_montserrat_20);
         lv_obj_set_pos(heading,10,4);
-        for(int n=0;n<total;n++){
+        for(int n=0;n<7;n++){
             int col=n/5,row=n%5;
             int x=col?400:12,y=35+row*31;
-            const char *title=media?media_titles[n]:energy_titles[n];
-            lv_obj_t *name_label=label(w->card,title,0xA8B2B8,&mira_font_fr_16);
-            lv_obj_set_pos(name_label,x,y);
-            lv_obj_set_width(name_label,105);
+            lv_obj_t *nm=label(w->card,energy_titles[n],0xA8B2B8,&mira_font_fr_16);
+            lv_obj_set_pos(nm,x,y);lv_obj_set_width(nm,105);
             w->fields[n]=label(w->card,"--",0x22BEEA,&mira_font_fr_16);
-            lv_obj_set_pos(w->fields[n],x+112,y);
-            lv_obj_set_width(w->fields[n],245);
+            lv_obj_set_pos(w->fields[n],x+112,y);lv_obj_set_width(w->fields[n],245);
         }
-        if(media){
-            media_add_button(w,0,125,"Précédent");
-            media_add_button(w,1,307,"Lecture");
-            media_add_button(w,2,489,"Suivant");
-            lv_obj_t *volume_text=label(w->card,"Volume",0xA8B2B8,&mira_font_fr_16);
-            lv_obj_set_pos(volume_text,15,254);
-            w->media_slider=lv_slider_create(w->card);
-            lv_obj_set_size(w->media_slider,625,15);
-            lv_obj_set_pos(w->media_slider,118,262);
-            lv_slider_set_range(w->media_slider,0,100);
-            lv_slider_set_value(w->media_slider,40,LV_ANIM_OFF);
-            lv_obj_set_style_bg_color(w->media_slider,cyan_c(),LV_PART_INDICATOR);
-            uintptr_t vol=((uintptr_t)(w-widgets)<<3)|3u;
-            lv_obj_add_event_cb(w->media_slider,media_direct_action,LV_EVENT_RELEASED,(void*)(vol+1));
-            lv_obj_t *device_text=label(w->card,"Sortie",0xA8B2B8,&mira_font_fr_16);
-            lv_obj_set_pos(device_text,15,293);
-            w->media_device_dropdown=lv_dropdown_create(w->card);
-            lv_obj_set_size(w->media_device_dropdown,625,39);
-            lv_obj_set_pos(w->media_device_dropdown,118,290);
-            lv_dropdown_set_options(w->media_device_dropdown,"Sélectionner un appareil");
-            uintptr_t device=((uintptr_t)(w-widgets)<<3)|4u;
-            lv_obj_add_event_cb(w->media_device_dropdown,media_direct_action,LV_EVENT_VALUE_CHANGED,(void*)(device+1));
+        return;
+    }
+    if(!strcmp(type,"media")){
+        // Restore beta's 786x558 Spotify-style card. The former generic
+        // key/value table was not Mira 0.7.37's multimedia widget.
+        w->card=card(pg,786,558);
+        lv_obj_set_layout(w->card,LV_LAYOUT_NONE);
+        lv_obj_set_style_pad_all(w->card,0,0);
+        no_scroll(w->card);
+        lv_obj_t *heading=label(w->card,display,0xF3F6F7,&mira_font_fr_16);
+        lv_obj_set_width(heading,742);
+        lv_obj_set_style_text_align(heading,LV_TEXT_ALIGN_CENTER,0);
+        lv_obj_set_pos(heading,22,7);
+        const int artX=(786-230)/2,artY=38;
+        for(int side=-1;side<=1;side+=2){
+            lv_obj_t *sleeve=lv_obj_create(w->card);
+            lv_obj_set_pos(sleeve,artX+side*24,artY+7);
+            lv_obj_set_size(sleeve,225,225);
+            lv_obj_set_style_radius(sleeve,15,0);
+            lv_obj_set_style_bg_color(sleeve,lv_color_hex(0x244463),0);
+            lv_obj_set_style_bg_grad_color(sleeve,lv_color_hex(0x101C34),0);
+            lv_obj_set_style_bg_grad_dir(sleeve,LV_GRAD_DIR_VER,0);
+            lv_obj_set_style_border_width(sleeve,0,0);
+            lv_obj_set_style_shadow_width(sleeve,0,0); // preserves fast scroll
+            lv_obj_set_style_pad_all(sleeve,0,0);
+            lv_obj_remove_flag(sleeve,LV_OBJ_FLAG_CLICKABLE|LV_OBJ_FLAG_SCROLLABLE);
         }
+        lv_obj_t *art=lv_obj_create(w->card);
+        lv_obj_set_size(art,230,230);
+        lv_obj_set_pos(art,artX,artY);
+        lv_obj_set_style_radius(art,15,0);
+        lv_obj_set_style_clip_corner(art,true,0);
+        lv_obj_set_style_bg_color(art,lv_color_hex(0x132A47),0);
+        lv_obj_set_style_bg_grad_color(art,lv_color_hex(0x315C87),0);
+        lv_obj_set_style_bg_grad_dir(art,LV_GRAD_DIR_VER,0);
+        lv_obj_set_style_pad_all(art,0,0);
+        lv_obj_set_style_border_width(art,0,0);
+        lv_obj_set_style_shadow_width(art,0,0);
+        no_scroll(art);
+        lv_obj_remove_flag(art,LV_OBJ_FLAG_CLICKABLE);
+        w->media_artwork_placeholder=label(art,LV_SYMBOL_AUDIO,0x22BEEA,
+                                           &lv_font_montserrat_28);
+        lv_obj_center(w->media_artwork_placeholder);
+        w->media_artwork_image=lv_image_create(art);
+        lv_obj_align(w->media_artwork_image,LV_ALIGN_CENTER,0,0);
+        lv_obj_add_flag(w->media_artwork_image,LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(w->media_artwork_image,LV_OBJ_FLAG_CLICKABLE);
+        // Keep the original passive field names; hidden metadata still
+        // receives Jeedom Infos without creating duplicate visual labels.
+        for(int n=0;n<9;n++){
+            const char *initial=n==0?"Aucune lecture":n==3?"À l'arrêt":
+                                n==5?"-- %":"";
+            const lv_font_t *font=n==0?&mira_font_fr_16:
+                                   n==1?&mira_font_fr_14:&mira_font_fr_12;
+            uint32_t color=n==0?0xF3F6F7:0xA8B2B8;
+            w->fields[n]=label(w->card,initial,color,font);
+            if(n==0||n==1||n==3){
+                lv_obj_set_width(w->fields[n],742);
+                lv_obj_set_style_text_align(w->fields[n],LV_TEXT_ALIGN_CENTER,0);
+                lv_obj_set_pos(w->fields[n],22,n==0?279:n==1?314:340);
+                lv_label_set_long_mode(w->fields[n],LV_LABEL_LONG_DOT);
+            }else if(n==5){
+                lv_obj_set_width(w->fields[n],49);
+                lv_obj_set_style_text_align(w->fields[n],LV_TEXT_ALIGN_RIGHT,0);
+                lv_obj_set_pos(w->fields[n],710,472);
+            }else lv_obj_add_flag(w->fields[n],LV_OBJ_FLAG_HIDDEN);
+        }
+        media_add_button(w,0,261,LV_SYMBOL_PREV);
+        media_add_button(w,1,357,LV_SYMBOL_PLAY);
+        media_add_button(w,2,453,LV_SYMBOL_NEXT);
+        lv_obj_t *volume_icon=label(w->card,LV_SYMBOL_VOLUME_MAX,
+                                     0x22BEEA,&lv_font_montserrat_20);
+        lv_obj_set_pos(volume_icon,22,469);
+        w->media_slider=lv_slider_create(w->card);
+        lv_obj_set_size(w->media_slider,646,18);
+        lv_obj_set_pos(w->media_slider,60,474);
+        lv_slider_set_range(w->media_slider,0,100);
+        lv_slider_set_value(w->media_slider,40,LV_ANIM_OFF);
+        lv_obj_set_style_bg_color(w->media_slider,cyan_c(),LV_PART_INDICATOR);
+        uintptr_t vol=((uintptr_t)(w-widgets)<<3)|3u;
+        lv_obj_add_event_cb(w->media_slider,media_direct_action,LV_EVENT_RELEASED,(void*)(vol+1));
+        w->media_device_dropdown=lv_dropdown_create(w->card);
+        lv_obj_set_size(w->media_device_dropdown,660,36);
+        lv_obj_set_pos(w->media_device_dropdown,106,509);
+        lv_dropdown_set_options(w->media_device_dropdown,"Sélectionner un appareil");
+        lv_obj_t *device_title=label(w->card,"Sortie",0xA8B2B8,&mira_font_fr_14);
+        lv_obj_set_pos(device_title,22,520);
+        uintptr_t device=((uintptr_t)(w-widgets)<<3)|4u;
+        lv_obj_add_event_cb(w->media_device_dropdown,media_direct_action,
+                            LV_EVENT_VALUE_CHANGED,(void*)(device+1));
         return;
     }
     if(!strcmp(type,"camera")){
@@ -2292,7 +2353,7 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                                 if(playing||paused){
                                     w->media_is_playing=playing;
                                     if(w->media_play_caption)
-                                        lv_label_set_text(w->media_play_caption,playing?"Pause":"Lecture");
+                                        lv_label_set_text(w->media_play_caption,playing?LV_SYMBOL_PAUSE:LV_SYMBOL_PLAY);
                                 }
                             }else if(n==7) {
                                 snprintf(w->media_active_device,sizeof(w->media_active_device),"%.95s",msg->value);
