@@ -25,6 +25,7 @@ pairs = {
     "HTML_Donnees.h": "mira_beta_data_html",
     "HTML_ConfigAP.h": "mira_beta_config_ap_html",
     "HTML_ReseauxEnreg.h": "mira_beta_known_networks_html",
+    "HTML_ModificationReseau.h": "mira_beta_edit_network_html",
     "HTML_Message.h": "mira_beta_message_html",
 }
 
@@ -78,5 +79,13 @@ assert 'mira_beta_data_confirm(req,nav)' in handlers, "Missing reset confirmatio
 assert 'mira_beta_data_reset_post' in setup, "Missing POST-only reset endpoint"
 assert 'reset_token=0;' in data and 'do_scope(operation)' in data, "Reset confirmation not single-use"
 assert 'mira_recovery_save_beta_ap' in recovery and 'beta_ap_persistent||!station_connected' in recovery, "Beta AP settings not persisted/recovered"
+networks = (idf / "mira_beta_networks.c").read_text(encoding="utf-8")
+assert 'mira_beta_networks_list' in networks and 'mira_beta_networks_activate' in networks
+assert 'mira_beta_networks_remove' in networks and 'mira_beta_networks_upsert' in networks
+assert 'BETA_OVERLAY_KEY "wifi_profiles"' in networks
+assert 'mira_beta_web_network_post' in setup
+assert 'mira_beta_networks_remove(id)' in handlers and 'mira_beta_networks_activate(id)' in handlers
+assert 'mira_beta_known_networks_html' in handlers and 'mira_beta_edit_network_html' in handlers
+print("PASS beta network list, edit, activation and removal routes")
 print("PASS beta Wi-Fi AP and reset safety contracts")
 print("PASS beta page/control route wiring")
