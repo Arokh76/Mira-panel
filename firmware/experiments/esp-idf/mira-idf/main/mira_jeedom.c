@@ -1414,7 +1414,8 @@ static esp_err_t nav_pages_post(httpd_req_t *req){
         nvs_close(nv);
     }
     if(err!=ESP_OK){
-        httpd_resp_send_err(req,HTTPD_503_SERVICE_UNAVAILABLE,"Ecriture masque impossible");
+        httpd_resp_set_status(req,"503 Service Unavailable");
+        httpd_resp_sendstr(req,"Ecriture masque impossible");
         return ESP_FAIL;
     }
     return httpd_resp_sendstr(req,"OK");
@@ -1473,7 +1474,8 @@ static esp_err_t nav_favorites_post(httpd_req_t *req){
         nvs_close(nv);
     }
     if(err!=ESP_OK){
-        httpd_resp_send_err(req,HTTPD_503_SERVICE_UNAVAILABLE,"Ecriture favoris impossible");
+        httpd_resp_set_status(req,"503 Service Unavailable");
+        httpd_resp_sendstr(req,"Ecriture favoris impossible");
         return ESP_FAIL;
     }
     return httpd_resp_sendstr(req,"OK");
