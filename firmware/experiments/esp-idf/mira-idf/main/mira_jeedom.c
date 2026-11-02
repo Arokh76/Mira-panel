@@ -2265,13 +2265,18 @@ static esp_err_t mira_health_get(httpd_req_t *req){
     const bool connected=esp_wifi_sta_get_ap_info(&ap)==ESP_OK;
     uint32_t count=0,last_heap=0,lowest_heap=0;
     mira_full_navigation_stats(&count,&last_heap,&lowest_heap);
-    char result[580];
+    mira_full_state_diagnostics_t diagnostic={0};
+    mira_full_state_diagnostics(&diagnostic);
+    char result[850];
     snprintf(result,sizeof(result),
         "{\"uptime_ms\":%llu,\"wifi\":%d,\"rssi_dbm\":%d,"
         "\"heap_free\":%u,\"heap_min\":%u,\"heap_largest_block\":%u,"
         "\"psram_free\":%u,\"nav_count\":%u,\"nav_last_heap\":%u,"
         "\"nav_lowest_heap\":%u,\"internal_heap_free\":%u,"
-        "\"internal_largest_block\":%u}",
+        "\"internal_largest_block\":%u,"
+        "\"state_cache_used\":%u,\"state_cache_capacity\":%u,"
+        "\"state_unchanged\":%u,\"state_cache_evictions\":%u,"
+        "\"state_queue_dropped\":%u,\"state_queue_pending\":%u}",
         (unsigned long long)(esp_timer_get_time()/1000),
         connected?3:6,connected?(int)ap.rssi:0,
         (unsigned)esp_get_free_heap_size(),
@@ -2280,7 +2285,13 @@ static esp_err_t mira_health_get(httpd_req_t *req){
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
         (unsigned)count,(unsigned)last_heap,(unsigned)lowest_heap,
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
-        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+        (unsigned)diagnostic.state_cache_used,
+        (unsigned)diagnostic.state_cache_capacity,
+        (unsigned)diagnostic.state_unchanged,
+        (unsigned)diagnostic.state_cache_evictions,
+        (unsigned)diagnostic.state_queue_dropped,
+        (unsigned)diagnostic.state_queue_pending);
     httpd_resp_set_type(req,"application/json");
     httpd_resp_set_hdr(req,"Cache-Control","no-store");
     return httpd_resp_sendstr(req,result);
