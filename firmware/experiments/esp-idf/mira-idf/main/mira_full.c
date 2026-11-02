@@ -202,6 +202,92 @@ static void mira_fit_info_value(lv_obj_t *text,lv_obj_t *card){
     lv_obj_set_width(text,room);
     lv_obj_set_height(text,lv_font_get_line_height(chosen)+5);
 }
+// Beta's INFO glyph+value group is centered as a unit, with the font fitted
+// against the REAL UTF-8 glyph width after every Jeedom/MQTT state change.
+static void mira_fit_icon_info_value(mira_widget_t *w){
+    if(!w||!w->card||!w->info_icon||!w->value_label)return;
+    lv_obj_update_layout(w->card);
+    int inner=lv_obj_get_content_width(w->card);
+    int icon_w=lv_obj_get_width(w->info_icon);
+    int icon_h=lv_obj_get_height(w->info_icon);
+    int gap=inner>=180?10:6,margin=inner>=180?8:4;
+    int room=inner-2*margin-icon_w-gap-6;
+    if(room<8)return;
+    const char *text=lv_label_get_text(w->value_label);
+    if(!text)return;
+    const lv_font_t *fonts[]={
+        &lv_font_montserrat_28,&lv_font_montserrat_20,
+        &mira_font_fr_16,&mira_font_fr_12
+    };
+    const lv_font_t *chosen=fonts[3];
+    int text_width=0;
+    bool fits=false;
+    for(size_t i=(inner>=200&&lv_obj_get_height(w->card)>105)?0u:1u;i<4;i++){
+        lv_point_t size={0};
+        lv_text_get_size(&size,text,fonts[i],
+            lv_obj_get_style_text_letter_space(w->value_label,0),
+            0,LV_COORD_MAX,LV_TEXT_FLAG_NONE);
+        chosen=fonts[i];text_width=size.x;
+        if(text_width<=room){fits=true;break;}
+    }
+    int draw_width=fits?text_width:room;
+    int x=margin+(inner-2*margin-icon_w-gap-draw_width)/2;
+    int y=lv_obj_get_y(w->info_icon);
+    lv_obj_set_pos(w->info_icon,x,y);
+    lv_obj_add_flag(w->value_label,LV_OBJ_FLAG_IGNORE_LAYOUT);
+    lv_obj_set_align(w->value_label,LV_ALIGN_TOP_LEFT);
+    lv_obj_set_style_text_font(w->value_label,chosen,0);
+    lv_obj_set_style_text_align(w->value_label,LV_TEXT_ALIGN_LEFT,0);
+    lv_label_set_long_mode(w->value_label,fits?LV_LABEL_LONG_CLIP:LV_LABEL_LONG_DOT);
+    lv_obj_set_size(w->value_label,draw_width+6,lv_font_get_line_height(chosen)+4);
+    lv_obj_set_pos(w->value_label,x+icon_w+gap,
+        y+(icon_h-lv_font_get_line_height(chosen))/2);
+}
+static void mira_decorate_info(mira_widget_t *w,const char *requested,
+                               const char *mode,const char *layout){
+    if(!w||!w->card||!w->value_label)return;
+    if(mode&&!strcmp(mode,"text"))return;
+    const char *kind=mira_info_glyph_kind(requested,w->name,w->unit);
+    if(!kind)return; // Unknown icons preserve their original name/value view.
+    lv_obj_update_layout(w->card);
+    int width=lv_obj_get_width(w->card),height=lv_obj_get_height(w->card);
+    if(width<90||height<35)return;
+    bool icon_only=mode&&!strcmp(mode,"icon");
+    if(icon_only&&(!layout||strcmp(layout,"free"))&&height>=115){
+        height=100;
+        lv_obj_set_height(w->card,height);
+    }
+    int pad=width>=220?16:8;
+    int side=width/5, max_side=icon_only?height*10/17:height/2;
+    if(side>max_side)side=max_side;
+    if(side>70)side=70;
+    if(side<18)side=18;
+    int y=(height-side)/2;
+    if(!icon_only&&height>90)y+=8;
+    w->info_icon=mira_info_glyph_create(w->card,kind,side,cyan_c());
+    if(!w->info_icon)return;
+    lv_obj_set_pos(w->info_icon,pad,y);
+    if(w->info_name){
+        if(icon_only)lv_obj_add_flag(w->info_name,LV_OBJ_FLAG_HIDDEN);
+        else{
+            lv_obj_add_flag(w->info_name,LV_OBJ_FLAG_IGNORE_LAYOUT);
+            lv_obj_set_align(w->info_name,LV_ALIGN_TOP_LEFT);
+            lv_obj_set_width(w->info_name,width-2*pad);
+            lv_obj_set_style_text_align(w->info_name,LV_TEXT_ALIGN_CENTER,0);
+            lv_obj_set_style_text_font(w->info_name,
+                  height>105?&mira_font_fr_16:&mira_font_fr_12,0);
+            lv_obj_set_pos(w->info_name,pad,height>105?10:3);
+        }
+    }
+    if(w->info_status){
+        lv_obj_add_flag(w->info_status,LV_OBJ_FLAG_IGNORE_LAYOUT);
+        lv_obj_set_align(w->info_status,LV_ALIGN_TOP_LEFT);
+        lv_obj_set_width(w->info_status,width-2*pad);
+        lv_obj_set_style_text_align(w->info_status,LV_TEXT_ALIGN_CENTER,0);
+        lv_obj_set_pos(w->info_status,pad,height-21);
+    }
+    mira_fit_icon_info_value(w);
+}
 static void no_scroll(lv_obj_t *obj){lv_obj_remove_flag(obj,LV_OBJ_FLAG_SCROLLABLE);}
 static void panel_style(lv_obj_t *obj,bool light){
     lv_obj_set_style_bg_color(obj,light?panel2_c():panel_c(),0);
