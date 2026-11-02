@@ -4,6 +4,7 @@
 #include "mira_beta_setup.h"
 #include "mira_beta_setup_pages.h"
 #include "mira_beta_web.h"
+#include "mira_beta_ota.h"
 #include "mira_setup_access.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -287,5 +288,9 @@ esp_err_t mira_beta_setup_register(httpd_handle_t server){
     if(err!=ESP_OK)return err;
     const httpd_uri_t display={.uri="/display-save",.method=HTTP_POST,
                                .handler=mira_beta_web_display_save};
-    return httpd_register_uri_handler(server,&display);
+    err=httpd_register_uri_handler(server,&display);
+    if(err!=ESP_OK)return err;
+    const httpd_uri_t upload={.uri="/doUpdateFile",.method=HTTP_POST,
+                              .handler=mira_beta_ota_upload};
+    return httpd_register_uri_handler(server,&upload);
 }
