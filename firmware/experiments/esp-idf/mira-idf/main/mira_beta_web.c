@@ -125,8 +125,10 @@ static bool decimal(const char *s,unsigned max,unsigned *out){
     if(!s||!*s)return false;
     unsigned val=0;
     for(const unsigned char *p=(const unsigned char *)s;*p;p++){
-        if(*p<'0'||*p>'9'||val>(max-(*p-'0'))/10)return false;
-        val=val*10+(*p-'0');
+        if(*p<'0'||*p>'9')return false;
+        unsigned digit=(unsigned)(*p-'0');
+        if(digit>max||val>(max-digit)/10)return false;
+        val=val*10+digit;
     }
     if(val>max)return false;
     *out=val;
