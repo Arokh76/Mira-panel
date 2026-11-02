@@ -205,7 +205,8 @@ static cJSON *index_from_config(const char *json) {
             }
         }else if((!strcmp(type,"title")||!strcmp(type,"text_index"))){
             int size=jint((cJSON*)item,"size",20);
-            if(size<10)size=10;if(size>72)size=72;
+            if(size<10)size=10;
+            if(size>72)size=72;
             char style[90];
             snprintf(style,sizeof(style),
                      "<div style=\"padding:10px 0;font-size:%dpx\">",size);
@@ -374,7 +375,8 @@ esp_err_t mira_jeedom_render_beta_actions(httpd_req_t *req){
         if(!*name)continue;
         if((!strcmp(type,"button")||!strcmp(type,"little_button"))&&id>0){
             any=true;
-            if((status=beta_html(req,"<button class=\"Bouton\" id=\""))!=ESP_OK||
+            if((status=beta_html(req,!strcmp(type,"little_button")?
+                 "<button class=\"LittleBouton\" id=\"":"<button class=\"Bouton\" id=\""))!=ESP_OK||
                (status=beta_html_id(req,id))!=ESP_OK||
                (status=beta_html(req,"\" onclick=\"Click(this)\">"))!=ESP_OK||
                (status=beta_html_escape(req,name))!=ESP_OK||
