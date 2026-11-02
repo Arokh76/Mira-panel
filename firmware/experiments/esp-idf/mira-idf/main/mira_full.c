@@ -82,6 +82,8 @@ static uint8_t favorite_pages[3]={0,1,2};
 static uint8_t visible_page_mask=0x3f;
 static uint32_t last_favorite_poll_ms;
 static uint8_t current_page=0;
+// Preserve firmware-beta's enum: 0=Mira, 1=Sombre, 2=Glass.
+static uint8_t ui_theme=0;
 static const char *page_names[6]={"Accueil","Lumières","Températures","Paramètres","Énergie","Multimédia"};
 static const int page_order[6]={0,1,2,4,5,3};
 static lv_obj_t *clock_text,*date_text,*clock_status_text;
@@ -126,11 +128,13 @@ static mira_widget_t widgets[MAX_WIDGETS];
 static uint8_t widget_n=0;
 static lv_color_t text_c(void){return lv_color_hex(0xF3F6F7);}
 static lv_color_t muted_c(void){return lv_color_hex(0xA8B2B8);}
-static lv_color_t cyan_c(void){return lv_color_hex(0x22BEEA);}
-static lv_color_t panel_c(void){return lv_color_hex(0x10283D);}
-static lv_color_t panel2_c(void){return lv_color_hex(0x163449);}
-static lv_color_t border_c(void){return lv_color_hex(0x155A75);}
-static lv_color_t bg_c(void){return lv_color_hex(0x061725);}
+// Exact palette of MiraPanelUI.cpp 0.7.37, not an invented IDF skin.
+static lv_color_t cyan_c(void){return lv_color_hex(ui_theme==2?0x5BDEFF:ui_theme==1?0x31BDF2:0x2ABEFF);}
+static lv_color_t panel_c(void){return lv_color_hex(ui_theme==2?0x103047:ui_theme==1?0x141B22:0x0E2032);}
+static lv_color_t panel2_c(void){return lv_color_hex(ui_theme==2?0x17445D:ui_theme==1?0x202A33:0x173149);}
+static lv_color_t border_c(void){return lv_color_hex(ui_theme==2?0x2B6882:ui_theme==1?0x33414C:0x17354B);}
+static lv_color_t bg_c(void){return lv_color_hex(ui_theme==2?0x071A28:ui_theme==1?0x090D12:0x071421);}
+static lv_color_t nav_c(void){return lv_color_hex(ui_theme==2?0x06131F:ui_theme==1?0x070B0F:0x06101B);}
 
 static const char *str(const cJSON *obj, const char *key, const char *def) {
     const cJSON *v=cJSON_GetObjectItemCaseSensitive(obj,key);
@@ -144,7 +148,7 @@ static int integer(const cJSON *obj,const char *key,int def){
     return def;
 }
 static void text_style(lv_obj_t *obj,uint32_t color,const lv_font_t *font){
-    lv_obj_set_style_text_color(obj,lv_color_hex(color),0);
+    lv_obj_set_style_text_color(obj,color==0x22BEEA?cyan_c():lv_color_hex(color),0);
     if(font)lv_obj_set_style_text_font(obj,font,0);
 }
 static lv_obj_t *label(lv_obj_t *parent,const char *s,uint32_t color,const lv_font_t *font){
@@ -156,10 +160,11 @@ static lv_obj_t *label(lv_obj_t *parent,const char *s,uint32_t color,const lv_fo
 static void no_scroll(lv_obj_t *obj){lv_obj_remove_flag(obj,LV_OBJ_FLAG_SCROLLABLE);}
 static void panel_style(lv_obj_t *obj,bool light){
     lv_obj_set_style_bg_color(obj,light?panel2_c():panel_c(),0);
-    lv_obj_set_style_bg_opa(obj,LV_OPA_COVER,0);
+    lv_obj_set_style_bg_opa(obj,ui_theme==2?LV_OPA_80:LV_OPA_COVER,0);
     lv_obj_set_style_border_color(obj,border_c(),0);
     lv_obj_set_style_border_width(obj,1,0);
-    lv_obj_set_style_radius(obj,14,0);
+    lv_obj_set_style_border_opa(obj,ui_theme==0?LV_OPA_50:LV_OPA_70,0);
+    lv_obj_set_style_radius(obj,ui_theme==2?16:14,0);
     lv_obj_set_style_pad_all(obj,9,0);
     lv_obj_set_style_shadow_width(obj,0,0); // no shadows during first real UI comparison
 }
@@ -1348,11 +1353,38 @@ static void night_auto_changed(lv_event_t *event){
     save_sleep_setting_u8("night_auto",requested?1:0);
     apply_auto_brightness();
 }
+// Theme transitions occur only on the LVGL task. Rebuild widgets with their
+// original JSON programming; never modify Jeedom values or SPIFFS on theme.
+static void build_config(void);
+static void settings(void);
+static void theme_changed(lv_event_t *event){
+    if(suppress_events||display_sleeping)return;
+    uint16_t selected=lv_dropdown_get_selected(lv_event_get_target_obj(event));
+    if(selected>2||selected==ui_theme)return;
+    ui_theme=(uint8_t)selected;
+    save_sleep_setting_u8("theme",ui_theme);
+    lv_obj_set_style_bg_color(screen,bg_c(),0);
+    lv_obj_set_style_bg_grad_color(screen,bg_c(),0);
+    for(size_t i=0;i<6;i++){
+        lv_obj_set_style_bg_color(pages[i],bg_c(),0);
+        lv_obj_set_style_bg_grad_color(pages[i],bg_c(),0);
+    }
+    lv_obj_set_style_bg_color(nav,nav_c(),0);
+    lv_obj_set_style_border_color(nav,border_c(),0);
+    if(page_picker) {
+        lv_obj_set_style_bg_color(page_picker,panel_c(),0);
+        if(picker_card)lv_obj_set_style_bg_color(picker_card,panel2_c(),0);
+    }
+    const uint8_t current=current_page;
+    build_config();
+    if(pages[3]){lv_obj_clean(pages[3]);settings();}
+    show_page(current);
+}
 static void settings(void){
     lv_obj_t *head=card(3,640,40);
     lv_obj_t *h=label(head,"Paramètres",0xF3F6F7,&mira_font_fr_16);
     lv_obj_center(h);
-    lv_obj_t *display=card(3,640,130);
+    lv_obj_t *display=card(3,640,178);
     make_flex(display,LV_FLEX_FLOW_COLUMN,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_START);
     label(display,"Affichage",0x22BEEA,&mira_font_fr_16);
     label(display,"Luminosité écran",0xF3F6F7,&mira_font_fr_16);
@@ -1361,7 +1393,12 @@ static void settings(void){
     lv_slider_set_range(sl,30,255);
     lv_slider_set_value(sl,desired_awake_brightness(),LV_ANIM_OFF);
     lv_obj_add_event_cb(sl,brightness_release,LV_EVENT_RELEASED,NULL);
-    label(display,"Thème : Mira",0xA8B2B8,&mira_font_fr_16);
+    label(display,"Thème de Mira Panel",0xA8B2B8,&mira_font_fr_16);
+    lv_obj_t *theme_choice=lv_dropdown_create(display);
+    lv_dropdown_set_options(theme_choice,"Mira\nSombre\nGlass");
+    lv_dropdown_set_selected(theme_choice,ui_theme);
+    lv_obj_set_size(theme_choice,260,38);
+    lv_obj_add_event_cb(theme_choice,theme_changed,LV_EVENT_VALUE_CHANGED,NULL);
     lv_obj_t *schedule=card(3,640,106);
     label(schedule,"Luminosité automatique jour / nuit",0x22BEEA,&mira_font_fr_16);
     lv_obj_t *auto_switch=lv_switch_create(schedule);
@@ -1662,6 +1699,9 @@ static void load_ui_configuration(void){
     // Read it as a fallback only; never rewrite the beta's original NVS.
     nvs_handle_t legacy_nvs;
     if(nvs_open("miraui",NVS_READONLY,&legacy_nvs)==ESP_OK){
+        uint8_t saved_theme=0xff;
+        if(nvs_get_u8(legacy_nvs,"theme",&saved_theme)==ESP_OK&&saved_theme<=2)
+            ui_theme=saved_theme;
         uint8_t legacy_home=1;
         if(nvs_get_u8(legacy_nvs,"home",&legacy_home)==ESP_OK)
             return_home_enabled=legacy_home!=0;
@@ -1669,6 +1709,9 @@ static void load_ui_configuration(void){
     }
     nvs_handle_t ui_nvs;
     if(nvs_open("mira_idf_ui",NVS_READONLY,&ui_nvs)==ESP_OK){
+        uint8_t configured_theme=0xff;
+        if(nvs_get_u8(ui_nvs,"theme",&configured_theme)==ESP_OK&&configured_theme<=2)
+            ui_theme=configured_theme;
         uint8_t stored=220;
         if(nvs_get_u8(ui_nvs,"brightness",&stored)==ESP_OK && stored>=30)
             display_brightness_raw=stored;
@@ -1715,8 +1758,8 @@ void mira_full_ui_create(lv_display_t *disp){
     screen=lv_obj_create(NULL);
     lv_obj_set_size(screen,800,480);
     lv_obj_set_style_bg_color(screen,bg_c(),0);
-    lv_obj_set_style_bg_grad_color(screen,lv_color_hex(0x0A2134),0);
-    lv_obj_set_style_bg_grad_dir(screen,LV_GRAD_DIR_VER,0);
+    lv_obj_set_style_bg_grad_color(screen,bg_c(),0);
+    lv_obj_set_style_bg_grad_dir(screen,LV_GRAD_DIR_NONE,0);
     lv_obj_set_style_border_width(screen,0,0);
     lv_obj_set_style_pad_all(screen,0,0);
     no_scroll(screen);
@@ -1727,8 +1770,8 @@ void mira_full_ui_create(lv_display_t *disp){
         lv_obj_set_size(pages[i],800,CONTENT_H);
         lv_obj_set_pos(pages[i],0,0);
         lv_obj_set_style_bg_color(pages[i],bg_c(),0);
-        lv_obj_set_style_bg_grad_color(pages[i],lv_color_hex(0x0A2134),0);
-        lv_obj_set_style_bg_grad_dir(pages[i],LV_GRAD_DIR_VER,0);
+        lv_obj_set_style_bg_grad_color(pages[i],bg_c(),0);
+        lv_obj_set_style_bg_grad_dir(pages[i],LV_GRAD_DIR_NONE,0);
         lv_obj_set_style_pad_all(pages[i],6,0);
         lv_obj_set_style_pad_top(pages[i],8,0);
         lv_obj_set_style_pad_row(pages[i],6,0);
@@ -1743,7 +1786,7 @@ void mira_full_ui_create(lv_display_t *disp){
     }
     nav=lv_obj_create(screen);
     lv_obj_set_pos(nav,0,CONTENT_H);lv_obj_set_size(nav,800,NAV_H);
-    lv_obj_set_style_bg_color(nav,lv_color_hex(0x06101B),0);
+    lv_obj_set_style_bg_color(nav,nav_c(),0);
     lv_obj_set_style_border_color(nav,border_c(),0);
     lv_obj_set_style_border_width(nav,1,0);
     lv_obj_set_style_radius(nav,0,0);
