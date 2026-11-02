@@ -67,7 +67,7 @@ static const char mira_beta_wifi_page[] =
 "<main><section class=\"card\"><div class=\"eyebrow\">Mira Panel</div><h1>Connecter le panneau au Wi-Fi</h1><p class=\"lead\">Choisis ton réseau local, puis indique le mot de passe et le mode d'adressage.</p>\n"
 "<form name=\"reg\" action=\"/save?config=wifi\" onsubmit=\"return Verif();\" method=\"POST\">\n"
 "  <div class=\"grid\">\n"
-"    <div class=\"field full\"><label>Nom du réseau Wi-Fi (saisie manuelle)</label></div>\n"
+"    <div class=\"field full\">MIRA_SCAN_SLOT</div>\n"
 "    <div class=\"field\"><label for=\"ssid\">Nom du réseau</label><input class=\"box1\" id=\"ssid\" name=\"ssid\" value=\"\" type=\"text\" required></div>\n"
 "    <div class=\"field\"><label for=\"pass\">Mot de passe Wi-Fi</label><input class=\"box1\" id=\"pass\" name=\"pass\" type=\"password\" autocomplete=\"current-password\"></div>\n"
 "    <div class=\"field full\"><label for=\"ip\">Adresse IP</label><input class=\"box1\" id=\"ip\" name=\"ip\" value=\"Auto\" type=\"text\" placeholder=\"Auto\"></div>\n"
