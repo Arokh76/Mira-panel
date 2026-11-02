@@ -54,7 +54,7 @@ static esp_err_t send_html_escaped(httpd_req_t *req,const char *value){
 static esp_err_t serve_wifi_page(httpd_req_t *req){
     const char *token="MIRA_SCAN_SLOT";
     const char *slot=strstr(mira_beta_wifi_page,token);
-    if(!slot)return serve_wifi_page(req);
+    if(!slot)return serve_page(req,mira_beta_wifi_page);
     httpd_resp_set_type(req,"text/html; charset=utf-8");
     if(httpd_resp_send_chunk(req,mira_beta_wifi_page,
                             (ssize_t)(slot-mira_beta_wifi_page))!=ESP_OK)
