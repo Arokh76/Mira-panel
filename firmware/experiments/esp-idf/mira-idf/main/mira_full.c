@@ -159,6 +159,39 @@ static lv_obj_t *label(lv_obj_t *parent,const char *s,uint32_t color,const lv_fo
     text_style(l,color,font);
     return l;
 }
+// Same principle as firmware-beta miraFitInfoValue(): measure the ACTUAL
+// rendered UTF-8 text, including its units, on every change. A fixed font
+// chosen from the initial value will overflow when Jeedom sends longer data.
+// Dot clipping is a last resort, never an arbitrary constant font cut-off.
+static void mira_fit_info_value(lv_obj_t *text,lv_obj_t *card){
+    if(!text||!card)return;
+    const char *value=lv_label_get_text(text);
+    if(!value)return;
+    lv_obj_update_layout(card);
+    int32_t room=lv_obj_get_content_width(card)-8;
+    if(room<=8)return;
+    static const lv_font_t *const fonts[]={
+        &lv_font_montserrat_28,&lv_font_montserrat_20,
+        &mira_font_fr_16,&mira_font_fr_12
+    };
+    const bool allow_large=room>=180&&lv_obj_get_height(card)>105;
+    const lv_font_t *chosen=fonts[3];
+    bool fits=false;
+    lv_point_t measured={0};
+    for(size_t i=allow_large?0:1;i<sizeof(fonts)/sizeof(fonts[0]);i++){
+        lv_text_get_size(&measured,value,fonts[i],
+                         lv_obj_get_style_text_letter_space(text,0),0,
+                         LV_COORD_MAX,LV_TEXT_FLAG_NONE);
+        chosen=fonts[i];
+        if(measured.x<=room){fits=true;break;}
+    }
+    // Do not repeatedly invalidate the object if the value did not change.
+    if(lv_obj_get_style_text_font(text,0)!=chosen)
+        lv_obj_set_style_text_font(text,chosen,0);
+    lv_label_set_long_mode(text,fits?LV_LABEL_LONG_CLIP:LV_LABEL_LONG_DOT);
+    lv_obj_set_width(text,room);
+    lv_obj_set_height(text,lv_font_get_line_height(chosen)+5);
+}
 static void no_scroll(lv_obj_t *obj){lv_obj_remove_flag(obj,LV_OBJ_FLAG_SCROLLABLE);}
 static void panel_style(lv_obj_t *obj,bool light){
     lv_obj_set_style_bg_color(obj,light?panel2_c():panel_c(),0);
@@ -814,6 +847,7 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
             lv_obj_set_size(w->value_label,width-14,35);
             lv_obj_set_style_text_align(w->value_label,LV_TEXT_ALIGN_CENTER,0);
             lv_obj_align(w->value_label,LV_ALIGN_TOP_MID,0,home_tile?48:26);
+            mira_fit_info_value(w->value_label,w->card);
             if(home_tile){
                 lv_obj_t *since=label(w->card,*w->value?"Valeur configurée":"En attente des données",0xA8B2B8,&mira_font_fr_12);
                 w->info_status=since;
@@ -829,6 +863,7 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         label(w->card,display,0xA8B2B8,&mira_font_fr_16);
         char value[198];snprintf(value,sizeof(value),"%s %s",*w->value?w->value:"--",w->unit);
         w->value_label=label(w->card,value,0x22BEEA,&lv_font_montserrat_20);
+        mira_fit_info_value(w->value_label,w->card);
         return;
     }
     if(!strcmp(type,"button")||!strcmp(type,"multiaction")){
