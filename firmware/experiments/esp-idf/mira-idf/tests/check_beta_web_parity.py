@@ -156,7 +156,7 @@ assert 'scroll_cache_reset(); // release every LVGL image reference' in full
 print("PASS original palette, 3 themes, hue wheel, dynamic text and safe RGB565 scroll cache")
 # Multimedia is the native Spotify-like beta widget, NOT a key/value grid.
 album = (idf / "mira_album_art.c").read_text(encoding="utf-8")
-assert 'lv_obj_set_size(w->card,786,558)' not in full or 'w->card=card(pg,786,558)' in full
+assert 'w->card=card(pg,786,558)' in full
 assert 'media_add_button(w,0,261,LV_SYMBOL_PREV)' in full
 assert 'media_add_button(w,1,357,LV_SYMBOL_PLAY)' in full
 assert 'media_add_button(w,2,453,LV_SYMBOL_NEXT)' in full
@@ -167,6 +167,17 @@ assert 'https://mosaic.scdn.co/' in album
 assert 'https://yt3.googleusercontent.com/' in album
 assert 'mira_camera_fetch_url(url,&frame)' in album
 assert 'mira_album_art.c' in (idf / "CMakeLists.txt").read_text(encoding="utf-8")
+# Jeedom and MQTT cover URLs must reach the artwork worker without being
+# truncated to a 159-byte ordinary info state.
+mqtt = (idf / "mira_mqtt.c").read_text(encoding="utf-8")
+jeedom = (idf / "mira_jeedom.c").read_text(encoding="utf-8")
+assert 'mira_cover_update_t' in full and 'cover_update_queue' in full
+assert 'mira_album_art_request(i,cover.url)' in full
+assert 'const size_t limit=cover?768u:159u;' in mqtt
+assert 'char value[769]={0};' in mqtt and 'char value[160]={0}' not in mqtt
+assert 'char selected[24]={0},action_id[16]={0},value[769]={0};' in jeedom
+assert 'char encoded[1024];' in jeedom
+assert 'strlen(value)>(is_cover?768u:159u)' in jeedom
 print("PASS beta media art/cover layout with HTTPS background decoding")
 # Only a published IDF-specific target may result in 'available'; the
 # Arduino firmware target must never be silently reused.
