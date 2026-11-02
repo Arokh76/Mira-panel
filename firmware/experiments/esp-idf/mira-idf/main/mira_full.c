@@ -747,6 +747,162 @@ static void camera_poll_on_lvgl_task(uint32_t tick){
     if(camera_status)lv_obj_add_flag(camera_status,LV_OBJ_FLAG_HIDDEN);
 }
 
+// Firmware-beta uses snapshots ONLY for passive INFO tiles. LVGL 9 draws
+// expensive rounded cards and text during scroll; snapshot those tiles to
+// opaque RGB565 once during IDLE, retain their geometry via IGNORE_LAYOUT,
+// and restore live interactive content when the gesture settles.
+// Never snapshot while moving or while new Jeedom values arrive.
+#define MIRA_SCROLL_CACHE_BUDGET (384u*1024u)
+typedef struct {
+    lv_obj_t *card,*image;
+    lv_image_dsc_t dsc;
+    uint8_t *pixels;
+    uint32_t bytes;
+    bool ready,dirty,disabled;
+} mira_scroll_tile_t;
+static mira_scroll_tile_t scroll_tiles[MAX_WIDGETS];
+static uint32_t scroll_cache_bytes;
+static uint32_t scroll_last_move_ms,scroll_last_build_ms;
+static bool scroll_cache_active;
+
+static void scroll_cache_activate(bool active){
+    if(scroll_cache_active==active)return;
+    scroll_cache_active=active;
+    for(uint8_t i=0;i<widget_n;i++){
+        mira_scroll_tile_t *tile=&scroll_tiles[i];
+        if(!tile->ready||!tile->image||!tile->card)continue;
+        if(active){
+            int32_t edge=((int32_t)tile->dsc.header.w-
+                          lv_obj_get_width(tile->card))/2;
+            lv_obj_set_pos(tile->image,lv_obj_get_x(tile->card)-edge,
+                                       lv_obj_get_y(tile->card)-edge);
+            lv_obj_remove_flag(tile->image,LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_style_opa(tile->card,LV_OPA_TRANSP,0);
+        }else{
+            lv_obj_set_style_opa(tile->card,LV_OPA_COVER,0);
+            lv_obj_add_flag(tile->image,LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+static void scroll_cache_reset(void){
+    scroll_cache_activate(false);
+    for(uint8_t i=0;i<MAX_WIDGETS;i++){
+        mira_scroll_tile_t *t=&scroll_tiles[i];
+        if(t->image){
+            lv_image_set_src(t->image,NULL);
+            lv_obj_delete(t->image);
+        }
+        if(t->pixels)heap_caps_free(t->pixels);
+        memset(t,0,sizeof(*t));
+    }
+    scroll_cache_bytes=0;
+    scroll_last_build_ms=0;
+}
+static void scroll_cache_invalidate(uint8_t index){
+    if(index<MAX_WIDGETS)scroll_tiles[index].dirty=true;
+}
+static void scroll_cache_on_move(lv_event_t *event){
+    if(lv_event_get_code(event)!=LV_EVENT_SCROLL||display_sleeping)return;
+    scroll_last_move_ms=lv_tick_get();
+    scroll_cache_activate(true);
+}
+static void scroll_cache_prepare(uint8_t idx){
+    mira_widget_t *widget=&widgets[idx];
+    mira_scroll_tile_t *t=&scroll_tiles[idx];
+    if(strcmp(widget->type,"info")||!widget->card||
+       lv_obj_get_parent(widget->card)==pages[3]||t->disabled||
+       (t->ready&&!t->dirty))return;
+    lv_obj_t *card_obj=widget->card;
+    lv_obj_update_layout(card_obj);
+    uint32_t need_alpha=lv_snapshot_buf_size_needed(card_obj,LV_COLOR_FORMAT_ARGB8888);
+    uint32_t need_rgb=lv_snapshot_buf_size_needed(card_obj,LV_COLOR_FORMAT_RGB565);
+    if(!need_alpha||!need_rgb||need_alpha>480u*1024u||
+       need_rgb>320u*1024u){t->disabled=true;return;}
+    if(t->ready){
+        if(t->image){lv_image_set_src(t->image,NULL);lv_obj_delete(t->image);}
+        if(t->pixels)heap_caps_free(t->pixels);
+        scroll_cache_bytes-=t->bytes;
+        t->image=NULL;t->pixels=NULL;t->bytes=0;t->ready=false;
+    }
+    if(scroll_cache_bytes+need_rgb>MIRA_SCROLL_CACHE_BUDGET||
+       heap_caps_get_free_size(MALLOC_CAP_SPIRAM)<
+           need_alpha+need_rgb+256u*1024u){t->disabled=true;return;}
+    uint8_t *opaque=heap_caps_malloc(need_rgb,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    uint8_t *alpha=heap_caps_malloc(need_alpha,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!opaque||!alpha){
+        if(opaque)heap_caps_free(opaque);
+        if(alpha)heap_caps_free(alpha);
+        t->disabled=true;return;
+    }
+    lv_image_dsc_t snapshot={0};
+    lv_result_t result=lv_snapshot_take_to_buf(card_obj,LV_COLOR_FORMAT_ARGB8888,
+                                              &snapshot,alpha,need_alpha);
+    if(result!=LV_RESULT_OK||snapshot.header.cf!=LV_COLOR_FORMAT_ARGB8888||
+       !snapshot.header.w||!snapshot.header.h||
+       (uint64_t)snapshot.header.w*snapshot.header.h*4u>need_alpha||
+       (uint64_t)snapshot.header.w*snapshot.header.h*2u>need_rgb){
+        heap_caps_free(alpha);heap_caps_free(opaque);
+        t->disabled=true;return;
+    }
+    const uint32_t background=lv_color_to_u32(bg_c())&0xffffffu;
+    const uint32_t pixels=(uint32_t)snapshot.header.w*snapshot.header.h;
+    uint16_t *out=(uint16_t *)opaque;
+    for(uint32_t n=0;n<pixels;n++){
+        const uint8_t *pixel=alpha+n*4u;
+        // LVGL ARGB8888 is BGRA in memory on the ESP32-S3 (little endian).
+        uint32_t opacity=pixel[3];
+        uint32_t r=((uint32_t)pixel[2]*opacity+
+                   ((background>>16)&255u)*(255u-opacity)+127u)/255u;
+        uint32_t g=((uint32_t)pixel[1]*opacity+
+                   ((background>>8)&255u)*(255u-opacity)+127u)/255u;
+        uint32_t b=((uint32_t)pixel[0]*opacity+
+                    (background&255u)*(255u-opacity)+127u)/255u;
+        out[n]=(uint16_t)(((r>>3)<<11)|((g>>2)<<5)|(b>>3));
+    }
+    heap_caps_free(alpha);
+    t->pixels=opaque;
+    t->bytes=need_rgb;
+    t->card=card_obj;
+    t->dsc=snapshot;
+    t->dsc.header.cf=LV_COLOR_FORMAT_RGB565;
+    t->dsc.data=opaque;
+    t->dsc.data_size=need_rgb;
+    t->image=lv_image_create(lv_obj_get_parent(card_obj));
+    if(!t->image){
+        heap_caps_free(opaque);
+        memset(t,0,sizeof(*t));
+        return;
+    }
+    lv_obj_add_flag(t->image,LV_OBJ_FLAG_IGNORE_LAYOUT);
+    lv_obj_remove_flag(t->image,LV_OBJ_FLAG_CLICKABLE|LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(t->image,LV_OBJ_FLAG_HIDDEN);
+    lv_image_set_src(t->image,&t->dsc);
+    const int32_t edge=((int32_t)snapshot.header.w-lv_obj_get_width(card_obj))/2;
+    lv_obj_set_pos(t->image,lv_obj_get_x(card_obj)-edge,
+                            lv_obj_get_y(card_obj)-edge);
+    t->ready=true;
+    t->dirty=false;
+    scroll_cache_bytes+=need_rgb;
+}
+static void scroll_cache_service(uint32_t now){
+    if(scroll_cache_active&&now-scroll_last_move_ms>=380u)
+        scroll_cache_activate(false);
+    if(scroll_cache_active||display_sleeping||!widget_n||
+       now-last_user_touch_ms<1200u||
+       (scroll_last_move_ms&&now-scroll_last_move_ms<850u)||
+       now-scroll_last_build_ms<150u)return;
+    scroll_last_build_ms=now;
+    // Build ONE tile per call; never block the normal 10-15fps UI loop by
+    // rasterizing all cards in one pass.
+    for(uint8_t i=0;i<widget_n;i++){
+        mira_scroll_tile_t *t=&scroll_tiles[i];
+        if(!strcmp(widgets[i].type,"info")&&widgets[i].card&&
+           !t->disabled&&(!t->ready||t->dirty)){
+            scroll_cache_prepare(i);
+            break;
+        }
+    }
+}
 static void make_widget(const cJSON *o,int info_total,int *info_seen){
     if(widget_n>=MAX_WIDGETS){ESP_LOGW(TAG,"Widget capacity reached (%d)",MAX_WIDGETS);return;}
     const char *type=str(o,"type",""),*loc=str(o,"emplacement","accueil");
@@ -1682,6 +1838,7 @@ static void build_config(void){
             return;
         }
     }
+    scroll_cache_reset(); // release every LVGL image reference BEFORE card deletion
     widget_n=0;clock_text=NULL;date_text=NULL;clock_status_text=NULL;widget_count=0;
     for(int i=0;i<6;i++)if(i!=3)lv_obj_clean(pages[i]);
     int home_info=0,seen=0;
@@ -1929,6 +2086,8 @@ void mira_full_ui_create(lv_display_t *disp){
         } else make_flex(pages[i],LV_FLEX_FLOW_COLUMN,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_CENTER);
         lv_obj_set_scroll_dir(pages[i],LV_DIR_VER);
         lv_obj_set_scrollbar_mode(pages[i],LV_SCROLLBAR_MODE_OFF);
+        if(i==0||i==1||i==2)
+            lv_obj_add_event_cb(pages[i],scroll_cache_on_move,LV_EVENT_SCROLL,NULL);
         if(i)lv_obj_add_flag(pages[i],LV_OBJ_FLAG_HIDDEN);
     }
     nav=lv_obj_create(screen);
@@ -2337,7 +2496,10 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
             const char *shown=lv_label_get_text(w->value_label);
             if(!shown||strcmp(shown,display)){
                 lv_label_set_text(w->value_label,display);
-                if(!strcmp(w->type,"info"))mira_fit_info_value(w->value_label,w->card);
+                if(!strcmp(w->type,"info")){
+                    mira_fit_info_value(w->value_label,w->card);
+                    scroll_cache_invalidate((uint8_t)(w-widgets));
+                }
             }
         }
         suppress_events=false;
@@ -2378,6 +2540,7 @@ void mira_full_ui_tick(void){
     static uint32_t diag_last_tick;
     uint32_t now_tick=lv_tick_get();
     camera_poll_on_lvgl_task(now_tick);
+    scroll_cache_service(now_tick);
     // Original Mira's 60-second auto return: use verified GT911 physical
     // press counter, not LVGL redraw/Info traffic (which is not user activity).
     mira_display_stats_t last_touch={0};
