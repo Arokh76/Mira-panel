@@ -33,6 +33,7 @@
 #include "mira_camera.h"
 #include "mira_setup_access.h"
 #include "mira_beta_setup.h"
+#include "mira_beta_web.h"
 
 #define MIRA_WIDTH 800
 #define MIRA_HEIGHT 480
@@ -2258,7 +2259,10 @@ bool mira_full_storage_init(void){
     else ESP_LOGI(TAG,"Existing Mira SPIFFS mounted without formatting");
     return spiffs_ready;
 }
+// The native beta home page owns the normal URL, not this experiment screen.
 static esp_err_t page_get(httpd_req_t *req){
+    if(!mira_beta_setup_unconfigured() && !mira_beta_web_authorized(req))
+        return ESP_FAIL;
     const char *html=
         "<!doctype html><html lang='fr'><meta name='viewport' content='width=device-width,initial-scale=1'>"
         "<title>Mira LVGL 9.6 - Import JSON</title><h2>Mira LVGL 9.6 / Waveshare 4.3C</h2>"
@@ -2291,6 +2295,12 @@ static esp_err_t page_get(httpd_req_t *req){
         "async function configureMqtt(){let r=await fetch('/mira/mqtt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({host:document.getElementById('mhost').value,port:Number(document.getElementById('mport').value),screen:document.getElementById('mname').value,username:document.getElementById('muser').value,password:document.getElementById('mpass').value,enabled:document.getElementById('menabled').checked})});document.getElementById('mqttresult').textContent=await r.text();}</script></html>";
     httpd_resp_set_type(req,"text/html; charset=utf-8");
     return httpd_resp_send(req,html,HTTPD_RESP_USE_STRLEN);
+}
+static esp_err_t legacy_mira_get(httpd_req_t *req){
+    httpd_resp_set_status(req,"302 Found");
+    httpd_resp_set_hdr(req,"Location",mira_beta_setup_unconfigured()?"/load":"/");
+    httpd_resp_set_hdr(req,"Cache-Control","no-store");
+    return httpd_resp_sendstr(req,"Mira Panel");
 }
 static esp_err_t import_post(httpd_req_t *req){
     if(!mira_setup_require_ap(req))return ESP_FAIL;
@@ -2328,6 +2338,9 @@ static esp_err_t import_post(httpd_req_t *req){
 /* HTTP-safe input, e.g. POST /mira/state {"name":"Salon","value":"22.5"}.
    Never invoke LVGL in the HTTP server task and never send a Jeedom action. */
 static esp_err_t state_post(httpd_req_t *req){
+    // Experimental passive-state injection is not a public Jeedom endpoint.
+    // Real Jeedom events use the authenticated legacy /updatenr API.
+    if(!mira_beta_web_authorized(req))return ESP_FAIL;
     if(!state_queue){httpd_resp_set_status(req,"503 Service Unavailable");httpd_resp_sendstr(req,"State queue unavailable");return ESP_FAIL;}
     if(req->content_len<2||req->content_len>512){
         httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"JSON state payload must be 2..512 bytes");
@@ -2370,10 +2383,12 @@ static esp_err_t state_post(httpd_req_t *req){
 }
 
 void mira_full_register_http(httpd_handle_t server){
-    httpd_uri_t a={.uri="/mira",.method=HTTP_GET,.handler=page_get};
+    httpd_uri_t a={.uri="/recovery/mira",.method=HTTP_GET,.handler=page_get};
+    httpd_uri_t legacy={.uri="/mira",.method=HTTP_GET,.handler=legacy_mira_get};
     httpd_uri_t b={.uri="/mira/import",.method=HTTP_POST,.handler=import_post};
     httpd_uri_t c={.uri="/mira/state",.method=HTTP_POST,.handler=state_post};
     ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_register_uri_handler(server,&a));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_register_uri_handler(server,&legacy));
     ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_register_uri_handler(server,&b));
     ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_register_uri_handler(server,&c));
 }
