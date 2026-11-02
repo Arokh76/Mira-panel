@@ -5,4 +5,5 @@
 #include "esp_http_server.h"
 // Returns true when an unconfigured Mira request was handled.
 bool mira_beta_setup_root(httpd_req_t *req);
+bool mira_beta_setup_unconfigured(void);
 esp_err_t mira_beta_setup_register(httpd_handle_t server);
