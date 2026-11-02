@@ -46,6 +46,16 @@
 > sur une tâche dédiée, actions et volume, avec transport de l'URL `__cover`
 > jusqu'à 768 octets sans augmenter la file des autres Infos.
 >
+> **Complément LVGL 9 / Infos** : corrections du pas mémoire ARGB8888
+> vers RGB565 (stride, taille des données et lignes alignées), exclusion
+> des cartes hors écran du cache, reprise sur pression PSRAM temporaire,
+> affichage immédiat des nouvelles valeurs Jeedom durant un défilement.
+> Portage des pictogrammes bêta (température, hygrométrie, pression,
+> éclairage, porte, énergie/prise), `labelMode=auto/text/icon/both`,
+> et des variantes Info `hero/value/compact/wide`. Horodatage `MAJ hh:mm`
+> identique à la bêta. Ces changements restent sous validation CI
+> et devront être comparés sur l'écran réel.
+>
 > **Attention** : la compilation d'un lot précédent de cette parité a
 > réussi, mais seule la CI sur le SHA final confirme l'absence d'erreur de
 > build de l'ensemble. La comparaison visuelle et l'interaction sur écran
