@@ -45,6 +45,7 @@ static const char *TAG="mira-full-43";
 static const char *JSON_PATH="/spiffs/miralvgl.json";
 static volatile bool reload_pending=false;
 static volatile bool settings_reload_pending=false;
+static volatile bool theme_reload_pending=false;
 void mira_full_request_settings_reload(void){settings_reload_pending=true;}
 void mira_full_request_reload(void){ reload_pending=true; }
 // Strict one-way UI state ingestion. Only the LVGL task can touch the widget tree.
@@ -1666,6 +1667,11 @@ static void theme_changed(lv_event_t *event){
     if(selected>2||selected==ui_theme)return;
     ui_theme=(uint8_t)selected;
     save_sleep_setting_u8("theme",ui_theme);
+    // Never delete a dropdown or its parent while LVGL is dispatching its
+    // VALUE_CHANGED event. Apply/rebuild in the next LVGL tick instead.
+    theme_reload_pending=true;
+}
+static void theme_apply_on_lvgl_task(void){
     lv_obj_set_style_bg_color(screen,bg_c(),0);
     lv_obj_set_style_bg_grad_color(screen,bg_c(),0);
     for(size_t i=0;i<6;i++){
@@ -1674,7 +1680,7 @@ static void theme_changed(lv_event_t *event){
     }
     lv_obj_set_style_bg_color(nav,nav_c(),0);
     lv_obj_set_style_border_color(nav,border_c(),0);
-    if(page_picker) {
+    if(page_picker){
         lv_obj_set_style_bg_color(page_picker,panel_c(),0);
         if(picker_card)lv_obj_set_style_bg_color(picker_card,panel2_c(),0);
     }
@@ -1683,6 +1689,7 @@ static void theme_changed(lv_event_t *event){
     if(pages[3]){lv_obj_clean(pages[3]);settings();}
     show_page(current);
 }
+
 static void settings(void){
     lv_obj_t *head=card(3,640,40);
     lv_obj_t *h=label(head,"Paramètres",0xF3F6F7,&mira_font_fr_16);
@@ -2517,6 +2524,11 @@ static void apply_pending_states(void){
 
 void mira_full_ui_tick(void){
     poll_navigation_settings();
+    if(theme_reload_pending){
+        theme_reload_pending=false;
+        camera_close();
+        theme_apply_on_lvgl_task();
+    }
     if(reload_pending){reload_pending=false;camera_close();build_config();}
     if(settings_reload_pending){
         settings_reload_pending=false;
