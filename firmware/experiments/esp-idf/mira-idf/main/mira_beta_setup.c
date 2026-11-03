@@ -133,30 +133,30 @@ static bool parse_form_param(const char *body,const char *key,char *dest,size_t 
     dest[out]=0;
     return true;
 }
-/* First-install access is necessarily through the recovery AP when the
- * station interface has no IP address and no saved SSID. The generic
- * HTTP socket address check is too strict on some ESP-IDF 5.5/LwIP
- * connections; it rejected the original local-key POST with HTTP 403.
+/* The original firmware-beta first-run server was exposed only by the
+ * dedicated Mira setup AP. In ESP-IDF 5.5 some HTTP client socket addresses
+ * are not reported on the interface used for reception; strict socket-only
+ * checks wrongly reject /save?config=key (403) even in first setup.
  *
- * This exception is deliberately ONLY for /load and /save during first-run.
- * Production configuration, recovery OTA, and other sensitive routes retain
- * mira_setup_require_ap() and their existing authentication checks.
+ * During first-run ONLY, accept setup routes if the softAP is enabled and
+ * the station interface has no assigned IP. No routed STA/LAN interface is
+ * reachable in this state. Keep the normal AP authorization for every other
+ * route; production and OTA authorization are unchanged.
  */
 static bool first_run_ap_access(httpd_req_t *req){
     if(mira_setup_ap_client(req))return true;
-
-    /* No configured station means there is no independent LAN path into the
-     * panel. Require an IP-less STA netif as well, to prevent this fallback
-     * from ever accepting a request arriving via a connected LAN interface.
-     */
-    wifi_config_t sta={0};
+    wifi_mode_t mode=WIFI_MODE_NULL;
     esp_netif_t *sta_netif=esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
     esp_netif_ip_info_t sta_ip={0};
-    if(esp_wifi_get_config(WIFI_IF_STA,&sta)==ESP_OK &&
-       !sta.sta.ssid[0] && sta_netif &&
+    if(esp_wifi_get_mode(&mode)==ESP_OK &&
+       (mode==WIFI_MODE_AP||mode==WIFI_MODE_APSTA) &&
+       sta_netif &&
        esp_netif_get_ip_info(sta_netif,&sta_ip)==ESP_OK &&
        sta_ip.ip.addr==0){
-        ESP_LOGW(TAG,"First-run HTTP accepted on isolated AP (no STA profile or IP)");
+        /* A previously stored STA SSID does not mean LAN access is live.
+         * The original beta resets STA when opening its captive portal.
+         */
+        ESP_LOGW(TAG,"First-run HTTP allowed via isolated Mira AP (STA has no IP)");
         return true;
     }
     return mira_setup_require_ap(req);
