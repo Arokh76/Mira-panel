@@ -90,11 +90,11 @@ print("PASS beta network list, edit, activation and removal routes")
 print("PASS beta Wi-Fi AP and reset safety contracts")
 # The first physical Waveshare 4.3C setup entered HTTP 403 on
 # /save?config=key despite access via the recovery AP. The initial wizard
-# must still be reachable when the STA has no SSID AND no assigned IP;
+# must still be reachable when the softAP is active and STA has no IP;
 # this must not weaken protected production routes or recovery OTA.
 assert "static bool first_run_ap_access(httpd_req_t *req)" in setup
-assert 'esp_wifi_get_config(WIFI_IF_STA,&sta)==ESP_OK' in setup
-assert '!sta.sta.ssid[0]' in setup
+assert 'esp_wifi_get_mode(&mode)==ESP_OK' in setup
+assert '(mode==WIFI_MODE_AP||mode==WIFI_MODE_APSTA)' in setup
 assert 'esp_netif_get_ip_info(sta_netif,&sta_ip)==ESP_OK' in setup
 assert 'sta_ip.ip.addr==0' in setup
 assert setup.count("if(!first_run_ap_access(req))return ESP_FAIL;")==2
