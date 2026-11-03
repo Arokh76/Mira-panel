@@ -8,6 +8,7 @@
 #include "nvs.h"
 #include "cJSON.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -20,6 +21,9 @@ static bool enabled;
 static char host[128], username[64], secret[96], screen_name[48];
 static uint16_t port=1883;
 static char state_prefix[112], action_prefix[112],display_prefix[112];
+static char last_display_signature[160];
+static int64_t last_display_check_us;
+
 
 static void refresh_prefixes(void) {
     snprintf(state_prefix,sizeof(state_prefix),"mira/%s/States/",screen_name);
@@ -83,6 +87,10 @@ static void mqtt_event(void *arg, esp_event_base_t base,int32_t event_id,void *e
     esp_mqtt_event_handle_t e=(esp_mqtt_event_handle_t)event_data;
     if(event_id==MQTT_EVENT_CONNECTED) {
         connected=true;
+        // Request full retained-state publication by the next LVGL UI tick.
+        // MQTT callbacks never read LVGL-owned display fields.
+        last_display_signature[0]=0;
+        last_display_check_us=0;
         char subscription[120];
         snprintf(subscription,sizeof(subscription),"%s#",state_prefix);
         esp_mqtt_client_subscribe(client,subscription,0);
@@ -219,6 +227,60 @@ esp_err_t mira_mqtt_init(void) {
     ESP_LOGI(TAG,"Native MQTT %s (disabled until provisioned)",enabled?"enabled":"disabled");
     return ESP_OK;
 }
+/* Exact firmware-beta topics: mira/<screen>/Display/<key>/state.
+ * Retained, read-only snapshots. MQTT callbacks do not enter LVGL.
+ * Publish on connect and on actual changes (checked at most once / 15 s),
+ * without forwarding a passive state as a command.
+ */
+void mira_mqtt_publish_display_states(const mira_mqtt_display_state_t *state){
+    if(!state||!enabled||!connected||!client)return;
+    const int64_t now=esp_timer_get_time();
+    const bool first=last_display_signature[0]==0;
+    if(!first && now-last_display_check_us<15000000LL)return;
+    last_display_check_us=now;
+    char signature[160];
+    const int n=snprintf(signature,sizeof(signature),
+        "%u|%u|%u|%lu|%u|%s|%s|%u|%u|%s|%s",
+        (unsigned)state->day,(unsigned)state->night,
+        (unsigned)state->sleep_brightness,
+        (unsigned long)state->sleep_timeout,
+        (unsigned)state->night_auto,state->night_start,state->night_end,
+        (unsigned)state->clock_sleep,(unsigned)state->brightness,
+        state->sleeping?"sleep":"awake",state->night_active?"night":"day");
+    if(n<0||n>=(int)sizeof(signature))return;
+    if(!first&&!strcmp(signature,last_display_signature))return;
+    static const char *const names[]={
+        "day","night","sleep_brightness","sleep_timeout","night_auto",
+        "night_start","night_end","clock_sleep","brightness","mode","state"
+    };
+    char values[11][24]={0};
+    snprintf(values[0],24,"%u",(unsigned)state->day);
+    snprintf(values[1],24,"%u",(unsigned)state->night);
+    snprintf(values[2],24,"%u",(unsigned)state->sleep_brightness);
+    snprintf(values[3],24,"%lu",(unsigned long)state->sleep_timeout);
+    snprintf(values[4],24,"%u",(unsigned)state->night_auto);
+    snprintf(values[5],24,"%s",state->night_start);
+    snprintf(values[6],24,"%s",state->night_end);
+    snprintf(values[7],24,"%u",(unsigned)state->clock_sleep);
+    snprintf(values[8],24,"%u",(unsigned)state->brightness);
+    snprintf(values[9],24,"%s",state->night_active?"night":"day");
+    snprintf(values[10],24,"%s",state->sleeping?"sleep":"awake");
+    bool sent=true;
+    for(size_t i=0;i<sizeof(names)/sizeof(names[0]);i++){
+        char topic[160];
+        const int t=snprintf(topic,sizeof(topic),"%s%s/state",display_prefix,names[i]);
+        if(t<0||t>=(int)sizeof(topic)||
+           esp_mqtt_client_enqueue(client,topic,values[i],0,0,1,true)<0){
+            sent=false;
+            break;
+        }
+    }
+    // A partial failure will trigger retry rather than permanently storing
+    // an incomplete display state snapshot.
+    if(sent)snprintf(last_display_signature,sizeof(last_display_signature),
+                      "%s",signature);
+}
+
 bool mira_mqtt_publish_action(const char *name,const char *value) {
     if(!client||!connected||!enabled||!name||!value)return false;
     if(strlen(name)>95||strlen(value)>159)return false;
