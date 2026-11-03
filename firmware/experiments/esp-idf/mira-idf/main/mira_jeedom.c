@@ -14,6 +14,7 @@
 #include <string.h>
 #include <strings.h>
 #include <ctype.h>
+#include <math.h>
 #include <inttypes.h>
 #include "cJSON.h"
 #include "nvs.h"
