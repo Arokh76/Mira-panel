@@ -88,6 +88,19 @@ assert 'mira_beta_networks_remove(id)' in handlers and 'mira_beta_networks_activ
 assert 'mira_beta_known_networks_html' in handlers and 'mira_beta_edit_network_html' in handlers
 print("PASS beta network list, edit, activation and removal routes")
 print("PASS beta Wi-Fi AP and reset safety contracts")
+# First real 4.3C USB boot crash, 2026-11-03:
+# InstrFetchProhibited PC=0x00000008 immediately after captive DNS was logged.
+# Recovery's 16-profile array alone occupied 3456 bytes on the small default
+# ESP-IDF main task stack. Keep it on heap and reserve sufficient startup stack.
+config = (idf.parent / "sdkconfig.defaults").read_text(encoding="utf-8")
+assert "CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192" in config
+assert "mira_beta_network_t profiles[MIRA_NET_MAX]" not in recovery
+assert "mira_beta_network_t *profiles=calloc(MIRA_NET_MAX,sizeof(*profiles))" in recovery
+assert "free(profiles);" in recovery
+assert 'Startup stack available after DNS:' in recovery
+assert 'Startup stack available before HTTP:' in recovery
+print("PASS first-boot stack overflow regression guards")
+
 # Original beta LVGL programming is a staged sequence, not a write on
 # every /addlistlvgl. All six routes must operate on the same pending list.
 for name in ("addlistlvgl", "removelistlvgl", "savelistlvgl",
