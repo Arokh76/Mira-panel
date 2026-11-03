@@ -39,7 +39,8 @@
 
 static const char *TAG="mira-idf-jeedom";
 // Legacy HTTP is the default. MQTT is an explicitly selected advanced mode.
-static volatile bool jeedom_mode_enabled=true;
+// Beta GetParamBool("Jeedom") defaults to false when unset.
+static volatile bool jeedom_mode_enabled=false;
 bool mira_jeedom_actions_enabled(void){return jeedom_mode_enabled;}
 /* Only one event leaves the screen. If MQTT is not available, execute
  * the configured beta GenericCmd URL asynchronously (never on LVGL).
@@ -2155,7 +2156,7 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
     if(nvs_ok)nvs_close(map);
     if(index)cJSON_Delete(index);
     nvs_handle_t cfg;
-    bool enabled=true; // HTTP/Jeedom is the factory-default Mira protocol.
+    bool enabled=false; // Match beta GetParamBool("Jeedom") when absent.
     if(nvs_open("mira_idf_jeed",NVS_READONLY,&cfg)==ESP_OK){
         char v[8]={0};
         if(nvs_read_string(cfg,"Jeedom",v,sizeof(v)))enabled=strcmp(v,"0")!=0;
