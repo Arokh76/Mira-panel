@@ -276,3 +276,16 @@ assert 'mira_beta_web_authorized(req)' in update
 assert 'return httpd_resp_send_chunk(req,NULL,0);' in jeedom.split('esp_err_t mira_jeedom_render_http_reference',1)[1].split('static esp_err_t getlvgl',1)[0]
 print("PASS beta HTTP references, native update checker and authenticated legacy GET command routing")
 print("PASS beta page/control route wiring")
+
+# Hardware parity: the Arduino 4.3C registers multi-action IDs but does not
+# draw the GPIO-only WT32 multi-action control; don't create a fake touch tile.
+assert 'if(!strcmp(type,"multiaction"))return;' in full
+assert 'MIRA_TARGET_WAVESHARE_43C' in beta_ui
+assert 'WT32MultiVisible(name)' in beta_ui
+assert 'append_action(arr,&id,"button",compound);' in jeedom
+# Composite Jeedom identity must preserve the beta's media/weather metadata.
+assert 'if(a && (n==4||n==5))cJSON_AddStringToObject(a,"unit","%");' in jeedom
+assert 'cJSON_AddNumberToObject(a,"max",11);' in jeedom
+assert 'cJSON_AddNumberToObject(a,"value",40);' in jeedom
+assert 'if(weather)cJSON_AddStringToObject(weather,"unit","°C");' in jeedom
+print("PASS Waveshare-only hidden multiactions and Jeedom media/weather index parity")
