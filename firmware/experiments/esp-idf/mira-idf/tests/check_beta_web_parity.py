@@ -88,6 +88,21 @@ assert 'mira_beta_networks_remove(id)' in handlers and 'mira_beta_networks_activ
 assert 'mira_beta_known_networks_html' in handlers and 'mira_beta_edit_network_html' in handlers
 print("PASS beta network list, edit, activation and removal routes")
 print("PASS beta Wi-Fi AP and reset safety contracts")
+# The first physical Waveshare 4.3C setup entered HTTP 403 on
+# /save?config=key despite access via the recovery AP. The initial wizard
+# must still be reachable when the STA has no SSID AND no assigned IP;
+# this must not weaken protected production routes or recovery OTA.
+assert "static bool first_run_ap_access(httpd_req_t *req)" in setup
+assert 'esp_wifi_get_config(WIFI_IF_STA,&sta)==ESP_OK' in setup
+assert '!sta.sta.ssid[0]' in setup
+assert 'esp_netif_get_ip_info(sta_netif,&sta_ip)==ESP_OK' in setup
+assert 'sta_ip.ip.addr==0' in setup
+assert setup.count("if(!first_run_ap_access(req))return ESP_FAIL;")==2
+assert 'if(!mira_setup_require_ap(req))return ESP_FAIL;' in recovery
+assert 'mira_setup_require_ap(req)' in (idf / "mira_beta_ota.c").read_text(encoding="utf-8")
+assert 'httpd_resp_set_status(req,"303 See Other")' in setup
+assert 'httpd_resp_set_hdr(req,"Location","/load?nav=wifisr")' in setup
+print("PASS first-install AP-only key to Wi-Fi route, production and OTA access unchanged")
 # First real 4.3C USB boot crash, 2026-11-03:
 # InstrFetchProhibited PC=0x00000008 immediately after captive DNS was logged.
 # Recovery's 16-profile array alone occupied 3456 bytes on the small default
