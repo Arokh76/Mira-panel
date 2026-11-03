@@ -325,3 +325,20 @@ assert 'if(lo>60)lo=60;' in jeedom
 assert 'if(hi>80)hi=80;' in jeedom
 assert 'if(id==before_modes)add_choices(arr,&id,compound,"Confort");' in jeedom
 print("PASS beta Jeedom info/range/thermostat index registration parity")
+
+# The original MiraMqtt publishes 11 retained Display/<key>/state
+# channels immediately after connection and again on settings changes.
+# Native IDF must not omit the outbound display feedback just because the
+# inbound /set subscriptions are present.
+assert 'void mira_mqtt_publish_display_states(const mira_mqtt_display_state_t *state)' in mqtt
+assert 'last_display_signature[0]=0;' in mqtt
+assert 'now-last_display_check_us<15000000LL' in mqtt
+assert 'esp_mqtt_client_enqueue(client,topic,values[i],0,0,1,true)' in mqtt
+for display_key in ("day","night","sleep_brightness","sleep_timeout",
+                    "night_auto","night_start","night_end","clock_sleep",
+                    "brightness","mode","state"):
+    assert '"'+display_key+'"' in mqtt
+assert 'mira_mqtt_publish_display_states(&status);' in full
+assert 'status.brightness=brightness==0?0:' in full
+assert 'mira_mqtt_display_state_t' in (idf / "mira_mqtt.h").read_text(encoding="utf-8")
+print("PASS beta retained MQTT display state publication on connect and change")
