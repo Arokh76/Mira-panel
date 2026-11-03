@@ -104,6 +104,14 @@ assert 'ESP_LOGI(TAG,"Mira beta setup step 1/2: local screen key saved");\n     
 assert 'return serve_wifi_page(req);' in setup.split('if(!strcmp(config,"key")){',1)[1].split('if(!strcmp(config,"wifi")){',1)[0]
 assert 'httpd_resp_set_status(req,"303 See Other")' not in setup
 print("PASS first-install beta direct key-to-Wi-Fi render, production and OTA access unchanged")
+# The direct-served key/Wi-Fi/saved HTML templates are not fed through the
+# percent-unescaping template renderer used by other beta pages.
+setup_pages=(idf / "mira_beta_setup_pages.h").read_text(encoding="utf-8")
+assert '%%' not in setup_pages, "Direct-served setup CSS must use single literal %"
+assert 'nvs_set_u8(nv,"ap_enabled",1)' in setup
+assert 'esp_restart();' in setup.split('if(!strcmp(nav,"reboot")',1)[1].split('static esp_err_t save_post',1)[0]
+assert "Redémarrage de l'appareil en point d'accès Mira" in setup
+print("PASS original setup CSS percentages and keep-AP reboot semantics")
 # First real 4.3C USB boot crash, 2026-11-03:
 # InstrFetchProhibited PC=0x00000008 immediately after captive DNS was logged.
 # Recovery's 16-profile array alone occupied 3456 bytes on the small default
