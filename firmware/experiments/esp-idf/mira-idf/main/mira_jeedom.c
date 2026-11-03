@@ -826,7 +826,9 @@ esp_err_t mira_jeedom_render_http_reference(httpd_req_t *req){
     cJSON *index=raw?index_from_config(raw):NULL;
     free(raw);
     if(!index){
-        return beta_html(req,"<p>Aucune programmation Jeedom disponible.</p></main></html>");
+        if(beta_html(req,"<p>Aucune programmation Jeedom disponible.</p></main></html>")!=ESP_OK)
+            return ESP_FAIL;
+        return httpd_resp_send_chunk(req,NULL,0);
     }
     const cJSON *arr=cJSON_GetObjectItemCaseSensitive(index,"actions");
     const cJSON *item=NULL;
@@ -873,7 +875,8 @@ esp_err_t mira_jeedom_render_http_reference(httpd_req_t *req){
     if(status!=ESP_OK)return status;
     if(!entries&&beta_html(req,"<p>Aucune commande HTTP programmée.</p>")!=ESP_OK)
         return ESP_FAIL;
-    return beta_html(req,"</main></html>");
+    if(beta_html(req,"</main></html>")!=ESP_OK)return ESP_FAIL;
+    return httpd_resp_send_chunk(req,NULL,0);
 }
 
 static esp_err_t getlvgl(httpd_req_t *req) {
