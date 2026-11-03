@@ -342,3 +342,25 @@ assert 'mira_mqtt_publish_display_states(&status);' in full
 assert 'status.brightness=brightness==0?0:' in full
 assert 'mira_mqtt_display_state_t' in (idf / "mira_mqtt.h").read_text(encoding="utf-8")
 print("PASS beta retained MQTT display state publication on connect and change")
+
+# Arduino MiraPanelServer::GenericCmd is a real fallback after HTTP/Jeedom
+# is disabled: Paramètres saves each widget URL with #value# substitution.
+# It must be queued on the HTTP worker, not silently sent only via MQTT.
+assert 'bool mira_generic_queue_local_action(const char *name,const char *type,' in jeedom
+assert 'static void send_generic_action(const mira_action_msg_t *msg)' in jeedom
+assert 'else if(!strcmp(action.type,"__generic"))send_generic_action(&action);' in jeedom
+assert 'mira_generic_queue_local_action(name,type,value)' in jeedom
+assert 'mira_other_transport(action_name,action_type,payload)' in jeedom
+assert 'mira_other_transport(name,type,value)' in jeedom
+assert 'if(mira_mqtt_publish_action(name,value))return true;' in jeedom
+assert 'if(!strcmp(type,"list")||!strcmp(type,"listbutton"))' in jeedom
+assert 'snprintf(command_value,sizeof(command_value),"%%23%02X%02X%02X"' in jeedom
+assert 'chunk=command_value;' in jeedom
+assert 'esp_http_client_perform(client)' in jeedom
+assert 'mira_other_transport_action(b->name,b->type,payload)' in full
+assert 'mira_other_transport_action(w->name,"listbutton",value)' in full
+assert 'mira_other_transport_action(command,(action>=3)?"range":"button",payload)' in full
+assert 'mira_format_hhmm(status.night_start,begin)' in full
+assert 'mira_format_hhmm(status.night_end,finish)' in full
+assert 'snprintf(status.night_start,sizeof(status.night_start)' not in full
+print("PASS beta asynchronous GenericCmd configured URL fallback and fixed-size HH:MM")
