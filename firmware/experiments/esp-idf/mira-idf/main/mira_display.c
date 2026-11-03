@@ -8,6 +8,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "driver/i2c_master.h"
 #include "driver/gpio.h"
 #include "esp_lcd_panel_rgb.h"
@@ -25,7 +26,8 @@ static const char *TAG = "mira-idf-rgb";
 static i2c_master_bus_handle_t i2c_bus;
 static i2c_master_dev_handle_t gt911;
 static i2c_master_dev_handle_t ioexp_device;
-static uint8_t ioexp_output_shadow=0xff;
+static uint8_t ioexp_output_shadow=0x3f;
+static SemaphoreHandle_t ioexp_lock;
 static bool touch_ready;
 static uint8_t touch_addr;
 static volatile uint32_t touch_reads;
@@ -224,28 +226,61 @@ static esp_err_t ioexp_write(i2c_master_dev_handle_t ioexp, uint8_t reg, uint8_t
 // policy. The 4.3C uses a CH32 I2C controller at 0x24; EXIO2 enables the lamp
 // and PWM register 0x05 dims it. No ESP32 LEDC/GPIO pin is used.
 // Do not use 7-inch CH422G brightness profiles here.
+/* Waveshare 4.3C isolated terminal mapping:
+ * CH32 / IO_EXTENSION 0x24: EXIO0=DI0, EXIO5=DI1,
+ * EXIO6=DO0, EXIO7=DO1.
+ * Register 0x02: 0=input, 1=output; register 0x03: output levels;
+ * register 0x04: input levels. Never repurpose LCD/touch EXIO1/2.
+ * Share one mutex and one output shadow with backlight writes.
+ */
+esp_err_t mira_display_io_read(bool *di0,bool *di1,bool *do0,bool *do1) {
+    if(!di0||!di1||!do0||!do1)return ESP_ERR_INVALID_ARG;
+    if(!ioexp_device||!ioexp_lock)return ESP_ERR_INVALID_STATE;
+    if(xSemaphoreTake(ioexp_lock,pdMS_TO_TICKS(160))!=pdTRUE)return ESP_ERR_TIMEOUT;
+    uint8_t register_addr=0x04,inputs=0;
+    esp_err_t err=i2c_master_transmit_receive(ioexp_device,&register_addr,1,
+                                               &inputs,1,80);
+    if(err==ESP_OK){
+        *di0=(inputs&(1u<<0))!=0;
+        *di1=(inputs&(1u<<5))!=0;
+        *do0=(ioexp_output_shadow&(1u<<6))!=0;
+        *do1=(ioexp_output_shadow&(1u<<7))!=0;
+    }
+    xSemaphoreGive(ioexp_lock);
+    return err;
+}
+esp_err_t mira_display_io_write(unsigned channel,bool level) {
+    if(channel>1)return ESP_ERR_INVALID_ARG;
+    if(!ioexp_device||!ioexp_lock)return ESP_ERR_INVALID_STATE;
+    if(xSemaphoreTake(ioexp_lock,pdMS_TO_TICKS(160))!=pdTRUE)return ESP_ERR_TIMEOUT;
+    const uint8_t bit=(uint8_t)(1u<<(6u+channel));
+    const uint8_t next=level?(uint8_t)(ioexp_output_shadow|bit):
+                             (uint8_t)(ioexp_output_shadow&~bit);
+    esp_err_t err=ioexp_write(ioexp_device,0x03,next);
+    if(err==ESP_OK)ioexp_output_shadow=next;
+    xSemaphoreGive(ioexp_lock);
+    return err;
+}
 esp_err_t mira_display_set_brightness(uint8_t raw) {
-    if(!ioexp_device)return ESP_ERR_INVALID_STATE;
-    if(raw==0){
-        const uint8_t next=ioexp_output_shadow & (uint8_t)~(1u<<2);
-        esp_err_t err=ioexp_write(ioexp_device,0x03,next);
-        if(err==ESP_OK)ioexp_output_shadow=next;
-        return err;
+    if(!ioexp_device||!ioexp_lock)return ESP_ERR_INVALID_STATE;
+    if(xSemaphoreTake(ioexp_lock,pdMS_TO_TICKS(160))!=pdTRUE)return ESP_ERR_TIMEOUT;
+    const uint8_t next=raw?(uint8_t)(ioexp_output_shadow|(1u<<2)):
+                           (uint8_t)(ioexp_output_shadow&~(1u<<2));
+    esp_err_t err=ioexp_write(ioexp_device,0x03,next);
+    if(err==ESP_OK)ioexp_output_shadow=next;
+    if(raw&&err==ESP_OK){
+        uint8_t percentage=1;
+        if(raw>30){
+            uint32_t value=1u+(((uint32_t)(raw-30)*99u+112u)/225u);
+            percentage=(uint8_t)(value>100u?100u:value);
+        }
+        // Existing validated Waveshare 4.3C inverted PWM policy unchanged.
+        const uint8_t pwm100=(uint8_t)(((100u-percentage)*80u+49u)/99u);
+        const uint8_t pwm8=(uint8_t)((pwm100*255u+50u)/100u);
+        err=ioexp_write(ioexp_device,0x05,pwm8);
     }
-    const uint8_t enabled=ioexp_output_shadow | (uint8_t)(1u<<2);
-    esp_err_t err=ioexp_write(ioexp_device,0x03,enabled);
-    if(err!=ESP_OK)return err;
-    ioexp_output_shadow=enabled;
-    uint8_t percentage=1;
-    if(raw>30){
-        uint32_t value=1u+(((uint32_t)(raw-30)*99u+112u)/225u);
-        percentage=(uint8_t)(value>100u?100u:value);
-    }
-    // Hardware duty is inverted on this panel: 100% brightness => PWM 0;
-    // clamp interactive minimum to the already tested Waveshare duty 80/100.
-    const uint8_t pwm100=(uint8_t)(((100u-percentage)*80u+49u)/99u);
-    const uint8_t pwm8=(uint8_t)((pwm100*255u+50u)/100u);
-    return ioexp_write(ioexp_device,0x05,pwm8);
+    xSemaphoreGive(ioexp_lock);
+    return err;
 }
 
 static void init_i2c(void) {
@@ -265,10 +300,14 @@ static void init_i2c(void) {
     };
     ESP_ERROR_CHECK(i2c_master_bus_add_device(i2c_bus, &ext_cfg, &ioexp_device));
 
-    // Configure IO0..IO7 outputs; our original 0xff keeps LCD/USB state
-    // identical to the last working no-bounce firmware.
-    ESP_ERROR_CHECK(ioexp_write(ioexp_device, 0x02, 0xff));
-    ESP_ERROR_CHECK(ioexp_write(ioexp_device, 0x03, 0xff));
+    // Vendor 04_isolation_io example explicitly clears bits EXIO0 and
+    // EXIO5 for DI0 and DI1 (0=input, 1=output). Preserve LCD/touch IOs.
+    // Hold DO0 and DO1 LOW at boot; never turn external outputs on by default.
+    ioexp_lock=xSemaphoreCreateMutex();
+    if(!ioexp_lock){ESP_LOGE(TAG,"CH32 I/O mutex unavailable");abort();}
+    ESP_ERROR_CHECK(ioexp_write(ioexp_device,0x03,0x3f));
+    ESP_ERROR_CHECK(ioexp_write(ioexp_device,0x02,0xde));
+    ioexp_output_shadow=0x3f;
 
     // Correct missing GT911 hard reset / address selection:
     // (1) EXIO1 low, (2) GPIO4 low => choose GT911 0x5d,
@@ -282,11 +321,11 @@ static void init_i2c(void) {
     };
     ESP_ERROR_CHECK(gpio_config(&irq_cfg));
     ESP_ERROR_CHECK(gpio_set_level(GPIO_NUM_4, 0));
-    ESP_ERROR_CHECK(ioexp_write(ioexp_device, 0x03, 0xfd)); // EXIO1 low; EXIO2 backlight stays on
+    ESP_ERROR_CHECK(ioexp_write(ioexp_device, 0x03, 0x3d)); // EXIO1 low; EXIO2 backlight stays on
     vTaskDelay(pdMS_TO_TICKS(100));
     ESP_ERROR_CHECK(gpio_set_level(GPIO_NUM_4, 0));
     vTaskDelay(pdMS_TO_TICKS(100));
-    ESP_ERROR_CHECK(ioexp_write(ioexp_device, 0x03, 0xff)); // EXIO1 high => GT911 exits reset
+    ESP_ERROR_CHECK(ioexp_write(ioexp_device, 0x03, 0x3f)); // EXIO1 high => GT911 exits reset
     vTaskDelay(pdMS_TO_TICKS(200));
 
     // GPIO4 is GT911 interrupt input during operation. Poll coordinates using I2C.
