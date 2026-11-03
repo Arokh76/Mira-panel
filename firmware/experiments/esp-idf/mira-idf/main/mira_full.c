@@ -3070,6 +3070,31 @@ void mira_full_ui_tick(void){
     if(ms-last_clock_ms>2000){
         last_clock_ms=ms;
         apply_auto_brightness();
+        // Restore firmware-beta MQTT Display/<key>/state retained feedback.
+        // This snapshot is read ONLY from the LVGL task, never an MQTT
+        // network callback, and must never generate a Jeedom action.
+        mira_mqtt_display_state_t status={
+            .day=day_brightness_percent,
+            .night=night_brightness_percent,
+            .sleep_brightness=sleep_brightness_percent,
+            .sleep_timeout=sleep_timeout_seconds,
+            .night_auto=night_auto_enabled,
+            .clock_sleep=sleep_clock_enabled,
+            .night_active=night_auto_enabled&&current_night_period(),
+            .sleeping=display_sleeping
+        };
+        uint8_t brightness=display_sleeping?
+            (sleep_clock_enabled?applied_brightness_raw:0):
+            applied_brightness_raw;
+        status.brightness=brightness==0?0:(brightness<=30?1:
+            (uint8_t)(1u+(((uint32_t)brightness-30u)*99u+112u)/225u));
+        const int begin=night_start_minute<0?23*60:night_start_minute;
+        const int finish=night_end_minute<0?7*60:night_end_minute;
+        snprintf(status.night_start,sizeof(status.night_start),
+                 "%02d:%02d",begin/60,begin%60);
+        snprintf(status.night_end,sizeof(status.night_end),
+                 "%02d:%02d",finish/60,finish%60);
+        mira_mqtt_publish_display_states(&status);
         if(clock_status_text){
             wifi_ap_record_t access_point={0};
             char status[150];
