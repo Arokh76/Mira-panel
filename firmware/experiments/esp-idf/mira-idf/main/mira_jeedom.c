@@ -41,6 +41,15 @@ static const char *TAG="mira-idf-jeedom";
 // Legacy HTTP is the default. MQTT is an explicitly selected advanced mode.
 static volatile bool jeedom_mode_enabled=true;
 bool mira_jeedom_actions_enabled(void){return jeedom_mode_enabled;}
+/* Only one event leaves the screen. If MQTT is not available, execute
+ * the configured beta GenericCmd URL asynchronously (never on LVGL).
+ */
+static bool mira_other_transport(const char *name,const char *type,
+                                 const char *value){
+    if(mira_mqtt_publish_action(name,value))return true;
+    return mira_generic_queue_local_action(name,type,value);
+}
+
 // Request async synchronization after Jeedom changes its command table.
 static void request_binding_sync(void);
 static uint32_t ui_config_hash(const char *s);
@@ -698,7 +707,7 @@ esp_err_t mira_jeedom_beta_web_action(httpd_req_t *req){
     }
     bool success=mira_jeedom_actions_enabled()?
         mira_jeedom_queue_local_action(action_name,action_type,payload):
-        mira_mqtt_publish_action(action_name,payload);
+        mira_other_transport(action_name,action_type,payload);
     if(!success){
         httpd_resp_set_status(req,"503 Service Unavailable");
         return httpd_resp_sendstr(req,"Transport inactif");
@@ -839,7 +848,7 @@ esp_err_t mira_jeedom_beta_legacy_get_update(httpd_req_t *req){
          */
         success=mira_jeedom_actions_enabled()?
             mira_jeedom_queue_local_action(name,type,value):
-            mira_mqtt_publish_action(name,value);
+            mira_other_transport(name,type,value);
         if(success && (!strcmp(type,"range")||!strcmp(type,"color")||
                        !strcmp(type,"list")||!strcmp(type,"inputbox")))
             (void)mira_full_enqueue_state(name,value);
