@@ -16,3 +16,7 @@ bool mira_jeedom_actions_enabled(void);
 // Original beta home page: authenticated HTTP-only rendering / action bridge.
 esp_err_t mira_jeedom_render_beta_actions(httpd_req_t *req);
 esp_err_t mira_jeedom_beta_web_action(httpd_req_t *req);
+
+// Read-only page of historic HTTP IDs and authenticated beta GET /update.
+esp_err_t mira_jeedom_render_http_reference(httpd_req_t *req);
+esp_err_t mira_jeedom_beta_legacy_get_update(httpd_req_t *req);
