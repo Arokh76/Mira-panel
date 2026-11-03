@@ -699,6 +699,30 @@ static esp_err_t beta_43c_gpio_page(httpd_req_t *req){
       "</script></body></html>");
 }
 
+/* The raw beta System HTML deliberately hides GPIO on Waveshare,
+ * because its old WT32 pins are wrong for this board. Preserve the source
+ * template unchanged; add the new, correctly mapped 4.3C I/O entry only
+ * in the native render path.
+ */
+static esp_err_t render_system_43c(httpd_req_t *req){
+    const char *page=mira_beta_system_html;
+    const char *at=strstr(page,"<section class=\"card\"><h2>Maintenance</h2>");
+    if(!at)return render(req,page);
+    const char *insert=
+      "<section class=\"card\"><h2>Entrées / sorties 4.3C</h2>"
+      "<p class=\"hint\">Bornier isolé Waveshare : DI0, DI1, DO0, DO1.</p>"
+      "<a class=\"btn secondary\" href=\"/load?nav=gpio\">Configurer les E/S</a></section>";
+    const size_t pre=(size_t)(at-page),len=strlen(page),extra=strlen(insert);
+    char *copy=malloc(len+extra+1);
+    if(!copy)return html_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Mémoire HTML indisponible");
+    memcpy(copy,page,pre);
+    memcpy(copy+pre,insert,extra);
+    memcpy(copy+pre+extra,at,len-pre+1);
+    esp_err_t result=render(req,copy);
+    free(copy);
+    return result;
+}
+
 esp_err_t mira_beta_web_home(httpd_req_t *req){
     if(!mira_beta_web_authorized(req))return ESP_FAIL;
     return render(req,mira_beta_index_html);
@@ -714,7 +738,7 @@ esp_err_t mira_beta_web_load(httpd_req_t *req){
     if(!strcmp(nav,"gpio"))return beta_43c_gpio_page(req);
     if(!strcmp(nav,"mqtt"))return render(req,mira_beta_mqtt_html);
     if(!strcmp(nav,"wifi"))return render(req,mira_beta_wifi_manager_html);
-    if(!strcmp(nav,"system"))return render(req,mira_beta_system_html);
+    if(!strcmp(nav,"system"))return render_system_43c(req);
     if(!strcmp(nav,"rst"))return render(req,mira_beta_data_html);
     if(!strcmp(nav,"configAP"))return render(req,mira_beta_config_ap_html);
     if(!strcmp(nav,"listnetwork"))return render(req,mira_beta_known_networks_html);
