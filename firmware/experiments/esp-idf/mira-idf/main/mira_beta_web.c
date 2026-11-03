@@ -8,6 +8,7 @@
 #include "mira_jeedom.h"
 #include "mira_mqtt.h"
 #include "mira_recovery.h"
+#include "mira_display.h"
 #include "mira_beta_networks.h"
 #include "esp_random.h"
 #include "esp_timer.h"
@@ -585,21 +586,117 @@ static esp_err_t beta_checkupdate_page(httpd_req_t *req){
       "document.getElementById('check').addEventListener('click',check);"
       "check();</script></body></html>");
 }
-static esp_err_t beta_wt32_gpio_notice(httpd_req_t *req){
-    /* GPIO extender routes exist on the WT32 build only. The Waveshare 4.3C
-     * does not expose the same connector or pin contract. Do not invent one.
-     */
+/* Hardware-specific adaptation of firmware-beta/HTML/HTML_GPIO.h.
+ * Unlike WT32 EXT general-purpose GPIOs, Waveshare 4.3C exposes
+ * 2 isolated digital inputs + 2 isolated outputs through CH32 @0x24.
+ * The display driver owns the shared bus/output shadow.
+ */
+esp_err_t mira_beta_web_gpio_state(httpd_req_t *req){
+    if(!mira_beta_web_authorized(req))return ESP_FAIL;
+    bool di0=0,di1=0,do0=0,do1=0;
+    esp_err_t err=mira_display_io_read(&di0,&di1,&do0,&do1);
+    if(err!=ESP_OK){
+        httpd_resp_set_status(req,"503 Service Unavailable");
+        return httpd_resp_sendstr(req,"Lecture DI/DO CH32 impossible");
+    }
+    char body[128];
+    snprintf(body,sizeof(body),
+             "{\"inputs\":[%u,%u],\"outputs\":[%u,%u],\"hardware\":\"waveshare-43c\"}",
+             (unsigned)di0,(unsigned)di1,(unsigned)do0,(unsigned)do1);
+    httpd_resp_set_type(req,"application/json; charset=utf-8");
+    httpd_resp_set_hdr(req,"Cache-Control","no-store");
+    return httpd_resp_sendstr(req,body);
+}
+esp_err_t mira_beta_web_gpio_set(httpd_req_t *req){
+    if(!mira_beta_web_authorized(req))return ESP_FAIL;
+    char header[8]={0};
+    if(httpd_req_get_hdr_value_str(req,"X-Mira-GPIO",header,sizeof(header))!=ESP_OK ||
+       strcmp(header,"1")){
+        return html_err(req,HTTPD_403_FORBIDDEN,"En-tete local X-Mira-GPIO requis");
+    }
+    cJSON *form=read_form(req);
+    if(!form)return html_err(req,HTTPD_400_BAD_REQUEST,"Formulaire GPIO invalide");
+    const char *channel=field(form,"output"),*state=field(form,"state");
+    if(!channel||!state||
+       (strcmp(channel,"0")&&strcmp(channel,"1"))||
+       (strcmp(state,"0")&&strcmp(state,"1"))){
+        cJSON_Delete(form);
+        return html_err(req,HTTPD_400_BAD_REQUEST,"DO0 ou DO1, valeur 0 ou 1 requise");
+    }
+    const unsigned out=(unsigned)(channel[0]-'0');
+    const bool high=state[0]=='1';
+    esp_err_t err=mira_display_io_write(out,high);
+    cJSON_Delete(form);
+    if(err!=ESP_OK){
+        httpd_resp_set_status(req,"503 Service Unavailable");
+        return httpd_resp_sendstr(req,"Sortie isolee non disponible");
+    }
+    httpd_resp_set_type(req,"text/plain; charset=utf-8");
+    return httpd_resp_sendstr(req,"OK");
+}
+static esp_err_t beta_43c_gpio_page(httpd_req_t *req){
     httpd_resp_set_type(req,"text/html; charset=utf-8");
+    httpd_resp_set_hdr(req,"Cache-Control","no-store");
     return httpd_resp_sendstr(req,
-      "<!DOCTYPE html><html lang=\"fr\"><meta charset=\"utf-8\">"
-      "<title>Mira Panel - GPIO</title><body style=\"background:#7193A0;"
-      "font-family:Arial,sans-serif;padding:32px\">"
-      "<main style=\"background:white;border-radius:18px;max-width:700px;"
-      "margin:auto;padding:25px\"><h1>GPIO</h1>"
-      "<p>Les commandes GPIO de la bêta WT32 ne sont pas compatibles "
-      "avec le câblage du Waveshare 4.3C. Ce menu reste désactivé "
-      "sur cette cible pour éviter toute commande sur une mauvaise broche.</p>"
-      "<a href=\"/load?nav=system\">Retour au système</a></main></body></html>");
+      "<!doctype html><html lang=\"fr\"><head><meta charset=\"utf-8\">"
+      "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+      "<title>Mira Panel - E/S Waveshare 4.3C</title><style>"
+      "*{box-sizing:border-box}body{margin:0;background:#7193A0;"
+      "font:15px Arial,sans-serif;color:#263238}header{background:#1E5064;"
+      "color:white;padding:20px;font-size:22px;font-weight:800}"
+      "main{max-width:900px;margin:25px auto;padding:0 16px 32px}"
+      "a{color:#1E5064}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px}"
+      ".card{background:white;padding:22px;border-radius:18px;"
+      "box-shadow:0 4px 12px #0001}.notice{background:#fff6e7;"
+      "border:1px solid #e9c990;padding:16px;border-radius:12px;margin:18px 0}"
+      "button{background:#1E5064;border:0;border-radius:11px;padding:11px 14px;"
+      "color:white;font-size:16px;font-weight:700;cursor:pointer}"
+      ".value{font-size:24px;font-weight:800}.low{color:#a34a4a}.high{color:#176b42}"
+      "#message{min-height:28px;font-weight:700}"
+      "@media(max-width:640px){.grid{grid-template-columns:1fr}}</style></head>"
+      "<body><header>Mira Panel · E/S isolées 4.3C</header><main>"
+      "<p><a href=\"/load?nav=system\">Retour au système</a> · "
+      "<a href=\"/\">Accueil</a></p>"
+      "<div class=\"notice\"><b>Bornier Waveshare 4.3C :</b> "
+      "DI0/DI1 sont des entrées isolées et DO0/DO1 des sorties isolées. "
+      "Elles passent par l'extension I²C, pas par les GPIO du WT32."
+      "<p>Les sorties démarrent à 0 (niveau bas). Vérifier la polarité "
+      "effective et les limites électriques de la carte avant de brancher "
+      "un actionneur. Ne pas utiliser pour commander directement le secteur.</p></div>"
+      "<p id=\"message\" aria-live=\"polite\"></p><div class=\"grid\">"
+      "<section class=\"card\"><h2>DI0 · EXIO0</h2><p id=\"di0\" class=\"value\">Lecture…</p></section>"
+      "<section class=\"card\"><h2>DI1 · EXIO5</h2><p id=\"di1\" class=\"value\">Lecture…</p></section>"
+      "<section class=\"card\"><h2>DO0 · EXIO6</h2>"
+      "<p id=\"do0\" class=\"value\">Lecture…</p><button id=\"b0\" type=\"button\">Changer DO0</button></section>"
+      "<section class=\"card\"><h2>DO1 · EXIO7</h2>"
+      "<p id=\"do1\" class=\"value\">Lecture…</p><button id=\"b1\" type=\"button\">Changer DO1</button></section>"
+      "</div><p>Lecture des entrées toutes les 2 secondes. "
+      "Commandes locales, sans action Jeedom automatique.</p></main>"
+      "<script>"
+      "let latest=null,busy=false;"
+      "const msg=document.getElementById('message');"
+      "function show(id,on){let e=document.getElementById(id);"
+      "e.textContent=on?'Niveau haut (1)':'Niveau bas (0)';"
+      "e.className='value '+(on?'high':'low');}"
+      "async function read(){if(busy)return;"
+      "try{let r=await fetch('/gpio/state',{credentials:'same-origin',cache:'no-store'});"
+      "if(!r.ok)throw new Error('HTTP '+r.status);let j=await r.json();latest=j;"
+      "show('di0',j.inputs[0]);show('di1',j.inputs[1]);"
+      "show('do0',j.outputs[0]);show('do1',j.outputs[1]);"
+      "msg.textContent='';}catch(e){msg.textContent='Lecture des E/S impossible : '+e.message;}}"
+      "async function setDO(n){if(!latest||busy)return;"
+      "let state=latest.outputs[n]?0:1;"
+      "if(state&&!confirm('Activer physiquement DO'+n+' ?'))return;"
+      "busy=true;try{let r=await fetch('/gpio/set',{method:'POST',"
+      "credentials:'same-origin',headers:{'Content-Type':'application/x-www-form-urlencoded',"
+      "'X-Mira-GPIO':'1'},body:new URLSearchParams({output:String(n),state:String(state)})});"
+      "if(!r.ok)throw new Error('HTTP '+r.status+' : '+await r.text());"
+      "msg.textContent='DO'+n+' mis à '+state+'.';}catch(e){msg.textContent='Erreur : '+e.message;}"
+      "finally{busy=false;await read();}}"
+      "document.getElementById('b0').onclick=()=>setDO(0);"
+      "document.getElementById('b1').onclick=()=>setDO(1);"
+      "read();setInterval(read,2000);"
+      "</script></body></html>");
 }
 
 esp_err_t mira_beta_web_home(httpd_req_t *req){
@@ -614,7 +711,7 @@ esp_err_t mira_beta_web_load(httpd_req_t *req){
     if(!strcmp(nav,"params"))return render(req,mira_beta_params_html);
     if(!strcmp(nav,"id"))return mira_jeedom_render_http_reference(req);
     if(!strcmp(nav,"checkupdate"))return beta_checkupdate_page(req);
-    if(!strcmp(nav,"gpio"))return beta_wt32_gpio_notice(req);
+    if(!strcmp(nav,"gpio"))return beta_43c_gpio_page(req);
     if(!strcmp(nav,"mqtt"))return render(req,mira_beta_mqtt_html);
     if(!strcmp(nav,"wifi"))return render(req,mira_beta_wifi_manager_html);
     if(!strcmp(nav,"system"))return render(req,mira_beta_system_html);
