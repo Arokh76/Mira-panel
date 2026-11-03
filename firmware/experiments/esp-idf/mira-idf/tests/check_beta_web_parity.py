@@ -254,4 +254,25 @@ assert 'mira_beta_update_start' in setup
 assert 'mira_beta_update_legacy_page' in setup
 assert 'mira_beta_update.c' in (idf / "CMakeLists.txt").read_text(encoding="utf-8")
 print("PASS IDF-only update routes and trusted manifest HTTPS")
+# The WT32 beta web navigation includes /load?nav=id (HTTP IDs),
+# /load?nav=checkupdate (update checker), and legacy keyed GET /update
+# commands. The first IDF web port showed pages but omitted these routes.
+web=(idf / "mira_beta_web.c").read_text(encoding="utf-8")
+jeedom=(idf / "mira_jeedom.c").read_text(encoding="utf-8")
+update=(idf / "mira_beta_update.c").read_text(encoding="utf-8")
+assert 'if(!strcmp(nav,"id"))return mira_jeedom_render_http_reference(req);' in web
+assert 'if(!strcmp(nav,"checkupdate"))return beta_checkupdate_page(req);' in web
+assert 'if(!strcmp(nav,"gpio"))return beta_wt32_gpio_notice(req);' in web
+assert "static esp_err_t beta_checkupdate_page(httpd_req_t *req)" in web
+assert 'fetch(\'/api/checkupdate\'' in web
+assert 'Mise à jour Arduino/WT32 ne doit jamais être installée ici.' in web or "Une mise à jour Arduino/WT32 ne doit jamais être installée ici." in web
+assert 'esp_err_t mira_jeedom_render_http_reference(httpd_req_t *req)' in jeedom
+assert 'esp_err_t mira_jeedom_beta_legacy_get_update(httpd_req_t *req)' in jeedom
+assert 'if(!require_key(req))return ESP_FAIL;' in jeedom.split('esp_err_t mira_jeedom_beta_legacy_get_update',1)[1].split('esp_err_t mira_jeedom_render_http_reference',1)[0]
+assert 'mira_full_enqueue_state(name,value)' in jeedom
+assert 'mira_jeedom_queue_local_action(name,type,value)' in jeedom
+assert 'return mira_jeedom_beta_legacy_get_update(req);' in update
+assert 'mira_beta_web_authorized(req)' in update
+assert 'return httpd_resp_send_chunk(req,NULL,0);' in jeedom.split('esp_err_t mira_jeedom_render_http_reference',1)[1].split('static esp_err_t getlvgl',1)[0]
+print("PASS beta HTTP references, native update checker and authenticated legacy GET command routing")
 print("PASS beta page/control route wiring")
