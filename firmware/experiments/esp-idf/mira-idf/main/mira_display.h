@@ -32,6 +32,10 @@ esp_err_t mira_display_init(void);
 // Waveshare 4.3C confirmed CH32 IO expander (EXIO2 gate + PWM 0x05).
 // Mira 0.7.37 brightness scale: 0=off, 30..255 interactive visible.
 esp_err_t mira_display_set_brightness(uint8_t raw);
+// Native isolated DI0/DI1 and DO0/DO1 (Waveshare 4.3C CH32 I2C @0x24).
+// Output levels always default OFF on boot; no WT32 GPIO pin reuse.
+esp_err_t mira_display_io_read(bool *di0,bool *di1,bool *do0,bool *do1);
+esp_err_t mira_display_io_write(unsigned channel,bool level);
 lv_display_t *mira_display_lvgl(void);
 void mira_display_touch_read(lv_indev_t *indev, lv_indev_data_t *data);
 bool mira_display_touch_ready(void);
