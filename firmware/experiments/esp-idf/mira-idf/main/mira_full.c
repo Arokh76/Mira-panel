@@ -495,6 +495,16 @@ static void wheel_touch(lv_event_t *event){
     }
 }
 
+/* Legacy beta GenericCmd fallback: use MQTT if connected, otherwise
+ * enqueue the configured HTTP URL from Paramètres. Never perform blocking
+ * HTTP in an LVGL event and never duplicate a successful MQTT action.
+ */
+static bool mira_other_transport_action(const char *name,const char *type,
+                                        const char *value){
+    if(mira_mqtt_publish_action(name,value))return true;
+    return mira_generic_queue_local_action(name,type,value);
+}
+
 static void event_local(lv_event_t *e){
     if(suppress_events||display_sleeping)return;
     mira_widget_t *b=(mira_widget_t*)lv_event_get_user_data(e);
@@ -546,12 +556,12 @@ static void event_local(lv_event_t *e){
         remember_passive_state(&observation);
     }
     const bool use_jeedom=mira_jeedom_actions_enabled();
-    const bool mqtt_sent=!use_jeedom&&mira_mqtt_publish_action(b->name,payload);
+    const bool mqtt_sent=!use_jeedom&&mira_other_transport_action(b->name,b->type,payload);
     const bool jeedom_queued=use_jeedom&&mira_jeedom_queue_local_action(b->name,b->type,payload);
     if(feedback) {
         char result[180];
         snprintf(result,sizeof(result),"%s : %.60s = %.60s",
-                  jeedom_queued?"Action Jeedom en file":(mqtt_sent?"Action MQTT":"Aperçu local"),b->name,b->value);
+                  jeedom_queued?"Action Jeedom en file":(mqtt_sent?"Action MQTT / HTTP":"Aperçu local"),b->name,b->value);
         lv_label_set_text(feedback,result);
     }
 }
@@ -571,7 +581,7 @@ static void multi_dispatch(mira_widget_t *w,uint8_t gesture){
         char action[112];
         int n=snprintf(action,sizeof(action),"%s%s",prefix[selected],w->name);
         if(n>0&&n<(int)sizeof(action))
-            sent=mira_mqtt_publish_action(action,"1");
+            sent=mira_other_transport_action(action,"button","1");
     }
     if(feedback){
         char result[180];
@@ -632,7 +642,7 @@ static void listbutton_clicked(lv_event_t *event){
     memmove(w->value,value,strlen(value)+1u);
     bool sent=mira_jeedom_actions_enabled()
         ?mira_jeedom_queue_local_action(w->name,"listbutton",value)
-        :mira_mqtt_publish_action(w->name,value);
+        :mira_other_transport_action(w->name,"listbutton",value);
     if(feedback){
         char response[180];
         snprintf(response,sizeof(response),"%s : %.60s = %.60s",
@@ -691,7 +701,7 @@ static void thermostat_mode_selected(lv_event_t *event){
     if(mira_jeedom_actions_enabled())
         (void)mira_jeedom_queue_local_action(name,"list",value);
     else
-        (void)mira_mqtt_publish_action(name,value);
+        (void)mira_other_transport_action(name,"list",value);
 }
 static void media_select_active_device(mira_widget_t *w){
     if(!w||!w->media_device_dropdown||!w->media_active_device[0])return;
@@ -747,7 +757,7 @@ static void media_direct_action(lv_event_t *event) {
     const bool jeedom=mira_jeedom_actions_enabled();
     const bool queued=jeedom&&mira_jeedom_queue_local_action(
         command,(action>=3)?"range":"button",payload);
-    const bool published=!jeedom&&mira_mqtt_publish_action(command,payload);
+    const bool published=!jeedom&&mira_other_transport_action(command,(action>=3)?"range":"button",payload);
     if(action==1&&(queued||published)){
         w->media_is_playing=!w->media_is_playing;
         if(w->media_play_caption)lv_label_set_text(w->media_play_caption,w->media_is_playing?LV_SYMBOL_PAUSE:LV_SYMBOL_PLAY);
@@ -755,7 +765,7 @@ static void media_direct_action(lv_event_t *event) {
     if(feedback){
         char result[180];
         snprintf(result,sizeof(result),"%s : %.112s",
-            queued?"Jeedom en file":(published?"MQTT envoyé":"Action inactive"),command);
+            queued?"Jeedom en file":(published?"MQTT / HTTP envoyé":"Action inactive"),command);
         lv_label_set_text(feedback,result);
     }
 }
