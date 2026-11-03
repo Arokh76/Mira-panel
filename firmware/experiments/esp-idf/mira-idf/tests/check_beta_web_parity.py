@@ -310,3 +310,18 @@ assert 'cJSON_AddNumberToObject(a,"max",11);' in jeedom
 assert 'cJSON_AddNumberToObject(a,"value",40);' in jeedom
 assert 'if(weather)cJSON_AddStringToObject(weather,"unit","°C");' in jeedom
 print("PASS Waveshare-only hidden multiactions and Jeedom media/weather index parity")
+
+# Beta IndexAddInfo does not reuse the JSON widget's default value.
+assert 'cJSON_AddStringToObject(a,"value","");' in jeedom
+assert 'cJSON_AddStringToObject(a,"return","false");' in jeedom
+# The original MiraPanelUI.cpp normalizes range values and half-degree
+# thermostat setpoints before registering the Jeedom command IDs.
+assert 'if(hi<=lo)hi=lo>INT_MAX-100?INT_MAX:lo+100;' in jeedom
+assert 'if(current<lo)current=lo;' in jeedom
+assert 'if(current>hi)current=hi;' in jeedom
+assert 'setpoint=roundf(setpoint*2.0f)*0.5f;' in jeedom
+assert 'if(lo< -20)lo= -20;' in jeedom
+assert 'if(lo>60)lo=60;' in jeedom
+assert 'if(hi>80)hi=80;' in jeedom
+assert 'if(id==before_modes)add_choices(arr,&id,compound,"Confort");' in jeedom
+print("PASS beta Jeedom info/range/thermostat index registration parity")
