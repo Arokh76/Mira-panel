@@ -22,6 +22,7 @@
 #include "esp_log.h"
 #include "esp_err.h"
 #include "esp_http_client.h"
+#include "esp_crt_bundle.h"
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "esp_timer.h"
@@ -1815,6 +1816,21 @@ bool mira_jeedom_queue_local_action(const char *name,const char *type,const char
     snprintf(msg.value,sizeof(msg.value),"%s",value);
     return xQueueSend(action_queue,&msg,0)==pdTRUE;
 }
+/* MiraPanelServer::GenericCmd fallback when Jeedom is disabled and
+ * MQTT did not accept a user action. Use the SAME background action worker
+ * as Jeedom HTTP; do not execute network requests on the LVGL task.
+ */
+bool mira_generic_queue_local_action(const char *name,const char *type,
+                                     const char *value){
+    if(jeedom_mode_enabled||!action_queue||!name||!*name||!type||!value||
+       strlen(name)>=96||strlen(type)>=24||strlen(value)>=160)return false;
+    mira_action_msg_t msg={0};
+    snprintf(msg.name,sizeof(msg.name),"%s",name);
+    snprintf(msg.type,sizeof(msg.type),"__generic");
+    snprintf(msg.value,sizeof(msg.value),"%s",value);
+    return xQueueSend(action_queue,&msg,0)==pdTRUE;
+}
+
 static int resolve_local_action(cJSON *index,const mira_action_msg_t *msg,
                                 char *value,size_t value_size) {
     cJSON *entries=cJSON_GetObjectItemCaseSensitive(index,"actions"),*item;
@@ -2152,12 +2168,105 @@ static void request_binding_sync(void){
     (void)xQueueSend(action_queue,&msg,0);
 }
 
+/* The beta GenericCmd() looks up a widget's configured URL in the
+ * programming JSON and replaces #value# with the effective action value.
+ * For list selections that is the historical list-command ID; toggle
+ * uses the registered On/Off label; color uses URL-encoded #RRGGBB.
+ * Never interpret a passive Info as a user-triggered HTTP GET.
+ */
+static void send_generic_action(const mira_action_msg_t *msg){
+    if(!msg||jeedom_mode_enabled)return;
+    char *json=read_config(NULL);
+    if(!json)return;
+    cJSON *root=cJSON_Parse(json);
+    if(!root){free(json);return;}
+    const cJSON *widgets=cJSON_GetObjectItemCaseSensitive(root,"lvgl");
+    const cJSON *item=NULL;
+    const char *url=NULL,*type=NULL;
+    cJSON_ArrayForEach(item,widgets){
+        if(strcmp(jstr((cJSON*)item,"name",""),msg->name))continue;
+        url=jstr((cJSON*)item,"url","");
+        type=jstr((cJSON*)item,"type","");
+        break;
+    }
+    if(!url||!*url||!type||strlen(url)>1023||
+       (strncmp(url,"http://",7)&&strncmp(url,"https://",8))||
+       strpbrk(url,"\r\n")){
+        cJSON_Delete(root);free(json);return;
+    }
+    char command_value[160]={0};
+    if(!strcmp(type,"toggle")){
+        snprintf(command_value,sizeof(command_value),"%s",
+                 !strcmp(msg->value,"1")?"On":"Off");
+    }else if(!strcmp(type,"list")||!strcmp(type,"listbutton")){
+        /* Match IndexAddList() + GenericCmd(): list sends the selected
+         * option's numeric local ID rather than its displayed label.
+         */
+        cJSON *index=index_from_config(json);
+        const cJSON *arr=index?cJSON_GetObjectItemCaseSensitive(index,"actions"):NULL,*row;
+        cJSON_ArrayForEach(row,arr){
+            if(strcmp(jstr((cJSON*)row,"type",""),"list")||
+               strcmp(jstr((cJSON*)row,"nomliste",""),msg->name)||
+               strcmp(jstr((cJSON*)row,"nom",""),msg->value))continue;
+            snprintf(command_value,sizeof(command_value),"%d",
+                     jint((cJSON*)row,"id",-1));
+            break;
+        }
+        if(index)cJSON_Delete(index);
+        if(!command_value[0]){cJSON_Delete(root);free(json);return;}
+    }else if(!strcmp(type,"color")){
+        unsigned r=0,g=0,b=0;
+        char extra=0;
+        if(sscanf(msg->value,"%u,%u,%u %c",&r,&g,&b,&extra)!=3||
+           r>255u||g>255u||b>255u){cJSON_Delete(root);free(json);return;}
+        snprintf(command_value,sizeof(command_value),"%%23%02X%02X%02X",r,g,b);
+    }else if(!strcmp(type,"range")||!strcmp(type,"roundrange")){
+        snprintf(command_value,sizeof(command_value),"%s",msg->value);
+    }else if(strcmp(type,"button")){
+        cJSON_Delete(root);free(json);return;
+    }
+    /* Escaped #value# appears literally in the beta user-defined URLs.
+     * Preserve all occurrences, but reject expansions beyond a fixed bound.
+     */
+    char expanded[2048]={0};
+    size_t used=0;
+    for(const char *p=url;*p;){
+        const char *chunk=p;
+        size_t len=0;
+        if(command_value[0]&&!strncmp(p,"#value#",7)){
+            chunk=command_value;
+            len=strlen(command_value);
+            p+=7;
+        }else{
+            len=1;p++;
+        }
+        if(used+len>=sizeof(expanded)){cJSON_Delete(root);free(json);return;}
+        memcpy(expanded+used,chunk,len);
+        used+=len;
+    }
+    expanded[used]=0;
+    cJSON_Delete(root);free(json);
+    esp_http_client_config_t cfg={
+        .url=expanded,.timeout_ms=5000,.disable_auto_redirect=true,
+        .crt_bundle_attach=esp_crt_bundle_attach
+    };
+    esp_http_client_handle_t client=esp_http_client_init(&cfg);
+    if(!client)return;
+    const esp_err_t result=esp_http_client_perform(client);
+    const int status=esp_http_client_get_status_code(client);
+    if(result!=ESP_OK||status<200||status>=300)
+        ESP_LOGW(TAG,"Generic Mira action failed (%s, HTTP %d)",
+                 esp_err_to_name(result),status);
+    esp_http_client_cleanup(client);
+}
+
 static void jeedom_action_worker(void *unused) {
     (void)unused;
     mira_action_msg_t action;
     for(;;) {
         if(xQueueReceive(action_queue,&action,portMAX_DELAY)==pdTRUE){
             if(!strcmp(action.type,"__sync"))sync_jeedom_bindings();
+            else if(!strcmp(action.type,"__generic"))send_generic_action(&action);
             else send_jeedom_action(&action);
         }
     }
