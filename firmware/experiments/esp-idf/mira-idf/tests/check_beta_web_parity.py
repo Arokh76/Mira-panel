@@ -369,3 +369,26 @@ assert 'static volatile bool jeedom_mode_enabled=false;' in jeedom
 assert 'bool enabled=false; // Match beta GetParamBool("Jeedom") when absent.' in jeedom
 assert 'if(!strcmp(name,"Jeedom"))jeedom_mode_enabled=!strcmp(value,"1");' in jeedom
 print("PASS beta disabled-by-default Jeedom transport and explicit setting override")
+
+
+# Source-derived contracts: keep comparing against the firmware-beta code,
+# not just a manually maintained list of features. Future beta additions
+# must fail this parity check until they are explicitly ported.
+legacy_widget_types=set(re.findall(r'\\btype\\s*==\\s*"([^"]+)"',beta_ui))
+idf_types_block=full.split('static const char *const supported[]={',1)[1].split('};',1)[0]
+native_widget_types=set(re.findall(r'"([^"]+)"',idf_types_block))
+assert legacy_widget_types==native_widget_types, (
+    "Widget types missing/extra compared to beta",
+    sorted(legacy_widget_types-native_widget_types),
+    sorted(native_widget_types-legacy_widget_types)
+)
+legacy_mqtt=(root / "firmware/source/consolidated/MIRA_PANEL/MiraMqtt.cpp").read_text(encoding="utf-8")
+legacy_display_keys=set(re.findall(r'publishDisplayState\\("([^"]+)"',legacy_mqtt))
+native_names_block=mqtt.split('static const char *const names[]={',1)[1].split('};',1)[0]
+native_display_keys=set(re.findall(r'"([^"]+)"',native_names_block))
+assert legacy_display_keys==native_display_keys, (
+    "MQTT Display topics differ from firmware-beta",
+    sorted(legacy_display_keys-native_display_keys),
+    sorted(native_display_keys-legacy_display_keys)
+)
+print("PASS source-derived parity: all beta LVGL widget types and MQTT Display topics")
