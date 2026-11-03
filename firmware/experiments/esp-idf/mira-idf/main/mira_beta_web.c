@@ -540,6 +540,68 @@ static esp_err_t beta_network_remove_confirm(httpd_req_t *req){
     httpd_resp_set_hdr(req,"Cache-Control","no-store");
     return httpd_resp_sendstr(req,body);
 }
+/* Original firmware-beta: /load?nav=checkupdate.
+ * Keep the real beta update-check button and the manual .bin installer,
+ * but only ask the native IDF target manifest, never the Arduino release.
+ */
+static esp_err_t beta_checkupdate_page(httpd_req_t *req){
+    httpd_resp_set_type(req,"text/html; charset=utf-8");
+    httpd_resp_set_hdr(req,"Cache-Control","no-store");
+    return httpd_resp_sendstr(req,
+      "<!DOCTYPE html><html lang=\"fr\"><head><meta charset=\"utf-8\">"
+      "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+      "<title>Mira Panel - Mise à jour</title><style>"
+      ":root{--bg:#7193A0;--panel:#1E5064;--active:#D39E55}"
+      "body{margin:0;background:var(--bg);font-family:Arial,sans-serif;color:#263238}"
+      "header{background:var(--panel);color:white;padding:20px;font-weight:800;font-size:22px}"
+      "main{max-width:800px;margin:28px auto;padding:25px;background:white;border-radius:20px}"
+      "p{line-height:1.5}a{color:var(--panel)}"
+      "button,input[type=submit]{background:var(--active);border:0;padding:12px 18px;"
+      "border-radius:12px;color:white;font-size:16px;font-weight:bold;cursor:pointer}"
+      ".status{background:#f5f8f9;border:1px solid #d9e2e6;padding:16px;"
+      "border-radius:12px;white-space:pre-wrap}"
+      "form{margin:15px 0}input[type=file]{max-width:100%}</style></head><body>"
+      "<header>Mira Panel</header><main>"
+      "<p><a href=\"/load?nav=system\">Retour au système</a></p>"
+      "<h1>Mise à jour</h1>"
+      "<p>Cette version utilise ESP-IDF 5.5.6 sur Waveshare 4.3C. "
+      "Une mise à jour Arduino/WT32 ne doit jamais être installée ici.</p>"
+      "<button type=\"button\" id=\"check\">Vérifier les mises à jour</button>"
+      "<p id=\"result\" class=\"status\" aria-live=\"polite\">Vérification non lancée.</p>"
+      "<h2>Mise à jour manuelle</h2>"
+      "<p>Sélectionne exclusivement un fichier OTA ESP-IDF 4.3C compatible.</p>"
+      "<form method=\"POST\" action=\"/doUpdateFile\" enctype=\"multipart/form-data\">"
+      "<input type=\"file\" name=\"update\" accept=\".bin\" required>"
+      "<input type=\"submit\" value=\"Installer le fichier .bin\"></form>"
+      "</main><script>"
+      "async function check(){var e=document.getElementById('result');"
+      "e.textContent='Vérification GitHub en cours...';"
+      "try{var r=await fetch('/api/checkupdate',{cache:'no-store'});"
+      "if(!r.ok)throw new Error('HTTP '+r.status);"
+      "var j=await r.json();"
+      "e.textContent=(j.message||j.status||'Statut inconnu')+"
+      "(j.version?'\\nVersion distante : '+j.version:'');"
+      "}catch(err){e.textContent='Vérification impossible : '+err.message;}}"
+      "document.getElementById('check').addEventListener('click',check);"
+      "check();</script></body></html>");
+}
+static esp_err_t beta_wt32_gpio_notice(httpd_req_t *req){
+    /* GPIO extender routes exist on the WT32 build only. The Waveshare 4.3C
+     * does not expose the same connector or pin contract. Do not invent one.
+     */
+    httpd_resp_set_type(req,"text/html; charset=utf-8");
+    return httpd_resp_sendstr(req,
+      "<!DOCTYPE html><html lang=\"fr\"><meta charset=\"utf-8\">"
+      "<title>Mira Panel - GPIO</title><body style=\"background:#7193A0;"
+      "font-family:Arial,sans-serif;padding:32px\">"
+      "<main style=\"background:white;border-radius:18px;max-width:700px;"
+      "margin:auto;padding:25px\"><h1>GPIO</h1>"
+      "<p>Les commandes GPIO de la bêta WT32 ne sont pas compatibles "
+      "avec le câblage du Waveshare 4.3C. Ce menu reste désactivé "
+      "sur cette cible pour éviter toute commande sur une mauvaise broche.</p>"
+      "<a href=\"/load?nav=system\">Retour au système</a></main></body></html>");
+}
+
 esp_err_t mira_beta_web_home(httpd_req_t *req){
     if(!mira_beta_web_authorized(req))return ESP_FAIL;
     return render(req,mira_beta_index_html);
@@ -551,6 +613,8 @@ esp_err_t mira_beta_web_load(httpd_req_t *req){
         (void)httpd_query_key_value(query,"nav",nav,sizeof(nav));
     if(!strcmp(nav,"params"))return render(req,mira_beta_params_html);
     if(!strcmp(nav,"id"))return mira_jeedom_render_http_reference(req);
+    if(!strcmp(nav,"checkupdate"))return beta_checkupdate_page(req);
+    if(!strcmp(nav,"gpio"))return beta_wt32_gpio_notice(req);
     if(!strcmp(nav,"mqtt"))return render(req,mira_beta_mqtt_html);
     if(!strcmp(nav,"wifi"))return render(req,mira_beta_wifi_manager_html);
     if(!strcmp(nav,"system"))return render(req,mira_beta_system_html);
