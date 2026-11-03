@@ -262,7 +262,26 @@ jeedom=(idf / "mira_jeedom.c").read_text(encoding="utf-8")
 update=(idf / "mira_beta_update.c").read_text(encoding="utf-8")
 assert 'if(!strcmp(nav,"id"))return mira_jeedom_render_http_reference(req);' in web
 assert 'if(!strcmp(nav,"checkupdate"))return beta_checkupdate_page(req);' in web
-assert 'if(!strcmp(nav,"gpio"))return beta_wt32_gpio_notice(req);' in web
+assert 'if(!strcmp(nav,"gpio"))return beta_43c_gpio_page(req);' in web
+assert 'esp_err_t mira_beta_web_gpio_state(httpd_req_t *req)' in web
+assert 'esp_err_t mira_beta_web_gpio_set(httpd_req_t *req)' in web
+assert 'mira_beta_web_authorized(req)' in web
+assert '"X-Mira-GPIO"' in web
+assert 'mira_display_io_write(out,high)' in web
+assert 'mira_display_io_read(&di0,&di1,&do0,&do1)' in web
+assert '.uri="/gpio/state"' in setup and '.uri="/gpio/set"' in setup
+display=(idf / "mira_display.c").read_text(encoding="utf-8")
+display_h=(idf / "mira_display.h").read_text(encoding="utf-8")
+assert 'ioexp_write(ioexp_device,0x02,0xde)' in display
+assert 'ioexp_write(ioexp_device,0x03,0x3f)' in display
+assert 'ioexp_output_shadow=0x3f;' in display
+assert 'ioexp_write(ioexp_device, 0x03, 0xff)' not in display
+assert 'ioexp_write(ioexp_device, 0x02, 0xff)' not in display
+assert 'mira_display_io_write(unsigned channel,bool level)' in display
+assert 'mira_display_io_read(bool *di0,bool *di1,bool *do0,bool *do1)' in display
+assert 'SemaphoreHandle_t ioexp_lock' in display
+assert 'mira_display_io_read' in display_h and 'mira_display_io_write' in display_h
+print("PASS 4.3C isolated I/O direction and default OFF, UI routes and access protection")
 assert "static esp_err_t beta_checkupdate_page(httpd_req_t *req)" in web
 assert 'fetch(\'/api/checkupdate\'' in web
 assert 'Mise à jour Arduino/WT32 ne doit jamais être installée ici.' in web or "Une mise à jour Arduino/WT32 ne doit jamais être installée ici." in web
