@@ -262,7 +262,11 @@ static cJSON *index_from_config(const char *json) {
         }else if(!strcmp(type,"media")){
             for(size_t n=0;n<9;n++){
                 char compound[192];snprintf(compound,sizeof(compound),"%.95s__%s",name,media_fields[n]);
-                append_action(arr,&id,"info",compound);
+                cJSON *a=append_action(arr,&id,"info",compound);
+                /* Mirror MiraPanelUI.cpp: progress and volume carry %
+                 * units in the historical Jeedom /getindex table.
+                 */
+                if(a && (n==4||n==5))cJSON_AddStringToObject(a,"unit","%");
             }
             for(size_t n=0;n<3;n++){
                 char compound[192];snprintf(compound,sizeof(compound),"%.95s__%s",name,media_actions[n]);
@@ -272,12 +276,23 @@ static cJSON *index_from_config(const char *json) {
             snprintf(compound,sizeof(compound),"%.95s__pause",name);
             append_action(arr,&id,"button",compound);
             snprintf(compound,sizeof(compound),"%.95s__volume_cmd",name);
-            append_action(arr,&id,"range",compound);
+            cJSON *a=append_action(arr,&id,"range",compound);
+            if(a){
+                cJSON_AddNumberToObject(a,"min",0);
+                cJSON_AddNumberToObject(a,"max",100);
+                cJSON_AddNumberToObject(a,"value",40);
+            }
             snprintf(compound,sizeof(compound),"%.95s__device_cmd",name);
-            append_action(arr,&id,"range",compound);
+            a=append_action(arr,&id,"range",compound);
+            if(a){
+                cJSON_AddNumberToObject(a,"min",0);
+                cJSON_AddNumberToObject(a,"max",11);
+                cJSON_AddNumberToObject(a,"value",0);
+            }
         }else if(!strcmp(type,"datetime")&&!weather_registered){
             weather_registered=true;
-            append_action(arr,&id,"info","__mira_weather_temperature");
+            cJSON *weather=append_action(arr,&id,"info","__mira_weather_temperature");
+            if(weather)cJSON_AddStringToObject(weather,"unit","°C");
             append_action(arr,&id,"info","__mira_weather_condition");
             append_action(arr,&id,"info","__mira_weather_code");
         }
