@@ -263,6 +263,8 @@ update=(idf / "mira_beta_update.c").read_text(encoding="utf-8")
 assert 'if(!strcmp(nav,"id"))return mira_jeedom_render_http_reference(req);' in web
 assert 'if(!strcmp(nav,"checkupdate"))return beta_checkupdate_page(req);' in web
 assert 'if(!strcmp(nav,"gpio"))return beta_43c_gpio_page(req);' in web
+assert 'if(!strcmp(nav,"system"))return render_system_43c(req);' in web
+assert 'Configurer les E/S' in web
 assert 'esp_err_t mira_beta_web_gpio_state(httpd_req_t *req)' in web
 assert 'esp_err_t mira_beta_web_gpio_set(httpd_req_t *req)' in web
 assert 'mira_beta_web_authorized(req)' in web
