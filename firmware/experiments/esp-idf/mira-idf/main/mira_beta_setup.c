@@ -133,9 +133,37 @@ static bool parse_form_param(const char *body,const char *key,char *dest,size_t 
     dest[out]=0;
     return true;
 }
+/* First-install access is necessarily through the recovery AP when the
+ * station interface has no IP address and no saved SSID. The generic
+ * HTTP socket address check is too strict on some ESP-IDF 5.5/LwIP
+ * connections; it rejected the original local-key POST with HTTP 403.
+ *
+ * This exception is deliberately ONLY for /load and /save during first-run.
+ * Production configuration, recovery OTA, and other sensitive routes retain
+ * mira_setup_require_ap() and their existing authentication checks.
+ */
+static bool first_run_ap_access(httpd_req_t *req){
+    if(mira_setup_ap_client(req))return true;
+
+    /* No configured station means there is no independent LAN path into the
+     * panel. Require an IP-less STA netif as well, to prevent this fallback
+     * from ever accepting a request arriving via a connected LAN interface.
+     */
+    wifi_config_t sta={0};
+    esp_netif_t *sta_netif=esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    esp_netif_ip_info_t sta_ip={0};
+    if(esp_wifi_get_config(WIFI_IF_STA,&sta)==ESP_OK &&
+       !sta.sta.ssid[0] && sta_netif &&
+       esp_netif_get_ip_info(sta_netif,&sta_ip)==ESP_OK &&
+       sta_ip.ip.addr==0){
+        ESP_LOGW(TAG,"First-run HTTP accepted on isolated AP (no STA profile or IP)");
+        return true;
+    }
+    return mira_setup_require_ap(req);
+}
 static esp_err_t load_get(httpd_req_t *req){
     if(!mira_beta_setup_unconfigured())return mira_beta_web_load(req);
-    if(!mira_setup_require_ap(req))return ESP_FAIL;
+    if(!first_run_ap_access(req))return ESP_FAIL;
     char query[96],nav[24];
     if(httpd_req_get_url_query_str(req,query,sizeof(query))!=ESP_OK||
        httpd_query_key_value(query,"nav",nav,sizeof(nav))!=ESP_OK){
@@ -154,7 +182,7 @@ static esp_err_t load_get(httpd_req_t *req){
 }
 static esp_err_t save_post(httpd_req_t *req){
     if(!mira_beta_setup_unconfigured())return mira_beta_web_save(req);
-    if(!mira_setup_require_ap(req))return ESP_FAIL;
+    if(!first_run_ap_access(req))return ESP_FAIL;
     char query[64],config[12];
     if(httpd_req_get_url_query_str(req,query,sizeof(query))!=ESP_OK||
        httpd_query_key_value(query,"config",config,sizeof(config))!=ESP_OK){
