@@ -365,6 +365,14 @@ esp_err_t mira_beta_setup_register(httpd_handle_t server){
                                 .handler=mira_beta_web_network_post};
     err=httpd_register_uri_handler(server,&network);
     if(err!=ESP_OK)return err;
+    const httpd_uri_t gpio_state={.uri="/gpio/state",.method=HTTP_GET,
+                                  .handler=mira_beta_web_gpio_state};
+    err=httpd_register_uri_handler(server,&gpio_state);
+    if(err!=ESP_OK)return err;
+    const httpd_uri_t gpio_set={.uri="/gpio/set",.method=HTTP_POST,
+                                .handler=mira_beta_web_gpio_set};
+    err=httpd_register_uri_handler(server,&gpio_set);
+    if(err!=ESP_OK)return err;
     const httpd_uri_t check={.uri="/api/checkupdate",.method=HTTP_GET,
                              .handler=mira_beta_update_check};
     err=httpd_register_uri_handler(server,&check);
