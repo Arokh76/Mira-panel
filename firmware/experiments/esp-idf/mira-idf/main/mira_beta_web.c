@@ -550,6 +550,7 @@ esp_err_t mira_beta_web_load(httpd_req_t *req){
     if(httpd_req_get_url_query_str(req,query,sizeof(query))==ESP_OK)
         (void)httpd_query_key_value(query,"nav",nav,sizeof(nav));
     if(!strcmp(nav,"params"))return render(req,mira_beta_params_html);
+    if(!strcmp(nav,"id"))return mira_jeedom_render_http_reference(req);
     if(!strcmp(nav,"mqtt"))return render(req,mira_beta_mqtt_html);
     if(!strcmp(nav,"wifi"))return render(req,mira_beta_wifi_manager_html);
     if(!strcmp(nav,"system"))return render(req,mira_beta_system_html);
