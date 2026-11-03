@@ -174,8 +174,26 @@ static esp_err_t load_get(httpd_req_t *req){
     if(!strcmp(nav,"wifisr")&&has_local_key())
         return serve_wifi_page(req);
     if(!strcmp(nav,"reboot")&&has_local_key()&&!has_wifi_station()){
-        // The beta permits remaining in AP mode without a station.
-        return serve_wifi_page(req);
+        /* Original firmware-beta /load?nav=reboot sets ap[0].actif=1,
+         * shows the confirmation and restarts in persistent AP mode.
+         * Simply returning the Wi-Fi form was a porting regression.
+         */
+        nvs_handle_t nv;
+        esp_err_t err=nvs_open("mira_idf_net",NVS_READWRITE,&nv);
+        if(err==ESP_OK){
+            err=nvs_set_u8(nv,"ap_enabled",1);
+            if(err==ESP_OK)err=nvs_commit(nv);
+            nvs_close(nv);
+        }
+        if(err!=ESP_OK){
+            httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,
+                                "Impossible de conserver le point d'acces Mira");
+            return ESP_FAIL;
+        }
+        esp_err_t response=serve_page(req,mira_beta_saved_page);
+        vTaskDelay(pdMS_TO_TICKS(1200));
+        esp_restart();
+        return response;
     }
     httpd_resp_send_err(req,HTTPD_403_FORBIDDEN,"Configuration Mira indisponible");
     return ESP_FAIL;
