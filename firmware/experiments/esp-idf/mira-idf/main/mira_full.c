@@ -2081,7 +2081,9 @@ static void settings(void){
 }
 static void empty_notice(const char *message){
     lv_obj_t *c=card(0,786,120);
-    lv_obj_t *l=label(c,message,0xF3F6F7,&lv_font_montserrat_20);
+    // Onboarding text includes accented French characters (É, é, è, etc.).
+    // Plain Montserrat 20 has no such glyphs in this IDF build.
+    lv_obj_t *l=label(c,message,0xF3F6F7,&mira_font_fr_16);
     lv_obj_set_width(l,740);
     lv_label_set_long_mode(l,LV_LABEL_LONG_WRAP);
     lv_obj_center(l);
