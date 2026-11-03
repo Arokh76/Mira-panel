@@ -3005,6 +3005,20 @@ static void apply_pending_states(void){
         apply_state_on_lvgl_task(&update);
 }
 
+/* Fixed-size HH:MM formatting for retained MQTT Display states.
+ * Keep compile-time 6-byte buffer safety and beta 24-hour semantics.
+ */
+static void mira_format_hhmm(char out[6],int minute){
+    if(minute<0||minute>=24*60)minute=0;
+    const int hour=minute/60,min=minute%60;
+    out[0]=(char)('0'+hour/10);
+    out[1]=(char)('0'+hour%10);
+    out[2]=':';
+    out[3]=(char)('0'+min/10);
+    out[4]=(char)('0'+min%10);
+    out[5]=0;
+}
+
 void mira_full_ui_tick(void){
     poll_navigation_settings();
     if(theme_reload_pending){
@@ -3100,10 +3114,8 @@ void mira_full_ui_tick(void){
             (uint8_t)(1u+(((uint32_t)brightness-30u)*99u+112u)/225u));
         const int begin=night_start_minute<0?23*60:night_start_minute;
         const int finish=night_end_minute<0?7*60:night_end_minute;
-        snprintf(status.night_start,sizeof(status.night_start),
-                 "%02d:%02d",begin/60,begin%60);
-        snprintf(status.night_end,sizeof(status.night_end),
-                 "%02d:%02d",finish/60,finish%60);
+        mira_format_hhmm(status.night_start,begin);
+        mira_format_hhmm(status.night_end,finish);
         mira_mqtt_publish_display_states(&status);
         if(clock_status_text){
             wifi_ap_record_t access_point={0};
