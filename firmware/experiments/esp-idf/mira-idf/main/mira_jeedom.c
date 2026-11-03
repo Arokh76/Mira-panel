@@ -261,10 +261,14 @@ static cJSON *index_from_config(const char *json) {
             if(lo>60)lo=60;
             if(hi<lo+1)hi=lo+1;
             if(hi>80)hi=80;
+            const cJSON *setval=cJSON_GetObjectItemCaseSensitive(w,"value");
             const char *raw=jstr((cJSON*)w,"value","20");
             char *endptr=NULL;
-            float setpoint=strtof(raw,&endptr);
-            if(endptr==raw||*endptr||!isfinite(setpoint))setpoint=20.0f;
+            float setpoint=cJSON_IsNumber(setval)?
+                (float)setval->valuedouble:strtof(raw,&endptr);
+            if(!cJSON_IsNumber(setval) &&
+               (endptr==raw||*endptr))setpoint=20.0f;
+            if(!isfinite(setpoint))setpoint=20.0f;
             setpoint=roundf(setpoint*2.0f)*0.5f;
             if(setpoint<lo)setpoint=(float)lo;
             if(setpoint>hi)setpoint=(float)hi;
