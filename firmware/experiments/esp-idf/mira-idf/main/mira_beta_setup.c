@@ -190,7 +190,17 @@ static esp_err_t load_get(httpd_req_t *req){
                                 "Impossible de conserver le point d'acces Mira");
             return ESP_FAIL;
         }
-        esp_err_t response=serve_page(req,mira_beta_saved_page);
+        const char *ap_restart_html=
+            "<!doctype html><html lang=\"fr\"><meta charset=\"UTF-8\">"
+            "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+            "<title>Mira Panel - Enregistrement terminé</title>"
+            "<body style=\"font-family:Arial,sans-serif;background:#7193A0;"
+            "color:#263238;padding:32px\"><main style=\"max-width:760px;"
+            "background:white;padding:28px;border-radius:20px;margin:auto\">"
+            "<h1>Enregistrement terminé</h1>"
+            "<p>Redémarrage de l'appareil en point d'accès Mira...</p>"
+            "</main></body></html>";
+        esp_err_t response=serve_page(req,ap_restart_html);
         vTaskDelay(pdMS_TO_TICKS(1200));
         esp_restart();
         return response;
