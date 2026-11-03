@@ -232,14 +232,12 @@ static esp_err_t save_post(httpd_req_t *req){
             return ESP_FAIL;
         }
         ESP_LOGI(TAG,"Mira beta setup step 1/2: local screen key saved");
-        /* POST/Redirect/GET: the browser must leave /save?config=key
-         * and request the actual Wi-Fi step from the AP. Avoid a scan
-         * and chunked HTML response inside the credentials POST itself.
+        /* Match firmware-beta's MiraPanelServer.cpp first-run /save
+         * flow: after persisting the local key, render the exact original
+         * Page_ManageurWiFiSansR in the same HTTP POST response.
+         * A 303 redirect was an unnecessary IDF-port divergence.
          */
-        httpd_resp_set_status(req,"303 See Other");
-        httpd_resp_set_hdr(req,"Location","/load?nav=wifisr");
-        httpd_resp_set_hdr(req,"Cache-Control","no-store");
-        return httpd_resp_send(req,NULL,0);
+        return serve_wifi_page(req);
     }
     if(!strcmp(config,"wifi")){
         if(!has_local_key()||has_wifi_station()){
