@@ -806,6 +806,8 @@ esp_err_t mira_recovery_init(void) {
     configure_beta_ap_profile();
     ESP_RETURN_ON_ERROR(esp_wifi_start(), TAG, "wifi start");
     ESP_ERROR_CHECK_WITHOUT_ABORT(mira_beta_captive_dns_start());
+    ESP_LOGI(TAG,"Startup stack available after DNS: %u bytes",
+             (unsigned)uxTaskGetStackHighWaterMark(NULL));
     if(xTaskCreate(recovery_ap_supervisor,"mira_ap_guard",3072,NULL,3,NULL)!=pdPASS)
         ESP_LOGW(TAG,"Recovery AP supervisor unavailable; AP remains enabled");
     wifi_config_t saved_sta={0};
@@ -824,25 +826,36 @@ esp_err_t mira_recovery_init(void) {
     if(has_native_profiles&&have_sta){
         // If the user deleted the active SSID in Mira's native list, do not
         // resurrect it from Wi-Fi flash storage after a reboot.
-        mira_beta_network_t profiles[MIRA_NET_MAX]={0};
-        size_t count=0;
-        if(mira_beta_networks_list(profiles,&count,MIRA_NET_MAX)==ESP_OK){
-            bool listed=false;
-            size_t active_len=strnlen((const char*)saved_sta.sta.ssid,sizeof(saved_sta.sta.ssid));
-            for(size_t i=0;i<count;i++){
-                if(strlen(profiles[i].ssid)==active_len&&
-                   !memcmp(profiles[i].ssid,saved_sta.sta.ssid,active_len)){
-                    listed=true;break;
+        // This array was previously an automatic variable (>3.4 KiB) in
+        // app_main's startup call chain. It can smash the 3.5 KiB default
+        // ESP-IDF main-task stack before the HTTP server or LVGL is started.
+        // Allocate on the heap only when the native NVS overlay is present.
+        mira_beta_network_t *profiles=calloc(MIRA_NET_MAX,sizeof(*profiles));
+        if(!profiles){
+            ESP_LOGW(TAG,"Network profile list skipped: not enough heap");
+        }else{
+            size_t count=0;
+            if(mira_beta_networks_list(profiles,&count,MIRA_NET_MAX)==ESP_OK){
+                bool listed=false;
+                size_t active_len=strnlen((const char*)saved_sta.sta.ssid,
+                                           sizeof(saved_sta.sta.ssid));
+                for(size_t i=0;i<count;i++){
+                    if(strlen(profiles[i].ssid)==active_len&&
+                       !memcmp(profiles[i].ssid,saved_sta.sta.ssid,active_len)){
+                        listed=true;
+                        break;
+                    }
+                }
+                if(!listed){
+                    wifi_config_t blank={0};
+                    if(esp_wifi_set_config(WIFI_IF_STA,&blank)==ESP_OK){
+                        have_sta=false;
+                        memset(&saved_sta,0,sizeof(saved_sta));
+                        ESP_LOGI(TAG,"Previously deleted Wi-Fi profile not restored");
+                    }
                 }
             }
-            if(!listed){
-                wifi_config_t blank={0};
-                if(esp_wifi_set_config(WIFI_IF_STA,&blank)==ESP_OK){
-                    have_sta=false;
-                    memset(&saved_sta,0,sizeof(saved_sta));
-                    ESP_LOGI(TAG,"Previously deleted Wi-Fi profile not restored");
-                }
-            }
+            free(profiles);
         }
     }
     if(!has_native_profiles&&(!have_sta || legacy_saved)){
@@ -877,6 +890,8 @@ esp_err_t mira_recovery_init(void) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_connect());
     }
 
+    ESP_LOGI(TAG,"Startup stack available before HTTP: %u bytes",
+             (unsigned)uxTaskGetStackHighWaterMark(NULL));
     httpd_config_t conf = HTTPD_DEFAULT_CONFIG();
     // 9 routes are registered below; ESP-IDF defaults to 8 URI handlers.
     // Exceeding that limit used to abort app_main() before LCD init, causing
