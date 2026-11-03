@@ -99,7 +99,7 @@ assert 'esp_netif_get_ip_info(sta_netif,&sta_ip)==ESP_OK' in setup
 assert 'sta_ip.ip.addr==0' in setup
 assert setup.count("if(!first_run_ap_access(req))return ESP_FAIL;")==2
 assert 'if(!mira_setup_require_ap(req))return ESP_FAIL;' in recovery
-assert 'mira_setup_require_ap(req)' in (idf / "mira_beta_ota.c").read_text(encoding="utf-8")
+assert 'mira_beta_web_authorized(req)' in (idf / "mira_beta_ota.c").read_text(encoding="utf-8")
 assert 'httpd_resp_set_status(req,"303 See Other")' in setup
 assert 'httpd_resp_set_hdr(req,"Location","/load?nav=wifisr")' in setup
 print("PASS first-install AP-only key to Wi-Fi route, production and OTA access unchanged")
