@@ -580,7 +580,7 @@ static esp_err_t beta_checkupdate_page(httpd_req_t *req){
       "if(!r.ok)throw new Error('HTTP '+r.status);"
       "var j=await r.json();"
       "e.textContent=(j.message||j.status||'Statut inconnu')+"
-      "(j.version?'\\nVersion distante : '+j.version:'');"
+      "(j.remote?'\\nVersion distante : '+j.remote:'');"
       "}catch(err){e.textContent='Vérification impossible : '+err.message;}}"
       "document.getElementById('check').addEventListener('click',check);"
       "check();</script></body></html>");
