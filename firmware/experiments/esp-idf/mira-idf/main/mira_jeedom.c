@@ -2225,9 +2225,16 @@ static void send_generic_action(const mira_action_msg_t *msg){
         if(!command_value[0]){cJSON_Delete(root);free(json);return;}
     }else if(!strcmp(type,"color")){
         unsigned r=0,g=0,b=0;
-        char extra=0;
-        if(sscanf(msg->value,"%u,%u,%u %c",&r,&g,&b,&extra)!=3||
-           r>255u||g>255u||b>255u){cJSON_Delete(root);free(json);return;}
+        bool valid=false;
+        if(strlen(msg->value)==7 && msg->value[0]=='#'){
+            valid=sscanf(msg->value+1,"%2x%2x%2x",&r,&g,&b)==3;
+        }else{
+            char extra=0;
+            valid=sscanf(msg->value,"%u,%u,%u %c",&r,&g,&b,&extra)==3;
+        }
+        if(!valid||r>255u||g>255u||b>255u){
+            cJSON_Delete(root);free(json);return;
+        }
         snprintf(command_value,sizeof(command_value),"%%23%02X%02X%02X",r,g,b);
     }else if(!strcmp(type,"range")||!strcmp(type,"roundrange")){
         snprintf(command_value,sizeof(command_value),"%s",msg->value);
