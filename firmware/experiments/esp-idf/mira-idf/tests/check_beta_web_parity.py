@@ -364,3 +364,8 @@ assert 'mira_format_hhmm(status.night_start,begin)' in full
 assert 'mira_format_hhmm(status.night_end,finish)' in full
 assert 'snprintf(status.night_start,sizeof(status.night_start)' not in full
 print("PASS beta asynchronous GenericCmd configured URL fallback and fixed-size HH:MM")
+# Exactly match firmware-beta GetParamBool("Jeedom") absent => false.
+assert 'static volatile bool jeedom_mode_enabled=false;' in jeedom
+assert 'bool enabled=false; // Match beta GetParamBool("Jeedom") when absent.' in jeedom
+assert 'if(!strcmp(name,"Jeedom"))jeedom_mode_enabled=!strcmp(value,"1");' in jeedom
+print("PASS beta disabled-by-default Jeedom transport and explicit setting override")
