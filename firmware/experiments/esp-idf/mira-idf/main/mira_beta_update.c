@@ -5,6 +5,7 @@
 // uploads them via /doUpdateFile. No remote binary is flashed by this module.
 #include "mira_beta_update.h"
 #include "mira_beta_web.h"
+#include "mira_jeedom.h"
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
 #include "esp_timer.h"
@@ -140,6 +141,12 @@ esp_err_t mira_beta_update_check(httpd_req_t *req){
         "Mise à jour IDF publiée. Utiliser Système pour vérifier et installer.",remote);
 }
 esp_err_t mira_beta_update_legacy_page(httpd_req_t *req){
+    /* /update without a key is the maintenance page; the original beta also
+     * serves authenticated GET /update?key=...&button/toggle/info/... . */
+    char query[2048]={0},key[128]={0};
+    if(httpd_req_get_url_query_str(req,query,sizeof(query))==ESP_OK &&
+       httpd_query_key_value(query,"key",key,sizeof(key))==ESP_OK)
+        return mira_jeedom_beta_legacy_get_update(req);
     if(!mira_beta_web_authorized(req))return ESP_FAIL;
     httpd_resp_set_status(req,"303 See Other");
     httpd_resp_set_hdr(req,"Location","/load?nav=system");
