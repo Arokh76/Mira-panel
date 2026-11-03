@@ -100,9 +100,10 @@ assert 'sta_ip.ip.addr==0' in setup
 assert setup.count("if(!first_run_ap_access(req))return ESP_FAIL;")==2
 assert 'if(!mira_setup_require_ap(req))return ESP_FAIL;' in recovery
 assert 'mira_beta_web_authorized(req)' in (idf / "mira_beta_ota.c").read_text(encoding="utf-8")
-assert 'httpd_resp_set_status(req,"303 See Other")' in setup
-assert 'httpd_resp_set_hdr(req,"Location","/load?nav=wifisr")' in setup
-print("PASS first-install AP-only key to Wi-Fi route, production and OTA access unchanged")
+assert 'ESP_LOGI(TAG,"Mira beta setup step 1/2: local screen key saved");\n        /* Match firmware-beta' in setup
+assert 'return serve_wifi_page(req);' in setup.split('if(!strcmp(config,"key")){',1)[1].split('if(!strcmp(config,"wifi")){',1)[0]
+assert 'httpd_resp_set_status(req,"303 See Other")' not in setup
+print("PASS first-install beta direct key-to-Wi-Fi render, production and OTA access unchanged")
 # First real 4.3C USB boot crash, 2026-11-03:
 # InstrFetchProhibited PC=0x00000008 immediately after captive DNS was logged.
 # Recovery's 16-profile array alone occupied 3456 bytes on the small default
