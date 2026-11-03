@@ -15,6 +15,7 @@
 #include <strings.h>
 #include <ctype.h>
 #include <math.h>
+#include <limits.h>
 #include <inttypes.h>
 #include "cJSON.h"
 #include "nvs.h"
@@ -202,8 +203,14 @@ static cJSON *index_from_config(const char *json) {
         if(!strcmp(type,"info")||!strcmp(type,"button")){
             cJSON *a=append_action(arr,&id,type,name);
             if(a && !strcmp(type,"info")){
+                /* IndexAddInfo() starts with an empty Jeedom state. The
+                 * widget's JSON default is NOT a received sensor value.
+                 */
                 cJSON_AddStringToObject(a,"unit",jstr((cJSON*)w,"unit",""));
-                cJSON_AddStringToObject(a,"value",jstr((cJSON*)w,"value",""));
+                cJSON_AddStringToObject(a,"value","");
+                cJSON_AddStringToObject(a,"size","");
+            }else if(a){
+                cJSON_AddStringToObject(a,"return","false");
             }
         }else if(!strcmp(type,"toggle")){
             cJSON *a=cJSON_CreateObject();if(!a)continue;
@@ -216,11 +223,20 @@ static cJSON *index_from_config(const char *json) {
             cJSON_AddStringToObject(a,"state","Off");
             cJSON_AddItemToArray(arr,a);
         }else if(!strcmp(type,"range")||!strcmp(type,"roundrange")){
+            /* MiraPanelUI.cpp normalizes malformed min/max and clamps the
+             * default BEFORE registering its IndexAddRange() command.
+             * Jeedom must see exactly the same range for autosync.
+             */
+            int lo=jint((cJSON*)w,"min",0),hi=jint((cJSON*)w,"max",100);
+            if(hi<=lo)hi=lo>INT_MAX-100?INT_MAX:lo+100;
+            int current=jint((cJSON*)w,"value",lo);
+            if(current<lo)current=lo;
+            if(current>hi)current=hi;
             cJSON *a=append_action(arr,&id,"range",name);
             if(a){
-                cJSON_AddNumberToObject(a,"min",jint((cJSON*)w,"min",0));
-                cJSON_AddNumberToObject(a,"max",jint((cJSON*)w,"max",100));
-                cJSON_AddNumberToObject(a,"value",jint((cJSON*)w,"value",0));
+                cJSON_AddNumberToObject(a,"min",lo);
+                cJSON_AddNumberToObject(a,"max",hi);
+                cJSON_AddNumberToObject(a,"value",current);
             }
         }else if(!strcmp(type,"color")){
             cJSON *a=append_action(arr,&id,"color",name);
@@ -237,14 +253,31 @@ static cJSON *index_from_config(const char *json) {
             cJSON *a=append_action(arr,&id,"info",compound);
             if(a)cJSON_AddStringToObject(a,"unit","°C");
             snprintf(compound,sizeof(compound),"%s__consigne",name);
+            /* Beta thermo min [-20,60], max [min+1,80], half-degree
+             * setpoint then round to the integer IndexAddRange default.
+             */
+            int lo=jint((cJSON*)w,"min",5),hi=jint((cJSON*)w,"max",30);
+            if(lo< -20)lo= -20;
+            if(lo>60)lo=60;
+            if(hi<lo+1)hi=lo+1;
+            if(hi>80)hi=80;
+            const char *raw=jstr((cJSON*)w,"value","20");
+            char *endptr=NULL;
+            float setpoint=strtof(raw,&endptr);
+            if(endptr==raw||*endptr||!isfinite(setpoint))setpoint=20.0f;
+            setpoint=roundf(setpoint*2.0f)*0.5f;
+            if(setpoint<lo)setpoint=(float)lo;
+            if(setpoint>hi)setpoint=(float)hi;
             a=append_action(arr,&id,"range",compound);
             if(a){
-                cJSON_AddNumberToObject(a,"min",jint((cJSON*)w,"min",5));
-                cJSON_AddNumberToObject(a,"max",jint((cJSON*)w,"max",30));
-                cJSON_AddNumberToObject(a,"value",jint((cJSON*)w,"value",20));
+                cJSON_AddNumberToObject(a,"min",lo);
+                cJSON_AddNumberToObject(a,"max",hi);
+                cJSON_AddNumberToObject(a,"value",(int)roundf(setpoint));
             }
             snprintf(compound,sizeof(compound),"%s__mode",name);
+            const int before_modes=id;
             add_choices(arr,&id,compound,jstr((cJSON*)w,"modes","Confort|Éco|Hors gel|Arrêt"));
+            if(id==before_modes)add_choices(arr,&id,compound,"Confort");
         }else if(!strcmp(type,"multiaction")){
             static const char *const triggers[]={"Multi_Clic_","Multi_Double_","Multi_Triple_","Multi_Long_"};
             for(size_t n=0;n<4;n++){
