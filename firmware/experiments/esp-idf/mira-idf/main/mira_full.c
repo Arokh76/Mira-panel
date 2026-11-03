@@ -1132,6 +1132,14 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         lv_obj_align(warning,LV_ALIGN_BOTTOM_LEFT,0,0);
         return;
     }
+    /* firmware-beta MiraPanelUI.cpp registers the four Multi_* IDs for
+     * every multiaction, but on MIRA_TARGET_WAVESHARE_43C only draws its
+     * tile when WT32MultiVisible(name) returns true. That method always
+     * returns false on Waveshare: physical WT32 GPIO multi-buttons do not
+     * exist on the 4.3C. Keep the IDs via mira_jeedom index_from_config(),
+     * but DO NOT invent a visible touchscreen multiaction button.
+     */
+    if(!strcmp(type,"multiaction"))return;
     mira_widget_t *w=&widgets[widget_n++];
     memset(w,0,sizeof(*w));
     snprintf(w->name,sizeof(w->name),"%s",name);
