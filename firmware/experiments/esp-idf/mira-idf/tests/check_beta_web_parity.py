@@ -941,8 +941,10 @@ print('PASS encrypted Arduino MQTT credentials migrate with correct AES buffer')
 assert 'host[0]=0;username[0]=0;secret[0]=0;' in mqtt
 assert 'enabled=false;port=1883;' in mqtt
 assert 'if(err==ESP_OK&&s&&s->valuestring[0])' in mqtt
-assert 'if(!mira_setup_require_ap(r))return ESP_FAIL;' in mqtt[
+assert 'if(!mira_beta_web_authorized(r))return ESP_FAIL;' in mqtt[
     mqtt.index('static esp_err_t mqtt_get('):mqtt.index('static esp_err_t mqtt_post(')]
+assert 'if(!mira_setup_require_ap(r))return ESP_FAIL;' in mqtt[
+    mqtt.index('static esp_err_t mqtt_post('):]
 assert 'cJSON_AddStringToObject(result,"screen",screen_name);' in mqtt
 print('PASS MQTT reprovisioning, password retention, authenticated JSON status')
 
