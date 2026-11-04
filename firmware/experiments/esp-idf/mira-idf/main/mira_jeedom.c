@@ -1413,6 +1413,10 @@ static bool display_field_write(const mira_display_field_t *field,const char *va
            ((strcmp(field->key,"day_pct")&&strcmp(field->key,"night_pct"))||number>=1)){
             if(field->max>255)err=nvs_set_u32(nv,field->key,(uint32_t)number);
             else err=nvs_set_u8(nv,field->key,(uint8_t)number);
+            // Beta refreshDisplayConfig(): DISPLAY_Delai controls the
+            // sleep-enable switch after a new Jeedom configuration arrives.
+            if(err==ESP_OK&&!strcmp(field->key,"sleep_delay"))
+                err=nvs_set_u8(nv,"sleep_enabled",number>0?1:0);
         }
     }
     if(err==ESP_OK)err=nvs_commit(nv);
