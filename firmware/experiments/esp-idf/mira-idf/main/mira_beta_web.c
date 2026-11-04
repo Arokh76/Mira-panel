@@ -1129,7 +1129,15 @@ static esp_err_t save_beta_wifi(httpd_req_t *req,cJSON *form){
     snprintf(profile.dns1,sizeof(profile.dns1),"%s",dns1?dns1:"");
     snprintf(profile.dns2,sizeof(profile.dns2),"%s",dns2?dns2:"");
     result=mira_beta_networks_upsert(&profile,password);
-    if(result!=ESP_OK)ESP_LOGW(TAG,"Wi-Fi connected but not indexed: %s",esp_err_to_name(result));
+    if(result!=ESP_OK){
+        // Do not tell the user the saved-network operation succeeded when
+        // the native NVS overlay could not be committed. The STA Wi-Fi
+        // connection may have changed; report the persistence failure.
+        ESP_LOGE(TAG,"Wi-Fi applied but native profile was NOT saved: %s",
+                 esp_err_to_name(result));
+        return html_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,
+                        "Wi-Fi applique mais profil non enregistre; verifier NVS");
+    }
     return go_to(req,"/load?nav=listnetwork");
 }
 static esp_err_t save_beta_ap(httpd_req_t *req,cJSON *form){
