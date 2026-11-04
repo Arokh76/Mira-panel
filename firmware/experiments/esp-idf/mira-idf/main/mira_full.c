@@ -627,7 +627,21 @@ static void event_local(lv_event_t *e){
         remember_passive_state(&observation);
     }
     const bool use_jeedom=mira_jeedom_actions_enabled();
-    const bool mqtt_sent=!use_jeedom&&mira_other_transport_action(b->name,b->type,payload);
+    bool mqtt_sent=false;
+    if(!use_jeedom){
+        if(!strcmp(b->type,"thermostat")){
+            /* Arduino onThermostatRange publishes <name>__consigne with
+             * String(value,1). The Jeedom HTTP index still uses the base
+             * thermostat widget name, not that MQTT topic suffix. */
+            char mqtt_name[128];
+            const int n=snprintf(mqtt_name,sizeof(mqtt_name),
+                                 "%.95s__consigne",b->name);
+            if(n>0&&n<(int)sizeof(mqtt_name))
+                mqtt_sent=mira_mqtt_publish_action(mqtt_name,b->value);
+            if(!mqtt_sent)
+                mqtt_sent=mira_generic_queue_local_action(b->name,b->type,payload);
+        }else mqtt_sent=mira_other_transport_action(b->name,b->type,payload);
+    }
     const bool jeedom_queued=use_jeedom&&mira_jeedom_queue_local_action(b->name,b->type,payload);
     if(feedback) {
         char result[180];
