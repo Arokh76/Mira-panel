@@ -732,3 +732,20 @@ assert 'lv_obj_add_event_cb(sl,brightness_live,LV_EVENT_VALUE_CHANGED,NULL);' in
 assert 'lv_obj_add_event_cb(sl,brightness_release,LV_EVENT_RELEASED,NULL);' in full
 assert 'if(persisted_brightness_raw==(uint8_t)value)return;' in full
 print("PASS live beta brightness feedback with deferred NVS persistence")
+
+# On Waveshare 4.3C the beta WT32MultiVisible() is false: native DI
+# extension may display the tile ONLY if its own configuration opts in.
+assert 'MIRA_TARGET_WAVESHARE_43C' in beta_server_impl
+assert 'if(!strcmp(type,"multiaction")&&!mira_gpio43_multi_visible(w->name))' in full
+assert 'bool mira_gpio43_multi_visible(const char *name)' in (root/"firmware/experiments/esp-idf/mira-idf/main/mira_gpio43.c").read_text(encoding="utf-8")
+print("PASS Waveshare multi-action card hidden by default; EXIO visibility is opt-in")
+
+# Beta sleep settings have an explicit On/Off switch, independently of
+# display delay. Zero timeout remains the off value for web DISPLAY_Delai.
+assert 'ui->_sleepEnabled = lv_obj_has_state' in beta_ui_impl
+assert 'static bool sleep_enabled=true;' in full
+assert 'static void sleep_mode_changed(lv_event_t *event)' in full
+assert 'lv_obj_add_event_cb(sleep_switch,sleep_mode_changed,LV_EVENT_VALUE_CHANGED,NULL);' in full
+assert 'if(!display_sleeping && sleep_enabled && sleep_timeout_seconds>0 &&' in full
+assert 'nvs_get_u8(ui_nvs,"sleep_enabled",&enabled)' in full
+print("PASS beta explicit sleep enable switch and wake/sleep gate")
