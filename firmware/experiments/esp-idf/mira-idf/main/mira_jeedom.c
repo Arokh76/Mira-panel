@@ -1468,13 +1468,17 @@ static esp_err_t param_get(httpd_req_t *req){
         return httpd_resp_sendstr(req,ok?value:"Null");
     }
     nvs_handle_t nv;
+    /* Arduino GetParamText() reports a missing parameter as null.
+     * Do not forge "Jeedom=1" when NVS is absent: the default Jeedom
+     * protocol on firmware-beta is disabled.
+     */
     if(nvs_open("mira_idf_jeed",NVS_READONLY,&nv)!=ESP_OK)
-        return httpd_resp_sendstr(req,!strcmp(name,"Jeedom")?"1":"Null");
+        return httpd_resp_sendstr(req,"Null");
     char value[256]={0};size_t len=sizeof(value);
     esp_err_t err=nvs_get_str(nv,name,value,&len);
     nvs_close(nv);
     httpd_resp_set_type(req,"text/plain");
-    return httpd_resp_sendstr(req,err==ESP_OK?value:(!strcmp(name,"Jeedom")?"1":"Null"));
+    return httpd_resp_sendstr(req,err==ESP_OK?value:"Null");
 }
 // The original beta implements /get?key=...&toggle|info|infofa|id|param=...
 // Read-only: this endpoint MUST NOT issue an actuator or a Jeedom command.
@@ -1553,7 +1557,25 @@ static esp_err_t beta_get(httpd_req_t *req){
         if(!match)continue;
         const char *name=jstr((cJSON*)entry,"nom","");
         found=mira_full_cached_state(name,result,sizeof(result));
-        if(!found&&!is_toggle){
+        if(is_toggle){
+            /* Arduino IndexSetToggle() stores "On" or "Off" and /get
+             * returns that canonical label, not the raw incoming "1"/"0"
+             * which MQTT and Jeedom can send to the widget cache.
+             * Unobserved toggles retain the default state "Off".
+             */
+            if(!found){
+                snprintf(result,sizeof(result),"%s",
+                         jstr((cJSON*)entry,"state","Off"));
+                found=true;
+            }else{
+                const bool on=!strcasecmp(result,"On")||
+                              !strcasecmp(result,"true")||
+                              !strcasecmp(result,"oui")||
+                              !strcasecmp(result,"actif")||
+                              !strcmp(result,"1");
+                snprintf(result,sizeof(result),"%s",on?"On":"Off");
+            }
+        }else if(!found){
             const char *initial=jstr((cJSON*)entry,"value","");
             if(*initial){snprintf(result,sizeof(result),"%s",initial);found=true;}
         }
