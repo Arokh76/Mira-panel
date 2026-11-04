@@ -649,3 +649,16 @@ assert 'if(!screen||strlen(screen)>=48||' in handlers
 assert 'if(!strcmp(name,"null"))' not in mqtt  # handled by clean_screen_name
 assert 'if(!name[0]||!strcmp(name,"null"))snprintf(name,cap,"panel");' in mqtt
 print("PASS empty beta MQTT screen name defaults to panel")
+
+
+# Beta roundrange (not just thermostat) uses half-unit LVGL arcs:
+# physical range is min*2 .. max*2; outgoing 20.5 becomes "20.5"
+# and a passive 20.5 must display without triggering an action.
+assert 'lv_arc_set_range(b.control, b.minValue * 2, b.maxValue * 2);' in beta_ui_impl
+assert 'const float setpoint = rawValue * 0.5f;' in beta_ui_impl
+assert 'lv_arc_set_range(w->control,w->minv*2,w->maxv*2);' in full
+assert 'if(!strcmp(b->type,"thermostat")||!strcmp(b->type,"roundrange"))' in full
+assert 'if(w->control && !strcmp(w->type,"roundrange")){' in full
+assert 'lv_arc_set_value(w->control,half);' in full
+assert 'if((!strcmp(b->type,"thermostat")||!strcmp(b->type,"roundrange"))&&b->control)' in full
+print("PASS beta roundrange half-unit arc, passive state and action value")
