@@ -247,7 +247,8 @@ print("PASS Spotify NFC display labels and punctuation compatibility")
 # Arduino firmware target must never be silently reused.
 update = (idf / "mira_beta_update.c").read_text(encoding="utf-8")
 assert 'MIRA_IDF_PROFILE "waveshare-esp32s3-touch-lcd-4.3c-idf"' in update
-assert 'if(!valid||newer==-2)' in update
+assert 'ota_manifest_entry(url,hash,&bytes,remote)' in update
+assert 'ota_manifest_entry(url,digest,&expected,remote_version)' in update
 assert 'esp_crt_bundle_attach' in update
 assert 'mira_beta_update_check' in setup
 assert 'mira_beta_update_start' in setup
