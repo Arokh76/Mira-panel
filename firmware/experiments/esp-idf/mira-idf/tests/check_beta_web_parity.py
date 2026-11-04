@@ -401,8 +401,10 @@ assert 'int IndexAddButton(String Name, bool Return_Line = true)' in legacy_head
 assert 'int IndexAddInfo(String Name, String Unit = "", String Size = "60")' in legacy_header
 assert 'cJSON_AddStringToObject(entry,"size","60");' in jeedom
 assert 'cJSON_AddStringToObject(entry,"unit","");' in jeedom
-assert 'if(count==0)cJSON_AddNumberToObject(entry,"value",first_id);' in jeedom
-assert 'cJSON_AddStringToObject(entry,"value",text);' in jeedom
+assert 'cJSON_AddNumberToObject(entry,"value",first_id);' in jeedom
+assert 'cJSON_AddStringToObject(entry,"value",text);' not in jeedom
+assert 'Action["value"] = Listes_Value[k];' in legacy_server
+assert 'Action["value"] = IDAction - 1;' in legacy_server
 assert 'Action["value"] = IDAction - 1' in legacy_server
 print("PASS source-derived Jeedom button/info/list metadata for every compound widget")
 
