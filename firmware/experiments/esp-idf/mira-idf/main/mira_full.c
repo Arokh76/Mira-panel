@@ -141,6 +141,10 @@ typedef struct {
     lv_obj_t *list_buttons[12];
     char media_active_device[96];
     int minv,maxv;
+    /* Live drag: bound network traffic and avoid duplicate release values. */
+    int live_last_value;
+    uint32_t live_last_tick;
+    bool live_sent;
 } mira_widget_t;
 static mira_widget_t widgets[MAX_WIDGETS];
 static uint8_t widget_n=0;
@@ -612,6 +616,24 @@ static void event_local(lv_event_t *e){
                   jeedom_queued?"Action Jeedom en file":(mqtt_sent?"Action MQTT / HTTP":"Aperçu local"),b->name,b->value);
         lv_label_set_text(feedback,result);
     }
+}
+/* Arduino beta sends range/thermostat actions during dragging. Keep the
+ * UI responsive without flooding the bounded Jeedom/MQTT queues. The final
+ * value is always sent at release if the throttle skipped it. */
+static void event_live_range(lv_event_t *event){
+    if(suppress_events||display_sleeping)return;
+    mira_widget_t *w=(mira_widget_t*)lv_event_get_user_data(event);
+    if(!w||!w->control)return;
+    const int value=(!strcmp(w->type,"range")) ?
+        lv_slider_get_value(w->control) : lv_arc_get_value(w->control);
+    if(w->live_sent&&w->live_last_value==value)return;
+    const uint32_t now=lv_tick_get();
+    if(lv_event_get_code(event)==LV_EVENT_VALUE_CHANGED&&
+       w->live_sent&&(uint32_t)(now-w->live_last_tick)<180u)return;
+    event_local(event);
+    w->live_sent=true;
+    w->live_last_value=value;
+    w->live_last_tick=now;
 }
 // Multi-action dispatch is deferred until the double/triple-click window
 // closes. It is processed on the LVGL task without timers tied to deleted
@@ -1483,9 +1505,10 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
             lv_obj_set_style_bg_color(w->control,cyan_c(),LV_PART_INDICATOR);
             lv_obj_set_style_bg_color(w->control,lv_color_hex(0xEAF7FF),LV_PART_KNOB);
         }
-        // Only issue a Jeedom/MQTT command after the user finishes moving
-        // the slider/arc. VALUE_CHANGED can generate dozens of requests.
-        lv_obj_add_event_cb(w->control,event_local,LV_EVENT_RELEASED,w);
+        // Live beta-like drag with 180 ms rate limit; release sends any final
+        // value skipped by throttling, without duplicating the last command.
+        lv_obj_add_event_cb(w->control,event_live_range,LV_EVENT_VALUE_CHANGED,w);
+        lv_obj_add_event_cb(w->control,event_live_range,LV_EVENT_RELEASED,w);
         return;
     }
     if(!strcmp(type,"listbutton")){
