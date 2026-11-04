@@ -44,7 +44,10 @@ jobs:
           grep -Fq 'miraCompactActionValues()' firmware/source/consolidated/MIRA_PANEL/MiraPanelServer.cpp
           grep -Fq 'THEME_ROSE = 3' firmware/source/consolidated/MIRA_PANEL/MiraPanelUI.h
           grep -Fq 'MiraBootLogo::image()' firmware/source/consolidated/MIRA_PANEL/MiraPanelUI.cpp
-          grep -Fq 'LV_IMG_CF_TRUE_COLOR_ALPHA' firmware/source/consolidated/MIRA_PANEL/MiraBootLogo.h
+          grep -Fq 'W = 200' firmware/source/consolidated/MIRA_PANEL/MiraBootLogo.h
+          grep -Fq 'LV_IMG_CF_TRUE_COLOR' firmware/source/consolidated/MIRA_PANEL/MiraBootLogo.h
+          grep -Fq 'MiraBootLogo::release()' firmware/source/consolidated/MIRA_PANEL/MiraPanelUI.cpp
+          ! grep -Fq 'lv_img_set_zoom(miraMark' firmware/source/consolidated/MIRA_PANEL/MiraPanelUI.cpp
           grep -Fq '"0.7.37"' firmware/source/consolidated/MIRA_PANEL/MIRA_PANEL.ino
           rm -rf firmware/source/work
           mkdir -p firmware/source/work/MIRA_PANEL
@@ -78,7 +81,7 @@ jobs:
           ------------------------------------------------
           SINGLE-SCREEN TEST: never install on Waveshare or Nextion.
           This OTA application uses the stable 0.7.37 base with a targeted
-          ArduinoJson value-storage fix, Rose theme and startup logo. NOT an official release.
+          ArduinoJson value-storage fix, Rose theme and native 200x200 high-res Mira startup logo. NOT an official release.
           No production, firmware-beta, Jeedom, stable or release manifest is modified.
 
           Install the *_OTA.bin through the WT32 web firmware update.
