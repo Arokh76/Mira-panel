@@ -121,42 +121,21 @@ static esp_err_t json_response(httpd_req_t *req,const char *status,
     cJSON_free(encoded);
     return result;
 }
+/* The check and installation endpoints MUST validate the same manifest
+ * entry; otherwise the UI can advertise an update that the installer
+ * correctly refuses (invalid hash, size or target path).
+ */
+static bool ota_manifest_entry(char url[420],char expected_hash[65],
+                               size_t *bytes,char version_out[32]);
 esp_err_t mira_beta_update_check(httpd_req_t *req){
     if(!mira_beta_web_authorized(req))return ESP_FAIL;
-    char *manifest=fetch_manifest();
-    if(!manifest)
-        return json_response(req,"error","Manifeste GitHub IDF inaccessible.",NULL);
-    cJSON *json=cJSON_Parse(manifest);
-    free(manifest);
-    if(!json)return json_response(req,"error","Manifeste de versions invalide.",NULL);
-    const cJSON *project=cJSON_GetObjectItemCaseSensitive(json,"project");
-    const cJSON *version=cJSON_GetObjectItemCaseSensitive(json,"version");
-    const cJSON *targets=cJSON_GetObjectItemCaseSensitive(json,"targets");
-    const cJSON *native=cJSON_GetObjectItemCaseSensitive(targets,MIRA_IDF_PROFILE);
-    const cJSON *url=cJSON_GetObjectItemCaseSensitive(native,"ota");
-    const cJSON *sha=cJSON_GetObjectItemCaseSensitive(native,"otaSha256");
-    const cJSON *bytes=cJSON_GetObjectItemCaseSensitive(native,"otaBytes");
-    bool valid=cJSON_IsString(project)&&!strcmp(project->valuestring,"Mira Panel")&&
-               cJSON_IsString(version)&&cJSON_IsString(url)&&
-               cJSON_IsString(sha)&&sha->valuestring&&
-               strlen(sha->valuestring)==64&&cJSON_IsNumber(bytes)&&
-               bytes->valuedouble>=65536&&bytes->valuedouble<=4194304&&
-               url->valuestring&&
-               !strncmp(url->valuestring,APPROVED_OTA_PREFIX,strlen(APPROVED_OTA_PREFIX))&&
-               strstr(url->valuestring,"/waveshare-esp32s3-touch-lcd-4.3c-idf/ota.bin")&&
-               strlen(url->valuestring)>strlen(APPROVED_OTA_PREFIX);
-    char remote[32]={0};
-    if(valid && strlen(version->valuestring)<sizeof(remote))
-        snprintf(remote,sizeof(remote),"%s",version->valuestring);
-    else valid=false;
-    const int newer=valid?compare_version(remote,current_idf_version()):-2;
-    cJSON_Delete(json);
-    if(!valid||newer==-2)
-        return json_response(req,"error","Aucun OTA ESP-IDF 4.3C officiel publié pour cette cible.",NULL);
-    if(newer<=0)
-        return json_response(req,"uptodate","Version IDF à jour.",remote);
+    char url[420]={0},hash[65]={0},remote[32]={0};
+    size_t bytes=0;
+    if(!ota_manifest_entry(url,hash,&bytes,remote))
+        return json_response(req,"error",
+            "Aucun OTA ESP-IDF 4.3C officiel plus récent et valide n'est publié.",NULL);
     return json_response(req,"available",
-        "Mise à jour IDF publiée. Utiliser Système pour vérifier et installer.",remote);
+        "Mise à jour IDF vérifiée. Installation possible depuis Système.",remote);
 }
 esp_err_t mira_beta_update_legacy_page(httpd_req_t *req){
     /* /update without a key is the maintenance page; the original beta also
