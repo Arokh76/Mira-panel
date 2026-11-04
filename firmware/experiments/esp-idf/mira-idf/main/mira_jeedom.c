@@ -883,15 +883,12 @@ esp_err_t mira_jeedom_beta_web_action(httpd_req_t *req){
     /* Match Arduino events.send(data,event): the Web forms use
      * different SSE DATA contracts, not the raw action queue payload.
      * send: no SSE; range: value; color: "#rrggbb";
-     * list: list group name; textbox: numeric command ID. */
+     * list: list group name; textbox: submitted text. */
     char sse_data[160]={0};
     const char *sse_payload=NULL;
     if(!strcmp(kind,"send_range"))sse_payload=payload;
     else if(!strcmp(kind,"send_list"))sse_payload=action_name;
-    else if(!strcmp(kind,"send_textbox")){
-        snprintf(sse_data,sizeof(sse_data),"%ld",id);
-        sse_payload=sse_data;
-    }else if(!strcmp(kind,"send_color")){
+    else if(!strcmp(kind,"send_textbox"))sse_payload=payload;else if(!strcmp(kind,"send_color")){
         unsigned red=0,green=0,blue=0;
         if(sscanf(payload,"%u,%u,%u",&red,&green,&blue)==3&&
            red<=255u&&green<=255u&&blue<=255u){
