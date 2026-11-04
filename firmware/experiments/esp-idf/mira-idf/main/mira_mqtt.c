@@ -375,7 +375,7 @@ static esp_err_t mqtt_post(httpd_req_t *r) {
     const cJSON *s=root?cJSON_GetObjectItemCaseSensitive(root,"password"):NULL;
     const cJSON *en=root?cJSON_GetObjectItemCaseSensitive(root,"enabled"):NULL;
     if(!cJSON_IsString(h)||!h->valuestring||strlen(h->valuestring)>=sizeof(host)||
-       !cJSON_IsString(n)||!n->valuestring||!n->valuestring[0]||
+       !cJSON_IsString(n)||!n->valuestring||
        strlen(n->valuestring)>=sizeof(screen_name)||
        !cJSON_IsNumber(p)||p->valueint<1||p->valueint>65535||
        (u&&(!cJSON_IsString(u)||strlen(u->valuestring)>=sizeof(username)))||
