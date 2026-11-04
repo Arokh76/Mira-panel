@@ -358,9 +358,12 @@ assert 'if(!strcmp(type,"list")||!strcmp(type,"listbutton"))' in jeedom
 assert 'snprintf(command_value,sizeof(command_value),"%%23%02X%02X%02X"' in jeedom
 assert 'chunk=command_value;' in jeedom
 assert 'esp_http_client_perform(client)' in jeedom
-assert 'mira_other_transport_action(b->name,b->type,payload)' in full
-assert 'mira_other_transport_action(w->name,"listbutton",value)' in full
-assert 'mira_other_transport_action(command,(action>=3)?"range":"button",payload)' in full
+assert 'static bool mira_beta_user_action(' in full
+assert 'mira_jeedom_queue_local_action(name,type,value)' in full
+assert 'mira_mqtt_publish_action(mqtt_name?mqtt_name:name,' in full
+assert 'mira_generic_queue_local_action(name,type,value)' in full
+assert 'mira_beta_user_action(w->name,"listbutton",value,' in full
+assert 'mira_beta_user_action(command,(action>=3)?"range":"button",' in full
 assert 'mira_format_hhmm(status.night_start,begin)' in full
 assert 'mira_format_hhmm(status.night_end,finish)' in full
 assert 'snprintf(status.night_start,sizeof(status.night_start)' not in full
@@ -680,17 +683,20 @@ assert 'lv_obj_add_event_cb(w->control,event_live_range,LV_EVENT_RELEASED,w);' i
 assert '<180u' not in full
 print("PASS source-derived drag events: immediate range/roundrange, 130-ms thermostat and final release")
 
-# Beta LVGL 8 wheel emits RGB while dragging, not only on release. The
-# LVGL9 replacement has a hue ring and two explicit HSV axes; passive
-# states must update all three without an outgoing command.
+# Arduino LVGL8 uses the 150-pixel HUE colorwheel, with fixed mode:
+# saturation and value are preserved when a remote RGB state arrives,
+# but there are no extra HSV sliders. Release ALWAYS sends the final RGB.
+assert 'lv_colorwheel_set_mode(b.control, LV_COLORWHEEL_MODE_HUE);' in beta_ui_impl
+assert 'lv_colorwheel_set_mode_fixed(b.control, true);' in beta_ui_impl
 assert 'const bool liveSend = (code == LV_EVENT_VALUE_CHANGED || code == LV_EVENT_PRESSING)' in beta_ui_impl
 assert 'event_local(event);' in full[full.index('static void wheel_touch'):full.index('/* Legacy beta GenericCmd')]
-assert 'static void wheel_slider_touch(lv_event_t *event)' in full
-assert 'w->color_sat=(uint8_t)lv_slider_get_value(source);' in full
-assert 'w->color_val=(uint8_t)lv_slider_get_value(source);' in full
-assert 'lv_slider_set_value(w->color_saturation,hsv.s,LV_ANIM_OFF);' in full
-assert 'lv_slider_set_value(w->color_brightness,hsv.v,LV_ANIM_OFF);' in full
-print("PASS drag color publication and complete passive HSV restoration")
+assert 'lv_obj_set_size(w->control,MIRA_WHEEL_SIZE,MIRA_WHEEL_SIZE);' in full
+assert 'lv_obj_add_event_cb(w->control,event_local,LV_EVENT_RELEASED,w);' in full
+assert 'static void wheel_slider_touch(' not in full
+assert 'lv_slider_create(w->card)' not in full[full.index('if(!strcmp(type,"color"))'):full.index('if(!strcmp(type,"energy"))')]
+assert 'w->color_sat=hsv.s;' in full
+assert 'w->color_val=hsv.v;' in full
+print("PASS fixed 150px Hue wheel, live/final RGB, passive saturation and brightness")
 
 # Arduino multi-action gesture semantics: 900-ms held press, then
 # 370-ms post-release aggregation for single/double/triple.
@@ -764,3 +770,27 @@ print("PASS legacy miraui preferences for brightness, theme, sleep, clock and na
 assert '_sleepEnabled = _sleepTimeoutSec > 0;' in beta_ui_impl
 assert 'err=nvs_set_u8(nv,"sleep_enabled",number>0?1:0);' in jeedom
 print('PASS remote sleep delay updates activation')
+
+# Source-derived differences fixed: beta HTTP SSE keeps EventSource open
+# (unlike the early native reconnecting snapshot); the native handler must
+# hand off an async HTTP request and stream changed cached states.
+assert 'AsyncEventSource events("/events");' in beta_server_impl
+assert 'server.addHandler(&events);' in beta_server_impl
+assert 'httpd_req_async_handler_begin(req,&client->req)' in jeedom
+assert 'httpd_req_async_handler_complete(req)' in jeedom
+assert 'mira_sse_changed(client)' in jeedom
+assert 'vTaskDelay(pdMS_TO_TICKS(250))' in jeedom
+assert ': Mira keepalive' in jeedom
+assert 'return httpd_resp_send_chunk(req,NULL,0);' not in jeedom[jeedom.index('static esp_err_t beta_events_get('):jeedom.index('// Browser home commands on POST')]
+print("PASS persistent authenticated and bounded SSE transport")
+
+# The beta sends Jeedom actions AND MQTT to independent destinations when both
+# are configured; receiving a passive state must not dispatch either.
+assert 'ui._server.IndexSetEvent(b.id);' in beta_ui_impl
+assert 'ui.publishMqttAction(b, String(value));' in beta_ui_impl
+assert 'const bool queued=enabled&&mira_jeedom_queue_local_action(name,type,value);' in full
+assert 'const bool published=publish_mqtt&&' in full
+assert 'const bool generic=!enabled&&!published&&' in full
+assert 'mqtt_payload=b->value;' in full
+assert 'action!=4' in full # Beta device selection is Jeedom-only.
+print("PASS independent Jeedom and MQTT callbacks, no action from passive states")
