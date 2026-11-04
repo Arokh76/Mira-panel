@@ -401,11 +401,23 @@ bool mira_mqtt_publish_action(const char *name,const char *value) {
     return esp_mqtt_client_enqueue(client,topic,value,0,0,0,true)>=0;
 }
 static esp_err_t mqtt_get(httpd_req_t *r) {
-    char out[128];
-    snprintf(out,sizeof(out),"{\"enabled\":%s,\"connected\":%s,\"screen\":\"%s\"}",
-             enabled?"true":"false",connected?"true":"false",screen_name);
+    if(!mira_setup_require_ap(r))return ESP_FAIL;
+    // Names can legally include quotes and backslashes: escape JSON using
+    // cJSON instead of interpolating an unchecked NVS string into quotes.
+    cJSON *result=cJSON_CreateObject();
+    if(!result)return httpd_resp_send_err(r,HTTPD_500_INTERNAL_SERVER_ERROR,
+                                           "MQTT status unavailable");
+    cJSON_AddBoolToObject(result,"enabled",enabled);
+    cJSON_AddBoolToObject(result,"connected",connected);
+    cJSON_AddStringToObject(result,"screen",screen_name);
+    char *payload=cJSON_PrintUnformatted(result);
+    cJSON_Delete(result);
+    if(!payload)return httpd_resp_send_err(r,HTTPD_500_INTERNAL_SERVER_ERROR,
+                                            "MQTT status unavailable");
     httpd_resp_set_type(r,"application/json");
-    return httpd_resp_sendstr(r,out);
+    esp_err_t sent=httpd_resp_sendstr(r,payload);
+    cJSON_free(payload);
+    return sent;
 }
 static esp_err_t mqtt_post(httpd_req_t *r) {
     if(!mira_setup_require_ap(r))return ESP_FAIL;
@@ -450,7 +462,10 @@ static esp_err_t mqtt_post(httpd_req_t *r) {
     if(err==ESP_OK)err=nvs_set_u16(nv,"port",(uint16_t)p->valueint);
     if(err==ESP_OK)err=nvs_set_u8(nv,"enabled",cJSON_IsTrue(en)|| (cJSON_IsNumber(en)&&en->valueint!=0));
     if(err==ESP_OK&&u)err=nvs_set_str(nv,"username",u->valuestring);
-    if(err==ESP_OK&&s)err=nvs_set_str(nv,"secret",s->valuestring);
+    /* Match beta HTML MQTT settings: a blank password means keep
+     * the existing broker secret (do not silently disable authentication). */
+    if(err==ESP_OK&&s&&s->valuestring[0])
+        err=nvs_set_str(nv,"secret",s->valuestring);
     if(err==ESP_OK)err=nvs_commit(nv);
     nvs_close(nv);cJSON_Delete(root);
     if(err!=ESP_OK){httpd_resp_send_err(r,HTTPD_500_INTERNAL_SERVER_ERROR,"NVS write failed");return ESP_FAIL;}
