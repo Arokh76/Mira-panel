@@ -2016,6 +2016,54 @@ typedef struct {
     char value[160];
 } mira_action_msg_t;
 static QueueHandle_t action_queue;
+/* Latest-wins transport: a 40-widget panel has at most 80 independent
+ * media-range actions. Reserve 96 keyed slots in PSRAM so a saturated
+ * button FIFO cannot discard the final released slider/thermostat value.
+ * Never execute HTTP while holding the short critical section. */
+#define MIRA_LAST_VALUE_SLOTS 96u
+static mira_action_msg_t *last_value_actions;
+static TaskHandle_t action_worker_handle;
+static portMUX_TYPE last_value_lock=portMUX_INITIALIZER_UNLOCKED;
+
+static bool action_is_continuous(const char *type){
+    return !strcmp(type,"range")||!strcmp(type,"roundrange")||
+           !strcmp(type,"thermostat")||!strcmp(type,"color");
+}
+static bool enqueue_latest(const mira_action_msg_t *msg){
+    if(!last_value_actions||!msg||!msg->name[0])return false;
+    unsigned candidate=MIRA_LAST_VALUE_SLOTS;
+    portENTER_CRITICAL(&last_value_lock);
+    for(unsigned i=0;i<MIRA_LAST_VALUE_SLOTS;i++){
+        if(last_value_actions[i].name[0]&&
+           !strcmp(last_value_actions[i].name,msg->name)&&
+           !strcmp(last_value_actions[i].type,msg->type)){
+            candidate=i;break;
+        }
+        if(!last_value_actions[i].name[0]&&candidate==MIRA_LAST_VALUE_SLOTS)
+            candidate=i;
+    }
+    if(candidate<MIRA_LAST_VALUE_SLOTS)last_value_actions[candidate]=*msg;
+    portEXIT_CRITICAL(&last_value_lock);
+    if(candidate==MIRA_LAST_VALUE_SLOTS){
+        ESP_LOGE(TAG,"Jeedom last-value storage full; action refused");
+        return false;
+    }
+    if(action_worker_handle)xTaskNotifyGive(action_worker_handle);
+    return true;
+}
+static bool dequeue_latest(mira_action_msg_t *result){
+    if(!last_value_actions||!result)return false;
+    bool found=false;
+    portENTER_CRITICAL(&last_value_lock);
+    for(unsigned i=0;i<MIRA_LAST_VALUE_SLOTS;i++){
+        if(!last_value_actions[i].name[0])continue;
+        *result=last_value_actions[i];
+        last_value_actions[i].name[0]=0;
+        found=true;break;
+    }
+    portEXIT_CRITICAL(&last_value_lock);
+    return found;
+}
 
 
 static uint32_t ui_config_hash(const char *s) {
@@ -2043,7 +2091,10 @@ bool mira_jeedom_queue_local_action(const char *name,const char *type,const char
     snprintf(msg.name,sizeof(msg.name),"%s",name);
     snprintf(msg.type,sizeof(msg.type),"%s",type);
     snprintf(msg.value,sizeof(msg.value),"%s",value);
-    return xQueueSend(action_queue,&msg,0)==pdTRUE;
+    if(action_is_continuous(type))return enqueue_latest(&msg);
+    if(xQueueSend(action_queue,&msg,0)!=pdTRUE)return false;
+    if(action_worker_handle)xTaskNotifyGive(action_worker_handle);
+    return true;
 }
 /* MiraPanelServer::GenericCmd fallback when Jeedom is disabled and
  * MQTT did not accept a user action. Use the SAME background action worker
@@ -2057,7 +2108,10 @@ bool mira_generic_queue_local_action(const char *name,const char *type,
     snprintf(msg.name,sizeof(msg.name),"%s",name);
     snprintf(msg.type,sizeof(msg.type),"__generic");
     snprintf(msg.value,sizeof(msg.value),"%s",value);
-    return xQueueSend(action_queue,&msg,0)==pdTRUE;
+    if(action_is_continuous(type))return enqueue_latest(&msg);
+    if(xQueueSend(action_queue,&msg,0)!=pdTRUE)return false;
+    if(action_worker_handle)xTaskNotifyGive(action_worker_handle);
+    return true;
 }
 
 static int resolve_local_action(cJSON *index,const mira_action_msg_t *msg,
@@ -2470,7 +2524,8 @@ static void request_binding_sync(void){
     if(!action_queue)return;
     mira_action_msg_t msg={0};
     snprintf(msg.type,sizeof(msg.type),"__sync");
-    (void)xQueueSend(action_queue,&msg,0);
+    if(xQueueSend(action_queue,&msg,0)==pdTRUE&&action_worker_handle)
+        xTaskNotifyGive(action_worker_handle);
 }
 
 /* The beta GenericCmd() looks up a widget's configured URL in the
@@ -2575,12 +2630,19 @@ static void send_generic_action(const mira_action_msg_t *msg){
 static void jeedom_action_worker(void *unused) {
     (void)unused;
     mira_action_msg_t action;
+    bool prefer_latest=true;
     for(;;) {
-        if(xQueueReceive(action_queue,&action,portMAX_DELAY)==pdTRUE){
-            if(!strcmp(action.type,"__sync"))sync_jeedom_bindings();
-            else if(!strcmp(action.type,"__generic"))send_generic_action(&action);
-            else send_jeedom_action(&action);
+        bool found=prefer_latest&&dequeue_latest(&action);
+        if(!found)found=xQueueReceive(action_queue,&action,0)==pdTRUE;
+        if(!found)found=dequeue_latest(&action);
+        if(!found){
+            (void)ulTaskNotifyTake(pdTRUE,portMAX_DELAY);
+            continue;
         }
+        prefer_latest=!prefer_latest;
+        if(!strcmp(action.type,"__sync"))sync_jeedom_bindings();
+        else if(!strcmp(action.type,"__generic"))send_generic_action(&action);
+        else send_jeedom_action(&action);
     }
 }
 // The beta uses /reseau.json -> ap[0].passcrypt as the screen/plugin
@@ -2760,7 +2822,18 @@ esp_err_t mira_jeedom_action_init(void) {
     }
     action_queue=xQueueCreate(12,sizeof(mira_action_msg_t));
     if(!action_queue)return ESP_ERR_NO_MEM;
-    if(xTaskCreate(jeedom_action_worker,"mira_jeedom_http",7168,NULL,3,NULL)!=pdPASS) {
+    last_value_actions=heap_caps_calloc(MIRA_LAST_VALUE_SLOTS,
+                      sizeof(*last_value_actions),
+                      MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!last_value_actions){
+        vQueueDelete(action_queue);
+        action_queue=NULL;
+        return ESP_ERR_NO_MEM;
+    }
+    if(xTaskCreate(jeedom_action_worker,"mira_jeedom_http",7168,NULL,3,
+                   &action_worker_handle)!=pdPASS) {
+        heap_caps_free(last_value_actions);
+        last_value_actions=NULL;
         vQueueDelete(action_queue);
         action_queue=NULL;
         return ESP_ERR_NO_MEM;
