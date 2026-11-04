@@ -578,49 +578,133 @@ esp_err_t mira_jeedom_render_beta_actions(httpd_req_t *req){
     cJSON_Delete(index);
     return status;
 }
+/* ESP-IDF HTTPD asynchronous request: keep /events open like Arduino
+ * AsyncEventSource. One worker per browser (maximum two), no socket writes
+ * from LVGL, the MQTT callback, or the HTTP server's main task. A client
+ * sees changed states in under 250 ms and gets periodic SSE keepalives.
+ * Failed writes release the async request and its resources. */
+typedef struct {
+    httpd_req_t *req;
+    cJSON *index;
+    char (*last)[160];
+    unsigned count;
+} mira_sse_client_t;
+static unsigned mira_sse_clients;
+
+static esp_err_t mira_sse_changed(mira_sse_client_t *client){
+    const cJSON *actions=cJSON_GetObjectItemCaseSensitive(client->index,"actions");
+    const cJSON *item=NULL;
+    unsigned ordinal=0;
+    cJSON_ArrayForEach(item,actions){
+        if(ordinal>=client->count)break;
+        char *previous=client->last[ordinal++];
+        const char *type=jstr((cJSON*)item,"type","");
+        const char *name=jstr((cJSON*)item,"nom","");
+        if(!*name)continue;
+        char value[160]={0};
+        int id=jint((cJSON*)item,"id",-1);
+        if(!strcmp(type,"list")){
+            const char *group=jstr((cJSON*)item,"nomliste","");
+            if(!mira_full_cached_state(group,value,sizeof(value))||
+               strcmp(value,name))continue;
+        }else if(!mira_full_cached_state(name,value,sizeof(value)))continue;
+        if(!strcmp(type,"toggle")){
+            const bool on=!strcmp(value,"1")||!strcasecmp(value,"On")||
+                          !strcasecmp(value,"true");
+            id=jint((cJSON*)item,on?"id1":"id0",-1);
+        }else if(strcmp(type,"info")&&strcmp(type,"range")&&strcmp(type,"list")&&
+                 strcmp(type,"inputbox")&&strcmp(type,"infofa"))continue;
+        if(id<1||id>4096)continue;
+        // A passive state cannot inject an extra SSE field or event.
+        for(char *p=value;*p;p++)if(*p=='\\r'||*p=='\\n')*p=' ';
+        if(!strcmp(previous,value))continue;
+        char event[230];
+        int written=snprintf(event,sizeof(event),"event: %d\\ndata: %s\\n\\n",id,value);
+        if(written<1||(size_t)written>=sizeof(event))continue;
+        esp_err_t err=httpd_resp_send_chunk(client->req,event,(size_t)written);
+        if(err!=ESP_OK)return err;
+        snprintf(previous,160,"%s",value);
+    }
+    return ESP_OK;
+}
+
+static void mira_sse_worker(void *argument){
+    mira_sse_client_t *client=(mira_sse_client_t *)argument;
+    httpd_req_t *req=client->req;
+    esp_err_t err=httpd_resp_set_type(req,"text/event-stream; charset=utf-8");
+    if(err==ESP_OK)err=httpd_resp_set_hdr(req,"Cache-Control","no-cache");
+    if(err==ESP_OK)err=httpd_resp_send_chunk(req,"retry: 3000\\n\\n",HTTPD_RESP_USE_STRLEN);
+    TickType_t last_heartbeat=xTaskGetTickCount();
+    while(err==ESP_OK){
+        err=mira_sse_changed(client);
+        if(err!=ESP_OK)break;
+        vTaskDelay(pdMS_TO_TICKS(250));
+        TickType_t now=xTaskGetTickCount();
+        if(now-last_heartbeat>=pdMS_TO_TICKS(10000)){
+            err=httpd_resp_send_chunk(req,": Mira keepalive\\n\\n",HTTPD_RESP_USE_STRLEN);
+            last_heartbeat=now;
+        }
+    }
+    // ESP-IDF closes/releases the duplicated HTTP request in this call.
+    httpd_req_async_handler_complete(req);
+    if(client->index)cJSON_Delete(client->index);
+    free(client->last);
+    free(client);
+    __atomic_sub_fetch(&mira_sse_clients,1u,__ATOMIC_RELAXED);
+    vTaskDelete(NULL);
+}
+
 static esp_err_t beta_events_get(httpd_req_t *req){
     if(!mira_beta_web_authorized(req))return ESP_FAIL;
+    // Reserve at most two clients to protect the HTTP socket pool and RAM.
+    unsigned active=__atomic_load_n(&mira_sse_clients,__ATOMIC_RELAXED);
+    do {
+        if(active>=2u){
+            httpd_resp_set_status(req,"503 Service Unavailable");
+            return httpd_resp_sendstr(req,"SSE client limit");
+        }
+    }while(!__atomic_compare_exchange_n(&mira_sse_clients,&active,active+1u,
+                                        false,__ATOMIC_RELAXED,__ATOMIC_RELAXED));
     char *raw=read_config(NULL);
     cJSON *index=raw?index_from_config(raw):NULL;
     free(raw);
-    httpd_resp_set_type(req,"text/event-stream; charset=utf-8");
-    httpd_resp_set_hdr(req,"Cache-Control","no-cache");
-    esp_err_t err=httpd_resp_send_chunk(req,"retry: 3000\n\n",HTTPD_RESP_USE_STRLEN);
-    if(index){
-        const cJSON *actions=cJSON_GetObjectItemCaseSensitive(index,"actions");
-        const cJSON *item=NULL;
-        cJSON_ArrayForEach(item,actions){
-            if(err!=ESP_OK)break;
-            const char *type=jstr((cJSON*)item,"type","");
-            const char *name=jstr((cJSON*)item,"nom","");
-            if(!*name)continue;
-            char value[160]={0};
-            int id=jint((cJSON*)item,"id",-1);
-            if(!strcmp(type,"list")){
-                const char *group=jstr((cJSON*)item,"nomliste","");
-                if(!mira_full_cached_state(group,value,sizeof(value))||
-                   strcmp(value,name))continue;
-            }else if(!mira_full_cached_state(name,value,sizeof(value)))continue;
-            if(!strcmp(type,"toggle")){
-                const bool on=!strcmp(value,"1")||!strcasecmp(value,"On")||
-                              !strcasecmp(value,"true");
-                id=jint((cJSON*)item,on?"id1":"id0",-1);
-            }else if(strcmp(type,"info")&&strcmp(type,"range")&&strcmp(type,"list")&&
-                     strcmp(type,"inputbox")&&strcmp(type,"infofa"))
-                continue;
-            if(id<1||id>4096)continue;
-            // Prevent an incoming MQTT newline from becoming a forged SSE event.
-            for(char *p=value;*p;p++)if(*p=='\r'||*p=='\n')*p=' ';
-            char event[30];
-            snprintf(event,sizeof(event),"event: %d\ndata: ",id);
-            if((err=beta_html(req,event))!=ESP_OK||
-               (err=beta_html(req,value))!=ESP_OK||
-               (err=beta_html(req,"\n\n"))!=ESP_OK)break;
-        }
-        cJSON_Delete(index);
+    const cJSON *actions=index?cJSON_GetObjectItemCaseSensitive(index,"actions"):NULL;
+    const int count=cJSON_IsArray(actions)?cJSON_GetArraySize(actions):0;
+    if(count<0||count>192){
+        if(index)cJSON_Delete(index);
+        __atomic_sub_fetch(&mira_sse_clients,1u,__ATOMIC_RELAXED);
+        httpd_resp_send_err(req,HTTPD_503_SERVICE_UNAVAILABLE,"SSE index too large");
+        return ESP_FAIL;
     }
-    if(err!=ESP_OK)return err;
-    return httpd_resp_send_chunk(req,NULL,0);
+    mira_sse_client_t *client=calloc(1,sizeof(*client));
+    if(client){
+        client->count=(unsigned)count;
+        client->index=index;
+        client->last=calloc(count?((size_t)count):1u,sizeof(*client->last));
+    }
+    if(!client||!client->last){
+        if(client)free(client);
+        if(index)cJSON_Delete(index);
+        __atomic_sub_fetch(&mira_sse_clients,1u,__ATOMIC_RELAXED);
+        httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"SSE allocation failed");
+        return ESP_FAIL;
+    }
+    // The worker owns the duplicated request. The original request handler
+    // returns immediately, leaving the browser's EventSource connected.
+    esp_err_t err=httpd_req_async_handler_begin(req,&client->req);
+    if(err!=ESP_OK){
+        cJSON_Delete(index);free(client->last);free(client);
+        __atomic_sub_fetch(&mira_sse_clients,1u,__ATOMIC_RELAXED);
+        httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"SSE async unavailable");
+        return ESP_FAIL;
+    }
+    if(xTaskCreate(mira_sse_worker,"mira_sse",6144,client,4,NULL)!=pdPASS){
+        httpd_req_async_handler_complete(client->req);
+        cJSON_Delete(index);free(client->last);free(client);
+        __atomic_sub_fetch(&mira_sse_clients,1u,__ATOMIC_RELAXED);
+        return ESP_FAIL;
+    }
+    return ESP_OK;
 }
 // Browser home commands on POST /update?send=ID, send_range, send_list, etc.
 // Only local user interactions can produce outbound actions; state updates
