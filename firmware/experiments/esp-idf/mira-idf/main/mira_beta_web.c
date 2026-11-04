@@ -1017,7 +1017,7 @@ static esp_err_t save_mqtt(httpd_req_t *req,cJSON *form){
     const char *password=field(form,"MQTT_Mot_de_passe");
     const char *enabled=field(form,"MQTT_Actif");
     unsigned port=0,on=0;
-    if(!screen||!*screen||strlen(screen)>=48||!host||strlen(host)>=128||
+    if(!screen||strlen(screen)>=48||!host||strlen(host)>=128||
        !username||strlen(username)>=64||
        !decimal(field(form,"MQTT_Port"),65535,&port)||port<1||
        !decimal(enabled,1,&on)){
