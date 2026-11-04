@@ -99,6 +99,39 @@ static bool pop_pending_state(mira_state_update_t *out){
 // Keep them OUT of the 24-entry general state queue to protect internal RAM.
 typedef struct {char name[96];char url[769];} mira_cover_update_t;
 static QueueHandle_t cover_update_queue;
+#define MIRA_COVER_SLOTS 40
+static mira_cover_update_t *pending_covers;
+static SemaphoreHandle_t pending_covers_lock;
+static size_t pending_cover_cursor;
+static bool put_pending_cover(const mira_cover_update_t *cover){
+    if(!cover||!pending_covers||!pending_covers_lock||
+       xSemaphoreTake(pending_covers_lock,pdMS_TO_TICKS(20))!=pdTRUE)return false;
+    size_t slot=MIRA_COVER_SLOTS;
+    for(size_t i=0;i<MIRA_COVER_SLOTS;i++){
+        if(pending_covers[i].name[0]&&!strcmp(pending_covers[i].name,cover->name)){
+            slot=i;break;
+        }
+        if(!pending_covers[i].name[0]&&slot==MIRA_COVER_SLOTS)slot=i;
+    }
+    if(slot<MIRA_COVER_SLOTS)pending_covers[slot]=*cover;
+    xSemaphoreGive(pending_covers_lock);
+    return slot<MIRA_COVER_SLOTS;
+}
+static bool pop_pending_cover(mira_cover_update_t *cover){
+    if(!cover||!pending_covers||!pending_covers_lock||
+       xSemaphoreTake(pending_covers_lock,0)!=pdTRUE)return false;
+    bool found=false;
+    for(size_t n=0;n<MIRA_COVER_SLOTS;n++){
+        size_t i=(pending_cover_cursor+n)%MIRA_COVER_SLOTS;
+        if(!pending_covers[i].name[0])continue;
+        *cover=pending_covers[i];
+        pending_covers[i].name[0]=0;
+        pending_cover_cursor=(i+1)%MIRA_COVER_SLOTS;
+        found=true;break;
+    }
+    xSemaphoreGive(pending_covers_lock);
+    return found;
+}
 // Incoming values are tracked separately for the beta HTTP /get endpoint.
 // An absent entry is unknown, never treated as OFF or zero.
 #define MIRA_STATE_CACHE_LIMIT 384
@@ -2842,7 +2875,12 @@ bool mira_full_enqueue_state(const char *name,const char *value){
         mira_cover_update_t cover={0};
         snprintf(cover.name,sizeof(cover.name),"%s",name);
         memcpy(cover.url,value,size+1);
-        if(xQueueSend(cover_update_queue,&cover,0)!=pdTRUE){
+        // The broker may restore dozens of retained covers on reconnect.
+        // Coalesce URLs per media widget instead of dropping every third.
+        bool accepted=put_pending_cover(&cover);
+        if(!accepted&&cover_update_queue)
+            accepted=xQueueSend(cover_update_queue,&cover,0)==pdTRUE;
+        if(!accepted){
             __atomic_fetch_add(&passive_queue_dropped,1u,__ATOMIC_RELAXED);
             return false;
         }
@@ -3390,11 +3428,15 @@ void mira_full_ui_tick(void){
         apply_auto_brightness();
     }
     apply_pending_states();
-    if(cover_update_queue){
+    if(cover_update_queue||pending_covers){
         mira_cover_update_t cover;
-        // GUI task owns all image lifecycle; passive cover updates just
-        // hand off a URL to its bounded worker (no HTTP on the GUI).
-        for(int attempt=0;attempt<2&&xQueueReceive(cover_update_queue,&cover,0)==pdTRUE;attempt++){
+        // GUI task owns image lifecycle; URLs are coalesced by topic in
+        // PSRAM, then delivered at most twice per LVGL frame.
+        for(int attempt=0;attempt<2;attempt++){
+            bool have=cover_update_queue&&
+                xQueueReceive(cover_update_queue,&cover,0)==pdTRUE;
+            if(!have)have=pop_pending_cover(&cover);
+            if(!have)break;
             for(uint8_t i=0;i<widget_n;i++){
                 mira_widget_t *w=&widgets[i];
                 if(strcmp(w->type,"media"))continue;
@@ -3545,6 +3587,12 @@ bool mira_full_storage_init(void){
     if(!pending_states||!pending_states_lock)
         ESP_LOGW(TAG,"PSRAM passive-state coalescing unavailable; using bounded FIFO");
     if(!cover_update_queue)cover_update_queue=xQueueCreate(2,sizeof(mira_cover_update_t));
+    if(!pending_covers_lock)pending_covers_lock=xSemaphoreCreateMutex();
+    if(!pending_covers)
+        pending_covers=heap_caps_calloc(MIRA_COVER_SLOTS,
+                       sizeof(*pending_covers),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!pending_covers||!pending_covers_lock)
+        ESP_LOGW(TAG,"PSRAM cover coalescing unavailable; using two-entry FIFO");
     if(!state_queue)ESP_LOGE(TAG,"State queue allocation failed");
     if(!state_cache_lock)state_cache_lock=xSemaphoreCreateMutex();
     if(!state_cache)state_cache=heap_caps_calloc(MIRA_STATE_CACHE_LIMIT,sizeof(*state_cache),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
