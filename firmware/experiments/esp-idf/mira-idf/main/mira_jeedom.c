@@ -1869,8 +1869,10 @@ static esp_err_t getallparams(httpd_req_t *req){
         if(strstr(names[i],"Key"))continue;
         char value[256]={0};size_t cap=sizeof(value);
         if(!have_nvs||nvs_get_str(nv,names[i],value,&cap)!=ESP_OK){
-            if(strcmp(names[i],"Jeedom"))continue;
-            strcpy(value,"1"); // Original Mira IDF default transport: HTTP
+            // Arduino beta does not invent Jeedom=1 for an unset option.
+            // The synthesized /getallparams must agree with /getparam and
+            // the live action transport (both default to disabled).
+            continue;
         }
         cJSON *entry=cJSON_CreateObject();
         if(!entry)continue;
