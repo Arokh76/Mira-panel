@@ -782,7 +782,13 @@ assert 'httpd_req_async_handler_complete(req)' in jeedom
 assert 'mira_sse_changed(client)' in jeedom
 assert 'xEventGroupWaitBits(mira_sse_signal,MIRA_SSE_CHANGED,pdTRUE,pdFALSE,' in jeedom
 assert 'mira_jeedom_sse_notify();' in full
-assert 'mira_sse_record_direct((int)id,payload);' in jeedom
+assert 'if(sse_payload)mira_sse_record_direct((int)id,sse_payload);' in jeedom
+assert 'if(!strcmp(kind,"send_range"))sse_payload=payload;' in jeedom
+assert 'else if(!strcmp(kind,"send_list"))sse_payload=action_name;' in jeedom
+assert 'else if(!strcmp(kind,"send_textbox")){' in jeedom
+assert 'snprintf(sse_data,sizeof(sse_data),"#%02x%02x%02x",' in jeedom
+assert 'events.send(CValue, CNom, millis());' in beta_server_impl
+assert 'events.send(CNom, CValue, millis());' in beta_server_impl
 assert 'httpd_resp_send_chunk(client->req,event,(size_t)size)' in jeedom
 assert "retry: 3000\\n\\n" in jeedom
 assert 'HTTPD_503_SERVICE_UNAVAILABLE' not in jeedom
