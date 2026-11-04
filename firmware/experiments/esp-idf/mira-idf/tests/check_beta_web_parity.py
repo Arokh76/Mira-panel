@@ -305,15 +305,15 @@ assert 'MIRA_TARGET_WAVESHARE_43C' in beta_ui
 assert 'WT32MultiVisible(name)' in beta_ui
 assert 'append_action(arr,&id,"button",compound);' in jeedom
 # Composite Jeedom identity must preserve the beta's media/weather metadata.
-assert 'if(a && (n==4||n==5))cJSON_AddStringToObject(a,"unit","%");' in jeedom
+assert 'if(a && (n==4||n==5))cJSON_ReplaceItemInObjectCaseSensitive(a,"unit",cJSON_CreateString("%"));' in jeedom
 assert 'cJSON_AddNumberToObject(a,"max",11);' in jeedom
 assert 'cJSON_AddNumberToObject(a,"value",40);' in jeedom
-assert 'if(weather)cJSON_AddStringToObject(weather,"unit","°C");' in jeedom
+assert 'if(weather)cJSON_ReplaceItemInObjectCaseSensitive(weather,"unit",cJSON_CreateString("°C"));' in jeedom
 print("PASS Waveshare-only hidden multiactions and Jeedom media/weather index parity")
 
 # Beta IndexAddInfo does not reuse the JSON widget's default value.
-assert 'cJSON_AddStringToObject(a,"value","");' in jeedom
-assert 'cJSON_AddStringToObject(a,"return","false");' in jeedom
+assert 'cJSON_AddStringToObject(entry,"value","");' in jeedom
+assert 'cJSON_AddStringToObject(entry,"return","true");' in jeedom
 # The original MiraPanelUI.cpp normalizes range values and half-degree
 # thermostat setpoints before registering the Jeedom command IDs.
 assert 'if(hi<=lo)hi=lo>INT_MAX-100?INT_MAX:lo+100;' in jeedom
@@ -392,3 +392,15 @@ assert legacy_display_keys==native_display_keys, (
     sorted(native_display_keys-legacy_display_keys)
 )
 print("PASS source-derived parity: all beta LVGL widget types and MQTT Display topics")
+
+# Derive the exact original metadata from IndexAddButton/IndexAddInfo/List.
+legacy_server=(root/"firmware/source/consolidated/MIRA_PANEL/MiraPanelServer.cpp").read_text(encoding="utf-8")
+legacy_header=(root/"firmware/source/consolidated/MIRA_PANEL/MiraPanelServer.h").read_text(encoding="utf-8")
+assert 'int IndexAddButton(String Name, bool Return_Line = true)' in legacy_header
+assert 'int IndexAddInfo(String Name, String Unit = "", String Size = "60")' in legacy_header
+assert 'cJSON_AddStringToObject(entry,"size","60");' in jeedom
+assert 'cJSON_AddStringToObject(entry,"unit","");' in jeedom
+assert 'if(count==0)cJSON_AddNumberToObject(entry,"value",first_id);' in jeedom
+assert 'cJSON_AddStringToObject(entry,"value",text);' in jeedom
+assert 'Action["value"] = IDAction - 1' in legacy_server
+print("PASS source-derived Jeedom button/info/list metadata for every compound widget")
