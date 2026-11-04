@@ -2599,6 +2599,15 @@ static void load_ui_configuration(void){
         uint8_t legacy_home=1;
         if(nvs_get_u8(legacy_nvs,"home",&legacy_home)==ESP_OK)
             return_home_enabled=legacy_home!=0;
+        uint8_t old_brightness=220;
+        if(nvs_get_u8(legacy_nvs,"bright",&old_brightness)==ESP_OK&&
+           old_brightness>=30)
+            display_brightness_raw=old_brightness;
+        uint8_t old_sleep=1,old_clock=1;
+        if(nvs_get_u8(legacy_nvs,"sleep",&old_sleep)==ESP_OK)
+            sleep_enabled=old_sleep!=0;
+        if(nvs_get_u8(legacy_nvs,"clock",&old_clock)==ESP_OK)
+            sleep_clock_enabled=old_clock!=0;
         nvs_close(legacy_nvs);
     }
     nvs_handle_t ui_nvs;
@@ -2622,7 +2631,8 @@ static void load_ui_configuration(void){
         uint8_t enabled=(sleep_timeout_seconds>0)?1:0;
         if(nvs_get_u8(ui_nvs,"sleep_enabled",&enabled)==ESP_OK)
             sleep_enabled=enabled!=0;
-        else sleep_enabled=sleep_timeout_seconds>0;
+        else if(sleep_timeout_seconds==0)
+            sleep_enabled=false;
         uint8_t light=8;
         if(nvs_get_u8(ui_nvs,"sleep_light",&light)==ESP_OK && light<=100)
             sleep_brightness_percent=light;
