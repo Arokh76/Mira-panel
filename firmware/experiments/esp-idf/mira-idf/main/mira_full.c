@@ -480,22 +480,6 @@ static void wheel_mark_hue(mira_widget_t *w,int hue){
     }
 }
 static void event_local(lv_event_t *e);
-static void wheel_slider_touch(lv_event_t *event){
-    if(suppress_events||display_sleeping)return;
-    mira_widget_t *w=(mira_widget_t *)lv_event_get_user_data(event);
-    if(!w)return;
-    lv_obj_t *source=lv_event_get_target_obj(event);
-    w->local_input_until_ms=lv_tick_get()+
-        (lv_event_get_code(event)==LV_EVENT_RELEASED?350u:250u);
-    if(source==w->color_saturation)
-        w->color_sat=(uint8_t)lv_slider_get_value(source);
-    else if(source==w->color_brightness)
-        w->color_val=(uint8_t)lv_slider_get_value(source);
-    if(w->color_preview)
-        lv_obj_set_style_bg_color(w->color_preview,
-            lv_color_hsv_to_rgb(w->color_hue,w->color_sat,w->color_val),0);
-    event_local(event);
-}
 static void wheel_touch(lv_event_t *event){
     const lv_event_code_t code=lv_event_get_code(event);
     if(code!=LV_EVENT_PRESSED&&code!=LV_EVENT_PRESSING)return;
@@ -536,6 +520,22 @@ static bool mira_other_transport_action(const char *name,const char *type,
                                         const char *value){
     if(mira_mqtt_publish_action(name,value))return true;
     return mira_generic_queue_local_action(name,type,value);
+}
+/* Match Arduino's independent outputs: IndexSetEvent enqueues the legacy
+ * Jeedom command, and publishMqttAction ALSO publishes when MQTT is active.
+ * Failover to GenericCmd only when neither selected transport is available.
+ * This is called exclusively by local touch callbacks, never by states. */
+static bool mira_beta_user_action(const char *name,const char *type,
+                                 const char *value,const char *mqtt_name,
+                                 const char *mqtt_value,bool publish_mqtt){
+    const bool enabled=mira_jeedom_actions_enabled();
+    const bool queued=enabled&&mira_jeedom_queue_local_action(name,type,value);
+    const bool published=publish_mqtt&&
+        mira_mqtt_publish_action(mqtt_name?mqtt_name:name,
+                                 mqtt_value?mqtt_value:value);
+    const bool generic=!enabled&&!published&&
+        mira_generic_queue_local_action(name,type,value);
+    return queued||published||generic;
 }
 
 static void event_local(lv_event_t *e){
@@ -637,27 +637,22 @@ static void event_local(lv_event_t *e){
         snprintf(observation.value,sizeof(observation.value),"%s",b->value);
         remember_passive_state(&observation);
     }
-    const bool use_jeedom=mira_jeedom_actions_enabled();
-    bool mqtt_sent=false;
-    if(!use_jeedom){
-        if(!strcmp(b->type,"thermostat")){
-            /* Arduino onThermostatRange publishes <name>__consigne with
-             * String(value,1). The Jeedom HTTP index still uses the base
-             * thermostat widget name, not that MQTT topic suffix. */
-            char mqtt_name[128];
-            const int n=snprintf(mqtt_name,sizeof(mqtt_name),
-                                 "%.95s__consigne",b->name);
-            if(n>0&&n<(int)sizeof(mqtt_name))
-                mqtt_sent=mira_mqtt_publish_action(mqtt_name,b->value);
-            if(!mqtt_sent)
-                mqtt_sent=mira_generic_queue_local_action(b->name,b->type,payload);
-        }else mqtt_sent=mira_other_transport_action(b->name,b->type,payload);
+    char mqtt_topic[128]={0};
+    const char *mqtt_name=b->name;
+    const char *mqtt_payload=payload;
+    if(!strcmp(b->type,"thermostat")){
+        /* Arduino onThermostatRange uses String(value,1) ONLY for MQTT;
+         * Jeedom HTTP keeps the historical compact numeric text. */
+        snprintf(mqtt_topic,sizeof(mqtt_topic),"%.95s__consigne",b->name);
+        mqtt_name=mqtt_topic;
+        mqtt_payload=b->value;
     }
-    const bool jeedom_queued=use_jeedom&&mira_jeedom_queue_local_action(b->name,b->type,payload);
+    const bool sent=mira_beta_user_action(b->name,b->type,payload,
+                                          mqtt_name,mqtt_payload,true);
     if(feedback) {
         char result[180];
         snprintf(result,sizeof(result),"%s : %.60s = %.60s",
-                  jeedom_queued?"Action Jeedom en file":(mqtt_sent?"Action MQTT / HTTP":"Aperçu local"),b->name,b->value);
+                  sent?"Action envoyée":"Action inactive",b->name,b->value);
         lv_label_set_text(feedback,result);
     }
 }
@@ -763,9 +758,8 @@ static void listbutton_clicked(lv_event_t *event){
     const char *value=listbutton_label(w,index);
     listbutton_mark_selected(w,index);
     memmove(w->value,value,strlen(value)+1u);
-    bool sent=mira_jeedom_actions_enabled()
-        ?mira_jeedom_queue_local_action(w->name,"listbutton",value)
-        :mira_other_transport_action(w->name,"listbutton",value);
+    bool sent=mira_beta_user_action(w->name,"listbutton",value,
+                                    w->name,value,true);
     if(feedback){
         char response[180];
         snprintf(response,sizeof(response),"%s : %.60s = %.60s",
@@ -821,10 +815,9 @@ static void thermostat_mode_selected(lv_event_t *event){
     lv_dropdown_get_selected_str(w->thermostat_mode_select,value,sizeof(value));
     if(strlen(name)>=96||!value[0])return;
     if(w->thermostat_mode)lv_label_set_text(w->thermostat_mode,value);
-    if(mira_jeedom_actions_enabled())
-        (void)mira_jeedom_queue_local_action(name,"list",value);
-    else
-        (void)mira_other_transport_action(name,"list",value);
+    // Arduino onThermostatMode publishes the composite __mode topic
+    // independently of the Jeedom list command.
+    (void)mira_beta_user_action(name,"list",value,name,value,true);
 }
 static void media_select_active_device(mira_widget_t *w){
     if(!w||!w->media_device_dropdown||!w->media_active_device[0])return;
@@ -878,18 +871,18 @@ static void media_direct_action(lv_event_t *event) {
     }
     if(!suffix)return;
     snprintf(command,sizeof(command),"%.95s__%s",w->name,suffix);
-    const bool jeedom=mira_jeedom_actions_enabled();
-    const bool queued=jeedom&&mira_jeedom_queue_local_action(
-        command,(action>=3)?"range":"button",payload);
-    const bool published=!jeedom&&mira_other_transport_action(command,(action>=3)?"range":"button",payload);
-    if(action==1&&(queued||published)){
+    // Beta publishes media transport and volume to both channels, but
+    // device selection is deliberately Jeedom-only (not an MQTT command).
+    const bool sent=mira_beta_user_action(command,(action>=3)?"range":"button",
+                                          payload,command,payload,action!=4);
+    if(action==1&&sent){
         w->media_is_playing=!w->media_is_playing;
         if(w->media_play_caption)lv_label_set_text(w->media_play_caption,w->media_is_playing?LV_SYMBOL_PAUSE:LV_SYMBOL_PLAY);
     }
     if(feedback){
         char result[180];
         snprintf(result,sizeof(result),"%s : %.112s",
-            queued?"Jeedom en file":(published?"MQTT / HTTP envoyé":"Action inactive"),command);
+            sent?"Action envoyée":"Action inactive",command);
         lv_label_set_text(feedback,result);
     }
 }
@@ -1675,33 +1668,9 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         no_scroll(w->color_knob);
         lv_obj_remove_flag(w->color_knob,LV_OBJ_FLAG_CLICKABLE);
         wheel_mark_hue(w,initial.h);
-        // LVGL 9 has no LVGL 8 HSV colorwheel control: expose both missing
-        // HSV axes explicitly, instead of silently locking saturation/value.
-        lv_obj_t *sat_caption=label(w->card,"Saturation",0xF3F6F7,&mira_font_fr_16);
-        lv_obj_set_pos(sat_caption,22,48);
-        w->color_saturation=lv_slider_create(w->card);
-        lv_obj_set_size(w->color_saturation,240,14);
-        lv_obj_set_pos(w->color_saturation,24,84);
-        lv_slider_set_range(w->color_saturation,0,100);
-        lv_slider_set_value(w->color_saturation,w->color_sat,LV_ANIM_OFF);
-        lv_obj_add_event_cb(w->color_saturation,wheel_slider_touch,LV_EVENT_VALUE_CHANGED,w);
-        lv_obj_add_event_cb(w->color_saturation,wheel_slider_touch,LV_EVENT_RELEASED,w);
-        lv_obj_t *val_caption=label(w->card,"Luminosité couleur",0xF3F6F7,&mira_font_fr_16);
-        lv_obj_set_pos(val_caption,22,116);
-        w->color_brightness=lv_slider_create(w->card);
-        lv_obj_set_size(w->color_brightness,240,14);
-        lv_obj_set_pos(w->color_brightness,24,151);
-        lv_slider_set_range(w->color_brightness,0,100);
-        lv_slider_set_value(w->color_brightness,w->color_val,LV_ANIM_OFF);
-        lv_obj_add_event_cb(w->color_brightness,wheel_slider_touch,LV_EVENT_VALUE_CHANGED,w);
-        lv_obj_add_event_cb(w->color_brightness,wheel_slider_touch,LV_EVENT_RELEASED,w);
-        w->color_preview=lv_obj_create(w->card);
-        lv_obj_set_size(w->color_preview,210,82);
-        lv_obj_set_pos(w->color_preview,519,70);
-        lv_obj_set_style_radius(w->color_preview,14,0);
-        lv_obj_set_style_bg_color(w->color_preview,
-            lv_color_hsv_to_rgb(w->color_hue,w->color_sat,w->color_val),0);
-        no_scroll(w->color_preview);
+        // Arduino beta: fixed Hue-only wheel in a 196 px card. There are
+        // NO separate saturation/value sliders. Preserve the RGB-derived
+        // saturation/value internally when remote state changes.
         lv_obj_add_event_cb(w->control,wheel_touch,LV_EVENT_PRESSED,w);
         lv_obj_add_event_cb(w->control,wheel_touch,LV_EVENT_PRESSING,w);
         lv_obj_add_event_cb(w->control,event_local,LV_EVENT_RELEASED,w);
