@@ -662,3 +662,32 @@ assert 'if(w->control && !strcmp(w->type,"roundrange")){' in full
 assert 'lv_arc_set_value(w->control,half);' in full
 assert 'if((!strcmp(b->type,"thermostat")||!strcmp(b->type,"roundrange"))&&b->control)' in full
 print("PASS beta roundrange half-unit arc, passive state and action value")
+
+
+# Drag behavior must follow beta implementation, not a guessed common
+# throttle. Range and roundrange send each changed value and ALWAYS send
+# on release; thermostat throttles only intermediate changes at 130 ms.
+assert 'const bool liveSend = code == LV_EVENT_VALUE_CHANGED && value != b.lastLiveValue;' in beta_ui_impl
+assert 'const bool liveSend = code == LV_EVENT_VALUE_CHANGED && rawValue != b.lastLiveValue;' in beta_ui_impl
+assert '(uint32_t)(now - b.lastLiveSendMs) >= 130U' in beta_ui_impl
+assert 'if (liveSend || finalSend)' in beta_ui_impl
+assert 'static void event_live_range(lv_event_t *event)' in full
+assert 'w->live_last_value==value)return;' in full
+assert '(uint32_t)(now-w->live_last_tick)<130u' in full
+assert 'else if(code!=LV_EVENT_RELEASED)return;' in full
+assert 'lv_obj_add_event_cb(w->control,event_live_range,LV_EVENT_VALUE_CHANGED,w);' in full
+assert 'lv_obj_add_event_cb(w->control,event_live_range,LV_EVENT_RELEASED,w);' in full
+assert '<180u' not in full
+print("PASS source-derived drag events: immediate range/roundrange, 130-ms thermostat and final release")
+
+# Beta LVGL 8 wheel emits RGB while dragging, not only on release. The
+# LVGL9 replacement has a hue ring and two explicit HSV axes; passive
+# states must update all three without an outgoing command.
+assert 'const bool liveSend = (code == LV_EVENT_VALUE_CHANGED || code == LV_EVENT_PRESSING)' in beta_ui_impl
+assert 'event_local(event);' in full[full.index('static void wheel_touch'):full.index('/* Legacy beta GenericCmd')]
+assert 'static void wheel_slider_touch(lv_event_t *event)' in full
+assert 'w->color_sat=(uint8_t)lv_slider_get_value(source);' in full
+assert 'w->color_val=(uint8_t)lv_slider_get_value(source);' in full
+assert 'lv_slider_set_value(w->color_saturation,hsv.s,LV_ANIM_OFF);' in full
+assert 'lv_slider_set_value(w->color_brightness,hsv.v,LV_ANIM_OFF);' in full
+print("PASS drag color publication and complete passive HSV restoration")
