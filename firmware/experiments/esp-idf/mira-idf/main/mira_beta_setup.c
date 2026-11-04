@@ -400,5 +400,13 @@ esp_err_t mira_beta_setup_register(httpd_handle_t server){
     if(err!=ESP_OK)return err;
     const httpd_uri_t start={.uri="/updatemodule",.method=HTTP_GET,
                              .handler=mira_beta_update_start};
-    return httpd_register_uri_handler(server,&start);
+    err=httpd_register_uri_handler(server,&start);
+    if(err!=ESP_OK)return err;
+    const httpd_uri_t install={.uri="/updatemodule",.method=HTTP_POST,
+                               .handler=mira_beta_update_trigger};
+    err=httpd_register_uri_handler(server,&install);
+    if(err!=ESP_OK)return err;
+    const httpd_uri_t status={.uri="/api/otastatus",.method=HTTP_GET,
+                              .handler=mira_beta_update_status};
+    return httpd_register_uri_handler(server,&status);
 }
