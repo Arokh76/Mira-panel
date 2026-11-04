@@ -760,3 +760,7 @@ assert '_clockInSleep = _prefs.getBool("clock", true);' in beta_ui_impl
 for key in ("bright","sleep","clock","theme","home"):
     assert f'nvs_get_u8(legacy_nvs,"{key}"' in full
 print("PASS legacy miraui preferences for brightness, theme, sleep, clock and navigation")
+
+assert '_sleepEnabled = _sleepTimeoutSec > 0;' in beta_ui_impl
+assert 'err=nvs_set_u8(nv,"sleep_enabled",number>0?1:0);' in jeedom
+print('PASS remote sleep delay updates activation')
