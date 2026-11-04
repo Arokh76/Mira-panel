@@ -29,6 +29,7 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "mira_display.h"
+#include "mira_gpio43.h"
 #include "mira_mqtt.h"
 #include "mira_jeedom.h"
 #include "mira_camera.h"
@@ -510,6 +511,32 @@ static void event_local(lv_event_t *e){
     mira_widget_t *b=(mira_widget_t*)lv_event_get_user_data(e);
     if(!b)return;
     lv_obj_t *src=lv_event_get_target_obj(e);
+    /* Beta local-GPIO binding semantics: a button/toggle linked to a
+     * physical output executes locally and NEVER duplicates the event on
+     * Jeedom/MQTT. The 4.3C uses DO0/DO1, not WT32 EXT pin numbers.
+     */
+    if(!strcmp(b->type,"button")&&mira_gpio43_action_mapped(b->name)){
+        const bool success=mira_gpio43_execute_action(b->name);
+        if(feedback)lv_label_set_text(feedback,success?
+            "Commande sur sortie locale Waveshare":"Sortie GPIO indisponible");
+        return;
+    }
+    if(!strcmp(b->type,"toggle")&&mira_gpio43_toggle_mapped(b->name)){
+        const bool desired=lv_obj_has_state(src,LV_STATE_CHECKED);
+        if(!mira_gpio43_execute_toggle(b->name,desired)){
+            bool actual=false;
+            if(mira_gpio43_toggle_state(b->name,&actual)){
+                suppress_events=true;
+                if(actual)lv_obj_add_state(src,LV_STATE_CHECKED);
+                else lv_obj_remove_state(src,LV_STATE_CHECKED);
+                suppress_events=false;
+            }
+        }
+        snprintf(b->value,sizeof(b->value),"%s",
+                 lv_obj_has_state(src,LV_STATE_CHECKED)?"On":"Off");
+        if(feedback)lv_label_set_text(feedback,"Bascule locale Waveshare");
+        return;
+    }
     if(!strcmp(b->type,"toggle")){
         snprintf(b->value,sizeof(b->value),"%s",lv_obj_has_state(src,LV_STATE_CHECKED)?"On":"Off");
     }else if(!strcmp(b->type,"range")||!strcmp(b->type,"roundrange")||!strcmp(b->type,"thermostat")){
@@ -1149,7 +1176,11 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
      * exist on the 4.3C. Keep the IDs via mira_jeedom index_from_config(),
      * but DO NOT invent a visible touchscreen multiaction button.
      */
-    if(!strcmp(type,"multiaction"))return;
+    /* On Waveshare the only optional physical multiaction inputs are DI0
+     * and DI1. Render a touchscreen tile only when the user explicitly
+     * asks for it in the GPIO /multi/config mapping.
+     */
+    if(!strcmp(type,"multiaction")&&!mira_gpio43_multi_visible(name))return;
     mira_widget_t *w=&widgets[widget_n++];
     memset(w,0,sizeof(*w));
     snprintf(w->name,sizeof(w->name),"%s",name);
@@ -3020,6 +3051,29 @@ static void mira_format_hhmm(char out[6],int minute){
 }
 
 void mira_full_ui_tick(void){
+    /* Same 250 ms local-toggle feedback as the Arduino beta. Read only
+     * on the LVGL task; physical GPIO worker never manipulates UI objects.
+     */
+    static uint32_t last_gpio_tick=0;
+    uint32_t tick=lv_tick_get();
+    if(tick-last_gpio_tick>=250){
+        last_gpio_tick=tick;
+        for(size_t i=0;i<widget_n;i++){
+            mira_widget_t *w=&widgets[i];
+            if(strcmp(w->type,"toggle")||!w->control||
+               !mira_gpio43_toggle_mapped(w->name))continue;
+            bool on=false;
+            if(!mira_gpio43_toggle_state(w->name,&on))continue;
+            const bool shown=lv_obj_has_state(w->control,LV_STATE_CHECKED);
+            if(shown!=on){
+                suppress_events=true;
+                if(on)lv_obj_add_state(w->control,LV_STATE_CHECKED);
+                else lv_obj_remove_state(w->control,LV_STATE_CHECKED);
+                snprintf(w->value,sizeof(w->value),"%s",on?"On":"Off");
+                suppress_events=false;
+            }
+        }
+    }
     poll_navigation_settings();
     if(theme_reload_pending){
         theme_reload_pending=false;
