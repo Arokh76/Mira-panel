@@ -1006,12 +1006,12 @@ void MiraPanelUI::begin() {
   lv_obj_set_style_bg_opa(splash, LV_OPA_COVER, 0);
 
   lv_obj_t* miraMark = lv_img_create(splash);
-  // Native 200x200 source from the full-resolution official icon.
-  // Do not zoom: the old 35x28 icon at 4x was visibly pixelated.
+  // Native 150x150 logo, Lanczos-resized from the original 512x512 icon.
+  // No runtime zoom: sharp edges with a compact, non-overlapping layout.
   const lv_img_dsc_t* splashLogo = MiraBootLogo::image();
   if (splashLogo) {
     lv_img_set_src(miraMark, splashLogo);
-    lv_obj_align(miraMark, LV_ALIGN_CENTER, 0, -64);
+    lv_obj_align(miraMark, LV_ALIGN_CENTER, 0, -102);
   } else {
     lv_obj_add_flag(miraMark, LV_OBJ_FLAG_HIDDEN);
   }
@@ -1020,19 +1020,19 @@ void MiraPanelUI::begin() {
   lv_label_set_text(miraName, "MIRA");
   lv_obj_set_style_text_font(miraName, &lv_font_montserrat_40, 0);
   lv_obj_set_style_text_color(miraName, lv_color_hex(0xF3F6F7), 0);
-  lv_obj_align(miraName, LV_ALIGN_CENTER, 0, 35);
+  lv_obj_align(miraName, LV_ALIGN_CENTER, 0, 28);
 
   lv_obj_t* miraSub = lv_label_create(splash);
   lv_label_set_text(miraSub, "PANEL");
   lv_obj_set_style_text_font(miraSub, &lv_font_montserrat_16, 0);
   lv_obj_set_style_text_color(miraSub, lv_color_hex(0x4ACBFA), 0);
-  lv_obj_align(miraSub, LV_ALIGN_CENTER, 0, 70);
+  lv_obj_align(miraSub, LV_ALIGN_CENTER, 0, 63);
 
   lv_obj_t* startupLabel = lv_label_create(splash);
   lv_label_set_text(startupLabel, "Démarrage...");
   lv_obj_set_style_text_font(startupLabel, &mira_font_fr_14, 0);
   lv_obj_set_style_text_color(startupLabel, lv_color_hex(0xB1C2D4), 0);
-  lv_obj_align(startupLabel, LV_ALIGN_CENTER, 0, 137);
+  lv_obj_align(startupLabel, LV_ALIGN_CENTER, 0, 145);
 
   miraActiveBootSplash = splash;
   lv_timer_t* splashTimer = lv_timer_create(miraBootSplashTimeout, 1900, nullptr);
