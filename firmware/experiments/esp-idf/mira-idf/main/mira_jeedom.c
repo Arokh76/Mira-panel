@@ -2124,7 +2124,10 @@ static void sync_jeedom_bindings(void){
     if(nvs_open("mira_idf_jeed",NVS_READONLY,&cfg)!=ESP_OK)return;
     char on[8]={0},base[192]={0},secret[256]={0},init[24]={0};
     const bool saved_mode=nvs_read_string(cfg,"Jeedom",on,sizeof(on));
-    const bool ready=(!saved_mode||!strcmp(on,"1"))&&
+    /* Beta GetParamBool("Jeedom") is false when the parameter is absent.
+     * A missing NVS flag must never start background Jeedom sync.
+     */
+    const bool ready=saved_mode&&!strcmp(on,"1")&&
                      nvs_read_string(cfg,"Jeedom_IP",base,sizeof(base))&&
                      nvs_read_string(cfg,"Jeedom_Key_mira",secret,sizeof(secret))&&
                      nvs_read_string(cfg,"Jeedom_Init_Cmd",init,sizeof(init));
