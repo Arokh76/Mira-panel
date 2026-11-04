@@ -23,6 +23,32 @@ Ce document sépare **code présent**, **tests statiques/CI**, et **fonctionneme
 - La vérification de version OTA acceptait des manifestes que l'installateur refusait ensuite : `/api/checkupdate` appelle désormais le même `ota_manifest_entry()` que l'installateur.
 - `tests/check_beta_web_parity.py` compare maintenant **toutes** les routes bêta, y compris GPIO, et protège les accords ID/Jeedom/OTA.
 
+## Comparaison approfondie des comportements Arduino ↔ IDF (4 novembre 2026)
+
+La première vérification avait confirmé la présence des fonctions, mais pas la **forme exacte des données**. La lecture croisée des implémentations Arduino, IDF et Jeedom a révélé puis permis de corriger les divergences suivantes.
+
+| Contrat observable | Référence Arduino | Écart retrouvé dans IDF | Correction |
+| --- | --- | --- | --- |
+| `GET /get?toggle=...` | `IndexSetToggle()` garde `On`/`Off` | Cache passif brut pouvant répondre `1`/`0`, valeur initiale absente | Renvoyer `On`/`Off`, défaut `Off` |
+| Lecture d'un paramètre absent | `GetParamText()` retourne `null`, `GetParamBool()` est `false` | `param_get` forçait `Jeedom=1`, synchronisation lancée si le mode manquait | Ne jamais inventer l'activation Jeedom |
+| Nombre de widgets | `MiraPanelUI::MAX_BINDINGS = 40` | IDF et programmeur acceptaient 64 | Limite harmonisée à 40 |
+| Valeur de liste dans `/getindex` | `IndexAddList` met le **même nombre entier** dans `value` pour toutes les options de la liste | Les options suivantes avaient une chaîne JSON | Nombre pour toutes les options |
+| Action MQTT couleur | `onColor()` envoie `#RRGGBB` | IDF envoyait `r,g,b` | MQTT revient en hexadécimal ; Jeedom HTTP continue de recevoir les composantes RGB |
+| Action thermostat | `onThermostatRange()` émet `22`, `22.5`, etc. | IDF émettait `22.0` | Même représentation numérique qu'Arduino |
+| État MQTT brut / JSON | `mqttPayloadValue()` retire les espaces de l'enveloppe et décode `{"value": ...}` | IDF refusait un message si l'enveloppe dépassait 159 octets même lorsque la valeur extraite tenait | Limite imposée à la valeur **décodée**, enveloppe bornée à 1024 octets |
+| Correspondance des topics MQTT | `normalizeMqttTopicName()` retire les espaces en bordure avant les remplacements | IDF transformait ces espaces en underscores | Trim avant remplacement |
+| Nom d'écran MQTT | `cleanScreenName()` traite slash initial/final et caractères MQTT spéciaux | IDF rejetait certains noms compatibles avec la bêta | Normalisation équivalente avant construction des topics |
+| Réponse au réglage `Display/.../set` | `publishDisplayStates(true)` après commande | IDF attendait sa période de publication | Forçage de la prochaine publication depuis la tâche LVGL |
+| Horaires nuit | Défauts `23:00`–`07:00`; `normalizeClock` comprend `2300`, `23:00`, `23%3A00` | Horaires initialement non définis ; certains formats rejetés | Defaults restaurés et trois formats interprétés |
+| Liaison GPIO en lecture seule | Une liaison de lecture n'est pas un actionneur | Interception possible de clics de boutons | Seules les liaisons de sortie exécutables interceptent le clic |
+| OTA cible IDF | La vérification et l'installation doivent annoncer la même version installable | Vérification plus permissive que l'installateur | Validateur de manifeste partagé |
+
+**Tests ajoutés.** `tests/check_beta_web_parity.py` vérifie maintenant les types JSON, les bornes historiques, l'absence d'activation implicite de Jeedom, les formats des commandes (couleur, thermostat), les règles MQTT et les horaires, en se fondant sur les fonctions Arduino d'origine. Ces contrôles ne simulent pas un vrai broker ni un vrai Jeedom.
+
+**Limite externe de l'OTA automatique.** `main/firmware/targets.json` n'annonce actuellement *aucune* cible `waveshare-esp32s3-touch-lcd-4.3c-idf` : sans publication officielle compatible et empreinte vérifiable, le mécanisme doit répondre « aucune mise à jour » ; le test d'une installation automatique réelle reste impossible pour l'instant. Le mécanisme natif ne doit pas être confondu avec les binaires Arduino du même matériel.
+
+**État de validation.** Contrôles statiques et CI obligatoires avant de considérer ces changements compilables ; ensuite seulement validation physique. Le rapport ne prétend ni à l'équivalence pixel à pixel, ni à une exécution de toutes les interactions Web/LVGL, ni à une migration intégralement testée avec secrets et paramétrages réels.
+
 ## Limites à ne pas dissimuler
 
 1. La présence d'un handler ne démontre pas la compatibilité de ses effets ; les tests automatiques sont majoritairement structurels.
