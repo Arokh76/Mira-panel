@@ -460,35 +460,65 @@ esp_err_t mira_recovery_save_beta_wifi(const char *ssid,const char *password,
     if(!pwd_len&&old_len==ssid_len&&!memcmp(prior.sta.ssid,ssid,ssid_len))
         memcpy(sta.sta.password,prior.sta.password,sizeof(sta.sta.password));
     else if(pwd_len)memcpy(sta.sta.password,password,pwd_len);
-    nvs_handle_t nv;
-    esp_err_t err=nvs_open("mira_idf_net",NVS_READWRITE,&nv);
-    if(err!=ESP_OK)return err;
-    err=nvs_set_str(nv,"web_mode",mode);
-    if(err==ESP_OK)err=nvs_set_str(nv,"web_ip",ip);
-    if(err==ESP_OK)err=nvs_set_str(nv,"web_mask",mask);
-    if(err==ESP_OK)err=nvs_set_str(nv,"web_gw",gateway);
-    if(err==ESP_OK)err=nvs_set_str(nv,"web_dns1",dns1);
-    if(err==ESP_OK)err=nvs_set_str(nv,"web_dns2",dns2);
-    if(err==ESP_OK)err=nvs_set_u8(nv,"legacy_wifi",0);
-    if(err==ESP_OK){
-        esp_err_t er=nvs_erase_key(nv,"setup_ip");
-        if(er!=ESP_OK&&er!=ESP_ERR_NVS_NOT_FOUND)err=er;
+    /* Save the six dependent IP settings as a single NVS record.
+     * Formerly six nvs_set_str calls could leave half a manual-IP profile
+     * after an interrupted write, even when the STA credentials remained
+     * correct. Both IDF and beta Web pages read web_profile first. */
+    cJSON *profile=cJSON_CreateObject();
+    if(!profile){
+        memset(&sta,0,sizeof(sta));memset(&prior,0,sizeof(prior));
+        return ESP_ERR_NO_MEM;
     }
-    if(err==ESP_OK)err=nvs_commit(nv);
-    nvs_close(nv);
-    if(err!=ESP_OK)return err;
+    bool made=cJSON_AddStringToObject(profile,"mode",mode)!=NULL&&
+        cJSON_AddStringToObject(profile,"ip",ip)!=NULL&&
+        cJSON_AddStringToObject(profile,"mask",mask)!=NULL&&
+        cJSON_AddStringToObject(profile,"gateway",gateway)!=NULL&&
+        cJSON_AddStringToObject(profile,"dns1",dns1)!=NULL&&
+        cJSON_AddStringToObject(profile,"dns2",dns2)!=NULL;
+    char *profile_json=made?cJSON_PrintUnformatted(profile):NULL;
+    cJSON_Delete(profile);
+    if(!profile_json||strlen(profile_json)>511){
+        if(profile_json)cJSON_free(profile_json);
+        memset(&sta,0,sizeof(sta));memset(&prior,0,sizeof(prior));
+        return ESP_ERR_NO_MEM;
+    }
+
     (void)esp_wifi_disconnect();
-    err=esp_wifi_set_config(WIFI_IF_STA,&sta);
-    memset(&sta,0,sizeof(sta));
-    memset(&prior,0,sizeof(prior));
-    if(err!=ESP_OK)return err;
+    esp_err_t err=esp_wifi_set_config(WIFI_IF_STA,&sta);
+    if(err==ESP_OK){
+        nvs_handle_t nv;
+        err=nvs_open("mira_idf_net",NVS_READWRITE,&nv);
+        if(err==ESP_OK){
+            err=nvs_set_str(nv,"web_profile",profile_json);
+            if(err==ESP_OK)err=nvs_commit(nv);
+            nvs_close(nv);
+        }
+    }
+    cJSON_free(profile_json);
+    if(err!=ESP_OK){
+        // Configuring Wi-Fi flash and saving our own NVS are independent
+        // operations. Restore the original STA config if either fails;
+        // the old web_mode/web_profile values remain authoritative.
+        esp_err_t rollback=esp_wifi_set_config(WIFI_IF_STA,&prior);
+        if(rollback!=ESP_OK)
+            ESP_LOGE(TAG,"Wi-Fi config rollback failed: %s",esp_err_to_name(rollback));
+        (void)beta_web_load_ip_mode();
+        if(sta_netif){
+            if(legacy_ip_mode==PROFILE_MANUAL)legacy_apply_manual_ip();
+            else (void)esp_netif_dhcpc_start(sta_netif);
+        }
+        if(rollback==ESP_OK)(void)esp_wifi_connect();
+        memset(&sta,0,sizeof(sta));memset(&prior,0,sizeof(prior));
+        return err;
+    }
+    memset(&sta,0,sizeof(sta));memset(&prior,0,sizeof(prior));
     (void)beta_web_load_ip_mode();
     if(sta_netif){
         if(legacy_ip_mode==PROFILE_MANUAL)legacy_apply_manual_ip();
         else (void)esp_netif_dhcpc_start(sta_netif);
     }
     station_configured=true;
-    ESP_LOGI(TAG,"Beta Wi-Fi form applied (%s); station reconnecting",mode);
+    ESP_LOGI(TAG,"Beta Wi-Fi profile applied and atomically saved (%s)",mode);
     return esp_wifi_connect();
 }
 static void legacy_finish_fixed_auto(void){
