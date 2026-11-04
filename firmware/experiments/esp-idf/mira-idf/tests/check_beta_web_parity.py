@@ -691,3 +691,14 @@ assert 'w->color_val=(uint8_t)lv_slider_get_value(source);' in full
 assert 'lv_slider_set_value(w->color_saturation,hsv.s,LV_ANIM_OFF);' in full
 assert 'lv_slider_set_value(w->color_brightness,hsv.v,LV_ANIM_OFF);' in full
 print("PASS drag color publication and complete passive HSV restoration")
+
+# Arduino multi-action gesture semantics: 900-ms held press, then
+# 370-ms post-release aggregation for single/double/triple.
+assert '(uint32_t)(now-b.multiTouchPressAt)>=900' in beta_ui_impl
+assert '(uint32_t)(now-b.multiTouchReleasedAt)>=370' in beta_ui_impl
+assert 'LV_EVENT_RELEASED' in beta_ui_impl[beta_ui_impl.index('void MiraPanelUI::onMultiTouch'):beta_ui_impl.index('void MiraPanelUI::onToggle')]
+assert '(uint32_t)(gesture_now-w->multi_pressed_at)>=900u' in full
+assert 'w->multi_deadline=now+370u;' in full
+assert 'lv_obj_add_event_cb(bt,multiaction_event,LV_EVENT_PRESS_LOST,w);' in full
+assert 'lv_obj_add_event_cb(bt,multiaction_event,LV_EVENT_LONG_PRESSED,w);' not in full
+print("PASS Arduino multi-action 900-ms hold / 370-ms release grouping")
