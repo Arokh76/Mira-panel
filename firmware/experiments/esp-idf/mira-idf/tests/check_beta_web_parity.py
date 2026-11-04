@@ -846,3 +846,18 @@ print('PASS Web LVGL editor and programming agree on 40 widgets')
 beta_web=(idf/"mira_beta_web.c").read_text(encoding="utf-8")
 assert 'nvs_set_u8(nv,"sleep_enabled",values[2]>0?1:0)' in beta_web
 print('PASS Web display settings synchronize sleep enable')
+
+# The original HTTP APIs do not enable Jeedom when an NVS flag is absent.
+# /getallparams (synthesized JSON), /getparam and the action worker must agree.
+assert 'strcpy(value,"1"); // Original Mira IDF default transport: HTTP' not in jeedom
+assert 'if(!have_nvs||nvs_get_str(nv,names[i],value,&cap)!=ESP_OK){' in jeedom
+assert 'continue;' in jeedom[jeedom.index('if(!have_nvs||nvs_get_str(nv,names[i],value,&cap)!=ESP_OK){'):][:380]
+print('PASS /getallparams no longer forges Jeedom=1 on an unconfigured panel')
+
+# HTTP binding endpoints reject IDs with trailing text and malformed target
+# values instead of accepting partial strtol() conversions with 200 OK.
+assert 'if(id<1||id>4096||!value||!decimal_id(value)||' in jeedom
+assert '!decimal_id(id)||!decimal_id(value)||' in jeedom
+assert 'if(!decimal_id(id)||!decimal_id(off)||!decimal_id(on)||' in jeedom
+assert 'if(!query_param(req,"value",id,sizeof(id))||!decimal_id(id))' in jeedom
+print('PASS Web/Jeedom mapping endpoints validate complete decimal IDs')
