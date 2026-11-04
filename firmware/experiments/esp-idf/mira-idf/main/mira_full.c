@@ -134,6 +134,8 @@ typedef struct {
     // Distinguish Mira beta simple, double, triple and long-click commands.
     uint8_t multi_clicks;
     uint32_t multi_deadline;
+    uint32_t multi_pressed_at;
+    bool multi_touch_down;
     bool multi_long_fired;
     // Original beta "listbutton" is a set of tactile options, not a dropdown.
     char list_text[160];
@@ -688,22 +690,21 @@ static void multiaction_event(lv_event_t *event){
     mira_widget_t *w=(mira_widget_t*)lv_event_get_user_data(event);
     if(!w||strcmp(w->type,"multiaction"))return;
     const lv_event_code_t code=lv_event_get_code(event);
-    if(code==LV_EVENT_PRESSED){w->multi_long_fired=false;return;}
-    if(code==LV_EVENT_LONG_PRESSED){
-        w->multi_long_fired=true;
-        w->multi_clicks=0;
-        multi_dispatch(w,4);
-        return;
-    }
-    if(code!=LV_EVENT_CLICKED||w->multi_long_fired)return;
     const uint32_t now=lv_tick_get();
-    if(!w->multi_clicks||(int32_t)(now-w->multi_deadline)>=0)
-        w->multi_clicks=1;
-    else if(w->multi_clicks<3)w->multi_clicks++;
-    w->multi_deadline=now+380;
-    if(w->multi_clicks==3){
+    if(code==LV_EVENT_PRESSED){
+        w->multi_touch_down=true;
+        w->multi_long_fired=false;
+        w->multi_pressed_at=now;
+    }else if(code==LV_EVENT_RELEASED){
+        if(!w->multi_touch_down)return;
+        w->multi_touch_down=false;
+        if(!w->multi_long_fired){
+            if(w->multi_clicks<3)w->multi_clicks++;
+            w->multi_deadline=now+370u;
+        }else w->multi_clicks=0;
+    }else if(code==LV_EVENT_PRESS_LOST){
+        w->multi_touch_down=false;
         w->multi_clicks=0;
-        multi_dispatch(w,3);
     }
 }
 static const char *listbutton_label(const mira_widget_t *w,uint8_t index){
@@ -1376,8 +1377,8 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         lv_obj_t *t=label(bt,display,0xF3F6F7,&mira_font_fr_16);lv_obj_center(t);
         if(!strcmp(type,"multiaction")){
             lv_obj_add_event_cb(bt,multiaction_event,LV_EVENT_PRESSED,w);
-            lv_obj_add_event_cb(bt,multiaction_event,LV_EVENT_LONG_PRESSED,w);
-            lv_obj_add_event_cb(bt,multiaction_event,LV_EVENT_CLICKED,w);
+            lv_obj_add_event_cb(bt,multiaction_event,LV_EVENT_RELEASED,w);
+            lv_obj_add_event_cb(bt,multiaction_event,LV_EVENT_PRESS_LOST,w);
         }else lv_obj_add_event_cb(bt,event_local,LV_EVENT_CLICKED,w);
         return;
     }
@@ -3289,7 +3290,17 @@ void mira_full_ui_tick(void){
     const uint32_t gesture_now=lv_tick_get();
     for(uint8_t n=0;n<widget_n;n++){
         mira_widget_t *w=&widgets[n];
-        if(strcmp(w->type,"multiaction")||!w->multi_clicks||
+        if(strcmp(w->type,"multiaction"))continue;
+        // Beta timing: hold 900 ms, then wait 370 ms after final release.
+        // Do not use LVGL's unrelated built-in long-press timeout.
+        if(w->multi_touch_down&&!w->multi_long_fired&&
+           (uint32_t)(gesture_now-w->multi_pressed_at)>=900u){
+            w->multi_long_fired=true;
+            w->multi_clicks=0;
+            multi_dispatch(w,4);
+            continue;
+        }
+        if(w->multi_touch_down||!w->multi_clicks||
            (int32_t)(gesture_now-w->multi_deadline)<0)continue;
         const uint8_t count=w->multi_clicks;
         w->multi_clicks=0;
