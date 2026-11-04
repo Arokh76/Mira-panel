@@ -443,3 +443,38 @@ assert 'mira_gpio43_action_mapped(b->name)' in full
 assert 'if(!strcmp(type,"multiaction")&&!mira_gpio43_multi_visible(name))return;' in full
 assert 'mira_gpio43_multi_visible(const char *name)' in gpio_h
 print("PASS Waveshare isolated GPIO full beta config/link/multi route and local-control parity")
+
+
+# Strict HTTP endpoint comparison derived from the actual Arduino beta source,
+# across all native modules, not merely a manually enumerated subset.
+import glob
+beta_routes=set((method,path) for path,method in
+    re.findall(r'server\.on\(\s*"([^"]+)"\s*,\s*HTTP_(GET|POST)',legacy_server))
+native_source="\n".join(p.read_text(encoding="utf-8") for p in sorted(idf.glob("*.c")))
+native_routes=set((method,path) for path,method in re.findall(
+    r'\.uri\s*=\s*"([^"]+)"\s*,\s*\.method\s*=\s*HTTP_(GET|POST)',native_source))
+missing_routes=sorted(beta_routes-native_routes)
+assert not missing_routes, "Missing beta HTTP routes: "+repr(missing_routes)
+assert len(beta_routes)>=48, ("Unexpected beta route count",len(beta_routes))
+assert 'mira_gpio43_write((unsigned)i,state[0]==\'1\')' in web
+print("PASS all %d original firmware-beta HTTP routes registered on IDF" % len(beta_routes))
+
+# Automated OTA is allowed only after authenticated local POST; native-only
+# manifest, matching SHA-256, exact bytes and app descriptor verification.
+assert '.uri="/updatemodule",.method=HTTP_POST' in setup
+assert '.uri="/api/otastatus",.method=HTTP_GET' in setup
+assert 'if(!mira_beta_web_authorized(req))return ESP_FAIL;' in update
+assert '"X-Mira-OTA"' in update
+assert 'bool ota_valid_hex(const char *hex)' in update
+assert 'mbedtls_md_finish(&md,raw_hash)' in update
+assert 'strcasecmp(hex,digest)!=0' in update
+assert 'esp_ota_get_partition_description(partition,&candidate)' in update
+assert 'strcmp(candidate.project_name,"mira_idf_scroll")!=0' in update
+assert 'strcmp(candidate.version,remote_version)!=0' in update
+assert 'esp_ota_set_boot_partition(partition)' in update
+assert 'ota_active' in update
+assert 'if(!mira_beta_web_authorized(req))return ESP_FAIL;' in (idf/"mira_beta_ota.c").read_text(encoding="utf-8")
+assert 'esp_ota_get_partition_description(target,&candidate)' in (idf/"mira_beta_ota.c").read_text(encoding="utf-8")
+assert 'set(PROJECT_VER "0.7.37")' in (idf.parent/"CMakeLists.txt").read_text(encoding="utf-8")
+assert "id='install'" not in web or "Installer la mise à jour IDF" in web
+print("PASS native OTA auto/manual target isolation, authenticated trigger and SHA-256 contract")
