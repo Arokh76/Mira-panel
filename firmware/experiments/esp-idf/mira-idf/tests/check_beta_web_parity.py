@@ -749,3 +749,14 @@ assert 'lv_obj_add_event_cb(sleep_switch,sleep_mode_changed,LV_EVENT_VALUE_CHANG
 assert 'if(!display_sleeping && sleep_enabled && sleep_timeout_seconds>0 &&' in full
 assert 'nvs_get_u8(ui_nvs,"sleep_enabled",&enabled)' in full
 print("PASS beta explicit sleep enable switch and wake/sleep gate")
+
+# Firmware-beta's Preferences namespace "miraui" is reused only as a
+# READ-ONLY fallback when corresponding IDF keys do not exist. This
+# includes the user's actual screen brightness and sleep/clock toggles.
+assert '_prefs.begin("miraui", false);' in beta_ui_impl
+assert '_brightness = _prefs.getUChar("bright", 220);' in beta_ui_impl
+assert '_sleepEnabled = _prefs.getBool("sleep", true);' in beta_ui_impl
+assert '_clockInSleep = _prefs.getBool("clock", true);' in beta_ui_impl
+for key in ("bright","sleep","clock","theme","home"):
+    assert f'nvs_get_u8(legacy_nvs,"{key}"' in full
+print("PASS legacy miraui preferences for brightness, theme, sleep, clock and navigation")
