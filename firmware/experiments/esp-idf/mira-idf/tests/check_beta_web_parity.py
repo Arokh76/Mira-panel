@@ -630,3 +630,15 @@ legacy_mqtt_h=(root/"firmware/source/consolidated/MIRA_PANEL/MiraMqtt.h").read_t
 assert 'KEEPALIVE_S = 20;' in legacy_mqtt_h
 assert '.session.keepalive=20,' in mqtt
 print("PASS beta MQTT 20-second broker keepalive")
+
+
+# The beta settings page accepts the historical MQTT_Nom text and the
+# MQTT layer cleans it; do not reject beta-compatible nested topic names
+# at HTML submission while accepting them through the JSON API.
+assert 'static void clean_screen_name(char *name,size_t cap)' in mqtt
+assert 'clean_screen_name(screen_name,sizeof(screen_name));' in mqtt
+assert 'Nom MQTT invalide' not in handlers
+assert 'if(!strcmp(host,"null"))host[0]=0;' in mqtt
+assert 'if(!strcmp(username,"null"))username[0]=0;' in mqtt
+assert 'if(!strcmp(secret,"null"))secret[0]=0;' in mqtt
+print("PASS Arduino MQTT screen name via web form and literal null config")
