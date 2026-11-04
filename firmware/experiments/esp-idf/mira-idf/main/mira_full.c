@@ -75,7 +75,10 @@ static uint8_t day_brightness_percent=85,night_brightness_percent=20;
 static bool night_auto_enabled;
 static bool manual_brightness_override;
 static bool last_night_valid,last_night_period;
-static int night_start_minute=-1,night_end_minute=-1;
+/* Arduino MiraPanelUI.h defaults to 23:00–07:00 even before
+ * DISPLAY_DebutNuit / DISPLAY_FinNuit are created in params.json.
+ */
+static int night_start_minute=23*60,night_end_minute=7*60;
 static uint8_t applied_brightness_raw;
 
 static uint32_t sleep_timeout_seconds=120;
@@ -1835,10 +1838,31 @@ static uint8_t raw_from_percent(uint8_t percentage){
     return (uint8_t)(30u+(((uint32_t)percentage-1u)*225u+49u)/99u);
 }
 static int parse_beta_clock(const char *value){
-    if(!value||strlen(value)!=5||value[2]!=':')return -1;
-    for(int i=0;i<5;i++)if(i!=2&&(value[i]<'0'||value[i]>'9'))return -1;
-    int hour=(value[0]-'0')*10+(value[1]-'0');
-    int minute=(value[3]-'0')*10+(value[4]-'0');
+    /* Match Arduino normalizeClock(): trim, decode %3A, and accept the
+     * compact HHMM form as well as HH:MM. Invalid input is an instruction
+     * to keep the beta default, not disable the schedule entirely.
+     */
+    if(!value)return -1;
+    while(*value&&isspace((unsigned char)*value))value++;
+    size_t length=strlen(value);
+    while(length&&isspace((unsigned char)value[length-1]))length--;
+    const unsigned char *p=(const unsigned char*)value;
+    int digits[4]={0};
+    unsigned indices[4]={0};
+    if(length==4){
+        indices[0]=0;indices[1]=1;indices[2]=2;indices[3]=3;
+    }else if(length==5&&value[2]==':'){
+        indices[0]=0;indices[1]=1;indices[2]=3;indices[3]=4;
+    }else if(length==7&&value[2]=='%'&&value[3]=='3'&&
+             (value[4]=='A'||value[4]=='a')){
+        indices[0]=0;indices[1]=1;indices[2]=5;indices[3]=6;
+    }else return -1;
+    for(unsigned i=0;i<4;i++){
+        if(p[indices[i]]<'0'||p[indices[i]]>'9')return -1;
+        digits[i]=(int)(p[indices[i]]-'0');
+    }
+    const int hour=digits[0]*10+digits[1];
+    const int minute=digits[2]*10+digits[3];
     return hour<24&&minute<60?hour*60+minute:-1;
 }
 static bool current_night_period(void){
@@ -2434,11 +2458,15 @@ static void load_ui_configuration(void){
             night_auto_enabled=auto_mode!=0;
         char clock_time[8]={0};
         size_t clock_size=sizeof(clock_time);
-        if(nvs_get_str(ui_nvs,"night_start",clock_time,&clock_size)==ESP_OK)
-            night_start_minute=parse_beta_clock(clock_time);
+        if(nvs_get_str(ui_nvs,"night_start",clock_time,&clock_size)==ESP_OK){
+            const int parsed=parse_beta_clock(clock_time);
+            night_start_minute=parsed>=0?parsed:23*60;
+        }
         clock_size=sizeof(clock_time);
-        if(nvs_get_str(ui_nvs,"night_end",clock_time,&clock_size)==ESP_OK)
-            night_end_minute=parse_beta_clock(clock_time);
+        if(nvs_get_str(ui_nvs,"night_end",clock_time,&clock_size)==ESP_OK){
+            const int parsed=parse_beta_clock(clock_time);
+            night_end_minute=parsed>=0?parsed:7*60;
+        }
         nvs_close(ui_nvs);
     }
 }
