@@ -2789,6 +2789,9 @@ static void remember_passive_state(const mira_state_update_t *msg){
     }
     snprintf(state_cache[i].value,sizeof(state_cache[i].value),"%s",msg->value);
     xSemaphoreGive(state_cache_lock);
+    // Passive updates may wake browser EventSource listeners, but must never
+    // call a Jeedom/MQTT ACTION or manipulate an LVGL object here.
+    mira_jeedom_sse_notify();
 }
 bool mira_full_enqueue_state(const char *name,const char *value){
     if(!name||!value||!*name||strlen(name)>=96)return false;
