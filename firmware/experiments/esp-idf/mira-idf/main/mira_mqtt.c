@@ -168,7 +168,8 @@ static void start_client(void) {
         .broker.address.uri=uri,
         .credentials.username=username[0]?username:NULL,
         .credentials.authentication.password=secret[0]?secret:NULL,
-        .session.keepalive=30,
+        /* firmware-beta MiraMqtt.h KEEPALIVE_S=20 */
+        .session.keepalive=20,
     };
     client=esp_mqtt_client_init(&config);
     if(!client){ESP_LOGE(TAG,"MQTT init failed");return;}
