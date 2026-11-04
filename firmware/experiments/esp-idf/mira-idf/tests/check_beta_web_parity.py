@@ -785,7 +785,7 @@ assert 'mira_jeedom_sse_notify();' in full
 assert 'if(sse_payload)mira_sse_record_direct((int)id,sse_payload);' in jeedom
 assert 'if(!strcmp(kind,"send_range"))sse_payload=payload;' in jeedom
 assert 'else if(!strcmp(kind,"send_list"))sse_payload=action_name;' in jeedom
-assert 'else if(!strcmp(kind,"send_textbox")){' in jeedom
+assert 'else if(!strcmp(kind,"send_textbox"))sse_payload=payload;' in jeedom
 assert 'snprintf(sse_data,sizeof(sse_data),"#%02x%02x%02x",' in jeedom
 assert 'events.send(CValue, CNom, millis());' in beta_server_impl
 assert 'events.send(CNom, CValue, millis());' in beta_server_impl
