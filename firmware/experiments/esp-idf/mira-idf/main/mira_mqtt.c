@@ -270,6 +270,12 @@ static void read_config(void) {
     nvs_get_u16(nvs,"port",&port);
     if(!port)port=1883;
     nvs_close(nvs);
+    /* Beta refreshConfig() treats literal "null" as an absent MQTT
+     * credential or host, never a broker name or username/password.
+     */
+    if(!strcmp(host,"null"))host[0]=0;
+    if(!strcmp(username,"null"))username[0]=0;
+    if(!strcmp(secret,"null"))secret[0]=0;
     clean_screen_name(screen_name,sizeof(screen_name));
     refresh_prefixes();
 }
