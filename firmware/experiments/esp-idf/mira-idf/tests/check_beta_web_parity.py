@@ -602,3 +602,25 @@ assert 'last_display_signature[0]=0;' in mqtt
 assert 'out.trim();' in beta_ui_impl
 assert 'while(*src&&isspace((unsigned char)*src))src++;' in full
 print("PASS beta MQTT envelope decoding, topic trimming and immediate display feedback")
+
+
+# Arduino's outgoing control payloads, clock schedule and MQTT prefix rules
+# are observable API contracts: an identical UI may still break automations.
+assert 'snprintf(hex, sizeof(hex), "#%02X%02X%02X"' in beta_ui_impl
+assert 'snprintf(b->value,sizeof(b->value),"#%02X%02X%02X"' in full
+assert 'if(msg->value[0]==\'#\'&&strlen(msg->value)==7)' in jeedom
+assert 'snprintf(value,value_size,"%u,%u,%u",r,g,b);' in jeedom
+assert 'const String setpointText = (rawValue & 1)' in beta_ui_impl
+assert 'if(half&1)snprintf(thermostat_payload' in full
+assert 'else snprintf(thermostat_payload' in full
+assert 'payload=thermostat_payload;' in full
+assert '_nightStart = "23:00";' in beta_ui_header
+assert '_nightEnd = "07:00";' in beta_ui_header
+assert 'night_start_minute=23*60,night_end_minute=7*60;' in full
+assert "value[4]=='a'" in full and "value[2]=='%'" in full
+assert 'const int parsed=parse_beta_clock(trim);' in full
+assert 'clock[0]=(char)(\'0\'+hh/10);' in full
+assert 'static void clean_screen_name(' in mqtt
+assert "if(*p=='#'||*p=='+')*p='_';" in mqtt
+assert 'clean_screen_name(screen_name,sizeof(screen_name));' in mqtt
+print("PASS beta color HEX, thermostat half-degree, 23:00/07:00 and MQTT screen-name formats")
