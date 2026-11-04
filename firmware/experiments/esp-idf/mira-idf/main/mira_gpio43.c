@@ -359,7 +359,12 @@ esp_err_t mira_gpio43_link(const char *name,int output,uint8_t kind){
 }
 bool mira_gpio43_action_mapped(const char *name){
     if(!name||!take())return false;
-    const bool mapped=find_link(name)>=0;
+    /* A read-only binding (kind=2) publishes the physical output state;
+     * it must NOT intercept a touchscreen action. Otherwise a mapped
+     * button silently swallows the normal Jeedom/MQTT command.
+     */
+    const int slot=find_link(name);
+    const bool mapped=slot>=0&&links[slot].kind<2;
     drop();return mapped;
 }
 bool mira_gpio43_execute_action(const char *name){
