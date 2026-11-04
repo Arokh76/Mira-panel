@@ -146,6 +146,7 @@ typedef struct {
     /* Live drag: bound network traffic and avoid duplicate release values. */
     int live_last_value;
     uint32_t live_last_tick;
+    uint32_t local_input_until_ms;
     bool live_sent;
 } mira_widget_t;
 static mira_widget_t widgets[MAX_WIDGETS];
@@ -482,6 +483,8 @@ static void wheel_slider_touch(lv_event_t *event){
     mira_widget_t *w=(mira_widget_t *)lv_event_get_user_data(event);
     if(!w)return;
     lv_obj_t *source=lv_event_get_target_obj(event);
+    w->local_input_until_ms=lv_tick_get()+
+        (lv_event_get_code(event)==LV_EVENT_RELEASED?350u:250u);
     if(source==w->color_saturation)
         w->color_sat=(uint8_t)lv_slider_get_value(source);
     else if(source==w->color_brightness)
@@ -497,6 +500,7 @@ static void wheel_touch(lv_event_t *event){
     if(suppress_events||display_sleeping)return;
     mira_widget_t *w=(mira_widget_t *)lv_event_get_user_data(event);
     if(!w||!w->control)return;
+    w->local_input_until_ms=lv_tick_get()+250u;
     lv_indev_t *touch=lv_indev_get_act();
     if(!touch)return;
     lv_point_t p={0};
@@ -537,6 +541,11 @@ static void event_local(lv_event_t *e){
     mira_widget_t *b=(mira_widget_t*)lv_event_get_user_data(e);
     if(!b)return;
     lv_obj_t *src=lv_event_get_target_obj(e);
+    if(!strcmp(b->type,"range")||!strcmp(b->type,"roundrange")||
+       !strcmp(b->type,"thermostat")||!strcmp(b->type,"color")){
+        b->local_input_until_ms=lv_tick_get()+
+            (lv_event_get_code(e)==LV_EVENT_RELEASED?350u:250u);
+    }
     /* Beta local-GPIO binding semantics: a button/toggle linked to a
      * physical output executes locally and NEVER duplicates the event on
      * Jeedom/MQTT. The 4.3C uses DO0/DO1, not WT32 EXT pin numbers.
@@ -661,6 +670,10 @@ static void event_live_range(lv_event_t *event){
         lv_slider_get_value(w->control) : lv_arc_get_value(w->control);
     const lv_event_code_t code=lv_event_get_code(event);
     const uint32_t now=lv_tick_get();
+    if(code==LV_EVENT_PRESSED||code==LV_EVENT_PRESSING){
+        w->local_input_until_ms=now+250u;
+        return;
+    }
     /* Arduino beta: range and roundrange send every changed value,
      * including the release even if unchanged. Thermostat alone throttles
      * VALUE_CHANGED by 130 ms and always sends on release. */
@@ -851,6 +864,7 @@ static void media_direct_action(lv_event_t *event) {
     if(action==3){
         if(!w->media_slider)return;
         suffix="volume_cmd";
+        w->local_input_until_ms=lv_tick_get()+350u;
         snprintf(payload,sizeof(payload),"%ld",(long)lv_slider_get_value(w->media_slider));
     }
     if(action==4){
@@ -1545,6 +1559,8 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         }
         // Beta source: live changes (130 ms only for thermostat) and
         // unconditional final release, including the final matching value.
+        lv_obj_add_event_cb(w->control,event_live_range,LV_EVENT_PRESSED,w);
+        lv_obj_add_event_cb(w->control,event_live_range,LV_EVENT_PRESSING,w);
         lv_obj_add_event_cb(w->control,event_live_range,LV_EVENT_VALUE_CHANGED,w);
         lv_obj_add_event_cb(w->control,event_live_range,LV_EVENT_RELEASED,w);
         return;
@@ -2865,6 +2881,9 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                 for(int n=0;n<total;n++){
                     const char *known=media?media_fields[n]:energy_fields[n];
                     if(!strcmp(field,known)&&w->fields[n]){
+                        if(media&&n==5&&w->local_input_until_ms!=0&&
+                           (int32_t)(lv_tick_get()-w->local_input_until_ms)<0)
+                            break;
                         if(media&&n==5){
                             char *end=NULL;
                             long vol=strtol(msg->value,&end,10);
@@ -3063,8 +3082,16 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
             }
             if(selected>=0)listbutton_mark_selected(w,(uint8_t)selected);
         }
-        // Remote information is authoritative, but must never trigger an
-        // outgoing command. Color states accept legacy #RRGGBB / r,g,b.
+        // The beta preserves the user's live drag for 250 ms and for
+        // 350 ms after release, avoiding an older passive Jeedom echo
+        // snapping the control back mid-gesture.
+        if(w->local_input_until_ms!=0&&
+           (int32_t)(lv_tick_get()-w->local_input_until_ms)<0&&
+           (!strcmp(w->type,"range")||!strcmp(w->type,"roundrange")||
+            !strcmp(w->type,"thermostat")||!strcmp(w->type,"color")))
+            continue;
+        // Remote information is authoritative after the local-input window.
+        // Passive states never trigger an outgoing action.
         if(w->control && !strcmp(w->type,"thermostat")){
             // Jeedom's setpoint can be fractional. Only accept a complete,
             // finite numeric value; never move the dial to 0 on invalid data.
