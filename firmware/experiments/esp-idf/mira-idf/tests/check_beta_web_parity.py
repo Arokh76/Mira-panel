@@ -712,10 +712,11 @@ print("PASS Arduino multi-action 900-ms hold / 370-ms release grouping")
 # Arduino thermostat MQTT is a composite topic, unlike the Jeedom range
 # index. Never publish the thermostat command at the bare widget name.
 assert 'publishAction(b.name + "__consigne", String(value, 1));' in beta_ui_impl
-assert 'snprintf(mqtt_name,sizeof(mqtt_name),' in full
-assert '"%.95s__consigne",b->name' in full
-assert 'mira_mqtt_publish_action(mqtt_name,b->value)' in full
-assert 'mira_generic_queue_local_action(b->name,b->type,payload)' in full
+assert 'snprintf(mqtt_topic,sizeof(mqtt_topic),"%.95s__consigne",b->name);' in full
+assert 'mqtt_name=mqtt_topic;' in full
+assert 'mqtt_payload=b->value;' in full
+assert 'mira_beta_user_action(b->name,b->type,payload,' in full
+assert 'mira_generic_queue_local_action(name,type,value)' in full
 print("PASS thermostat MQTT uses composite __consigne topic and decimal payload")
 
 # Beta preserves local gesture for 250 ms, and for 350 ms after release
