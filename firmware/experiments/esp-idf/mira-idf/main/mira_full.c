@@ -55,13 +55,53 @@ void mira_full_request_reload(void){ reload_pending=true; }
 // No state update ever generates a Jeedom/MQTT command.
 typedef struct { char name[96]; char value[160]; } mira_state_update_t;
 static QueueHandle_t state_queue;
+/* A broker reconnect can deliver hundreds of retained composite states
+ * before the LVGL task consumes its 24-entry fallback FIFO. Use PSRAM
+ * last-value slots per topic so the latest passive state survives a burst.
+ * 40 beta widgets x 9 media fields = 360, plus weather controls. */
+#define MIRA_PENDING_STATE_SLOTS 384
+static mira_state_update_t *pending_states;
+static SemaphoreHandle_t pending_states_lock;
+static size_t pending_state_cursor;
+static bool put_pending_state(const mira_state_update_t *msg){
+    if(!msg||!pending_states||!pending_states_lock||
+       xSemaphoreTake(pending_states_lock,pdMS_TO_TICKS(20))!=pdTRUE)
+        return false;
+    size_t slot=MIRA_PENDING_STATE_SLOTS;
+    for(size_t i=0;i<MIRA_PENDING_STATE_SLOTS;i++){
+        if(pending_states[i].name[0]&&!strcmp(pending_states[i].name,msg->name)){
+            slot=i;break;
+        }
+        if(!pending_states[i].name[0]&&slot==MIRA_PENDING_STATE_SLOTS)
+            slot=i;
+    }
+    if(slot<MIRA_PENDING_STATE_SLOTS)pending_states[slot]=*msg;
+    xSemaphoreGive(pending_states_lock);
+    return slot<MIRA_PENDING_STATE_SLOTS;
+}
+static bool pop_pending_state(mira_state_update_t *out){
+    if(!out||!pending_states||!pending_states_lock||
+       xSemaphoreTake(pending_states_lock,0)!=pdTRUE)
+        return false;
+    bool found=false;
+    for(size_t n=0;n<MIRA_PENDING_STATE_SLOTS;n++){
+        const size_t i=(pending_state_cursor+n)%MIRA_PENDING_STATE_SLOTS;
+        if(!pending_states[i].name[0])continue;
+        *out=pending_states[i];
+        pending_states[i].name[0]=0;
+        pending_state_cursor=(i+1)%MIRA_PENDING_STATE_SLOTS;
+        found=true;break;
+    }
+    xSemaphoreGive(pending_states_lock);
+    return found;
+}
 // Album artwork URLs are longer than ordinary Jeedom Infos (159 bytes).
 // Keep them OUT of the 24-entry general state queue to protect internal RAM.
 typedef struct {char name[96];char url[769];} mira_cover_update_t;
 static QueueHandle_t cover_update_queue;
 // Incoming values are tracked separately for the beta HTTP /get endpoint.
 // An absent entry is unknown, never treated as OFF or zero.
-#define MIRA_STATE_CACHE_LIMIT 96
+#define MIRA_STATE_CACHE_LIMIT 384
 static mira_state_update_t *state_cache;
 static size_t state_cache_count;
 // Monotonic counters: do not allocate additional heap in diagnostics.
@@ -2808,11 +2848,16 @@ bool mira_full_enqueue_state(const char *name,const char *value){
         }
         return true;
     }
-    if(!state_queue||size>=160)return false;
+    if(size>=160)return false;
     mira_state_update_t msg={0};
     snprintf(msg.name,sizeof(msg.name),"%s",name);
     snprintf(msg.value,sizeof(msg.value),"%s",value);
-    if(xQueueSend(state_queue,&msg,0)!=pdTRUE){
+    // Prefer keyed PSRAM slots, preserving the newest value even if the
+    // broker retained-state burst is larger than the internal FIFO.
+    bool accepted=put_pending_state(&msg);
+    if(!accepted&&state_queue)
+        accepted=xQueueSend(state_queue,&msg,0)==pdTRUE;
+    if(!accepted){
         __atomic_fetch_add(&passive_queue_dropped,1u,__ATOMIC_RELAXED);
         return false;
     }
@@ -2827,6 +2872,12 @@ void mira_full_state_diagnostics(mira_full_state_diagnostics_t *out){
     out->state_cache_evictions=__atomic_load_n(&passive_evictions,__ATOMIC_RELAXED);
     out->state_queue_dropped=__atomic_load_n(&passive_queue_dropped,__ATOMIC_RELAXED);
     if(state_queue)out->state_queue_pending=(uint32_t)uxQueueMessagesWaiting(state_queue);
+    if(pending_states_lock&&pending_states&&
+       xSemaphoreTake(pending_states_lock,pdMS_TO_TICKS(10))==pdTRUE){
+        for(size_t i=0;i<MIRA_PENDING_STATE_SLOTS;i++)
+            if(pending_states[i].name[0])out->state_queue_pending++;
+        xSemaphoreGive(pending_states_lock);
+    }
     if(state_cache_lock&&xSemaphoreTake(state_cache_lock,pdMS_TO_TICKS(30))==pdTRUE){
         out->state_cache_used=(uint32_t)state_cache_count;
         xSemaphoreGive(state_cache_lock);
@@ -3275,10 +3326,15 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
     }
 }
 static void apply_pending_states(void){
-    if(!state_queue)return;
     mira_state_update_t update;
-    for(int n=0;n<12&&xQueueReceive(state_queue,&update,0)==pdTRUE;n++)
+    // Drain at most 12 per LVGL tick, preserving the screen's frame budget.
+    // The fallback FIFO is drained first, then latest-value PSRAM slots.
+    for(int n=0;n<12;n++){
+        bool have=state_queue&&xQueueReceive(state_queue,&update,0)==pdTRUE;
+        if(!have)have=pop_pending_state(&update);
+        if(!have)break;
         apply_state_on_lvgl_task(&update);
+    }
 }
 
 /* Fixed-size HH:MM formatting for retained MQTT Display states.
@@ -3482,6 +3538,12 @@ static bool spiffs_partition_is_blank(void){
 }
 bool mira_full_storage_init(void){
     if(!state_queue)state_queue=xQueueCreate(24,sizeof(mira_state_update_t));
+    if(!pending_states_lock)pending_states_lock=xSemaphoreCreateMutex();
+    if(!pending_states)
+        pending_states=heap_caps_calloc(MIRA_PENDING_STATE_SLOTS,
+                          sizeof(*pending_states),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!pending_states||!pending_states_lock)
+        ESP_LOGW(TAG,"PSRAM passive-state coalescing unavailable; using bounded FIFO");
     if(!cover_update_queue)cover_update_queue=xQueueCreate(2,sizeof(mira_cover_update_t));
     if(!state_queue)ESP_LOGE(TAG,"State queue allocation failed");
     if(!state_cache_lock)state_cache_lock=xSemaphoreCreateMutex();
