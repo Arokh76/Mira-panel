@@ -340,18 +340,52 @@ static void legacy_apply_manual_ip(void){
 }
 // The original beta Wi-Fi form uses auto/manual/fixed_auto. Keep the
 // profiles in the native NVS namespace; never alter reseau.json from Arduino.
+/* Native IP settings are stored as one validated JSON NVS value. A
+ * single atomic profile prevents mixed DHCP/manual fields if power is lost
+ * while saving. Legacy six-key preferences remain readable as fallback. */
+static bool read_atomic_web_profile(nvs_handle_t nv,
+    char mode[16],char ip[32],char mask[32],char gw[32],
+    char dns1[32],char dns2[32]){
+    char encoded[512]={0};
+    size_t cap=sizeof(encoded);
+    if(nvs_get_str(nv,"web_profile",encoded,&cap)!=ESP_OK)return false;
+    cJSON *root=cJSON_Parse(encoded);
+    if(!root)return false;
+    const char *const keys[]={"mode","ip","mask","gateway","dns1","dns2"};
+    char *const targets[]={mode,ip,mask,gw,dns1,dns2};
+    const size_t sizes[]={16,32,32,32,32,32};
+    bool valid=true;
+    for(size_t i=0;i<6;i++){
+        const cJSON *item=cJSON_GetObjectItemCaseSensitive(root,keys[i]);
+        if(!cJSON_IsString(item)||!item->valuestring||
+           strlen(item->valuestring)>=sizes[i]){valid=false;break;}
+    }
+    if(valid){
+        for(size_t i=0;i<6;i++){
+            const cJSON *v=cJSON_GetObjectItemCaseSensitive(root,keys[i]);
+            snprintf(targets[i],sizes[i],"%s",v->valuestring);
+        }
+        valid=!strcmp(mode,"auto")||!strcmp(mode,"manual")||
+              !strcmp(mode,"fixed_auto");
+    }
+    cJSON_Delete(root);
+    return valid;
+}
 static bool beta_web_load_ip_mode(void){
     nvs_handle_t nv;
     if(nvs_open("mira_idf_net",NVS_READONLY,&nv)!=ESP_OK)return false;
     char mode[16]={0},ip[32]={0},mask[32]={0},gw[32]={0},dns1[32]={0},dns2[32]={0};
-    size_t n=sizeof(mode);
-    bool stored=nvs_get_str(nv,"web_mode",mode,&n)==ESP_OK;
-    if(stored){
-        n=sizeof(ip);(void)nvs_get_str(nv,"web_ip",ip,&n);
-        n=sizeof(mask);(void)nvs_get_str(nv,"web_mask",mask,&n);
-        n=sizeof(gw);(void)nvs_get_str(nv,"web_gw",gw,&n);
-        n=sizeof(dns1);(void)nvs_get_str(nv,"web_dns1",dns1,&n);
-        n=sizeof(dns2);(void)nvs_get_str(nv,"web_dns2",dns2,&n);
+    bool stored=read_atomic_web_profile(nv,mode,ip,mask,gw,dns1,dns2);
+    if(!stored){
+        size_t n=sizeof(mode);
+        stored=nvs_get_str(nv,"web_mode",mode,&n)==ESP_OK;
+        if(stored){
+            n=sizeof(ip);(void)nvs_get_str(nv,"web_ip",ip,&n);
+            n=sizeof(mask);(void)nvs_get_str(nv,"web_mask",mask,&n);
+            n=sizeof(gw);(void)nvs_get_str(nv,"web_gw",gw,&n);
+            n=sizeof(dns1);(void)nvs_get_str(nv,"web_dns1",dns1,&n);
+            n=sizeof(dns2);(void)nvs_get_str(nv,"web_dns2",dns2,&n);
+        }
     }
     nvs_close(nv);
     if(!stored)return false;
