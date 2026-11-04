@@ -563,7 +563,11 @@ static void event_local(lv_event_t *e){
         const uint8_t brightness=b->color_val;
         const lv_color_t col=lv_color_hsv_to_rgb(hue,saturation,brightness);
         const uint32_t rgb=lv_color_to_u32(col);
-        snprintf(b->value,sizeof(b->value),"%u,%u,%u",
+        /* MiraPanelUI::onColor publishes #RRGGBB to Actions/, never
+         * "r,g,b". Keep the same hex payload for MQTT and the cache;
+         * the Jeedom HTTP encoder converts it to the plugin's RGB data.
+         */
+        snprintf(b->value,sizeof(b->value),"#%02X%02X%02X",
                  (unsigned)((rgb>>16)&255u),(unsigned)((rgb>>8)&255u),
                  (unsigned)(rgb&255u));
         if(b->color_preview)lv_obj_set_style_bg_color(b->color_preview,col,0);
