@@ -544,7 +544,7 @@ static void event_local(lv_event_t *e){
         snprintf(b->value,sizeof(b->value),"%s",lv_obj_has_state(src,LV_STATE_CHECKED)?"On":"Off");
     }else if(!strcmp(b->type,"range")||!strcmp(b->type,"roundrange")||!strcmp(b->type,"thermostat")){
         int v=(!strcmp(b->type,"roundrange")||!strcmp(b->type,"thermostat"))?lv_arc_get_value(src):lv_slider_get_value(src);
-        if(!strcmp(b->type,"thermostat"))
+        if(!strcmp(b->type,"thermostat")||!strcmp(b->type,"roundrange"))
             snprintf(b->value,sizeof(b->value),"%.1f",v*0.5f);
         else
             snprintf(b->value,sizeof(b->value),"%d",v);
@@ -586,7 +586,7 @@ static void event_local(lv_event_t *e){
     char thermostat_payload[24]={0};
     const char *payload=(!strcmp(b->type,"toggle")) ?
                         (!strcmp(b->value,"On")?"1":"0") : b->value;
-    if(!strcmp(b->type,"thermostat")&&b->control){
+    if((!strcmp(b->type,"thermostat")||!strcmp(b->type,"roundrange"))&&b->control){
         const int half=lv_arc_get_value(b->control);
         if(half&1)snprintf(thermostat_payload,sizeof(thermostat_payload),
                            "%.1f",half*0.5f);
@@ -1387,8 +1387,13 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
                 lv_arc_set_value(w->control,half);
                 snprintf(w->value,sizeof(w->value),"%.1f",half*0.5f);
             }else{
-                lv_arc_set_range(w->control,w->minv,w->maxv);
-                lv_arc_set_value(w->control,clamp(atoi(w->value),w->minv,w->maxv));
+                /* Arduino createRoundRange() exposes half-unit resolution.
+                 * Keep the full native range doubled; a 20.5 setpoint is
+                 * represented by raw LVGL arc value 41.
+                 */
+                lv_arc_set_range(w->control,w->minv*2,w->maxv*2);
+                lv_arc_set_value(w->control,
+                                 clamp(atoi(w->value),w->minv,w->maxv)*2);
             }
             if(thermostat){
                 lv_arc_set_bg_angles(w->control,135,45);
@@ -2987,6 +2992,32 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                 char text[48];
                 snprintf(text,sizeof(text),"%.1f°",half*0.5f);
                 lv_label_set_text(w->value_label,text);
+            }
+            continue;
+        }
+        if(w->control && !strcmp(w->type,"roundrange")){
+            /* Beta handleMqttState() and onRoundRange() keep the displayed
+             * value in half-units; an incoming 20.5 becomes arc value 41.
+             * Reconcile passively, without emitting a Jeedom/MQTT action.
+             */
+            char *end=NULL;
+            errno=0;
+            const float incoming=strtof(msg->value,&end);
+            if(!*msg->value||!end||*end||errno==ERANGE||!isfinite(incoming))
+                continue;
+            const int half=clamp((int)lroundf(incoming*2.0f),
+                                 w->minv*2,w->maxv*2);
+            suppress_events=true;
+            lv_arc_set_value(w->control,half);
+            suppress_events=false;
+            snprintf(w->value,sizeof(w->value),"%.1f",half*0.5f);
+            if(w->value_label){
+                char caption[144];
+                snprintf(caption,sizeof(caption),"%s%s%s",
+                         w->value,
+                         (w->unit[0]&&w->unit[0]!='°')?" ":"",
+                         w->unit);
+                lv_label_set_text(w->value_label,caption);
             }
             continue;
         }
