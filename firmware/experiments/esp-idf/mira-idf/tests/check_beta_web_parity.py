@@ -887,3 +887,78 @@ assert 'if(!mira_sse_signal)mira_sse_signal=xEventGroupCreate();' not in jeedom[
     jeedom.index('static esp_err_t beta_events_get('):
     jeedom.index('// Browser home commands on POST')]
 print('PASS SSE event group initialized before concurrent /events requests')
+
+# A complete retained MQTT message can be split across several ESP-MQTT
+# DATA callbacks. Beta's processIncoming reads the entire broker PUBLISH;
+# an IDF first-fragment-only handler silently loses larger state payloads.
+assert 'void MiraMqtt::processIncoming()' in legacy_mqtt
+assert 'processPublish(header, packet, len);' in legacy_mqtt
+for required in (
+    'static void clear_fragment(void)',
+    'e->current_data_offset==0',
+    'e->total_data_len>1024',
+    'incoming_fragment.expected!=e->total_data_len',
+    'incoming_fragment.received!=e->current_data_offset',
+    'memcpy(incoming_fragment.payload+incoming_fragment.received,',
+    'if(incoming_fragment.received==incoming_fragment.expected)',
+    'incoming_state(incoming_fragment.topic,incoming_fragment.topic_len,',
+    'incoming_display(incoming_fragment.topic,incoming_fragment.topic_len,',
+):
+    assert required in mqtt, f'MQTT fragment-reassembly missing: {required}'
+assert 'e->data_len==e->total_data_len' not in mqtt
+print('PASS MQTT fragment reassembly and bounded passive-state dispatch')
+
+# Reconnection publishes all retained composite info states at once.
+# A 24-slot FIFO can discard the majority of a 40-widget media panel;
+# last-value PSRAM slots retain 40*9 plus weather, never trigger actions.
+for required in (
+    '#define MIRA_PENDING_STATE_SLOTS 384',
+    'static bool put_pending_state(const mira_state_update_t *msg)',
+    'static bool pop_pending_state(mira_state_update_t *out)',
+    'bool accepted=put_pending_state(&msg);',
+    'if(!have)have=pop_pending_state(&update);',
+    '#define MIRA_STATE_CACHE_LIMIT 384',
+    '#define MIRA_COVER_SLOTS 40',
+    'bool accepted=put_pending_cover(&cover);',
+    'if(!have)have=pop_pending_cover(&cover);',
+):
+    assert required in full, f'MQTT reconnect saturation protection missing: {required}'
+assert 'remember_passive_state(&msg);' in full
+assert 'mira_jeedom_sse_notify();' in full
+print('PASS bounded PSRAM latest states/covers, no passive action echo')
+
+# Legacy AES migration rejects capacities >256 (its ciphertext buffer is
+# 256 bytes). A 769-byte MQTT plaintext buffer therefore rejected EVERY
+# legacy crypted-text broker password, irrespective of its actual length.
+assert 'capacity>256' in (idf/'mira_legacy_cipher.c').read_text(encoding='utf-8')
+assert 'char plaintext[256]={0};' in mqtt
+assert 'mira_legacy_decrypt(stored,plaintext,sizeof(plaintext))' in mqtt
+assert 'char plaintext[769]={0};' not in mqtt
+print('PASS encrypted Arduino MQTT credentials migrate with correct AES buffer')
+
+# Configuration reapply clears credentials/flags from the old live broker
+# and keeps the old password if a JSON setup omits or blanks that field.
+assert 'host[0]=0;username[0]=0;secret[0]=0;' in mqtt
+assert 'enabled=false;port=1883;' in mqtt
+assert 'if(err==ESP_OK&&s&&s->valuestring[0])' in mqtt
+assert 'if(!mira_setup_require_ap(r))return ESP_FAIL;' in mqtt[
+    mqtt.index('static esp_err_t mqtt_get('):mqtt.index('static esp_err_t mqtt_post(')]
+assert 'cJSON_AddStringToObject(result,"screen",screen_name);' in mqtt
+print('PASS MQTT reprovisioning, password retention, authenticated JSON status')
+
+# Editing an existing Wi-Fi profile first snapshots the previous native
+# secret, then rolls it back if saving the index/overlay fails. A failed
+# Wi-Fi profile write must not return a successful Web redirect.
+native_networks=(idf/'mira_beta_networks.c').read_text(encoding='utf-8')
+for required in (
+    'char previous_password[96]={0};',
+    'bool had_previous_password=false;',
+    'if(err==ESP_OK)err=save(root);',
+    'if(err!=ESP_OK&&*password){',
+    'had_previous_password?',
+    'nvs_erase_key(nv,key)',
+    'memset(previous_password,0,sizeof(previous_password));',
+):
+    assert required in native_networks, f'Wi-Fi rollback missing: {required}'
+assert 'Wi-Fi applique mais profil non enregistre; verifier NVS' in handlers
+print('PASS Wi-Fi native overlay failure surfaces error and restores credential')
