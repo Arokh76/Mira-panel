@@ -17,7 +17,7 @@
 | `thermostat` | Consigne 0,5°, 130 ms sur glissement, `__consigne`, modes | Arc, file HTTP, MQTT composite | Corrigé : `__consigne`, décimale et 130 ms ; confirmation finale au relâchement |
 | `list` / `listbutton` | Jusqu'à 12 options, libellé ou index passif | Menu, boutons, même format de choix | Valeurs de `getindex` typées nombre et étiquettes comparées |
 | `multiaction` | Appui long 900 ms, agrégation 370 ms, 4 actions ; tuile masquée sur Waveshare | Même chronologie ; EXIO facultatif | Corrigé : chronologie et visibilité opt-in |
-| `color` | Anneau hue 150 px, sorties `#RRGGBB`, changement et relâchement | Anneau RGB565, saturation et valeur séparées, sorties hex | Fonction RGB présente, mais interface LVGL9 pas pixel-identique au colorwheel LVGL8 |
+| `color` | Anneau hue 150 px fixe, sorties `#RRGGBB`, changement et relâchement | Anneau 150 px RGB565 fixe, saturation et valeur conservées dans l'état, sorties hex | Porté sans les curseurs HSV ajoutés à tort ; finesse des gestes / rendu à valider sur écran |
 | `energy` | 7 infos composites, batteries conditionnelles | 7 infos, jauges, hauteur variable | Champs et modes passifs comparés ; géométrie à observer |
 | `media` | 9 infos, cover, previous/play/pause/next, volume, appareil | 9 infos, JPEG cover, actions et liste | Canaux et types d'actions comparés ; flux réels à essayer |
 | `camera` | BMP/JPEG/MJPEG, HTTP/HTTPS, écran dédié | Tâche de réception, JPEG/BMP/MJPEG et TLS, écran dédié | Chemins présents ; flux, certificats et mémoire PSRAM non testés physiquement |
@@ -40,9 +40,9 @@
 
 ## Différences qui **ne peuvent pas être certifiées identiques** par le seul code
 
-1. `/events` est un flux SSE *snapshot/reconnexion* sous IDF, alors qu'Arduino garde une connexion persistante. La réception reste possible, mais la latence du rafraîchissement navigateur n'est pas strictement identique.
-2. LVGL 9 ne propose plus le même widget `lv_colorwheel` que LVGL 8 ; le cadran RGB565 et les curseurs HSV en reproduisent les commandes sans identité graphique exacte.
-3. Le firmware IDF privilégie un seul transport actif pour éviter le double pilotage HTTP Jeedom + MQTT ; le code Arduino peut publier via les deux transports lorsqu'ils sont tous deux activés. Ce choix est intentionnel mais **pas une identité de comportement**.
+1. **SSE fonctionnel corrigé dans le code** : `/events` utilise désormais une requête HTTP asynchrone persistante, des états actualisés sans reconnexion et des événements directs après commande Web. Deux clients maximum et ping de maintien ; la compatibilité navigateur / réseau réel n'est pas encore éprouvée.
+2. **Roue corrigée dans le code** : un seul anneau de teinte fixe de 150 px, sans les curseurs saturation/luminosité ajoutés auparavant ; la teinte, la couleur RGB et les composantes HSV de l'état passif sont conservées. LVGL 9 a une implémentation graphique différente de LVGL 8 : identité pixel à pixel non revendiquée.
+3. **Commandes corrigées dans le code** : les gestes LVGL publient indépendamment la commande Jeedom et la commande MQTT si les deux sont actifs, comme Arduino, sans générer d'action depuis un état passif. Le choix de destination réellement raccordée et les doublons potentiels sont à tester sur Jeedom/MQTT.
 4. Les E/S du Waveshare sont deux DI et deux DO isolées ; ce ne sont pas les broches EXT du WT32. Leurs modes électriques ne peuvent être copiés à l'identique.
 5. Le manifeste officiel ne contient pas encore une cible OTA IDF publiée ; le chemin de mise à jour distante est volontairement verrouillé.
 6. Les tests de source ne prouvent ni les FPS/tearing/tactile, ni les échanges réels Jeedom/MQTT, ni les sauvegardes chiffrées d'un appareil, ni les binaires du dernier commit.
@@ -54,4 +54,4 @@
 3. fichiers `FACTORY_USB_0x0.bin` et `OTA.bin` présents dans l'artifact de ce build ;
 4. ne pas déclarer une stricte parité *matérielle* avant le vrai test écran, et ne pas publier en stable.
 
-**Ce document clôt l'inventaire comparatif des sous-systèmes principaux en code, mais ne remplace pas un test d'intégration.** Si l'objectif est une identité complète y compris SSE, routage double et rendu LVGL8, ces divergences doivent être traitées comme des tâches distinctes plutôt que masquées.
+**Ce document clôt l'inventaire comparatif des sous-systèmes principaux en code, mais ne remplace pas un test d'intégration.** Les trois différences SSE, roue et routage double ont été corrigées en source ; la compilation du commit final et le fonctionnement réel ne sont pas présumés acquis.
