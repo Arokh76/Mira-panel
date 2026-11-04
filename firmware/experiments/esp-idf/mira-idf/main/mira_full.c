@@ -1407,7 +1407,10 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
             lv_obj_set_style_arc_color(w->control,cyan_c(),LV_PART_INDICATOR);
             char initial_label[96];
             if(thermostat)snprintf(initial_label,sizeof(initial_label),"%s°",w->value);
-            else snprintf(initial_label,sizeof(initial_label),"%s %s",w->value,w->unit);
+            else snprintf(initial_label,sizeof(initial_label),"%s%s%s",
+                          w->value,
+                          (w->unit[0]&&strncmp(w->unit,"°",2))?" ":"",
+                          w->unit);
             if(thermostat){
                 lv_obj_t *inner=lv_obj_create(w->card);
                 lv_obj_set_size(inner,169,169);
@@ -3015,7 +3018,7 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                 char caption[144];
                 snprintf(caption,sizeof(caption),"%s%s%s",
                          w->value,
-                         (w->unit[0]&&w->unit[0]!='°')?" ":"",
+                         (w->unit[0]&&strncmp(w->unit,"°",2))?" ":"",
                          w->unit);
                 lv_label_set_text(w->value_label,caption);
             }
