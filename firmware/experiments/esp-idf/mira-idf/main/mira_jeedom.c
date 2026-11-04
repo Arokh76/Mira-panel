@@ -588,8 +588,31 @@ typedef struct {
     cJSON *index;
     char (*last)[160];
     unsigned count;
+    uint32_t last_direct_seq;
 } mira_sse_client_t;
 static unsigned mira_sse_clients;
+/* Direct HTTP form actions used to call Arduino events.send() immediately.
+ * A fixed 16-event history lets both browsers receive that event without
+ * holding an HTTP socket or allocating from the LVGL task. */
+typedef struct {uint32_t seq;int id;char value[160];} mira_sse_direct_t;
+static mira_sse_direct_t mira_sse_direct[16];
+static uint32_t mira_sse_direct_seq;
+static portMUX_TYPE mira_sse_lock=portMUX_INITIALIZER_UNLOCKED;
+static void mira_sse_record_direct(int id,const char *value){
+    if(id<1||id>4096||!value)return;
+    portENTER_CRITICAL(&mira_sse_lock);
+    uint32_t next=++mira_sse_direct_seq;
+    mira_sse_direct_t *slot=&mira_sse_direct[next%16u];
+    slot->seq=next;slot->id=id;
+    size_t n=0;
+    while(value[n]&&n<sizeof(slot->value)-1){
+        char c=value[n];
+        slot->value[n]=(c=='\\r'||c=='\\n')?' ':c;
+        n++;
+    }
+    slot->value[n]=0;
+    portEXIT_CRITICAL(&mira_sse_lock);
+}
 
 static esp_err_t mira_sse_changed(mira_sse_client_t *client){
     const cJSON *actions=cJSON_GetObjectItemCaseSensitive(client->index,"actions");
@@ -624,6 +647,30 @@ static esp_err_t mira_sse_changed(mira_sse_client_t *client){
         esp_err_t err=httpd_resp_send_chunk(client->req,event,(size_t)written);
         if(err!=ESP_OK)return err;
         snprintf(previous,160,"%s",value);
+    }
+    /* Send the direct events from the beta browser's action route,
+     * without waiting for a separate Jeedom/MQTT state reflection. */
+    for(unsigned attempt=0;attempt<16u;attempt++){
+        mira_sse_direct_t copy={0};
+        bool pending=false;
+        portENTER_CRITICAL(&mira_sse_lock);
+        uint32_t latest=mira_sse_direct_seq;
+        if(latest-client->last_direct_seq>16u)
+            client->last_direct_seq=latest-16u;
+        if(client->last_direct_seq!=latest){
+            const uint32_t wanted=client->last_direct_seq+1u;
+            copy=mira_sse_direct[wanted%16u];
+            client->last_direct_seq=wanted;
+            pending=copy.seq==wanted;
+        }
+        portEXIT_CRITICAL(&mira_sse_lock);
+        if(!pending)break;
+        char event[230];
+        int size=snprintf(event,sizeof(event),"event: %d\\ndata: %s\\n\\n",copy.id,copy.value);
+        if(size>0&&(size_t)size<sizeof(event)){
+            esp_err_t err=httpd_resp_send_chunk(client->req,event,(size_t)size);
+            if(err!=ESP_OK)return err;
+        }
     }
     return ESP_OK;
 }
@@ -689,6 +736,9 @@ static esp_err_t beta_events_get(httpd_req_t *req){
         httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"SSE allocation failed");
         return ESP_FAIL;
     }
+    portENTER_CRITICAL(&mira_sse_lock);
+    client->last_direct_seq=mira_sse_direct_seq;
+    portEXIT_CRITICAL(&mira_sse_lock);
     // The worker owns the duplicated request. The original request handler
     // returns immediately, leaving the browser's EventSource connected.
     esp_err_t err=httpd_req_async_handler_begin(req,&client->req);
@@ -810,6 +860,7 @@ esp_err_t mira_jeedom_beta_web_action(httpd_req_t *req){
         httpd_resp_set_status(req,"503 Service Unavailable");
         return httpd_resp_sendstr(req,"Transport inactif");
     }
+    mira_sse_record_direct((int)id,payload);
     httpd_resp_set_type(req,"text/plain");
     return httpd_resp_sendstr(req,"OK");
 }
