@@ -24,6 +24,23 @@ static uint16_t port=1883;
 static char state_prefix[112], action_prefix[112],display_prefix[112];
 static char last_display_signature[160];
 static int64_t last_display_check_us;
+/* ESP-MQTT may split a single PUBLISH into several MQTT_EVENT_DATA
+ * callbacks, with the topic only on the first fragment. Buffer a bounded
+ * 1024-byte envelope and dispatch once at total_data_len, never partially. */
+static struct {
+    char topic[240];
+    char payload[1025];
+    int expected;
+    int received;
+    int topic_len;
+    bool active;
+} incoming_fragment;
+static void clear_fragment(void){
+    incoming_fragment.active=false;
+    incoming_fragment.expected=0;
+    incoming_fragment.received=0;
+    incoming_fragment.topic_len=0;
+}
 
 
 /* Exact MiraMqtt::cleanScreenName() behavior for MQTT prefixes.
@@ -52,6 +69,7 @@ static void refresh_prefixes(void) {
 }
 static void stop_client(void) {
     connected=false;
+    clear_fragment();
     if(!client)return;
     esp_mqtt_client_stop(client);
     esp_mqtt_client_destroy(client);
@@ -151,11 +169,42 @@ static void mqtt_event(void *arg, esp_event_base_t base,int32_t event_id,void *e
         ESP_LOGI(TAG,"Connected. Subscribed state and display controls for %s",screen_name);
     }else if(event_id==MQTT_EVENT_DISCONNECTED){
         connected=false;
+        clear_fragment();
     }else if(event_id==MQTT_EVENT_DATA) {
-        // MQTT fragmented payloads must not be mistaken for full values.
-        if(e->current_data_offset==0 && e->data_len==e->total_data_len){
-            incoming_state(e->topic,e->topic_len,e->data,e->data_len);
-            incoming_display(e->topic,e->topic_len,e->data,e->data_len);
+        if(e->total_data_len<1||e->total_data_len>1024||
+           e->data_len<0||e->current_data_offset<0||
+           e->current_data_offset>e->total_data_len||
+           e->data_len>e->total_data_len-e->current_data_offset){
+            clear_fragment();
+            return;
+        }
+        if(e->current_data_offset==0){
+            clear_fragment();
+            if(!e->topic||e->topic_len<1||
+               e->topic_len>=(int)sizeof(incoming_fragment.topic))return;
+            memcpy(incoming_fragment.topic,e->topic,(size_t)e->topic_len);
+            incoming_fragment.topic[e->topic_len]=0;
+            incoming_fragment.topic_len=e->topic_len;
+            incoming_fragment.expected=e->total_data_len;
+            incoming_fragment.active=true;
+        }
+        if(!incoming_fragment.active||
+           incoming_fragment.expected!=e->total_data_len||
+           incoming_fragment.received!=e->current_data_offset||
+           (!e->data&&e->data_len>0)){
+            clear_fragment();
+            return;
+        }
+        if(e->data_len>0)
+            memcpy(incoming_fragment.payload+incoming_fragment.received,
+                   e->data,(size_t)e->data_len);
+        incoming_fragment.received+=e->data_len;
+        if(incoming_fragment.received==incoming_fragment.expected){
+            incoming_state(incoming_fragment.topic,incoming_fragment.topic_len,
+                           incoming_fragment.payload,incoming_fragment.received);
+            incoming_display(incoming_fragment.topic,incoming_fragment.topic_len,
+                             incoming_fragment.payload,incoming_fragment.received);
+            clear_fragment();
         }
     }
 }
@@ -215,7 +264,7 @@ static void import_beta_mqtt_config(void){
         else if(!strcmp(legacy,"MQTT_Utilisateur")){key="username";size_limit=64;}
         else if(!strcmp(legacy,"MQTT_Mot_de_passe")){key="secret";size_limit=96;}
         else if(strcmp(legacy,"MQTT_Port")&&strcmp(legacy,"MQTT_Actif"))continue;
-        char plaintext[769]={0};
+        char plaintext[256]={0};
         const char *value=stored;
         if(cJSON_IsString(t)&&t->valuestring&&!strcmp(t->valuestring,"crypted-text")){
             if(!mira_legacy_decrypt(stored,plaintext,sizeof(plaintext)))continue;
@@ -258,6 +307,10 @@ clear_value:
 }
 
 static void read_config(void) {
+    /* A disabled/reprovisioned broker must never inherit old credentials
+     * or a stale enabled flag from the previous live configuration. */
+    host[0]=0;username[0]=0;secret[0]=0;
+    enabled=false;port=1883;
     snprintf(screen_name,sizeof(screen_name),"panel");
     nvs_handle_t nvs;
     if(nvs_open("mira_idf_mqtt",NVS_READONLY,&nvs)!=ESP_OK){refresh_prefixes();return;}
