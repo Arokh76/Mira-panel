@@ -474,6 +474,7 @@ static void wheel_mark_hue(mira_widget_t *w,int hue){
             lv_color_hsv_to_rgb(w->color_hue,100,100),0);
     }
 }
+static void event_local(lv_event_t *e);
 static void wheel_touch(lv_event_t *event){
     const lv_event_code_t code=lv_event_get_code(event);
     if(code!=LV_EVENT_PRESSED&&code!=LV_EVENT_PRESSING)return;
@@ -500,6 +501,8 @@ static void wheel_touch(lv_event_t *event){
         if(w->color_preview)
             lv_obj_set_style_bg_color(w->color_preview,
               lv_color_hsv_to_rgb(w->color_hue,sat,brightness),0);
+        /* The beta publishes each changed RGB while dragging. */
+        event_local(event);
     }
 }
 
