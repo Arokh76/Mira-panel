@@ -1396,6 +1396,10 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         return;
     }
     if(!strcmp(type,"button")||!strcmp(type,"multiaction")){
+        /* Waveshare beta never draws a multiaction tile by default.
+         * The native isolated DI extension can explicitly opt in. */
+        if(!strcmp(type,"multiaction")&&!mira_gpio43_multi_visible(w->name))
+            return;
         w->card=card(pg,cw,54);
         lv_obj_set_style_bg_opa(w->card,LV_OPA_TRANSP,0);
         lv_obj_set_style_border_width(w->card,0,0);
