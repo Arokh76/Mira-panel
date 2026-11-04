@@ -878,11 +878,14 @@ esp_err_t mira_recovery_init(void) {
     bool have_sta=esp_wifi_get_config(WIFI_IF_STA,&saved_sta)==ESP_OK&&saved_sta.sta.ssid[0];
     nvs_handle_t profile_nv;
     uint8_t legacy_saved=0;
-    bool has_native_profiles=false;
+    bool has_native_profiles=false,has_web_profile=false;
     if(nvs_open("mira_idf_net",NVS_READONLY,&profile_nv)==ESP_OK){
         (void)nvs_get_u8(profile_nv,"legacy_wifi",&legacy_saved);
         size_t n=0;
         has_native_profiles=nvs_get_str(profile_nv,"wifi_profiles",NULL,&n)==ESP_OK&&n>2;
+        char mode[16]={0},ip[32]={0},mask[32]={0},gw[32]={0},
+             dns1[32]={0},dns2[32]={0};
+        has_web_profile=read_atomic_web_profile(profile_nv,mode,ip,mask,gw,dns1,dns2);
         nvs_close(profile_nv);
     }
     // A network explicitly deleted from the native beta profile list must
@@ -922,7 +925,7 @@ esp_err_t mira_recovery_init(void) {
             free(profiles);
         }
     }
-    if(!has_native_profiles&&(!have_sta || legacy_saved)){
+    if(!has_native_profiles&&!has_web_profile&&(!have_sta || legacy_saved)){
         bool imported=restore_legacy_wifi_profile(!have_sta);
         if(imported&&!have_sta){
             if(nvs_open("mira_idf_net",NVS_READWRITE,&profile_nv)==ESP_OK){
