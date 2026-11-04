@@ -269,8 +269,8 @@ assert 'esp_err_t mira_beta_web_gpio_state(httpd_req_t *req)' in web
 assert 'esp_err_t mira_beta_web_gpio_set(httpd_req_t *req)' in web
 assert 'mira_beta_web_authorized(req)' in web
 assert '"X-Mira-GPIO"' in web
-assert 'mira_display_io_write(out,high)' in web
-assert 'mira_display_io_read(&di0,&di1,&do0,&do1)' in web
+assert 'mira_gpio43_write((unsigned)i,state[0]==\'1\')' in web
+assert 'mira_gpio43_state(&state)' in web
 assert '.uri="/gpio/state"' in setup and '.uri="/gpio/set"' in setup
 display=(idf / "mira_display.c").read_text(encoding="utf-8")
 display_h=(idf / "mira_display.h").read_text(encoding="utf-8")
@@ -300,7 +300,7 @@ print("PASS beta page/control route wiring")
 
 # Hardware parity: the Arduino 4.3C registers multi-action IDs but does not
 # draw the GPIO-only WT32 multi-action control; don't create a fake touch tile.
-assert 'if(!strcmp(type,"multiaction"))return;' in full
+assert 'if(!strcmp(type,"multiaction")&&!mira_gpio43_multi_visible(name))return;' in full
 assert 'MIRA_TARGET_WAVESHARE_43C' in beta_ui
 assert 'WT32MultiVisible(name)' in beta_ui
 assert 'append_action(arr,&id,"button",compound);' in jeedom
@@ -417,3 +417,28 @@ assert 'if(attempt<3)vTaskDelay(pdMS_TO_TICKS(3000));' in jeedom
 assert 'if(confirmed){' in jeedom
 assert 'jeedom_action_worker' in jeedom
 print("PASS beta Jeedom acknowledgement by executed command ID, bounded retries, single worker")
+
+
+# All four beta GPIO endpoints must be adapted to the Waveshare isolated
+# IO-extension, including persist-on-boot, named links and DI multi-gestures.
+gpio=(idf/"mira_gpio43.c").read_text(encoding="utf-8")
+gpio_h=(idf/"mira_gpio43.h").read_text(encoding="utf-8")
+for route in ("/gpio/config","/gpio/link","/gpio/raw","/gpio/multi/config"):
+    assert '.uri="'+route+'"' in setup, route
+for handler in ("mira_beta_web_gpio_config","mira_beta_web_gpio_link",
+                "mira_beta_web_gpio_raw","mira_beta_web_gpio_multi"):
+    assert "esp_err_t "+handler+"(httpd_req_t *req)" in web, handler
+assert 'mira_gpio43_init()' in (idf/"app_main.c").read_text(encoding="utf-8")
+assert '"mira_gpio43.c"' in (idf/"CMakeLists.txt").read_text(encoding="utf-8")
+assert 'MIRA_DEBOUNCE_MS 35u' in gpio and 'MIRA_MULTICLICK_MS 370u' in gpio
+assert 'MIRA_HOLD_MS 900u' in gpio
+assert 'mira_display_io_read(&di0,&di1,&do0,&do1)' in gpio
+assert 'mira_display_io_write(output,physical)' in gpio
+assert 'nvs_open("mira43gpio",NVS_READWRITE' in gpio
+assert 'nvs_open("mira43links",NVS_READWRITE' in gpio
+assert 'nvs_open("mira43multi",NVS_READWRITE' in gpio
+assert 'mira_gpio43_toggle_mapped(b->name)' in full
+assert 'mira_gpio43_action_mapped(b->name)' in full
+assert 'if(!strcmp(type,"multiaction")&&!mira_gpio43_multi_visible(name))return;' in full
+assert 'mira_gpio43_multi_visible(const char *name)' in gpio_h
+print("PASS Waveshare isolated GPIO full beta config/link/multi route and local-control parity")
