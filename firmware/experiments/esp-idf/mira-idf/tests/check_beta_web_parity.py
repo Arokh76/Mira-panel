@@ -404,3 +404,16 @@ assert 'if(count==0)cJSON_AddNumberToObject(entry,"value",first_id);' in jeedom
 assert 'cJSON_AddStringToObject(entry,"value",text);' in jeedom
 assert 'Action["value"] = IDAction - 1' in legacy_server
 print("PASS source-derived Jeedom button/info/list metadata for every compound widget")
+
+# Jeedom-beta core/class/mira.class.php event() echoes the command ID for
+# both actions and passive infos. A generic HTTP 200 is not an acknowledgement.
+jeedom_plugin=(root/"core/class/mira.class.php").read_text(encoding="utf-8")
+assert "echo init('id');" in jeedom_plugin
+assert 'static esp_err_t capture_jeedom_ack(esp_http_client_event_t *event)' in jeedom
+assert 'acknowledgement.overflow' in jeedom
+assert '!strcmp(reply,remote_id)' in jeedom
+assert 'for(unsigned attempt=1;attempt<=3;attempt++)' in jeedom
+assert 'if(attempt<3)vTaskDelay(pdMS_TO_TICKS(3000));' in jeedom
+assert 'if(confirmed){' in jeedom
+assert 'jeedom_action_worker' in jeedom
+print("PASS beta Jeedom acknowledgement by executed command ID, bounded retries, single worker")
