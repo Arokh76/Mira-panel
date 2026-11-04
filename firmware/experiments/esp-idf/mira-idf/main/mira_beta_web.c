@@ -1023,9 +1023,10 @@ static esp_err_t save_mqtt(httpd_req_t *req,cJSON *form){
        !decimal(enabled,1,&on)){
         return html_err(req,HTTPD_400_BAD_REQUEST,"Parametres MQTT invalides");
     }
-    for(const char *p=screen;*p;p++){
-        if(*p=='/'||*p=='+'||*p=='#')return html_err(req,HTTPD_400_BAD_REQUEST,"Nom MQTT invalide");
-    }
+    /* Beta MiraMqtt::cleanScreenName() permits inner '/' and converts
+     * '+'/'#' to underscores. Keep the original user-supplied setting;
+     * mira_mqtt::read_config() normalizes before subscribing/publishing.
+     */
     if(password&&strlen(password)>=96)
         return html_err(req,HTTPD_400_BAD_REQUEST,"Mot de passe MQTT trop long");
     nvs_handle_t nv;
