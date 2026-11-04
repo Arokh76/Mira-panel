@@ -1742,9 +1742,13 @@ static esp_err_t beta_get(httpd_req_t *req){
     const bool is_toggle=!strcmp(kind,"toggle")||!strcmp(kind,"toogle");
     cJSON_ArrayForEach(entry,actions){
         const char *type=jstr((cJSON*)entry,"type","");
+        // Never return an ordinary Info value for an InfoFA lookup:
+        // the legacy /get?infofa=ID selector is a distinct action type.
         bool match=is_toggle?!strcmp(type,"toggle")&&
             (jint((cJSON*)entry,"id0",-1)==local||jint((cJSON*)entry,"id1",-1)==local):
-            !strcmp(type,"info")&&jint((cJSON*)entry,"id",-1)==local;
+            ((!strcmp(kind,"info")&&!strcmp(type,"info"))||
+             (!strcmp(kind,"infofa")&&!strcmp(type,"infofa")))&&
+             jint((cJSON*)entry,"id",-1)==local;
         if(!match)continue;
         const char *name=jstr((cJSON*)entry,"nom","");
         found=mira_full_cached_state(name,result,sizeof(result));
