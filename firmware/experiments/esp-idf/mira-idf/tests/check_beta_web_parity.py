@@ -624,3 +624,9 @@ assert 'static void clean_screen_name(' in mqtt
 assert "if(*p=='#'||*p=='+')*p='_';" in mqtt
 assert 'clean_screen_name(screen_name,sizeof(screen_name));' in mqtt
 print("PASS beta color HEX, thermostat half-degree, 23:00/07:00 and MQTT screen-name formats")
+
+
+legacy_mqtt_h=(root/"firmware/source/consolidated/MIRA_PANEL/MiraMqtt.h").read_text(encoding="utf-8")
+assert 'KEEPALIVE_S = 20;' in legacy_mqtt_h
+assert '.session.keepalive=20,' in mqtt
+print("PASS beta MQTT 20-second broker keepalive")
