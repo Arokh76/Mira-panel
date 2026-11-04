@@ -877,3 +877,13 @@ for key in ('"send"','"send_range"','"send_list"','"send_color"','"send_textbox"
 assert 'if(!mira_beta_web_authorized(req))return ESP_FAIL;' in recovery
 assert 'if(!mira_beta_web_authorized(req))return ESP_FAIL;' in jeedom
 print('PASS beta Web POST action dispatch, auth gate and selector names')
+
+# Multi-client SSE must share one initialized event group. Creating it in
+# concurrent /events handlers could strand a browser on a stale handle.
+assert 'esp_err_t mira_jeedom_action_init(void) {' in jeedom
+assert 'if(!mira_sse_signal)mira_sse_signal=xEventGroupCreate();' in jeedom[
+    jeedom.index('esp_err_t mira_jeedom_action_init(void) {'):]
+assert 'if(!mira_sse_signal)mira_sse_signal=xEventGroupCreate();' not in jeedom[
+    jeedom.index('static esp_err_t beta_events_get('):
+    jeedom.index('// Browser home commands on POST')]
+print('PASS SSE event group initialized before concurrent /events requests')
