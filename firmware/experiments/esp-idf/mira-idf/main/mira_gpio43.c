@@ -168,9 +168,10 @@ static void poll_inputs(void *unused){
                          now-g->released>=MIRA_MULTICLICK_MS){
                     fire_kind[i]=g->count-1;g->count=0;
                 }
-                if(fire_kind[i]>=0)
+                if(fire_kind[i]>=0){
                     memcpy(fire_name[i],multi[i].name,sizeof(fire_name[i]));
                     fire_name[i][sizeof(fire_name[i])-1]=0;
+                }
             }
             drop();
             for(unsigned i=0;i<MIRA_INPUTS;i++)
