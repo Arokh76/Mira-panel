@@ -738,7 +738,7 @@ static esp_err_t beta_events_get(httpd_req_t *req){
         httpd_resp_sendstr(req,"SSE index too large");
         return ESP_FAIL;
     }
-    if(!mira_sse_signal)mira_sse_signal=xEventGroupCreate();
+    // Created once on startup, never concurrently in two HTTP requests.
     if(!mira_sse_signal){
         if(index)cJSON_Delete(index);
         __atomic_sub_fetch(&mira_sse_clients,1u,__ATOMIC_RELAXED);
@@ -2831,6 +2831,10 @@ static void import_legacy_http_settings(void) {
 }
 esp_err_t mira_jeedom_action_init(void) {
     if(action_queue)return ESP_OK;
+    // Keep the SSE event group immutable after the HTTP server starts:
+    // two simultaneous EventSource clients must never race to create it.
+    if(!mira_sse_signal)mira_sse_signal=xEventGroupCreate();
+    if(!mira_sse_signal)return ESP_ERR_NO_MEM;
     import_legacy_screen_key();
     import_legacy_http_settings();
     nvs_handle_t settings;
