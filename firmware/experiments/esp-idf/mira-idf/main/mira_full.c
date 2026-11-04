@@ -2000,10 +2000,19 @@ static void display_command_apply(const mira_display_command_t *cmd){
     else return;
     char clock[6]={0};
     if(kind==VALUE_CLOCK){
-        if(strlen(trim)==4&&strspn(trim,"0123456789")==4){
-            snprintf(clock,sizeof(clock),"%.2s:%.2s",trim,trim+2);
-        }else if(strlen(trim)==5){memcpy(clock,trim,5);}
-        if(parse_beta_clock(clock)<0)return;
+        const int parsed=parse_beta_clock(trim);
+        if(parsed<0)return;
+        /* Firmware-beta normalizes HHMM / HH:MM / HH%3AMM to HH:MM.
+         * Format exactly five characters without a truncation-prone
+         * snprintf into a six-character buffer.
+         */
+        const int hh=parsed/60,mm=parsed%60;
+        clock[0]=(char)('0'+hh/10);
+        clock[1]=(char)('0'+hh%10);
+        clock[2]=':';
+        clock[3]=(char)('0'+mm/10);
+        clock[4]=(char)('0'+mm%10);
+        clock[5]=0;
     }else if(!strcmp(key,"night_auto")||!strcmp(key,"clock_sleep")){
         if(display_true(trim))value_number=1;
         else if(display_false(trim))value_number=0;
