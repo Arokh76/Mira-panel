@@ -9,6 +9,7 @@
 #include "mira_mqtt.h"
 #include "mira_recovery.h"
 #include "mira_display.h"
+#include "mira_gpio43.h"
 #include "mira_beta_networks.h"
 #include "esp_random.h"
 #include "esp_timer.h"
@@ -591,48 +592,177 @@ static esp_err_t beta_checkupdate_page(httpd_req_t *req){
  * 2 isolated digital inputs + 2 isolated outputs through CH32 @0x24.
  * The display driver owns the shared bus/output shadow.
  */
+/* Four beta HTTP GPIO contracts, adapted to DI0/DI1 + DO0/DO1. Never
+ * interpret the WT32 physical pin numbers 10/11/12... as CH32 channels.
+ * Basic auth and a custom header are required for every state-changing POST.
+ */
+static bool gpio_post_authorized(httpd_req_t *req){
+    if(!mira_beta_web_authorized(req))return false;
+    char header[8]={0};
+    if(httpd_req_get_hdr_value_str(req,"X-Mira-GPIO",header,sizeof(header))==ESP_OK&&
+       !strcmp(header,"1"))return true;
+    httpd_resp_send_err(req,HTTPD_403_FORBIDDEN,
+                        "En-tete X-Mira-GPIO: 1 requis");
+    return false;
+}
+static int gpio_channel(const char *name,const char *kind,bool allow_none){
+    if(allow_none && name && (!strcmp(name,"none")||!strcmp(name,"0")))return -1;
+    if(!name)return -2;
+    if(!strcmp(kind,"DO")){
+        if(!strcmp(name,"DO0")||!strcmp(name,"0"))return 0;
+        if(!strcmp(name,"DO1")||!strcmp(name,"1"))return 1;
+    }else if(!strcmp(kind,"DI")){
+        if(!strcmp(name,"DI0")||!strcmp(name,"0"))return 0;
+        if(!strcmp(name,"DI1")||!strcmp(name,"1"))return 1;
+    }
+    return -2;
+}
+static esp_err_t gpio_post_result(httpd_req_t *req,esp_err_t err){
+    if(err==ESP_OK){
+        httpd_resp_set_type(req,"text/plain; charset=utf-8");
+        return httpd_resp_sendstr(req,"OK");
+    }
+    if(err==ESP_ERR_INVALID_ARG)
+        return html_err(req,HTTPD_400_BAD_REQUEST,"Parametres GPIO invalides");
+    if(err==ESP_ERR_INVALID_STATE)
+        return html_err(req,HTTPD_409_CONFLICT,
+                        "Sortie desactivee ou non configuree");
+    httpd_resp_set_status(req,"503 Service Unavailable");
+    return httpd_resp_sendstr(req,"Sauvegarde ou acces CH32 indisponible");
+}
 esp_err_t mira_beta_web_gpio_state(httpd_req_t *req){
     if(!mira_beta_web_authorized(req))return ESP_FAIL;
-    bool di0=0,di1=0,do0=0,do1=0;
-    esp_err_t err=mira_display_io_read(&di0,&di1,&do0,&do1);
+    mira_gpio43_state_t state={0};
+    esp_err_t err=mira_gpio43_state(&state);
     if(err!=ESP_OK){
         httpd_resp_set_status(req,"503 Service Unavailable");
         return httpd_resp_sendstr(req,"Lecture DI/DO CH32 impossible");
     }
-    char body[128];
-    snprintf(body,sizeof(body),
-             "{\"inputs\":[%u,%u],\"outputs\":[%u,%u],\"hardware\":\"waveshare-43c\"}",
-             (unsigned)di0,(unsigned)di1,(unsigned)do0,(unsigned)do1);
+    cJSON *root=cJSON_CreateObject(),*ins=cJSON_CreateArray(),
+          *outs=cJSON_CreateArray(),*configs=cJSON_CreateArray(),
+          *links=cJSON_CreateArray(),*multis=cJSON_CreateArray();
+    if(!root||!ins||!outs||!configs||!links||!multis){
+        cJSON_Delete(root);cJSON_Delete(ins);cJSON_Delete(outs);
+        cJSON_Delete(configs);cJSON_Delete(links);cJSON_Delete(multis);
+        return html_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"JSON GPIO indisponible");
+    }
+    cJSON_AddStringToObject(root,"hardware","waveshare-43c");
+    cJSON_AddNumberToObject(root,"revision",state.revision);
+    for(int i=0;i<2;i++){
+        cJSON_AddItemToArray(ins,cJSON_CreateBool(state.input[i]));
+        cJSON_AddItemToArray(outs,cJSON_CreateBool(state.output[i]));
+        cJSON *c=cJSON_CreateObject();
+        cJSON_AddBoolToObject(c,"enabled",state.config[i].enabled);
+        cJSON_AddBoolToObject(c,"inverted",state.config[i].inverted);
+        cJSON_AddNumberToObject(c,"boot",state.config[i].boot);
+        cJSON_AddBoolToObject(c,"logical_on",state.config[i].logical_on);
+        cJSON_AddItemToArray(configs,c);
+    }
+    mira_gpio43_link_t entries[24];
+    mira_gpio43_multi_t bindings[2];
+    mira_gpio43_describe(entries,bindings);
+    for(unsigned i=0;i<24;i++){
+        if(!entries[i].name[0])continue;
+        cJSON *c=cJSON_CreateObject();
+        cJSON_AddStringToObject(c,"name",entries[i].name);
+        cJSON_AddNumberToObject(c,"output",entries[i].output);
+        cJSON_AddNumberToObject(c,"kind",entries[i].kind);
+        cJSON_AddItemToArray(links,c);
+    }
+    for(unsigned i=0;i<2;i++){
+        cJSON *c=cJSON_CreateObject();
+        cJSON_AddNumberToObject(c,"input",i);
+        cJSON_AddStringToObject(c,"name",bindings[i].name);
+        cJSON_AddBoolToObject(c,"visible",bindings[i].visible);
+        cJSON_AddItemToArray(multis,c);
+    }
+    cJSON_AddItemToObject(root,"inputs",ins);
+    cJSON_AddItemToObject(root,"outputs",outs);
+    cJSON_AddItemToObject(root,"config",configs);
+    cJSON_AddItemToObject(root,"links",links);
+    cJSON_AddItemToObject(root,"multi",multis);
+    char *json=cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if(!json)return html_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"JSON GPIO indisponible");
     httpd_resp_set_type(req,"application/json; charset=utf-8");
     httpd_resp_set_hdr(req,"Cache-Control","no-store");
-    return httpd_resp_sendstr(req,body);
+    esp_err_t sent=httpd_resp_sendstr(req,json);
+    cJSON_free(json);
+    return sent;
 }
 esp_err_t mira_beta_web_gpio_set(httpd_req_t *req){
-    if(!mira_beta_web_authorized(req))return ESP_FAIL;
-    char header[8]={0};
-    if(httpd_req_get_hdr_value_str(req,"X-Mira-GPIO",header,sizeof(header))!=ESP_OK ||
-       strcmp(header,"1")){
-        return html_err(req,HTTPD_403_FORBIDDEN,"En-tete local X-Mira-GPIO requis");
-    }
+    if(!gpio_post_authorized(req))return ESP_FAIL;
     cJSON *form=read_form(req);
     if(!form)return html_err(req,HTTPD_400_BAD_REQUEST,"Formulaire GPIO invalide");
     const char *channel=field(form,"output"),*state=field(form,"state");
-    if(!channel||!state||
-       (strcmp(channel,"0")&&strcmp(channel,"1"))||
-       (strcmp(state,"0")&&strcmp(state,"1"))){
-        cJSON_Delete(form);
-        return html_err(req,HTTPD_400_BAD_REQUEST,"DO0 ou DO1, valeur 0 ou 1 requise");
-    }
-    const unsigned out=(unsigned)(channel[0]-'0');
-    const bool high=state[0]=='1';
-    esp_err_t err=mira_display_io_write(out,high);
+    int i=gpio_channel(channel,"DO",false);
+    esp_err_t err=ESP_ERR_INVALID_ARG;
+    if(i>=0&&state&&(!strcmp(state,"0")||!strcmp(state,"1")))
+        err=mira_gpio43_write((unsigned)i,state[0]=='1');
     cJSON_Delete(form);
-    if(err!=ESP_OK){
-        httpd_resp_set_status(req,"503 Service Unavailable");
-        return httpd_resp_sendstr(req,"Sortie isolee non disponible");
+    return gpio_post_result(req,err);
+}
+esp_err_t mira_beta_web_gpio_raw(httpd_req_t *req){
+    if(!gpio_post_authorized(req))return ESP_FAIL;
+    cJSON *form=read_form(req);
+    if(!form)return html_err(req,HTTPD_400_BAD_REQUEST,"Formulaire invalide");
+    const int i=gpio_channel(field(form,"gpio"),"DO",false);
+    const char *level=field(form,"level");
+    esp_err_t err=ESP_ERR_INVALID_ARG;
+    if(i>=0 && level && (!strcmp(level,"high")||!strcmp(level,"low")))
+        err=mira_gpio43_write_physical((unsigned)i,!strcmp(level,"high"));
+    cJSON_Delete(form);
+    return gpio_post_result(req,err);
+}
+esp_err_t mira_beta_web_gpio_config(httpd_req_t *req){
+    if(!gpio_post_authorized(req))return ESP_FAIL;
+    cJSON *form=read_form(req);
+    if(!form)return html_err(req,HTTPD_400_BAD_REQUEST,"Formulaire invalide");
+    const int i=gpio_channel(field(form,"gpio"),"DO",false);
+    const char *mode=field(form,"mode"),*inv=field(form,"inverted"),
+               *boot=field(form,"boot");
+    esp_err_t err=ESP_ERR_INVALID_ARG;
+    if(i>=0&&mode&&inv&&boot&&(!strcmp(mode,"output")||!strcmp(mode,"off"))&&
+       (!strcmp(inv,"0")||!strcmp(inv,"1"))){
+        int b=!strcmp(boot,"off")?0:(!strcmp(boot,"restore")?1:
+              (!strcmp(boot,"on")?2:-1));
+        if(b>=0)err=mira_gpio43_configure((unsigned)i,!strcmp(mode,"output"),
+                                         inv[0]=='1',(uint8_t)b);
     }
-    httpd_resp_set_type(req,"text/plain; charset=utf-8");
-    return httpd_resp_sendstr(req,"OK");
+    cJSON_Delete(form);
+    return gpio_post_result(req,err);
+}
+esp_err_t mira_beta_web_gpio_link(httpd_req_t *req){
+    if(!gpio_post_authorized(req))return ESP_FAIL;
+    cJSON *form=read_form(req);
+    if(!form)return html_err(req,HTTPD_400_BAD_REQUEST,"Formulaire invalide");
+    const char *name=field(form,"name"),*source=field(form,"source"),
+               *gpio=field(form,"gpio"),*level=field(form,"level");
+    int i=gpio_channel(gpio,"DO",true);
+    esp_err_t err=ESP_ERR_INVALID_ARG;
+    if(name && source && level &&
+       (!strcmp(source,"gpio")||!strcmp(source,"jeedom"))){
+        uint8_t kind=!strcmp(level,"high")?1:(!strcmp(level,"low")?0:
+                     (!strcmp(level,"read")?2:3));
+        if(kind<=2 && (i>=0||!strcmp(source,"jeedom")||i==-1))
+            err=mira_gpio43_link(name,!strcmp(source,"jeedom")?-1:i,kind);
+    }
+    cJSON_Delete(form);
+    return gpio_post_result(req,err);
+}
+esp_err_t mira_beta_web_gpio_multi(httpd_req_t *req){
+    if(!gpio_post_authorized(req))return ESP_FAIL;
+    cJSON *form=read_form(req);
+    if(!form)return html_err(req,HTTPD_400_BAD_REQUEST,"Formulaire invalide");
+    const char *name=field(form,"name"),*vis=field(form,"visible");
+    const int i=gpio_channel(field(form,"gpio"),"DI",true);
+    esp_err_t err=ESP_ERR_INVALID_ARG;
+    if(name&&vis&&(i>=0||i==-1)&&(!strcmp(vis,"0")||!strcmp(vis,"1"))){
+        err=mira_gpio43_multi(name,i,vis[0]=='1');
+        if(err==ESP_OK)mira_full_request_reload();
+    }
+    cJSON_Delete(form);
+    return gpio_post_result(req,err);
 }
 static esp_err_t beta_43c_gpio_page(httpd_req_t *req){
     httpd_resp_set_type(req,"text/html; charset=utf-8");
