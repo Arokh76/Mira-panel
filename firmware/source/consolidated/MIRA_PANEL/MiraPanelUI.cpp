@@ -38,6 +38,7 @@ static void miraBootSplashTimeout(lv_timer_t* /*timer*/) {
   if (miraActiveBootSplash) {
     lv_obj_del(miraActiveBootSplash);
     miraActiveBootSplash = nullptr;
+    MiraBootLogo::release(); // Free temporary RGB565 PSRAM after LVGL deletes the splash.
   }
 }
 #endif
@@ -1005,9 +1006,15 @@ void MiraPanelUI::begin() {
   lv_obj_set_style_bg_opa(splash, LV_OPA_COVER, 0);
 
   lv_obj_t* miraMark = lv_img_create(splash);
-  lv_img_set_src(miraMark, MiraBootLogo::image());
-  lv_img_set_zoom(miraMark, 1024); // 4x the repository 35x28 icon
-  lv_obj_align(miraMark, LV_ALIGN_CENTER, 0, -64);
+  // Native 200x200 source from the full-resolution official icon.
+  // Do not zoom: the old 35x28 icon at 4x was visibly pixelated.
+  const lv_img_dsc_t* splashLogo = MiraBootLogo::image();
+  if (splashLogo) {
+    lv_img_set_src(miraMark, splashLogo);
+    lv_obj_align(miraMark, LV_ALIGN_CENTER, 0, -64);
+  } else {
+    lv_obj_add_flag(miraMark, LV_OBJ_FLAG_HIDDEN);
+  }
 
   lv_obj_t* miraName = lv_label_create(splash);
   lv_label_set_text(miraName, "MIRA");
