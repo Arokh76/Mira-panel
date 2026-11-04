@@ -642,3 +642,10 @@ assert 'if(!strcmp(host,"null"))host[0]=0;' in mqtt
 assert 'if(!strcmp(username,"null"))username[0]=0;' in mqtt
 assert 'if(!strcmp(secret,"null"))secret[0]=0;' in mqtt
 print("PASS Arduino MQTT screen name via web form and literal null config")
+
+
+# Arduino cleanScreenName(blank) returns "panel", not a config error.
+assert 'if(!screen||strlen(screen)>=48||' in handlers
+assert 'if(!strcmp(name,"null"))' not in mqtt  # handled by clean_screen_name
+assert 'if(!name[0]||!strcmp(name,"null"))snprintf(name,cap,"panel");' in mqtt
+print("PASS empty beta MQTT screen name defaults to panel")
