@@ -606,7 +606,7 @@ static bool gpio_post_authorized(httpd_req_t *req){
     return false;
 }
 static int gpio_channel(const char *name,const char *kind,bool allow_none){
-    if(allow_none && name && (!strcmp(name,"none")||!strcmp(name,"0")))return -1;
+    if(allow_none && name && !strcmp(name,"none"))return -1;
     if(!name)return -2;
     if(!strcmp(kind,"DO")){
         if(!strcmp(name,"DO0")||!strcmp(name,"0"))return 0;
@@ -625,8 +625,8 @@ static esp_err_t gpio_post_result(httpd_req_t *req,esp_err_t err){
     if(err==ESP_ERR_INVALID_ARG)
         return html_err(req,HTTPD_400_BAD_REQUEST,"Parametres GPIO invalides");
     if(err==ESP_ERR_INVALID_STATE)
-        return html_err(req,HTTPD_409_CONFLICT,
-                        "Sortie desactivee ou non configuree");
+        return httpd_resp_set_status(req,"409 Conflict"),
+               httpd_resp_sendstr(req,"Sortie desactivee ou non configuree");
     httpd_resp_set_status(req,"503 Service Unavailable");
     return httpd_resp_sendstr(req,"Sauvegarde ou acces CH32 indisponible");
 }
@@ -815,7 +815,7 @@ static esp_err_t beta_43c_gpio_page(httpd_req_t *req){
       "show('do0',j.outputs[0]);show('do1',j.outputs[1]);"
       "msg.textContent='';}catch(e){msg.textContent='Lecture des E/S impossible : '+e.message;}}"
       "async function setDO(n){if(!latest||busy)return;"
-      "let state=latest.outputs[n]?0:1;"
+      "let state=latest.config[n].logical_on?0:1;"
       "if(state&&!confirm('Activer physiquement DO'+n+' ?'))return;"
       "busy=true;try{let r=await fetch('/gpio/set',{method:'POST',"
       "credentials:'same-origin',headers:{'Content-Type':'application/x-www-form-urlencoded',"
