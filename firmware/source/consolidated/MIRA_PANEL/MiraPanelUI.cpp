@@ -1,6 +1,9 @@
 #include "MiraPanelUI.h"
 #include "MiraMqtt.h"
 #include "MiraFrenchFont.h"
+#if !defined(MIRA_TARGET_WAVESHARE_43C) && !defined(MIRA_TARGET_NEXTION_28)
+  #include "MiraBootLogo.h"
+#endif
 #include <WiFi.h>
 #include <time.h>
 
@@ -28,6 +31,13 @@ lv_color_t MiraPanelUI::_buf2[MIRA_DISPLAY_WIDTH * MIRA_DRAW_BUFFER_LINES];
 #endif
 MiraDisplay* MiraPanelUI::_displayForLvgl = nullptr;
 MiraPanelUI* MiraPanelUI::_uiForLvgl = nullptr;
+
+#if !defined(MIRA_TARGET_WAVESHARE_43C) && !defined(MIRA_TARGET_NEXTION_28)
+static void miraBootSplashTimeout(lv_timer_t* timer) {
+  lv_obj_t* splash = static_cast<lv_obj_t*>(lv_timer_get_user_data(timer));
+  if (splash) lv_obj_del(splash);
+}
+#endif
 
 static const lv_color_t COL_TEXT    = lv_color_hex(0xF3F6F7);
 static const lv_color_t COL_MUTED   = lv_color_hex(0xA8B2B8);
@@ -285,42 +295,49 @@ int MiraPanelUI::clampInt(int value, int minValue, int maxValue) {
 }
 
 lv_color_t MiraPanelUI::colorBg() const {
+  if (_theme == THEME_ROSE) return lv_color_hex(0x1D1023);
   if (_theme == THEME_MIRA) return lv_color_hex(0x071421);
   if (_theme == THEME_GLASS) return lv_color_hex(0x071A28);
   return lv_color_hex(0x090D12);
 }
 
 lv_color_t MiraPanelUI::colorPanel() const {
+  if (_theme == THEME_ROSE) return lv_color_hex(0x322039);
   if (_theme == THEME_MIRA) return lv_color_hex(0x0E2032);
   if (_theme == THEME_GLASS) return lv_color_hex(0x103047);
   return lv_color_hex(0x141B22);
 }
 
 lv_color_t MiraPanelUI::colorPanel2() const {
+  if (_theme == THEME_ROSE) return lv_color_hex(0x503358);
   if (_theme == THEME_MIRA) return lv_color_hex(0x173149);
   if (_theme == THEME_GLASS) return lv_color_hex(0x17445D);
   return lv_color_hex(0x202A33);
 }
 
 lv_color_t MiraPanelUI::colorBorder() const {
+  if (_theme == THEME_ROSE) return lv_color_hex(0x805070);
   if (_theme == THEME_MIRA) return lv_color_hex(0x17354B);
   if (_theme == THEME_GLASS) return lv_color_hex(0x2B6882);
   return lv_color_hex(0x33414C);
 }
 
 lv_color_t MiraPanelUI::colorAccent() const {
+  if (_theme == THEME_ROSE) return lv_color_hex(0xFF75BE);
   if (_theme == THEME_GLASS) return lv_color_hex(0x5BDEFF);
   if (_theme == THEME_MIRA) return lv_color_hex(0x2ABEFF);
   return lv_color_hex(0x31BDF2);
 }
 
 lv_color_t MiraPanelUI::colorAccent2() const {
+  if (_theme == THEME_ROSE) return lv_color_hex(0x874774);
   if (_theme == THEME_MIRA) return lv_color_hex(0x0A5C88);
   if (_theme == THEME_GLASS) return lv_color_hex(0x176885);
   return lv_color_hex(0x155A75);
 }
 
 lv_color_t MiraPanelUI::colorNav() const {
+  if (_theme == THEME_ROSE) return lv_color_hex(0x21132B);
   if (_theme == THEME_MIRA) return lv_color_hex(0x06101B);
   if (_theme == THEME_GLASS) return lv_color_hex(0x06131F);
   return lv_color_hex(0x070B0F);
@@ -757,7 +774,7 @@ void MiraPanelUI::begin() {
   _brightness = _prefs.getUChar("bright", 220);
   uint8_t savedTheme = _prefs.getUChar("theme", 0xFF);
   if (savedTheme == 0xFF) savedTheme = _prefs.getBool("dark", false) ? THEME_DARK : THEME_MIRA;
-  _theme = savedTheme <= THEME_GLASS ? savedTheme : THEME_DARK;
+  _theme = savedTheme <= THEME_ROSE ? savedTheme : THEME_DARK;
   _returnHomeEnabled = _prefs.getBool("home", true);
   loadFavorites();
   _visiblePageMask = _prefs.getUChar("pageMask", 0x3F) | 0x01;
@@ -970,6 +987,46 @@ void MiraPanelUI::begin() {
   _lastActivity = millis();
   applyTheme();
   setNavActive(0);
+
+#if !defined(MIRA_TARGET_WAVESHARE_43C) && !defined(MIRA_TARGET_NEXTION_28)
+  // Splash created after the LVGL interface: while Jeedom data is loading,
+  // the mark is visible; removal is timer-driven, never a blocking delay.
+  lv_obj_t* splash = lv_obj_create(_screen);
+  lv_obj_set_size(splash, MIRA_DISPLAY_WIDTH, MIRA_DISPLAY_HEIGHT);
+  lv_obj_set_pos(splash, 0, 0);
+  lv_obj_clear_flag(splash, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_pad_all(splash, 0, 0);
+  lv_obj_set_style_radius(splash, 0, 0);
+  lv_obj_set_style_border_width(splash, 0, 0);
+  lv_obj_set_style_bg_color(splash, lv_color_hex(0x071421), 0);
+  lv_obj_set_style_bg_opa(splash, LV_OPA_COVER, 0);
+
+  lv_obj_t* miraMark = lv_img_create(splash);
+  lv_img_set_src(miraMark, MiraBootLogo::image());
+  lv_img_set_zoom(miraMark, 1024); // 4x the repository 35x28 icon
+  lv_obj_align(miraMark, LV_ALIGN_CENTER, 0, -64);
+
+  lv_obj_t* miraName = lv_label_create(splash);
+  lv_label_set_text(miraName, "MIRA");
+  lv_obj_set_style_text_font(miraName, &lv_font_montserrat_40, 0);
+  lv_obj_set_style_text_color(miraName, lv_color_hex(0xF3F6F7), 0);
+  lv_obj_align(miraName, LV_ALIGN_CENTER, 0, 35);
+
+  lv_obj_t* miraSub = lv_label_create(splash);
+  lv_label_set_text(miraSub, "PANEL");
+  lv_obj_set_style_text_font(miraSub, &lv_font_montserrat_16, 0);
+  lv_obj_set_style_text_color(miraSub, lv_color_hex(0x4ACBFA), 0);
+  lv_obj_align(miraSub, LV_ALIGN_CENTER, 0, 70);
+
+  lv_obj_t* startupLabel = lv_label_create(splash);
+  lv_label_set_text(startupLabel, "Démarrage...");
+  lv_obj_set_style_text_font(startupLabel, &mira_font_fr_14, 0);
+  lv_obj_set_style_text_color(startupLabel, lv_color_hex(0xB1C2D4), 0);
+  lv_obj_align(startupLabel, LV_ALIGN_CENTER, 0, 137);
+
+  lv_timer_t* splashTimer = lv_timer_create(miraBootSplashTimeout, 1900, splash);
+  if (splashTimer) lv_timer_set_repeat_count(splashTimer, 1);
+#endif
 
 #if defined(MIRA_TARGET_WAVESHARE_43C)
   // Do NOT call lv_refr_now() from the Arduino task here.
@@ -1706,7 +1763,7 @@ void MiraPanelUI::createButton(uint8_t idx) {
   lv_obj_set_style_border_opa(b.control, LV_OPA_70, 0);
   lv_obj_set_style_border_width(b.control, 1, 0);
   lv_obj_set_style_bg_color(b.control, colorAccent(), LV_STATE_PRESSED);
-  lv_obj_set_style_border_color(b.control, lv_color_hex(0x7DEEFF), LV_STATE_PRESSED);
+  lv_obj_set_style_border_color(b.control, colorAccent(), LV_STATE_PRESSED);
   lv_obj_set_style_border_width(b.control, 1, LV_STATE_PRESSED);
   lv_obj_set_style_radius(b.control, 13, 0);
   lv_obj_set_style_shadow_color(b.control, lv_color_hex(0x000000), 0);
@@ -2333,7 +2390,7 @@ void MiraPanelUI::createCamera(uint8_t idx) {
   lv_obj_set_style_border_opa(b.control, LV_OPA_70, 0);
   lv_obj_set_style_border_width(b.control, 1, 0);
   lv_obj_set_style_bg_color(b.control, colorAccent(), LV_STATE_PRESSED);
-  lv_obj_set_style_border_color(b.control, lv_color_hex(0x7DEEFF), LV_STATE_PRESSED);
+  lv_obj_set_style_border_color(b.control, colorAccent(), LV_STATE_PRESSED);
   lv_obj_set_style_border_width(b.control, 1, LV_STATE_PRESSED);
   lv_obj_set_style_radius(b.control, 13, 0);
   lv_obj_set_style_shadow_color(b.control, lv_color_hex(0x000000), 0);
@@ -3170,8 +3227,8 @@ void MiraPanelUI::buildSettingsPage() {
   lv_obj_set_size(_brightnessSlider, MIRA_DISPLAY_WIDTH >= 800 ? 600 : (MIRA_DISPLAY_WIDTH <= 240 ? 200 : 280), 14);
   lv_slider_set_range(_brightnessSlider, 30, 255);
   lv_slider_set_value(_brightnessSlider, _brightness, LV_ANIM_OFF);
-  lv_obj_set_style_bg_color(_brightnessSlider, COL_ACCENT2, LV_PART_INDICATOR);
-  lv_obj_set_style_bg_color(_brightnessSlider, COL_ACCENT, LV_PART_KNOB);
+  lv_obj_set_style_bg_color(_brightnessSlider, colorAccent2(), LV_PART_INDICATOR);
+  lv_obj_set_style_bg_color(_brightnessSlider, colorAccent(), LV_PART_KNOB);
   lv_obj_add_event_cb(_brightnessSlider, onBrightness, LV_EVENT_VALUE_CHANGED, this);
 
   lv_obj_t* themeRow = makeTransparentRow(_settingsCards[1], 36);
@@ -3181,7 +3238,7 @@ void MiraPanelUI::buildSettingsPage() {
   lv_obj_set_style_text_font(themeLbl, &mira_font_fr_12, 0);
   _themeDropdown = lv_dropdown_create(themeRow);
   lv_obj_set_width(_themeDropdown, MIRA_DISPLAY_WIDTH >= 800 ? 205 : 126);
-  lv_dropdown_set_options(_themeDropdown, "Mira\nSombre\nGlass");
+  lv_dropdown_set_options(_themeDropdown, "Mira\nSombre\nGlass\nRose");
   lv_dropdown_set_selected(_themeDropdown, _theme);
   lv_obj_set_style_text_font(_themeDropdown, &mira_font_fr_12, 0);
   lv_obj_set_style_text_color(_themeDropdown, COL_TEXT, 0);
@@ -3205,7 +3262,7 @@ void MiraPanelUI::buildSettingsPage() {
   _returnHomeSwitch = lv_switch_create(homeRow);
   lv_obj_set_size(_returnHomeSwitch, 48, 25);
   if (_returnHomeEnabled) lv_obj_add_state(_returnHomeSwitch, LV_STATE_CHECKED);
-  lv_obj_set_style_bg_color(_returnHomeSwitch, COL_GREEN, LV_PART_INDICATOR | LV_STATE_CHECKED);
+  lv_obj_set_style_bg_color(_returnHomeSwitch, _theme == THEME_ROSE ? colorAccent() : COL_GREEN, LV_PART_INDICATOR | LV_STATE_CHECKED);
   lv_obj_add_event_cb(_returnHomeSwitch, onReturnHome, LV_EVENT_VALUE_CHANGED, this);
 
   _settingsCards[3] = makeSettingsCard(104);
@@ -3222,7 +3279,7 @@ void MiraPanelUI::buildSettingsPage() {
   _sleepSwitch = lv_switch_create(sleepRow);
   lv_obj_set_size(_sleepSwitch, 48, 25);
   if (_sleepEnabled) lv_obj_add_state(_sleepSwitch, LV_STATE_CHECKED);
-  lv_obj_set_style_bg_color(_sleepSwitch, COL_GREEN, LV_PART_INDICATOR | LV_STATE_CHECKED);
+  lv_obj_set_style_bg_color(_sleepSwitch, _theme == THEME_ROSE ? colorAccent() : COL_GREEN, LV_PART_INDICATOR | LV_STATE_CHECKED);
   lv_obj_add_event_cb(_sleepSwitch, onSleepMode, LV_EVENT_VALUE_CHANGED, this);
 
   lv_obj_t* clockRow = makeTransparentRow(_settingsCards[3], 30);
@@ -3233,7 +3290,7 @@ void MiraPanelUI::buildSettingsPage() {
   _clockSleepSwitch = lv_switch_create(clockRow);
   lv_obj_set_size(_clockSleepSwitch, 48, 25);
   if (_clockInSleep) lv_obj_add_state(_clockSleepSwitch, LV_STATE_CHECKED);
-  lv_obj_set_style_bg_color(_clockSleepSwitch, COL_GREEN, LV_PART_INDICATOR | LV_STATE_CHECKED);
+  lv_obj_set_style_bg_color(_clockSleepSwitch, _theme == THEME_ROSE ? colorAccent() : COL_GREEN, LV_PART_INDICATOR | LV_STATE_CHECKED);
   lv_obj_add_event_cb(_clockSleepSwitch, onClockSleep, LV_EVENT_VALUE_CHANGED, this);
 }
 
@@ -3245,7 +3302,8 @@ void MiraPanelUI::applyTheme() {
 #endif
 
   const lv_color_t grad = (_theme == THEME_MIRA) ? lv_color_hex(0x0A2134) :
-                          (_theme == THEME_GLASS) ? lv_color_hex(0x0B293D) : colorBg();
+                          (_theme == THEME_GLASS) ? lv_color_hex(0x0B293D) :
+                          (_theme == THEME_ROSE) ? lv_color_hex(0x2B1735) : colorBg();
 
   lv_obj_set_style_bg_color(_screen, colorBg(), 0);
   lv_obj_set_style_bg_grad_color(_screen, grad, 0);
@@ -3300,6 +3358,7 @@ void MiraPanelUI::applyTheme() {
       lv_obj_set_style_border_color(b.control, colorAccent2(), 0);
       lv_obj_set_style_border_opa(b.control, LV_OPA_70, 0);
       lv_obj_set_style_bg_color(b.control, colorAccent(), LV_STATE_PRESSED);
+      lv_obj_set_style_border_color(b.control, colorAccent(), LV_STATE_PRESSED);
     }
     else if (b.type == W_TOGGLE && b.control) {
       lv_obj_set_style_bg_color(b.control, colorPanel2(), LV_PART_MAIN);
@@ -3344,11 +3403,23 @@ void MiraPanelUI::applyTheme() {
     lv_obj_set_style_border_color(_brightnessSlider, colorAccent(), LV_PART_KNOB);
   }
   if (_brightnessValue) lv_obj_set_style_text_color(_brightnessValue, colorAccent(), 0);
+  const lv_color_t enabledColor = _theme == THEME_ROSE ? colorAccent() : COL_GREEN;
+  if (_returnHomeSwitch) lv_obj_set_style_bg_color(_returnHomeSwitch, enabledColor, LV_PART_INDICATOR | LV_STATE_CHECKED);
+  if (_sleepSwitch) lv_obj_set_style_bg_color(_sleepSwitch, enabledColor, LV_PART_INDICATOR | LV_STATE_CHECKED);
+  if (_clockSleepSwitch) lv_obj_set_style_bg_color(_clockSleepSwitch, enabledColor, LV_PART_INDICATOR | LV_STATE_CHECKED);
   if (_themeDropdown) {
     lv_obj_set_style_bg_color(_themeDropdown, colorPanel2(), 0);
     lv_obj_set_style_border_color(_themeDropdown, colorBorder(), 0);
   }
 
+  refreshFavoriteNav();
+  if (_navPagesButton) {
+    const uint32_t count = lv_obj_get_child_cnt(_navPagesButton);
+    for (uint32_t i = 0; i < count; ++i) {
+      lv_obj_t* square = lv_obj_get_child(_navPagesButton, i);
+      if (square) lv_obj_set_style_bg_color(square, colorAccent(), 0);
+    }
+  }
   setNavActive(_currentPage);
 }
 void MiraPanelUI::loadFavorites() {
@@ -4213,7 +4284,7 @@ void MiraPanelUI::onTheme(lv_event_t* e) {
   MiraPanelUI* ui = static_cast<MiraPanelUI*>(lv_event_get_user_data(e));
   if (!ui || ui->_suppressEvents) return;
   uint16_t selected = lv_dropdown_get_selected(lv_event_get_target(e));
-  if (selected > THEME_GLASS) selected = THEME_MIRA;
+  if (selected > THEME_ROSE) selected = THEME_MIRA;
   ui->_theme = (uint8_t)selected;
   ui->_prefs.putUChar("theme", ui->_theme);
   ui->applyTheme();
