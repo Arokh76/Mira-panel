@@ -10,6 +10,7 @@
 #include "freertos/task.h"
 #include "lvgl.h"
 #include "mira_display.h"
+#include "mira_gpio43.h"
 #include "mira_full.h"
 #include "mira_mqtt.h"
 #include "mira_jeedom.h"
@@ -82,6 +83,7 @@ void app_main(void) {
     ESP_ERROR_CHECK(mira_jeedom_action_init()); // queued HTTP actions, never block LVGL
     ESP_ERROR_CHECK(mira_camera_init()); // background RGB24 BMP snapshots, no LVGL in network task
     ESP_ERROR_CHECK(mira_display_init());  // 4.3C known-good 12MHz RGB + GT911
+    ESP_ERROR_CHECK(mira_gpio43_init());   // safe isolated I/O; poll physical DI outside LVGL task
     mira_full_ui_create(mira_display_lvgl());
     BaseType_t ok=xTaskCreatePinnedToCore(lvgl_loop,"mira_lvgl",8192,NULL,5,NULL,1);
     ESP_ERROR_CHECK(ok==pdPASS?ESP_OK:ESP_ERR_NO_MEM);
