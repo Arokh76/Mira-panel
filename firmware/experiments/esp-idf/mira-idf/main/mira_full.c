@@ -83,6 +83,7 @@ static int night_start_minute=23*60,night_end_minute=7*60;
 static uint8_t applied_brightness_raw;
 
 static uint32_t sleep_timeout_seconds=120;
+static bool sleep_enabled=true;
 static bool return_home_enabled=true;
 static uint8_t sleep_brightness_percent=8;
 static bool sleep_clock_enabled=true,display_sleeping;
@@ -1979,6 +1980,14 @@ static void sleep_light_changed(lv_event_t *event){
         save_sleep_setting_u8("sleep_light",sleep_brightness_percent);
     }
 }
+static void sleep_mode_changed(lv_event_t *event){
+    if(display_sleeping||suppress_events)return;
+    const bool enabled=lv_obj_has_state(lv_event_get_target_obj(event),LV_STATE_CHECKED);
+    if(sleep_enabled!=enabled){
+        sleep_enabled=enabled;
+        save_sleep_setting_u8("sleep_enabled",enabled?1:0);
+    }
+}
 static void sleep_clock_changed(lv_event_t *event){
     if(display_sleeping||suppress_events)return;
     bool enabled=lv_obj_has_state(lv_event_get_target_obj(event),LV_STATE_CHECKED);
@@ -2294,6 +2303,11 @@ static void settings(void){
     lv_obj_t *sleep=card(3,640,214);
     lv_obj_t *shead=label(sleep,"Veille",0x22BEEA,&mira_font_fr_16);
     lv_obj_set_pos(shead,12,6);
+    lv_obj_t *sleep_switch=lv_switch_create(sleep);
+    lv_obj_set_pos(sleep_switch,545,9);
+    lv_obj_set_size(sleep_switch,48,25);
+    if(sleep_enabled)lv_obj_add_state(sleep_switch,LV_STATE_CHECKED);
+    lv_obj_add_event_cb(sleep_switch,sleep_mode_changed,LV_EVENT_VALUE_CHANGED,NULL);
     lv_obj_t *delay_title=label(sleep,"Délai de veille (0 = désactivée)",0xF3F6F7,&mira_font_fr_16);
     lv_obj_set_pos(delay_title,12,38);
     lv_obj_t *delay=lv_slider_create(sleep);
@@ -2605,6 +2619,10 @@ static void load_ui_configuration(void){
         }
         if(d==ESP_OK&&delay<=86400)
             sleep_timeout_seconds=delay;
+        uint8_t enabled=(sleep_timeout_seconds>0)?1:0;
+        if(nvs_get_u8(ui_nvs,"sleep_enabled",&enabled)==ESP_OK)
+            sleep_enabled=enabled!=0;
+        else sleep_enabled=sleep_timeout_seconds>0;
         uint8_t light=8;
         if(nvs_get_u8(ui_nvs,"sleep_light",&light)==ESP_OK && light<=100)
             sleep_brightness_percent=light;
@@ -3392,7 +3410,7 @@ void mira_full_ui_tick(void){
         show_page(0);
         last_user_touch_ms=now_tick;
     }
-    if(!display_sleeping && sleep_timeout_seconds>0 &&
+    if(!display_sleeping && sleep_enabled && sleep_timeout_seconds>0 &&
        now_tick-last_user_touch_ms>=(uint32_t)sleep_timeout_seconds*1000u)
         display_enter_sleep();
     if(now_tick-diag_last_tick>=200){
