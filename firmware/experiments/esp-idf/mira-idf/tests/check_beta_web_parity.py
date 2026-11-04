@@ -962,3 +962,17 @@ for required in (
     assert required in native_networks, f'Wi-Fi rollback missing: {required}'
 assert 'Wi-Fi applique mais profil non enregistre; verifier NVS' in handlers
 print('PASS Wi-Fi native overlay failure surfaces error and restores credential')
+
+# The Display/<key>/set channel can restore eleven retained settings plus
+# sleep/wake. Do not drop the final brightness or sleep command if the old
+# 12-element GUI queue is already full. Pending values are keyed by setting.
+for key in (
+    '#define MIRA_DISPLAY_COMMAND_SLOTS 16',
+    'static bool put_pending_display(const mira_display_command_t *msg)',
+    'static bool pop_pending_display(mira_display_command_t *msg)',
+    'if(put_pending_display(&msg))return true;',
+    'if(!have)have=pop_pending_display(&cmd);',
+):
+    assert key in full, f'MQTT Display latest-wins contract missing: {key}'
+assert 'if((!cover_update_queue&&!pending_covers)||size>768)return false;' in full
+print('PASS retained Display settings coalesced and media cover fallback preserved')
