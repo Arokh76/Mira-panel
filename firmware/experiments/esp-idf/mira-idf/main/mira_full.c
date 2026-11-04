@@ -142,7 +142,7 @@ static uint32_t passive_unchanged,passive_evictions,passive_queue_dropped;
 static SemaphoreHandle_t state_cache_lock;
 typedef struct { char key[32]; char value[48]; } mira_display_command_t;
 static QueueHandle_t display_command_queue;
-/* Retained Display/*/set controls plus wake/sleep can exceed the old
+/* Retained Display/<key>/set controls plus wake/sleep can exceed the old
  * 12-entry command FIFO. One pending value per key is sufficient, with
  * a small FIFO only as fallback if PSRAM cannot be allocated. */
 #define MIRA_DISPLAY_COMMAND_SLOTS 16
