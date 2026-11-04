@@ -169,7 +169,8 @@ static void poll_inputs(void *unused){
                     fire_kind[i]=g->count-1;g->count=0;
                 }
                 if(fire_kind[i]>=0)
-                    snprintf(fire_name[i],sizeof(fire_name[i]),"%s",multi[i].name);
+                    memcpy(fire_name[i],multi[i].name,sizeof(fire_name[i]));
+                    fire_name[i][sizeof(fire_name[i])-1]=0;
             }
             drop();
             for(unsigned i=0;i<MIRA_INPUTS;i++)
@@ -226,7 +227,9 @@ static void notify_links(unsigned output,bool logical,bool physical){
     if(!take())return;
     for(unsigned j=0;j<MIRA_LINKS;j++){
         if(links[j].name[0]&&links[j].output==output&&links[j].kind==2)
-            snprintf(names[count++],sizeof(names[0]),"%s",links[j].name);
+            memcpy(names[count],links[j].name,sizeof(names[count]));
+            names[count][sizeof(names[count])-1]=0;
+            count++;
     }
     drop();
     for(unsigned j=0;j<count;j++)
