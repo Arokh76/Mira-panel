@@ -2639,8 +2639,18 @@ void mira_full_state_diagnostics(mira_full_state_diagnostics_t *out){
     }
 }
 static void normalize_widget_name(const char *src,char *dst,size_t length){
+    if(!dst||!length)return;
+    if(!src){dst[0]=0;return;}
+    /* Match beta normalizeMqttTopicName(): String::trim() happens BEFORE
+     * replacing interior spaces and MQTT-special characters with '_'.
+     * Previous IDF code turned trailing spaces into underscores, losing
+     * topics that the Arduino version resolves successfully.
+     */
+    while(*src&&isspace((unsigned char)*src))src++;
+    size_t end=strlen(src);
+    while(end&&isspace((unsigned char)src[end-1]))end--;
     size_t j=0;
-    for(size_t i=0;src[i]&&j+1<length;i++){
+    for(size_t i=0;i<end&&j+1<length;i++){
         unsigned char c=(unsigned char)src[i];
         if(c==' '||c=='/'||c=='#'||c=='+')c='_';
         if(c>='A'&&c<='Z')c=(unsigned char)(c+('a'-'A'));
