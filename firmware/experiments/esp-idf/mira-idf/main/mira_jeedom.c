@@ -196,12 +196,12 @@ static void add_choices(cJSON *arr,int *id,const char *name,const char *options)
         cJSON_AddStringToObject(entry,"nomliste",name);
         cJSON_AddStringToObject(entry,"option",option);
         // IndexAddList defaults to the first choice ID for the entire group.
-        if(count==0)cJSON_AddNumberToObject(entry,"value",first_id);
-        else{
-            char text[16];
-            snprintf(text,sizeof(text),"%d",first_id);
-            cJSON_AddStringToObject(entry,"value",text);
-        }
+        /* Beta IndexAddList(): Listes_Value is an integer. Every
+         * option in the same group carries that initial numeric ID,
+         * including the second and later choices. Never turn those
+         * values into JSON strings: Jeedom reads the actual JSON type.
+         */
+        cJSON_AddNumberToObject(entry,"value",first_id);
         count++;
     }
 }
