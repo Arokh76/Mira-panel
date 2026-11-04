@@ -1905,9 +1905,26 @@ static int resolve_local_action(cJSON *index,const mira_action_msg_t *msg,
         }
         if(!strcmp(msg->type,"color")&&!strcmp(kind,"color")&&!strcmp(name,msg->name)){
             unsigned r=0,g=0,b=0;
-            char extra=0;
-            if(sscanf(msg->value,"%u,%u,%u %c",&r,&g,&b,&extra)!=3 ||
-               r>255u||g>255u||b>255u)return -1;
+            bool valid=false;
+            if(msg->value[0]=='#'&&strlen(msg->value)==7){
+                bool hex=true;
+                for(size_t i=1;i<7;i++)
+                    if(!isxdigit((unsigned char)msg->value[i])){hex=false;break;}
+                if(hex){
+                    unsigned color=0;
+                    if(sscanf(msg->value+1,"%6x",&color)==1){
+                        r=(color>>16)&255u;g=(color>>8)&255u;b=color&255u;
+                        valid=true;
+                    }
+                }
+            }else{
+                char extra=0;
+                valid=sscanf(msg->value,"%u,%u,%u %c",&r,&g,&b,&extra)==3;
+            }
+            if(!valid||r>255u||g>255u||b>255u)return -1;
+            /* The Jeedom plugin's value is three RGB channels. MQTT
+             * continues to receive the Arduino-native #RRGGBB string.
+             */
             snprintf(value,value_size,"%u,%u,%u",r,g,b);
             return jint(item,"id",-1);
         }
