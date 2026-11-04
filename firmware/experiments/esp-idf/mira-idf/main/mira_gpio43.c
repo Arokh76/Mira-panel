@@ -226,10 +226,11 @@ static void notify_links(unsigned output,bool logical,bool physical){
     unsigned count=0;
     if(!take())return;
     for(unsigned j=0;j<MIRA_LINKS;j++){
-        if(links[j].name[0]&&links[j].output==output&&links[j].kind==2)
+        if(links[j].name[0]&&links[j].output==output&&links[j].kind==2){
             memcpy(names[count],links[j].name,sizeof(names[count]));
             names[count][sizeof(names[count])-1]=0;
             count++;
+        }
     }
     drop();
     for(unsigned j=0;j<count;j++)
