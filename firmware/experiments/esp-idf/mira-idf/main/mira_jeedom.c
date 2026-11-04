@@ -607,7 +607,7 @@ static void mira_sse_record_direct(int id,const char *value){
     size_t n=0;
     while(value[n]&&n<sizeof(slot->value)-1){
         char c=value[n];
-        slot->value[n]=(c=='\\r'||c=='\\n')?' ':c;
+        slot->value[n]=(c=='\r'||c=='\n')?' ':c;
         n++;
     }
     slot->value[n]=0;
@@ -639,10 +639,10 @@ static esp_err_t mira_sse_changed(mira_sse_client_t *client){
                  strcmp(type,"inputbox")&&strcmp(type,"infofa"))continue;
         if(id<1||id>4096)continue;
         // A passive state cannot inject an extra SSE field or event.
-        for(char *p=value;*p;p++)if(*p=='\\r'||*p=='\\n')*p=' ';
+        for(char *p=value;*p;p++)if(*p=='\r'||*p=='\n')*p=' ';
         if(!strcmp(previous,value))continue;
         char event[230];
-        int written=snprintf(event,sizeof(event),"event: %d\\ndata: %s\\n\\n",id,value);
+        int written=snprintf(event,sizeof(event),"event: %d\ndata: %s\n\n",id,value);
         if(written<1||(size_t)written>=sizeof(event))continue;
         esp_err_t err=httpd_resp_send_chunk(client->req,event,(size_t)written);
         if(err!=ESP_OK)return err;
@@ -666,7 +666,7 @@ static esp_err_t mira_sse_changed(mira_sse_client_t *client){
         portEXIT_CRITICAL(&mira_sse_lock);
         if(!pending)break;
         char event[230];
-        int size=snprintf(event,sizeof(event),"event: %d\\ndata: %s\\n\\n",copy.id,copy.value);
+        int size=snprintf(event,sizeof(event),"event: %d\ndata: %s\n\n",copy.id,copy.value);
         if(size>0&&(size_t)size<sizeof(event)){
             esp_err_t err=httpd_resp_send_chunk(client->req,event,(size_t)size);
             if(err!=ESP_OK)return err;
@@ -680,7 +680,7 @@ static void mira_sse_worker(void *argument){
     httpd_req_t *req=client->req;
     esp_err_t err=httpd_resp_set_type(req,"text/event-stream; charset=utf-8");
     if(err==ESP_OK)err=httpd_resp_set_hdr(req,"Cache-Control","no-cache");
-    if(err==ESP_OK)err=httpd_resp_send_chunk(req,"retry: 3000\\n\\n",HTTPD_RESP_USE_STRLEN);
+    if(err==ESP_OK)err=httpd_resp_send_chunk(req,"retry: 3000\n\n",HTTPD_RESP_USE_STRLEN);
     TickType_t last_heartbeat=xTaskGetTickCount();
     while(err==ESP_OK){
         err=mira_sse_changed(client);
@@ -688,7 +688,7 @@ static void mira_sse_worker(void *argument){
         vTaskDelay(pdMS_TO_TICKS(250));
         TickType_t now=xTaskGetTickCount();
         if(now-last_heartbeat>=pdMS_TO_TICKS(10000)){
-            err=httpd_resp_send_chunk(req,": Mira keepalive\\n\\n",HTTPD_RESP_USE_STRLEN);
+            err=httpd_resp_send_chunk(req,": Mira keepalive\n\n",HTTPD_RESP_USE_STRLEN);
             last_heartbeat=now;
         }
     }
@@ -720,7 +720,8 @@ static esp_err_t beta_events_get(httpd_req_t *req){
     if(count<0||count>192){
         if(index)cJSON_Delete(index);
         __atomic_sub_fetch(&mira_sse_clients,1u,__ATOMIC_RELAXED);
-        httpd_resp_send_err(req,HTTPD_503_SERVICE_UNAVAILABLE,"SSE index too large");
+        httpd_resp_set_status(req,"503 Service Unavailable");
+        httpd_resp_sendstr(req,"SSE index too large");
         return ESP_FAIL;
     }
     mira_sse_client_t *client=calloc(1,sizeof(*client));
