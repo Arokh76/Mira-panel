@@ -225,11 +225,8 @@ static cJSON *index_from_config(const char *json) {
                 /* IndexAddInfo() starts with an empty Jeedom state. The
                  * widget's JSON default is NOT a received sensor value.
                  */
-                cJSON_AddStringToObject(a,"unit",jstr((cJSON*)w,"unit",""));
-                cJSON_AddStringToObject(a,"value","");
-                cJSON_AddStringToObject(a,"size","");
-            }else if(a){
-                cJSON_AddStringToObject(a,"return","false");
+                cJSON_ReplaceItemInObjectCaseSensitive(a,"unit",
+                    cJSON_CreateString(jstr((cJSON*)w,"unit","")));
             }
         }else if(!strcmp(type,"toggle")){
             cJSON *a=cJSON_CreateObject();if(!a)continue;
@@ -270,7 +267,7 @@ static cJSON *index_from_config(const char *json) {
             char compound[200];
             snprintf(compound,sizeof(compound),"%s__temperature",name);
             cJSON *a=append_action(arr,&id,"info",compound);
-            if(a)cJSON_AddStringToObject(a,"unit","°C");
+            if(a)cJSON_ReplaceItemInObjectCaseSensitive(a,"unit",cJSON_CreateString("°C"));
             snprintf(compound,sizeof(compound),"%s__consigne",name);
             /* Beta thermo min [-20,60], max [min+1,80], half-degree
              * setpoint then round to the integer IndexAddRange default.
@@ -322,7 +319,7 @@ static cJSON *index_from_config(const char *json) {
                 /* Mirror MiraPanelUI.cpp: progress and volume carry %
                  * units in the historical Jeedom /getindex table.
                  */
-                if(a && (n==4||n==5))cJSON_AddStringToObject(a,"unit","%");
+                if(a && (n==4||n==5))cJSON_ReplaceItemInObjectCaseSensitive(a,"unit",cJSON_CreateString("%"));
             }
             for(size_t n=0;n<3;n++){
                 char compound[192];snprintf(compound,sizeof(compound),"%.95s__%s",name,media_actions[n]);
@@ -348,7 +345,7 @@ static cJSON *index_from_config(const char *json) {
         }else if(!strcmp(type,"datetime")&&!weather_registered){
             weather_registered=true;
             cJSON *weather=append_action(arr,&id,"info","__mira_weather_temperature");
-            if(weather)cJSON_AddStringToObject(weather,"unit","°C");
+            if(weather)cJSON_ReplaceItemInObjectCaseSensitive(weather,"unit",cJSON_CreateString("°C"));
             append_action(arr,&id,"info","__mira_weather_condition");
             append_action(arr,&id,"info","__mira_weather_code");
         }
