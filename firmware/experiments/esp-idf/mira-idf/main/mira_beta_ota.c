@@ -4,6 +4,7 @@
 #include "mira_beta_ota.h"
 #include "mira_beta_web.h"
 #include "esp_ota_ops.h"
+#include "esp_app_desc.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
@@ -172,6 +173,20 @@ esp_err_t mira_beta_ota_upload(httpd_req_t *req){
     if(err!=ESP_OK){
         ESP_LOGW(TAG,"Beta browser OTA rejected: %s",esp_err_to_name(err));
         return fail(req,HTTPD_400_BAD_REQUEST,"Firmware OTA invalide, actif inchangé");
+    }
+    /* ESP32-S3 chip validation alone does NOT distinguish Arduino builds
+     * from this native ESP-IDF 4.3C port. Inspect the downloaded app image
+     * descriptor before selecting the next boot partition.
+     */
+    esp_app_desc_t candidate={0};
+    const esp_app_desc_t *running=esp_app_get_description();
+    if(!running||
+       esp_ota_get_partition_description(target,&candidate)!=ESP_OK||
+       strcmp(candidate.project_name,running->project_name)!=0||
+       strcmp(candidate.project_name,"mira_idf_scroll")!=0){
+        ESP_LOGW(TAG,"Manual OTA rejected: not a native Mira 4.3C app");
+        return fail(req,HTTPD_400_BAD_REQUEST,
+                    "Image ESP-IDF 4.3C requise (Arduino interdit)");
     }
     err=esp_ota_set_boot_partition(target);
     if(err!=ESP_OK)
