@@ -711,3 +711,24 @@ assert '"%.95s__consigne",b->name' in full
 assert 'mira_mqtt_publish_action(mqtt_name,b->value)' in full
 assert 'mira_generic_queue_local_action(b->name,b->type,payload)' in full
 print("PASS thermostat MQTT uses composite __consigne topic and decimal payload")
+
+# Beta preserves local gesture for 250 ms, and for 350 ms after release
+# before accepting an older Jeedom echo that could snap a control backwards.
+assert 'b.localInputUntilMs = now + 250;' in beta_ui_impl
+assert 'if (finalSend) b.localInputUntilMs = now + 350;' in beta_ui_impl
+assert 'localBinding.localInputUntilMs != 0' in beta_ui_impl
+assert 'uint32_t local_input_until_ms;' in full
+assert 'lv_event_get_code(e)==LV_EVENT_RELEASED?350u:250u' in full
+assert '(int32_t)(lv_tick_get()-w->local_input_until_ms)<0' in full
+assert 'w->local_input_until_ms=lv_tick_get()+350u;' in full
+print("PASS beta 250/350-ms local touch precedence for ranged/HSV/media controls")
+
+# Beta's backlight slider really changes hardware as the finger moves;
+# the ESP-IDF callback must not wait until release, while avoiding an
+# expensive NVS commit on every intermediate event.
+assert 'lv_obj_add_event_cb(_brightnessSlider, onBrightness, LV_EVENT_VALUE_CHANGED, this);' in beta_ui_impl
+assert 'static void brightness_live(lv_event_t *event)' in full
+assert 'lv_obj_add_event_cb(sl,brightness_live,LV_EVENT_VALUE_CHANGED,NULL);' in full
+assert 'lv_obj_add_event_cb(sl,brightness_release,LV_EVENT_RELEASED,NULL);' in full
+assert 'if(persisted_brightness_raw==(uint8_t)value)return;' in full
+print("PASS live beta brightness feedback with deferred NVS persistence")
