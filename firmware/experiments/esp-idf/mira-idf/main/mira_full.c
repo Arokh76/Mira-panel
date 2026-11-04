@@ -579,7 +579,21 @@ static void event_local(lv_event_t *e){
         strcpy(b->value,"1");
     }
     // Unlike MQTT States, only a real human LVGL action may publish Actions.
-    const char *payload=(!strcmp(b->type,"toggle")) ? (!strcmp(b->value,"On")?"1":"0") : b->value;
+    /* Arduino onThermostatRange() publishes "22" at full degrees and
+     * "22.5" on half degrees. Keep the display label at one decimal,
+     * but do not send the unrelated "22.0" MQTT/Jeedom action value.
+     */
+    char thermostat_payload[24]={0};
+    const char *payload=(!strcmp(b->type,"toggle")) ?
+                        (!strcmp(b->value,"On")?"1":"0") : b->value;
+    if(!strcmp(b->type,"thermostat")&&b->control){
+        const int half=lv_arc_get_value(b->control);
+        if(half&1)snprintf(thermostat_payload,sizeof(thermostat_payload),
+                           "%.1f",half*0.5f);
+        else snprintf(thermostat_payload,sizeof(thermostat_payload),
+                      "%d",half/2);
+        payload=thermostat_payload;
+    }
     // The old beta exposes the displayed switch state through GET /get.
     // Update the read-only HTTP cache for a real local touch, without
     // feeding it through the passive queue or generating another action.
