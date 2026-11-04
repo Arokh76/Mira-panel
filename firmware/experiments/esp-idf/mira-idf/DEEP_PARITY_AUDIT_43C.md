@@ -49,6 +49,12 @@ La première vérification avait confirmé la présence des fonctions, mais pas 
 
 **État de validation.** Contrôles statiques et CI obligatoires avant de considérer ces changements compilables ; ensuite seulement validation physique. Le rapport ne prétend ni à l'équivalence pixel à pixel, ni à une exécution de toutes les interactions Web/LVGL, ni à une migration intégralement testée avec secrets et paramétrages réels.
 
+### Alignements complémentaires après lecture des formulaires MQTT
+
+- `MiraMqtt::cleanScreenName()` accepte un nom d'écran vide (repli `panel`), des sous-chemins séparés par `/`, et nettoie `+`/`#`. Deux formulaires IDF refusaient encore ces entrées malgré leur acceptation par le moteur MQTT ; alignés sur Arduino.
+- `MiraMqtt::refreshConfig()` traite les chaînes littérales `"null"` pour le serveur, l'utilisateur et le mot de passe comme des valeurs absentes ; harmonisé dans le chargeur NVS IDF.
+- `MiraMqtt.h` définit `KEEPALIVE_S=20` secondes, contre 30 auparavant dans IDF ; harmonisé à 20 s.
+
 ## Divergences encore ouvertes après la lecture croisée
 
 - **Curseurs et roue de couleur pendant un glissement.** Arduino `MiraPanelUI::onRange()`, `onRoundRange()` et `onColor()` envoie une action lors des changements de valeur puis une confirmation au relâchement. Dans `mira_full.c`, les contrôles correspondants déclenchent `event_local` seulement sur `LV_EVENT_RELEASED`. La valeur finale est envoyée, mais pas les commandes intermédiaires. Cette différence est **confirmée dans le code**. Reproduire les envois intermédiaires sans coalescence saturerait facilement la file HTTP Jeedom et pourrait perdre la dernière commande ; une vraie parité de transport suppose de concevoir et tester un mécanisme de dernière valeur prioritaire.
