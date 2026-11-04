@@ -475,6 +475,20 @@ static void wheel_mark_hue(mira_widget_t *w,int hue){
     }
 }
 static void event_local(lv_event_t *e);
+static void wheel_slider_touch(lv_event_t *event){
+    if(suppress_events||display_sleeping)return;
+    mira_widget_t *w=(mira_widget_t *)lv_event_get_user_data(event);
+    if(!w)return;
+    lv_obj_t *source=lv_event_get_target_obj(event);
+    if(source==w->color_saturation)
+        w->color_sat=(uint8_t)lv_slider_get_value(source);
+    else if(source==w->color_brightness)
+        w->color_val=(uint8_t)lv_slider_get_value(source);
+    if(w->color_preview)
+        lv_obj_set_style_bg_color(w->color_preview,
+            lv_color_hsv_to_rgb(w->color_hue,w->color_sat,w->color_val),0);
+    event_local(event);
+}
 static void wheel_touch(lv_event_t *event){
     const lv_event_code_t code=lv_event_get_code(event);
     if(code!=LV_EVENT_PRESSED&&code!=LV_EVENT_PRESSING)return;
@@ -1624,6 +1638,33 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         no_scroll(w->color_knob);
         lv_obj_remove_flag(w->color_knob,LV_OBJ_FLAG_CLICKABLE);
         wheel_mark_hue(w,initial.h);
+        // LVGL 9 has no LVGL 8 HSV colorwheel control: expose both missing
+        // HSV axes explicitly, instead of silently locking saturation/value.
+        lv_obj_t *sat_caption=label(w->card,"Saturation",0xF3F6F7,&mira_font_fr_16);
+        lv_obj_set_pos(sat_caption,22,48);
+        w->color_saturation=lv_slider_create(w->card);
+        lv_obj_set_size(w->color_saturation,240,14);
+        lv_obj_set_pos(w->color_saturation,24,84);
+        lv_slider_set_range(w->color_saturation,0,100);
+        lv_slider_set_value(w->color_saturation,w->color_sat,LV_ANIM_OFF);
+        lv_obj_add_event_cb(w->color_saturation,wheel_slider_touch,LV_EVENT_VALUE_CHANGED,w);
+        lv_obj_add_event_cb(w->color_saturation,wheel_slider_touch,LV_EVENT_RELEASED,w);
+        lv_obj_t *val_caption=label(w->card,"Luminosité couleur",0xF3F6F7,&mira_font_fr_16);
+        lv_obj_set_pos(val_caption,22,116);
+        w->color_brightness=lv_slider_create(w->card);
+        lv_obj_set_size(w->color_brightness,240,14);
+        lv_obj_set_pos(w->color_brightness,24,151);
+        lv_slider_set_range(w->color_brightness,0,100);
+        lv_slider_set_value(w->color_brightness,w->color_val,LV_ANIM_OFF);
+        lv_obj_add_event_cb(w->color_brightness,wheel_slider_touch,LV_EVENT_VALUE_CHANGED,w);
+        lv_obj_add_event_cb(w->color_brightness,wheel_slider_touch,LV_EVENT_RELEASED,w);
+        w->color_preview=lv_obj_create(w->card);
+        lv_obj_set_size(w->color_preview,210,82);
+        lv_obj_set_pos(w->color_preview,519,70);
+        lv_obj_set_style_radius(w->color_preview,14,0);
+        lv_obj_set_style_bg_color(w->color_preview,
+            lv_color_hsv_to_rgb(w->color_hue,w->color_sat,w->color_val),0);
+        no_scroll(w->color_preview);
         lv_obj_add_event_cb(w->control,wheel_touch,LV_EVENT_PRESSED,w);
         lv_obj_add_event_cb(w->control,wheel_touch,LV_EVENT_PRESSING,w);
         lv_obj_add_event_cb(w->control,event_local,LV_EVENT_RELEASED,w);
@@ -3084,6 +3125,10 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                 wheel_mark_hue(w,hsv.h);
                 w->color_sat=hsv.s;
                 w->color_val=hsv.v;
+                if(w->color_saturation)
+                    lv_slider_set_value(w->color_saturation,hsv.s,LV_ANIM_OFF);
+                if(w->color_brightness)
+                    lv_slider_set_value(w->color_brightness,hsv.v,LV_ANIM_OFF);
                 if(w->color_preview)
                     lv_obj_set_style_bg_color(w->color_preview,
                                               lv_color_make(r,g,b),0);
