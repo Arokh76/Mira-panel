@@ -142,6 +142,44 @@ static uint32_t passive_unchanged,passive_evictions,passive_queue_dropped;
 static SemaphoreHandle_t state_cache_lock;
 typedef struct { char key[32]; char value[48]; } mira_display_command_t;
 static QueueHandle_t display_command_queue;
+/* Retained Display/*/set controls plus wake/sleep can exceed the old
+ * 12-entry command FIFO. One pending value per key is sufficient, with
+ * a small FIFO only as fallback if PSRAM cannot be allocated. */
+#define MIRA_DISPLAY_COMMAND_SLOTS 16
+static mira_display_command_t *pending_display_commands;
+static SemaphoreHandle_t pending_display_lock;
+static size_t pending_display_cursor;
+static bool put_pending_display(const mira_display_command_t *msg){
+    if(!pending_display_commands||!pending_display_lock||
+       xSemaphoreTake(pending_display_lock,pdMS_TO_TICKS(20))!=pdTRUE)
+        return false;
+    size_t i=MIRA_DISPLAY_COMMAND_SLOTS;
+    for(size_t n=0;n<MIRA_DISPLAY_COMMAND_SLOTS;n++){
+        if(pending_display_commands[n].key[0]&&
+           !strcmp(pending_display_commands[n].key,msg->key)){
+            i=n;break;
+        }
+        if(!pending_display_commands[n].key[0]&&i==MIRA_DISPLAY_COMMAND_SLOTS)i=n;
+    }
+    if(i<MIRA_DISPLAY_COMMAND_SLOTS)pending_display_commands[i]=*msg;
+    xSemaphoreGive(pending_display_lock);
+    return i<MIRA_DISPLAY_COMMAND_SLOTS;
+}
+static bool pop_pending_display(mira_display_command_t *msg){
+    if(!pending_display_commands||!pending_display_lock||
+       xSemaphoreTake(pending_display_lock,0)!=pdTRUE)return false;
+    bool have=false;
+    for(size_t n=0;n<MIRA_DISPLAY_COMMAND_SLOTS;n++){
+        size_t i=(pending_display_cursor+n)%MIRA_DISPLAY_COMMAND_SLOTS;
+        if(!pending_display_commands[i].key[0])continue;
+        *msg=pending_display_commands[i];
+        pending_display_commands[i].key[0]=0;
+        pending_display_cursor=(i+1)%MIRA_DISPLAY_COMMAND_SLOTS;
+        have=true;break;
+    }
+    xSemaphoreGive(pending_display_lock);
+    return have;
+}
 static bool suppress_events;
 static uint8_t display_brightness_raw=220;
 static uint8_t persisted_brightness_raw=220;
@@ -2241,10 +2279,14 @@ static void display_command_apply(const mira_display_command_t *cmd){
     settings_reload_pending=true;
 }
 static void apply_pending_display_commands(void){
-    if(!display_command_queue)return;
     mira_display_command_t cmd;
-    for(int i=0;i<8&&xQueueReceive(display_command_queue,&cmd,0)==pdTRUE;i++)
+    for(int i=0;i<8;i++){
+        bool have=display_command_queue&&
+            xQueueReceive(display_command_queue,&cmd,0)==pdTRUE;
+        if(!have)have=pop_pending_display(&cmd);
+        if(!have)break;
         display_command_apply(&cmd);
+    }
 }
 static void return_home_changed(lv_event_t *event){
     if(suppress_events)return;
@@ -2816,12 +2858,14 @@ void mira_full_ui_create(lv_display_t *disp){
 }
 
 bool mira_full_enqueue_display_command(const char *key,const char *value){
-    if(!display_command_queue||!key||!value||!*key||
-       strlen(key)>=32||strlen(value)>=48)return false;
+    if((!display_command_queue&&!pending_display_commands)||
+       !key||!value||!*key||strlen(key)>=32||strlen(value)>=48)return false;
     mira_display_command_t msg={0};
     snprintf(msg.key,sizeof(msg.key),"%s",key);
     snprintf(msg.value,sizeof(msg.value),"%s",value);
-    return xQueueSend(display_command_queue,&msg,0)==pdTRUE;
+    if(put_pending_display(&msg))return true;
+    return display_command_queue&&
+           xQueueSend(display_command_queue,&msg,0)==pdTRUE;
 }
 bool mira_full_cached_state(const char *name,char *out,size_t cap){
     if(!state_cache||!state_cache_lock||!name||!out||!cap)return false;
@@ -2871,7 +2915,7 @@ bool mira_full_enqueue_state(const char *name,const char *value){
     const size_t size=strlen(value),name_size=strlen(name);
     if(name_size>=7&&!strcmp(name+name_size-7,"__cover")){
         // Artwork is a special passive field, never a Jeedom actuator.
-        if(!cover_update_queue||size>768)return false;
+        if((!cover_update_queue&&!pending_covers)||size>768)return false;
         mira_cover_update_t cover={0};
         snprintf(cover.name,sizeof(cover.name),"%s",name);
         memcpy(cover.url,value,size+1);
@@ -3600,7 +3644,13 @@ bool mira_full_storage_init(void){
     if(mira_album_art_init()!=ESP_OK)
         ESP_LOGW(TAG,"Album cover worker unavailable; other media controls still work");
     if(!display_command_queue)display_command_queue=xQueueCreate(12,sizeof(mira_display_command_t));
-    if(!display_command_queue)ESP_LOGE(TAG,"Display command queue allocation failed");
+    if(!pending_display_lock)pending_display_lock=xSemaphoreCreateMutex();
+    if(!pending_display_commands)
+        pending_display_commands=heap_caps_calloc(MIRA_DISPLAY_COMMAND_SLOTS,
+                            sizeof(*pending_display_commands),
+                            MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!display_command_queue&&!pending_display_commands)
+        ESP_LOGE(TAG,"Display command queue allocation failed");
     const bool blank=spiffs_partition_is_blank();
     const esp_vfs_spiffs_conf_t cfg={
         .base_path="/spiffs",.partition_label="spiffs",
