@@ -3323,6 +3323,26 @@ void MiraPanelUI::applyTheme() {
   lv_obj_set_style_bg_grad_dir(_screen, LV_GRAD_DIR_VER, 0);
   lv_obj_set_style_bg_opa(_screen, LV_OPA_COVER, 0);
 
+  // L'horloge en veille suit le theme Rose, y compris apres un changement
+  // de theme sans redemarrage. Les autres themes restent noir / blanc.
+  const bool roseSleep = _theme == THEME_ROSE;
+  if (_sleepOverlay) {
+    lv_obj_set_style_bg_color(_sleepOverlay,
+        roseSleep ? lv_color_hex(0x170B1B) : lv_color_hex(0x000000), 0);
+  }
+  if (_sleepClock) {
+    lv_obj_set_style_text_color(_sleepClock,
+        roseSleep ? lv_color_hex(0xFF9ED2) : lv_color_white(), 0);
+  }
+  if (_sleepDate) {
+    lv_obj_set_style_text_color(_sleepDate,
+        roseSleep ? lv_color_hex(0xDB9BC2) : COL_MUTED, 0);
+  }
+  if (_sleepTemperature) {
+    lv_obj_set_style_text_color(_sleepTemperature,
+        roseSleep ? lv_color_hex(0xFFC0E3) : lv_color_white(), 0);
+  }
+
   if (_nav) {
     lv_obj_set_style_bg_color(_nav, colorNav(), 0);
     lv_obj_set_style_bg_opa(_nav, LV_OPA_COVER, 0);
