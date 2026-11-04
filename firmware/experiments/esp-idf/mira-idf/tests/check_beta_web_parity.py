@@ -780,7 +780,12 @@ assert 'server.addHandler(&events);' in beta_server_impl
 assert 'httpd_req_async_handler_begin(req,&client->req)' in jeedom
 assert 'httpd_req_async_handler_complete(req)' in jeedom
 assert 'mira_sse_changed(client)' in jeedom
-assert 'vTaskDelay(pdMS_TO_TICKS(250))' in jeedom
+assert 'xEventGroupWaitBits(mira_sse_signal,MIRA_SSE_CHANGED,pdTRUE,pdFALSE,' in jeedom
+assert 'mira_jeedom_sse_notify();' in full
+assert 'mira_sse_record_direct((int)id,payload);' in jeedom
+assert 'httpd_resp_send_chunk(client->req,event,(size_t)size)' in jeedom
+assert "retry: 3000\\n\\n" in jeedom
+assert 'HTTPD_503_SERVICE_UNAVAILABLE' not in jeedom
 assert ': Mira keepalive' in jeedom
 assert 'return httpd_resp_send_chunk(req,NULL,0);' not in jeedom[jeedom.index('static esp_err_t beta_events_get('):jeedom.index('// Browser home commands on POST')]
 print("PASS persistent authenticated and bounded SSE transport")
