@@ -729,7 +729,9 @@ static esp_err_t beta_events_get(httpd_req_t *req){
     free(raw);
     const cJSON *actions=index?cJSON_GetObjectItemCaseSensitive(index,"actions"):NULL;
     const int count=cJSON_IsArray(actions)?cJSON_GetArraySize(actions):0;
-    if(count<0||count>192){
+    // MAX_BINDINGS=40; a media composite registers up to 15 Jeedom
+    // actions per widget. Include the three internal weather Infos.
+    if(count<0||count>640){
         if(index)cJSON_Delete(index);
         __atomic_sub_fetch(&mira_sse_clients,1u,__ATOMIC_RELAXED);
         httpd_resp_set_status(req,"503 Service Unavailable");
@@ -747,7 +749,11 @@ static esp_err_t beta_events_get(httpd_req_t *req){
     if(client){
         client->count=(unsigned)count;
         client->index=index;
-        client->last=calloc(count?((size_t)count):1u,sizeof(*client->last));
+        // Large composite indexes belong in PSRAM, never in internal
+        // display/GT911 RAM. The screen requires PSRAM in any case.
+        client->last=heap_caps_calloc(count?((size_t)count):1u,
+                                     sizeof(*client->last),
+                                     MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     }
     if(!client||!client->last){
         if(client)free(client);
