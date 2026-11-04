@@ -3,6 +3,7 @@
 #include "mira_mqtt.h"
 #include "mira_full.h"
 #include "mira_setup_access.h"
+#include "mira_beta_web.h"
 #include "mira_legacy_cipher.h"
 #include "mqtt_client.h"
 #include "nvs.h"
@@ -401,7 +402,9 @@ bool mira_mqtt_publish_action(const char *name,const char *value) {
     return esp_mqtt_client_enqueue(client,topic,value,0,0,0,true)>=0;
 }
 static esp_err_t mqtt_get(httpd_req_t *r) {
-    if(!mira_setup_require_ap(r))return ESP_FAIL;
+    // Status is useful from the normal LAN dashboard, but must require
+    // the same authenticated session as the beta Web configuration.
+    if(!mira_beta_web_authorized(r))return ESP_FAIL;
     // Names can legally include quotes and backslashes: escape JSON using
     // cJSON instead of interpolating an unchecked NVS string into quotes.
     cJSON *result=cJSON_CreateObject();
