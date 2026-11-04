@@ -44,7 +44,8 @@ jobs:
           grep -Fq 'miraCompactActionValues()' firmware/source/consolidated/MIRA_PANEL/MiraPanelServer.cpp
           grep -Fq 'THEME_ROSE = 3' firmware/source/consolidated/MIRA_PANEL/MiraPanelUI.h
           grep -Fq 'MiraBootLogo::image()' firmware/source/consolidated/MIRA_PANEL/MiraPanelUI.cpp
-          grep -Fq 'W = 200' firmware/source/consolidated/MIRA_PANEL/MiraBootLogo.h
+          grep -Fq 'W = 150' firmware/source/consolidated/MIRA_PANEL/MiraBootLogo.h
+          grep -Fq 'lv_obj_align(miraMark, LV_ALIGN_CENTER, 0, -102)' firmware/source/consolidated/MIRA_PANEL/MiraPanelUI.cpp
           grep -Fq 'LV_IMG_CF_TRUE_COLOR' firmware/source/consolidated/MIRA_PANEL/MiraBootLogo.h
           grep -Fq 'MiraBootLogo::release()' firmware/source/consolidated/MIRA_PANEL/MiraPanelUI.cpp
           ! grep -Fq 'lv_img_set_zoom(miraMark' firmware/source/consolidated/MIRA_PANEL/MiraPanelUI.cpp
@@ -75,13 +76,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p package-dimitri
-          cp build-wt32/MIRA_PANEL.ino.bin package-dimitri/Mira_WT32_Dimitri_Rose_Logo_OTA.bin
+          cp build-wt32/MIRA_PANEL.ino.bin package-dimitri/Mira_WT32_Dimitri_Rose_Logo_Compact_V2_OTA.bin
           cat > package-dimitri/README.txt <<'EOF'
           MIRA PANEL - WT32-SC01 PLUS - DIMITRI JSON + ROSE + MIRA LOGO
           ------------------------------------------------
           SINGLE-SCREEN TEST: never install on Waveshare or Nextion.
           This OTA application uses the stable 0.7.37 base with a targeted
-          ArduinoJson value-storage fix, Rose theme and native 200x200 high-res Mira startup logo. NOT an official release.
+          ArduinoJson value-storage fix, Rose theme and native 150x150 high-res Mira startup logo. NOT an official release.
           No production, firmware-beta, Jeedom, stable or release manifest is modified.
 
           Install the *_OTA.bin through the WT32 web firmware update.
@@ -100,7 +101,7 @@ jobs:
       - name: Upload single-screen test image (NOT published as release)
         uses: actions/upload-artifact@v4
         with:
-          name: Mira_WT32_Dimitri_Rose_Logo_OTA
+          name: Mira_WT32_Dimitri_Rose_Logo_Compact_V2_OTA
           path: package-dimitri/
           if-no-files-found: error
           retention-days: 30
