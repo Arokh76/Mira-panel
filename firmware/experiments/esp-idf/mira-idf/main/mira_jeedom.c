@@ -30,6 +30,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "freertos/event_groups.h"
 
 #define MIRA_JSON_PATH "/spiffs/miralvgl.json"
 #define MIRA_JSON_TMP  "/spiffs/miralvgl.new"
@@ -591,6 +592,13 @@ typedef struct {
     uint32_t last_direct_seq;
 } mira_sse_client_t;
 static unsigned mira_sse_clients;
+static EventGroupHandle_t mira_sse_signal;
+#define MIRA_SSE_CHANGED BIT0
+void mira_jeedom_sse_notify(void){
+    // All listening clients wake together; no arbitrary polling period.
+    EventGroupHandle_t signal=mira_sse_signal;
+    if(signal)xEventGroupSetBits(signal,MIRA_SSE_CHANGED);
+}
 /* Direct HTTP form actions used to call Arduino events.send() immediately.
  * A fixed 16-event history lets both browsers receive that event without
  * holding an HTTP socket or allocating from the LVGL task. */
@@ -612,6 +620,7 @@ static void mira_sse_record_direct(int id,const char *value){
     }
     slot->value[n]=0;
     portEXIT_CRITICAL(&mira_sse_lock);
+    mira_jeedom_sse_notify();
 }
 
 static esp_err_t mira_sse_changed(mira_sse_client_t *client){
@@ -685,7 +694,10 @@ static void mira_sse_worker(void *argument){
     while(err==ESP_OK){
         err=mira_sse_changed(client);
         if(err!=ESP_OK)break;
-        vTaskDelay(pdMS_TO_TICKS(250));
+        // EventSource is notified directly by the MQTT/Jeedom state cache
+        // or by the browser action route, just as Arduino events.send().
+        xEventGroupWaitBits(mira_sse_signal,MIRA_SSE_CHANGED,pdTRUE,pdFALSE,
+                            pdMS_TO_TICKS(10000));
         TickType_t now=xTaskGetTickCount();
         if(now-last_heartbeat>=pdMS_TO_TICKS(10000)){
             err=httpd_resp_send_chunk(req,": Mira keepalive\n\n",HTTPD_RESP_USE_STRLEN);
@@ -722,6 +734,13 @@ static esp_err_t beta_events_get(httpd_req_t *req){
         __atomic_sub_fetch(&mira_sse_clients,1u,__ATOMIC_RELAXED);
         httpd_resp_set_status(req,"503 Service Unavailable");
         httpd_resp_sendstr(req,"SSE index too large");
+        return ESP_FAIL;
+    }
+    if(!mira_sse_signal)mira_sse_signal=xEventGroupCreate();
+    if(!mira_sse_signal){
+        if(index)cJSON_Delete(index);
+        __atomic_sub_fetch(&mira_sse_clients,1u,__ATOMIC_RELAXED);
+        httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"SSE signal unavailable");
         return ESP_FAIL;
     }
     mira_sse_client_t *client=calloc(1,sizeof(*client));
