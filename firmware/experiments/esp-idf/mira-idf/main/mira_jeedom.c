@@ -2024,6 +2024,7 @@ static QueueHandle_t action_queue;
 static mira_action_msg_t *last_value_actions;
 static TaskHandle_t action_worker_handle;
 static portMUX_TYPE last_value_lock=portMUX_INITIALIZER_UNLOCKED;
+static unsigned next_latest_slot;
 
 static bool action_is_continuous(const char *type){
     return !strcmp(type,"range")||!strcmp(type,"roundrange")||
@@ -2055,10 +2056,12 @@ static bool dequeue_latest(mira_action_msg_t *result){
     if(!last_value_actions||!result)return false;
     bool found=false;
     portENTER_CRITICAL(&last_value_lock);
-    for(unsigned i=0;i<MIRA_LAST_VALUE_SLOTS;i++){
+    for(unsigned offset=0;offset<MIRA_LAST_VALUE_SLOTS;offset++){
+        const unsigned i=(next_latest_slot+offset)%MIRA_LAST_VALUE_SLOTS;
         if(!last_value_actions[i].name[0])continue;
         *result=last_value_actions[i];
         last_value_actions[i].name[0]=0;
+        next_latest_slot=(i+1u)%MIRA_LAST_VALUE_SLOTS;
         found=true;break;
     }
     portEXIT_CRITICAL(&last_value_lock);
