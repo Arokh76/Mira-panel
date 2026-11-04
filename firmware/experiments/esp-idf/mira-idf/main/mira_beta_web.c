@@ -240,6 +240,26 @@ static void nvs_text(const char *ns,const char *key,const char *fallback,char *d
         nvs_close(nv);
     }
 }
+/* Keep the beta Wi-Fi editor in sync with the atomic native IP record.
+ * Old per-field NVS keys still render if an older IDF build saved them. */
+static bool atomic_web_field(const char *key,char *out,size_t cap){
+    if(!key||!out||!cap)return false;
+    nvs_handle_t nv;
+    if(nvs_open("mira_idf_net",NVS_READONLY,&nv)!=ESP_OK)return false;
+    char profile[512]={0};
+    size_t n=sizeof(profile);
+    bool stored=nvs_get_str(nv,"web_profile",profile,&n)==ESP_OK;
+    nvs_close(nv);
+    if(!stored)return false;
+    cJSON *root=cJSON_Parse(profile);
+    if(!root)return false;
+    const cJSON *field=cJSON_GetObjectItemCaseSensitive(root,key);
+    const bool ok=cJSON_IsString(field)&&field->valuestring&&
+                  strlen(field->valuestring)<cap;
+    if(ok)snprintf(out,cap,"%s",field->valuestring);
+    cJSON_Delete(root);
+    return ok;
+}
 static unsigned nvs_number(const char *ns,const char *key,unsigned fallback){
     nvs_handle_t nv;
     if(nvs_open(ns,NVS_READONLY,&nv)!=ESP_OK)return fallback;
@@ -371,17 +391,20 @@ static esp_err_t replacement(httpd_req_t *r,const char *name){
     }
     if(!strcmp(name,"IPMODE")){
         char value[24];
-        nvs_text("mira_idf_net","web_mode","auto",value,sizeof(value));
+        if(!atomic_web_field("mode",value,sizeof(value)))
+            nvs_text("mira_idf_net","web_mode","auto",value,sizeof(value));
         return escaped(r,value);
     }
-    static const struct {const char *slot,*key;} network_fields[]={
-        {"IP","web_ip"},{"MASK","web_mask"},{"GATEWAY","web_gw"},
-        {"DNS1","web_dns1"},{"DNS2","web_dns2"}
+    static const struct {const char *slot,*key,*atom;} network_fields[]={
+        {"IP","web_ip","ip"},{"MASK","web_mask","mask"},
+        {"GATEWAY","web_gw","gateway"},{"DNS1","web_dns1","dns1"},
+        {"DNS2","web_dns2","dns2"}
     };
     for(size_t i=0;i<sizeof(network_fields)/sizeof(network_fields[0]);i++){
         if(!strcmp(name,network_fields[i].slot)){
             char value[40]={0};
-            nvs_text("mira_idf_net",network_fields[i].key,"",value,sizeof(value));
+            if(!atomic_web_field(network_fields[i].atom,value,sizeof(value)))
+                nvs_text("mira_idf_net",network_fields[i].key,"",value,sizeof(value));
             return escaped(r,value);
         }
     }
