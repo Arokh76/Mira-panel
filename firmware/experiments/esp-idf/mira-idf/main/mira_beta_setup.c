@@ -373,6 +373,23 @@ esp_err_t mira_beta_setup_register(httpd_handle_t server){
                                 .handler=mira_beta_web_gpio_set};
     err=httpd_register_uri_handler(server,&gpio_set);
     if(err!=ESP_OK)return err;
+    /* Historical beta GPIO contracts, mapped to DI0/DI1 + DO0/DO1. */
+    const httpd_uri_t gpio_raw={.uri="/gpio/raw",.method=HTTP_POST,
+                                .handler=mira_beta_web_gpio_raw};
+    err=httpd_register_uri_handler(server,&gpio_raw);
+    if(err!=ESP_OK)return err;
+    const httpd_uri_t gpio_config={.uri="/gpio/config",.method=HTTP_POST,
+                                   .handler=mira_beta_web_gpio_config};
+    err=httpd_register_uri_handler(server,&gpio_config);
+    if(err!=ESP_OK)return err;
+    const httpd_uri_t gpio_link={.uri="/gpio/link",.method=HTTP_POST,
+                                 .handler=mira_beta_web_gpio_link};
+    err=httpd_register_uri_handler(server,&gpio_link);
+    if(err!=ESP_OK)return err;
+    const httpd_uri_t gpio_multi={.uri="/gpio/multi/config",.method=HTTP_POST,
+                                  .handler=mira_beta_web_gpio_multi};
+    err=httpd_register_uri_handler(server,&gpio_multi);
+    if(err!=ESP_OK)return err;
     const httpd_uri_t check={.uri="/api/checkupdate",.method=HTTP_GET,
                              .handler=mira_beta_update_check};
     err=httpd_register_uri_handler(server,&check);
