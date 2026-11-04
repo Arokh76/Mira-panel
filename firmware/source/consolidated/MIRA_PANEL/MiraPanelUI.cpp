@@ -33,9 +33,12 @@ MiraDisplay* MiraPanelUI::_displayForLvgl = nullptr;
 MiraPanelUI* MiraPanelUI::_uiForLvgl = nullptr;
 
 #if !defined(MIRA_TARGET_WAVESHARE_43C) && !defined(MIRA_TARGET_NEXTION_28)
-static void miraBootSplashTimeout(lv_timer_t* timer) {
-  lv_obj_t* splash = static_cast<lv_obj_t*>(lv_timer_get_user_data(timer));
-  if (splash) lv_obj_del(splash);
+static lv_obj_t* miraActiveBootSplash = nullptr;
+static void miraBootSplashTimeout(lv_timer_t* /*timer*/) {
+  if (miraActiveBootSplash) {
+    lv_obj_del(miraActiveBootSplash);
+    miraActiveBootSplash = nullptr;
+  }
 }
 #endif
 
@@ -1024,8 +1027,11 @@ void MiraPanelUI::begin() {
   lv_obj_set_style_text_color(startupLabel, lv_color_hex(0xB1C2D4), 0);
   lv_obj_align(startupLabel, LV_ALIGN_CENTER, 0, 137);
 
-  lv_timer_t* splashTimer = lv_timer_create(miraBootSplashTimeout, 1900, splash);
+  miraActiveBootSplash = splash;
+  lv_timer_t* splashTimer = lv_timer_create(miraBootSplashTimeout, 1900, nullptr);
   if (splashTimer) lv_timer_set_repeat_count(splashTimer, 1);
+  // Show the logo immediately, even if MQTT setup takes more than 1.9 seconds.
+  lv_timer_handler();
 #endif
 
 #if defined(MIRA_TARGET_WAVESHARE_43C)
