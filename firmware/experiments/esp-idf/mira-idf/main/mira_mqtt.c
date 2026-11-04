@@ -26,6 +26,25 @@ static char last_display_signature[160];
 static int64_t last_display_check_us;
 
 
+/* Exact MiraMqtt::cleanScreenName() behavior for MQTT prefixes.
+ * Stored settings are left intact; only the outbound topic name is
+ * normalized. Slash hierarchy inside the name is legal in the beta,
+ * whereas '+' and '#' must never become topic wildcards.
+ */
+static void clean_screen_name(char *name,size_t cap){
+    if(!name||cap<6)return;
+    size_t n=strlen(name),begin=0;
+    while(begin<n&&isspace((unsigned char)name[begin]))begin++;
+    while(n>begin&&isspace((unsigned char)name[n-1]))n--;
+    if(begin)memmove(name,name+begin,n-begin);
+    name[n-begin]=0;
+    while(name[0]=='/')memmove(name,name+1,strlen(name));
+    n=strlen(name);
+    while(n&&name[n-1]=='/')name[--n]=0;
+    for(char *p=name;*p;p++)if(*p=='#'||*p=='+')*p='_';
+    if(!name[0]||!strcmp(name,"null"))snprintf(name,cap,"panel");
+}
+
 static void refresh_prefixes(void) {
     snprintf(state_prefix,sizeof(state_prefix),"mira/%s/States/",screen_name);
     snprintf(action_prefix,sizeof(action_prefix),"mira/%s/Actions/",screen_name);
@@ -204,11 +223,10 @@ static void import_beta_mqtt_config(void){
         if(key){
             size_t used=strlen(value),found=0;
             if(used>=size_limit)goto clear_value;
-            if(!strcmp(key,"screen")){
-                if(!used)goto clear_value;
-                for(const char *q=value;*q;q++)
-                    if(*q=='/'||*q=='#'||*q=='+')goto clear_value;
-            }
+            if(!strcmp(key,"screen")&&!used)goto clear_value;
+            /* Arduino stores the label and normalizes it only when
+             * constructing MQTT topics; don't drop compatible beta names.
+             */
             if(nvs_get_str(nv,key,NULL,&found)==ESP_ERR_NVS_NOT_FOUND &&
                nvs_set_str(nv,key,value)==ESP_OK)imported++;
         }else if(!strcmp(legacy,"MQTT_Port")){
@@ -251,6 +269,7 @@ static void read_config(void) {
     nvs_get_u16(nvs,"port",&port);
     if(!port)port=1883;
     nvs_close(nvs);
+    clean_screen_name(screen_name,sizeof(screen_name));
     refresh_prefixes();
 }
 esp_err_t mira_mqtt_init(void) {
@@ -359,12 +378,10 @@ static esp_err_t mqtt_post(httpd_req_t *r) {
         httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"Expected host, port, screen, enabled and optional username/password");
         return ESP_FAIL;
     }
-    // Disable unsafe topic wildcards and path separators in the screen key.
-    for(const char *q=n->valuestring;*q;q++){
-        if(*q=='/'||*q=='+'||*q=='#'){
-            cJSON_Delete(root);httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"Invalid screen name");return ESP_FAIL;
-        }
-    }
+    /* Preserve beta's MQTT screen names, including subtopics. The
+     * clean_screen_name() pass strips leading/trailing '/' and replaces
+     * wildcard characters before constructing any subscription topic.
+     */
     nvs_handle_t nv;
     esp_err_t err=nvs_open("mira_idf_mqtt",NVS_READWRITE,&nv);
     if(err!=ESP_OK){cJSON_Delete(root);httpd_resp_send_err(r,HTTPD_500_INTERNAL_SERVER_ERROR,"NVS unavailable");return ESP_FAIL;}
