@@ -58,6 +58,12 @@ static int compare_version(const char *a,const char *b){
     }
     return 0;
 }
+static const char *current_idf_version(void){
+    const esp_app_desc_t *running=esp_app_get_description();
+    if(running && compare_version(running->version,running->version)==0)
+        return running->version;
+    return MIRA_IDF_BASELINE;
+}
 static char *fetch_manifest(void){
     const esp_http_client_config_t cfg={
         .url=MANIFEST_URL,
@@ -143,7 +149,7 @@ esp_err_t mira_beta_update_check(httpd_req_t *req){
     if(valid && strlen(version->valuestring)<sizeof(remote))
         snprintf(remote,sizeof(remote),"%s",version->valuestring);
     else valid=false;
-    const int newer=valid?compare_version(remote,MIRA_IDF_BASELINE):-2;
+    const int newer=valid?compare_version(remote,current_idf_version()):-2;
     cJSON_Delete(json);
     if(!valid||newer==-2)
         return json_response(req,"error","Aucun OTA ESP-IDF 4.3C officiel publié pour cette cible.",NULL);
@@ -197,7 +203,7 @@ static bool ota_valid_hex(const char *hex){
     return true;
 }
 static bool ota_manifest_entry(char url[420],char expected_hash[65],
-                               size_t *bytes){
+                               size_t *bytes,char version_out[32]){
     char *raw=fetch_manifest();
     if(!raw)return false;
     cJSON *manifest=cJSON_Parse(raw);
@@ -213,7 +219,8 @@ static bool ota_manifest_entry(char url[420],char expected_hash[65],
     const esp_partition_t *partition=esp_ota_get_next_update_partition(NULL);
     bool accepted=cJSON_IsString(project)&&!strcmp(project->valuestring,"Mira Panel")&&
                   cJSON_IsString(version)&&
-                  compare_version(version->valuestring,MIRA_IDF_BASELINE)>0&&
+                  compare_version(version->valuestring,current_idf_version())>0&&
+                  strlen(version->valuestring)<32&&
                   cJSON_IsString(ota)&&cJSON_IsString(sha)&&
                   ota_valid_hex(sha->valuestring)&&cJSON_IsNumber(size)&&
                   partition&&size->valuedouble>=65536&&
@@ -236,6 +243,7 @@ static bool ota_manifest_entry(char url[420],char expected_hash[65],
         snprintf(url,420,"%s",ota->valuestring);
         snprintf(expected_hash,65,"%s",sha->valuestring);
         *bytes=(size_t)size->valuedouble;
+        snprintf(version_out,32,"%s",version->valuestring);
     }
     cJSON_Delete(manifest);
     return accepted;
@@ -247,10 +255,10 @@ static bool ota_manifest_entry(char url[420],char expected_hash[65],
  */
 static void ota_install_worker(void *unused){
     (void)unused;
-    char url[420]={0},digest[65]={0};
+    char url[420]={0},digest[65]={0},remote_version[32]={0};
     size_t expected=0;
     ota_update_status("checking","Vérification du manifeste ESP-IDF",0,0);
-    if(!ota_manifest_entry(url,digest,&expected)){
+    if(!ota_manifest_entry(url,digest,&expected,remote_version)){
         ota_update_status("error","Aucune version IDF 4.3C signalee par un manifeste valide",0,0);
         goto finish;
     }
@@ -326,7 +334,8 @@ static void ota_install_worker(void *unused){
         const esp_app_desc_t *running=esp_app_get_description();
         if(!running||esp_ota_get_partition_description(partition,&candidate)!=ESP_OK||
            strcmp(candidate.project_name,running->project_name)!=0 ||
-           strcmp(candidate.project_name,"mira_idf_scroll")!=0){
+           strcmp(candidate.project_name,"mira_idf_scroll")!=0||
+           strcmp(candidate.version,remote_version)!=0){
             ota_update_status("error","Image refusée : projet ESP-IDF 4.3C incompatible",0,0);
             break;
         }
@@ -368,6 +377,7 @@ esp_err_t mira_beta_update_trigger(httpd_req_t *req){
         httpd_resp_set_status(req,"409 Conflict");
         return httpd_resp_sendstr(req,"Une installation OTA est deja en cours");
     }
+    ota_update_status("checking","Demande de mise à jour IDF acceptée",0,0);
     BaseType_t ok=xTaskCreate(ota_install_worker,"mira_idf_ota",8192,NULL,3,NULL);
     if(ok!=pdPASS){
         portENTER_CRITICAL(&ota_mux);
@@ -376,7 +386,6 @@ esp_err_t mira_beta_update_trigger(httpd_req_t *req){
         httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Tâche OTA impossible");
         return ESP_FAIL;
     }
-    ota_update_status("checking","Demande de mise à jour IDF acceptée",0,0);
     httpd_resp_set_status(req,"202 Accepted");
     httpd_resp_set_type(req,"application/json; charset=utf-8");
     return httpd_resp_sendstr(req,"{\"started\":true,\"hardware\":\"waveshare-43c-idf\"}");
