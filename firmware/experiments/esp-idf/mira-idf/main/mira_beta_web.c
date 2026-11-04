@@ -998,6 +998,10 @@ esp_err_t mira_beta_web_display_save(httpd_req_t *req){
             else if(!strcmp(numbers[i].key,"sleep_delay"))err=nvs_set_u32(nv,numbers[i].key,values[i]);
             else err=nvs_set_u8(nv,numbers[i].key,(uint8_t)values[i]);
         }
+        // Arduino refreshDisplayConfig() derives sleep activation from
+        // DISPLAY_Delai on each Web configuration save. Keep the separate
+        // local switch but reset its state when Web explicitly changes delay.
+        if(err==ESP_OK)err=nvs_set_u8(nv,"sleep_enabled",values[2]>0?1:0);
         if(err==ESP_OK)err=nvs_set_u8(nv,"night_auto",(uint8_t)night);
         if(err==ESP_OK)err=nvs_set_u8(nv,"sleep_clock",(uint8_t)clock);
         if(err==ESP_OK)err=nvs_set_str(nv,"night_start",start);
