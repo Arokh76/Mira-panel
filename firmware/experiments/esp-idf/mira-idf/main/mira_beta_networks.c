@@ -205,8 +205,51 @@ esp_err_t mira_beta_networks_upsert(const mira_beta_network_t *profile,const cha
        assign(entry,"dns1",profile->dns1)&&
        assign(entry,"dns2",profile->dns2);
     if(!existed&&ok)ok=assign(entry,"pass","");
-    esp_err_t err=ok?save_password(profile->id,password):ESP_ERR_NO_MEM;
+    if(!ok){cJSON_Delete(root);return ESP_ERR_NO_MEM;}
+
+    /* The new password lives in a separate native NVS namespace. If
+     * saving the overlay fails after the secret is written, restore the
+     * PREVIOUS secret; otherwise the old SSID would remain indexed with
+     * a new, wrong password and the panel could lose Wi-Fi on reboot.
+     * SPIFFS reseau.json is never modified. */
+    char previous_password[96]={0};
+    bool had_previous_password=false;
+    if(*password){
+        char key[16];password_key(profile->id,key,sizeof(key));
+        nvs_handle_t nv;
+        esp_err_t opened=nvs_open(BETA_PASSWORD_NS,NVS_READONLY,&nv);
+        if(opened==ESP_OK){
+            size_t cap=sizeof(previous_password);
+            esp_err_t got=nvs_get_str(nv,key,previous_password,&cap);
+            nvs_close(nv);
+            if(got==ESP_OK)had_previous_password=true;
+            else if(got!=ESP_ERR_NVS_NOT_FOUND){
+                cJSON_Delete(root);
+                return got;
+            }
+        }else if(opened!=ESP_ERR_NVS_NOT_FOUND){
+            cJSON_Delete(root);
+            return opened;
+        }
+    }
+    esp_err_t err=save_password(profile->id,password);
     if(err==ESP_OK)err=save(root);
+    if(err!=ESP_OK&&*password){
+        char key[16];password_key(profile->id,key,sizeof(key));
+        nvs_handle_t nv;
+        esp_err_t rollback=nvs_open(BETA_PASSWORD_NS,NVS_READWRITE,&nv);
+        if(rollback==ESP_OK){
+            rollback=had_previous_password?
+                nvs_set_str(nv,key,previous_password):nvs_erase_key(nv,key);
+            if(rollback==ESP_ERR_NVS_NOT_FOUND)rollback=ESP_OK;
+            if(rollback==ESP_OK)rollback=nvs_commit(nv);
+            nvs_close(nv);
+        }
+        if(rollback!=ESP_OK)
+            ESP_LOGE(TAG,"Wi-Fi secret rollback FAILED (id %d): %s",
+                     profile->id,esp_err_to_name(rollback));
+    }
+    memset(previous_password,0,sizeof(previous_password));
     cJSON_Delete(root);
     return err;
 }
