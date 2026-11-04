@@ -1947,7 +1947,8 @@ static esp_err_t param_saved(httpd_req_t *req){
 // Jeedom plugin associates its command IDs with Mira widget IDs.
 // Store mappings without executing them, especially during initialization.
 static bool put_remote_binding(long id,const char *value){
-    if(id<1||id>4096||!value||!*value||strlen(value)>30)return false;
+    if(id<1||id>4096||!value||!decimal_id(value)||
+       strlen(value)>30)return false;
     char *config=read_config(NULL);
     if(!config)return false;
     const uint32_t hash=ui_config_hash(config);
@@ -1970,6 +1971,7 @@ static esp_err_t set_jeedom_id(httpd_req_t *req){
     char id[16],value[32];
     if(!query_param(req,"id",id,sizeof(id))||
        !query_param(req,"value",value,sizeof(value))||
+       !decimal_id(id)||!decimal_id(value)||
        !put_remote_binding(strtol(id,NULL,10),value)){
         httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Association Jeedom impossible");
         return ESP_FAIL;
@@ -1986,7 +1988,8 @@ static esp_err_t set_jeedom_toggle_id(httpd_req_t *req){
         return ESP_FAIL;
     }
     long local=strtol(id,NULL,10);
-    if(local<1||local>=4096||
+    if(!decimal_id(id)||!decimal_id(off)||!decimal_id(on)||
+       local<1||local>=4096||
        !put_remote_binding(local,off)||
        !put_remote_binding(local+1,on)){
         httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Mapping toggle impossible");
@@ -1997,8 +2000,8 @@ static esp_err_t set_jeedom_toggle_id(httpd_req_t *req){
 static esp_err_t set_jeedom_init_id(httpd_req_t *req){
     if(!require_key(req))return ESP_FAIL;
     char id[32];
-    if(!query_param(req,"value",id,sizeof(id))){
-        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Init ID absent");
+    if(!query_param(req,"value",id,sizeof(id))||!decimal_id(id)){
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Init ID absent ou invalide");
         return ESP_FAIL;
     }
     nvs_handle_t nv;
