@@ -1288,8 +1288,10 @@ static esp_err_t beta_lvgl_append(httpd_req_t *req){
         return ESP_FAIL;
     }
     cJSON *array=cJSON_GetObjectItemCaseSensitive(beta_lvgl_stage,"lvgl");
-    if(cJSON_GetArraySize(array)>=64){
-        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Maximum 64 widgets LVGL");
+    // Arduino MiraPanelUI::MAX_BINDINGS=40. Do not accept 41-64 widgets
+    // which the screen would silently ignore after a successful Web save.
+    if(cJSON_GetArraySize(array)>=40){
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Maximum 40 widgets LVGL");
         return ESP_FAIL;
     }
     cJSON *item=cJSON_CreateObject();
@@ -1338,6 +1340,12 @@ static esp_err_t beta_lvgl_save(httpd_req_t *req){
             !strncmp(req->uri,"/screensave",11)?"Liste sauvegardée!":"OK");
     if(!beta_lvgl_stage){
         httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Aucune liste LVGL en attente");
+        return ESP_FAIL;
+    }
+    const cJSON *pending=cJSON_GetObjectItemCaseSensitive(beta_lvgl_stage,"lvgl");
+    if(!cJSON_IsArray(pending)||cJSON_GetArraySize(pending)>40){
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,
+                            "Programmation LVGL depasse 40 widgets");
         return ESP_FAIL;
     }
     char *out=cJSON_PrintUnformatted(beta_lvgl_stage);
