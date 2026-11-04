@@ -1019,7 +1019,8 @@ esp_err_t mira_jeedom_beta_legacy_get_update(httpd_req_t *req){
                     if(!okay)break;
                     snprintf(value,sizeof(value),"#%02x%02x%02x",
                              channels[0],channels[1],channels[2]);
-                }else snprintf(value,sizeof(value),"1");
+                }else if(!strcmp(kind,"httpaction"))value[0]=0;
+                else snprintf(value,sizeof(value),"1");
             }
             snprintf(name,sizeof(name),"%s",row_name);
             matched=true;break;
@@ -2036,7 +2037,8 @@ bool mira_jeedom_queue_local_action(const char *name,const char *type,const char
        strlen(name)>=96||strlen(type)>=24||strlen(value)>=160)return false;
     if(strcmp(type,"toggle")&&strcmp(type,"button")&&strcmp(type,"multiaction")&&
        strcmp(type,"range")&&strcmp(type,"roundrange")&&strcmp(type,"thermostat")&&
-       strcmp(type,"list")&&strcmp(type,"listbutton")&&strcmp(type,"color"))return false;
+       strcmp(type,"list")&&strcmp(type,"listbutton")&&strcmp(type,"color")&&
+       strcmp(type,"inputbox")&&strcmp(type,"httpaction"))return false;
     mira_action_msg_t msg={0};
     snprintf(msg.name,sizeof(msg.name),"%s",name);
     snprintf(msg.type,sizeof(msg.type),"%s",type);
@@ -2112,6 +2114,13 @@ static int resolve_local_action(cJSON *index,const mira_action_msg_t *msg,
         }
         if(!strcmp(msg->type,"button")&&!strcmp(kind,"button")&&!strcmp(name,msg->name))
             return jint(item,"id",-1);
+        if(!strcmp(msg->type,"inputbox")&&!strcmp(kind,"inputbox")&&
+           !strcmp(name,msg->name)){
+            snprintf(value,value_size,"%s",msg->value);
+            return jint(item,"id",-1);
+        }
+        if(!strcmp(msg->type,"httpaction")&&!strcmp(kind,"httpaction")&&
+           !strcmp(name,msg->name))return jint(item,"id",-1);
         // Mira beta publishes four distinct Jeedom button IDs for a
         // multiaction widget. Resolve the gesture to its historical binding;
         // unknown gestures never fall back silently to a single click.
