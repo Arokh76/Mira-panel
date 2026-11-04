@@ -186,6 +186,7 @@ static void add_choices(cJSON *arr,int *id,const char *name,const char *options)
     }
     char *save=NULL;
     int count=0;
+    const int first_id=*id;
     for(char *option=strtok_r(choices,"|",&save);option&&count<12;
         option=strtok_r(NULL,"|",&save)){
         trim(option);
@@ -194,6 +195,13 @@ static void add_choices(cJSON *arr,int *id,const char *name,const char *options)
         if(!entry)return;
         cJSON_AddStringToObject(entry,"nomliste",name);
         cJSON_AddStringToObject(entry,"option",option);
+        // IndexAddList defaults to the first choice ID for the entire group.
+        if(count==0)cJSON_AddNumberToObject(entry,"value",first_id);
+        else{
+            char text[16];
+            snprintf(text,sizeof(text),"%d",first_id);
+            cJSON_AddStringToObject(entry,"value",text);
+        }
         count++;
     }
 }
