@@ -806,3 +806,43 @@ assert 'const bool generic=!enabled&&!published&&' in full
 assert 'mqtt_payload=b->value;' in full
 assert 'action!=4' in full # Beta device selection is Jeedom-only.
 print("PASS independent Jeedom and MQTT callbacks, no action from passive states")
+
+# Jeedom slider commands cannot be allowed to evict a final release from
+# the same 12-entry FIFO used by discrete buttons. A keyed, PSRAM-backed
+# latest-value store is drained independently with round-robin fairness.
+assert 'action_queue=xQueueCreate(12,sizeof(mira_action_msg_t));' in jeedom
+for contract in (
+    '#define MIRA_LAST_VALUE_SLOTS 96u',
+    'static bool enqueue_latest(const mira_action_msg_t *msg)',
+    'static bool dequeue_latest(mira_action_msg_t *result)',
+    'if(action_is_continuous(type))return enqueue_latest(&msg);',
+    'next_latest_slot=(i+1u)%MIRA_LAST_VALUE_SLOTS;',
+    'ulTaskNotifyTake(pdTRUE,portMAX_DELAY)',
+    'heap_caps_calloc(MIRA_LAST_VALUE_SLOTS,',
+):
+    assert contract in jeedom, f"Jeedom latest-value contract missing: {contract}"
+assert 'xQueueReceive(action_queue,&action,portMAX_DELAY)' not in jeedom
+print('PASS Jeedom last-value slots protect final slider/thermostat/color commands')
+
+# Browser legacy input boxes and HTTP action IDs must resolve ONLY when
+# a matching historical entry actually exists; an unknown ID fails closed.
+assert 'strcmp(type,"inputbox")&&strcmp(type,"httpaction"))return false;' in jeedom
+assert 'strcmp(msg->type,"inputbox")&&!strcmp(kind,"inputbox")' in jeedom
+assert 'strcmp(msg->type,"httpaction")&&!strcmp(kind,"httpaction")' in jeedom
+assert 'snprintf(value,value_size,"%s",msg->value);' in jeedom
+assert 'else if(!strcmp(kind,"httpaction"))value[0]=0;' in jeedom
+assert 'if(local_id<1||local_id>4096)return;' in jeedom
+print('PASS legacy Jeedom inputbox/httpaction exact-ID dispatch and fail-closed unmapped IDs')
+
+# Web editor and Jeedom /programui may not disagree about MAX_BINDINGS=40.
+assert 'if(count>40)valid=false;' in jeedom
+assert 'if(cJSON_GetArraySize(array)>=40)' in jeedom
+assert 'cJSON_GetArraySize(pending)>40' in jeedom
+assert 'Maximum 64 widgets LVGL' not in jeedom
+print('PASS Web LVGL editor and programming agree on 40 widgets')
+
+# Saving DISPLAY_Delai in the beta HTML must also set sleep_enabled;
+# the on-screen sleep toggle can still override locally until that save.
+beta_web=(idf/"mira_beta_web.c").read_text(encoding="utf-8")
+assert 'nvs_set_u8(nv,"sleep_enabled",values[2]>0?1:0)' in beta_web
+print('PASS Web display settings synchronize sleep enable')
