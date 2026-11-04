@@ -144,6 +144,14 @@ static cJSON *append_action(cJSON *arr,int *id,const char *type,const char *name
     cJSON_AddNumberToObject(entry,"id",(*id)++);
     cJSON_AddStringToObject(entry,"nom",name);
     cJSON_AddStringToObject(entry,"type",type);
+    // Match the beta IndexAddButton/IndexAddInfo default JSON metadata.
+    if(!strcmp(type,"button"))
+        cJSON_AddStringToObject(entry,"return","true");
+    if(!strcmp(type,"info")){
+        cJSON_AddStringToObject(entry,"value","");
+        cJSON_AddStringToObject(entry,"size","60");
+        cJSON_AddStringToObject(entry,"unit","");
+    }
     cJSON_AddItemToArray(arr,entry);
     return entry;
 }
