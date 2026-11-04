@@ -71,6 +71,7 @@ typedef struct { char key[32]; char value[48]; } mira_display_command_t;
 static QueueHandle_t display_command_queue;
 static bool suppress_events;
 static uint8_t display_brightness_raw=220;
+static uint8_t persisted_brightness_raw=220;
 static uint8_t day_brightness_percent=85,night_brightness_percent=20;
 static bool night_auto_enabled;
 static bool manual_brightness_override;
@@ -1887,21 +1888,40 @@ static bool current_night_period(void); // implementation below
 // Match the old Waveshare43CDisplay brightness behavior, but save only on
 // release (never write flash on every pixel of a drag).  This callback runs
 // on LVGL task; the CH32 gate/PWM write is a short I2C transaction.
+/* Beta onBrightness() updates the backlight on LV_EVENT_VALUE_CHANGED.
+ * Persist only on release; the saved brightness is not rewritten for every
+ * intermediate finger position. */
+static void brightness_live(lv_event_t *event){
+    if(suppress_events||display_sleeping)return;
+    const int selected=lv_slider_get_value(lv_event_get_target_obj(event));
+    const uint8_t raw=(uint8_t)(selected<30?30:selected>255?255:selected);
+    if(applied_brightness_raw!=raw){
+        if(mira_display_set_brightness(raw)!=ESP_OK)return;
+        applied_brightness_raw=raw;
+    }
+    display_brightness_raw=raw;
+    manual_brightness_override=true;
+}
 static void brightness_release(lv_event_t *event) {
     if(suppress_events||display_sleeping)return;
     lv_obj_t *slider=lv_event_get_target_obj(event);
     int value=lv_slider_get_value(slider);
     if(value<30)value=30;
     if(value>255)value=255;
-    // Slider release can occur without a value change; do not wear NVS.
-    if(display_brightness_raw==(uint8_t)value)return;
-    const esp_err_t err=mira_display_set_brightness((uint8_t)value);
-    if(err!=ESP_OK){
-        ESP_LOGE(TAG,"Waveshare brightness update failed: %s",esp_err_to_name(err));
-        return;
+    // Finish with the exact released value, even if LVGL skipped a
+    // VALUE_CHANGED while the finger was lifted.
+    if(applied_brightness_raw!=(uint8_t)value){
+        const esp_err_t err=mira_display_set_brightness((uint8_t)value);
+        if(err!=ESP_OK){
+            ESP_LOGE(TAG,"Waveshare brightness update failed: %s",esp_err_to_name(err));
+            return;
+        }
+        applied_brightness_raw=(uint8_t)value;
     }
     display_brightness_raw=(uint8_t)value;
-    applied_brightness_raw=(uint8_t)value;
+    manual_brightness_override=true;
+    // Do not wear NVS when a tap/drag returns to the saved raw value.
+    if(persisted_brightness_raw==(uint8_t)value)return;
     // In automatic mode the same slider adjusts the active day/night level,
     // so the scheduler will not immediately undo the user's change.
     const uint8_t pct=(uint8_t)(1+(((uint32_t)value-30u)*99u+112u)/225u);
@@ -1915,7 +1935,8 @@ static void brightness_release(lv_event_t *event) {
         if(nvs_set_u8(nvs,"brightness",display_brightness_raw)==ESP_OK){
             if(night_auto_enabled)
                 (void)nvs_set_u8(nvs,night?"night_pct":"day_pct",pct);
-            (void)nvs_commit(nvs);
+            if(nvs_commit(nvs)==ESP_OK)
+                persisted_brightness_raw=(uint8_t)value;
         }
         nvs_close(nvs);
     }
@@ -2236,6 +2257,7 @@ static void settings(void){
     lv_obj_set_size(sl,600,14);
     lv_slider_set_range(sl,30,255);
     lv_slider_set_value(sl,desired_awake_brightness(),LV_ANIM_OFF);
+    lv_obj_add_event_cb(sl,brightness_live,LV_EVENT_VALUE_CHANGED,NULL);
     lv_obj_add_event_cb(sl,brightness_release,LV_EVENT_RELEASED,NULL);
     label(display,"Thème de Mira Panel",0xA8B2B8,&mira_font_fr_16);
     lv_obj_t *theme_choice=lv_dropdown_create(display);
@@ -2611,6 +2633,7 @@ static void load_ui_configuration(void){
 }
 void mira_full_ui_create(lv_display_t *disp){
     load_ui_configuration();
+    persisted_brightness_raw=display_brightness_raw;
     applied_brightness_raw=display_brightness_raw;
     ESP_ERROR_CHECK_WITHOUT_ABORT(mira_display_set_brightness(applied_brightness_raw));
     screen=lv_obj_create(NULL);
