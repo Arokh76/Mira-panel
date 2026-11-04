@@ -1927,6 +1927,29 @@ static bool nvs_read_string(nvs_handle_t nvs,const char *key,char *out,size_t si
     size_t len=size;
     return nvs_get_str(nvs,key,out,&len)==ESP_OK && out[0];
 }
+/* Bounded response capture. Jeedom plugin event() replies with the ID of
+ * the executed command; it may arrive across multiple HTTP data events.
+ * No LVGL call, no secrets or response bodies written to logs.
+ */
+typedef struct {
+    char buf[48];
+    size_t len;
+    bool overflow;
+} mira_jeedom_ack_t;
+static esp_err_t capture_jeedom_ack(esp_http_client_event_t *event){
+    if(event->event_id!=HTTP_EVENT_ON_DATA||!event->user_data||
+       event->data_len<=0)return ESP_OK;
+    mira_jeedom_ack_t *ack=(mira_jeedom_ack_t*)event->user_data;
+    const size_t n=(size_t)event->data_len;
+    if(n>=sizeof(ack->buf)-ack->len){
+        ack->overflow=true;
+        return ESP_FAIL;
+    }
+    memcpy(ack->buf+ack->len,event->data,n);
+    ack->len+=n;
+    ack->buf[ack->len]=0;
+    return ESP_OK;
+}
 static void send_jeedom_action(const mira_action_msg_t *msg) {
     // No network action before the screen plugin provisions *all* required
     // IDs; a fresh /programui invalidates these mappings (see below).
@@ -1984,20 +2007,46 @@ static void send_jeedom_action(const mira_action_msg_t *msg) {
         n=snprintf(uri+offset,sizeof(uri)-offset,"&value=%s",encoded_value);
         if(n<0||n>=(int)(sizeof(uri)-offset))return;
     }
-    esp_http_client_config_t http={
-        .url=uri,
-        .timeout_ms=3000,
-        .disable_auto_redirect=true,
-    };
-    esp_http_client_handle_t client=esp_http_client_init(&http);
-    if(!client)return;
-    esp_err_t result=esp_http_client_perform(client);
-    int status=esp_http_client_get_status_code(client);
-    if(result!=ESP_OK||status<200||status>=300)
-        ESP_LOGW(TAG,"Jeedom action local=%d remote=%s failed, HTTP %d (%s)",
-                 local_id,remote_id,status,esp_err_to_name(result));
-    else ESP_LOGI(TAG,"Jeedom action local=%d delivered (HTTP %d)",local_id,status);
-    esp_http_client_cleanup(client);
+    /* Firmware-beta SendQueud(): at most three sends, spaced by 3 seconds,
+     * and removal only after ReponseAsync matches the requested Jeedom ID.
+     * The jeedom-beta plugin's event() echoes init('id'), including for infos.
+     * 2xx alone is not an acknowledgement; for example an HTML login page
+     * can otherwise be misread as a successfully executed action.
+     */
+    for(unsigned attempt=1;attempt<=3;attempt++){
+        mira_jeedom_ack_t acknowledgement={0};
+        esp_http_client_config_t http={
+            .url=uri,
+            .timeout_ms=3000,
+            .disable_auto_redirect=true,
+            .event_handler=capture_jeedom_ack,
+            .user_data=&acknowledgement
+        };
+        esp_http_client_handle_t client=esp_http_client_init(&http);
+        if(!client){ESP_LOGW(TAG,"Jeedom HTTP client unavailable");return;}
+        esp_err_t result=esp_http_client_perform(client);
+        const int status=esp_http_client_get_status_code(client);
+        esp_http_client_cleanup(client);
+        /* Strip HTTP whitespace only; the plugin response itself must
+         * contain exactly one numeric remote ID and no unexpected content.
+         */
+        while(acknowledgement.len &&
+              isspace((unsigned char)acknowledgement.buf[acknowledgement.len-1]))
+            acknowledgement.buf[--acknowledgement.len]=0;
+        const char *reply=acknowledgement.buf;
+        while(*reply && isspace((unsigned char)*reply))reply++;
+        const bool confirmed=(result==ESP_OK&&status>=200&&status<300&&
+                              !acknowledgement.overflow&&!strcmp(reply,remote_id));
+        if(confirmed){
+            ESP_LOGI(TAG,"Jeedom action local=%d acknowledged (attempt %u)",
+                     local_id,attempt);
+            return;
+        }
+        ESP_LOGW(TAG,"Jeedom action local=%d not acknowledged (try %u/3, HTTP %d, transport=%s)",
+                 local_id,attempt,status,esp_err_to_name(result));
+        if(attempt<3)vTaskDelay(pdMS_TO_TICKS(3000));
+    }
+    ESP_LOGE(TAG,"Jeedom action local=%d dropped after three unacknowledged sends",local_id);
 }
 
 // The installed Jeedom plugin exposes its already-built ID association table
