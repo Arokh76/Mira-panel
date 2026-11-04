@@ -976,3 +976,24 @@ for key in (
     assert key in full, f'MQTT Display latest-wins contract missing: {key}'
 assert 'if((!cover_update_queue&&!pending_covers)||size>768)return false;' in full
 print('PASS retained Display settings coalesced and media cover fallback preserved')
+
+# DHCP/manual/fixed_auto is an inseparable 6-field profile. On the old port
+# each field was written separately and the device could reboot with mixed
+# IPv4 settings if NVS writes failed. Native web_profile is ONE NVS value,
+# with a read-only fallback for preexisting web_mode/web_ip/.. keys.
+for required in (
+    'static bool read_atomic_web_profile(nvs_handle_t nv,',
+    'nvs_get_str(nv,"web_profile",encoded,&cap)',
+    'bool stored=read_atomic_web_profile(nv,mode,ip,mask,gw,dns1,dns2);',
+    'err=nvs_set_str(nv,"web_profile",profile_json);',
+    'esp_err_t rollback=esp_wifi_set_config(WIFI_IF_STA,&prior);',
+    'has_web_profile=read_atomic_web_profile(profile_nv,',
+    'if(!has_native_profiles&&!has_web_profile&&(!have_sta || legacy_saved)){',
+):
+    assert required in recovery, f'Native atomic network profile missing: {required}'
+assert 'err=nvs_set_str(nv,"web_mode",mode);' not in recovery
+assert 'static bool atomic_web_field(const char *key,char *out,size_t cap)' in handlers
+assert 'atomic_web_field("mode",value,sizeof(value))' in handlers
+assert 'atomic_web_field(network_fields[i].atom,value,sizeof(value))' in handlers
+assert 'nvs_text("mira_idf_net",network_fields[i].key,"",value,sizeof(value));' in handlers
+print('PASS single-record IPv4 config, STA rollback, legacy profile fallback and Web fields')
