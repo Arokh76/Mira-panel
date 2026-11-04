@@ -1229,7 +1229,7 @@ static esp_err_t programui(httpd_req_t *req) {
     const cJSON *widgets=root?cJSON_GetObjectItemCaseSensitive(root,"lvgl"):NULL;
     bool valid=cJSON_IsArray(widgets);
     const int count=valid?cJSON_GetArraySize(widgets):0;
-    if(count>64)valid=false;  // Same bound as Mira's native LVGL importer.
+    if(count>40)valid=false;  // Exact firmware-beta MiraPanelUI::MAX_BINDINGS.
     if(valid){
         const cJSON *entry=NULL;
         cJSON_ArrayForEach(entry,widgets){
