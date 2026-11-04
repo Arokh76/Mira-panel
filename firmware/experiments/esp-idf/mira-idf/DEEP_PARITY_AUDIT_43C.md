@@ -49,6 +49,15 @@ La première vérification avait confirmé la présence des fonctions, mais pas 
 
 **État de validation.** Contrôles statiques et CI obligatoires avant de considérer ces changements compilables ; ensuite seulement validation physique. Le rapport ne prétend ni à l'équivalence pixel à pixel, ni à une exécution de toutes les interactions Web/LVGL, ni à une migration intégralement testée avec secrets et paramétrages réels.
 
+## Divergences encore ouvertes après la lecture croisée
+
+- **Curseurs et roue de couleur pendant un glissement.** Arduino `MiraPanelUI::onRange()`, `onRoundRange()` et `onColor()` envoie une action lors des changements de valeur puis une confirmation au relâchement. Dans `mira_full.c`, les contrôles correspondants déclenchent `event_local` seulement sur `LV_EVENT_RELEASED`. La valeur finale est envoyée, mais pas les commandes intermédiaires. Cette différence est **confirmée dans le code**. Reproduire les envois intermédiaires sans coalescence saturerait facilement la file HTTP Jeedom et pourrait perdre la dernière commande ; une vraie parité de transport suppose de concevoir et tester un mécanisme de dernière valeur prioritaire.
+- **Capacités des interfaces physiques.** Les E/S isolées Waveshare ne sont pas une traduction électrique des GPIO du WT32 ; le comportement précis de chaque polarité et mode de démarrage dépend d'essais réels.
+- **Enveloppes MQTT inhabituelles.** Le parseur IDF accepte désormais jusqu'à 1024 octets d'enveloppe et 159/768 octets décodés ; les limites de paquets de la pile Arduino et d'ESP-MQTT ne sont pas strictement identiques.
+- **Protocole d'installation.** La mise à jour automatique ne pourra être validée qu'après publication d'une version native spécifique ; aucun firmware Arduino ne doit être traité comme un OTA IDF.
+
+**Conclusion de l'audit source :** les traitements principaux et leurs formats échangés ont été comparés et les différences documentées ci-dessus restent explicites. Ce rapport ne constitue pas un certificat de parité totale : les scénarios réseau, les effets LVGL et les chemins de réinitialisation restent à éprouver sur le Waveshare physique.
+
 ## Limites à ne pas dissimuler
 
 1. La présence d'un handler ne démontre pas la compatibilité de ses effets ; les tests automatiques sont majoritairement structurels.
