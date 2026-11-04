@@ -626,10 +626,16 @@ static void event_live_range(lv_event_t *event){
     if(!w||!w->control)return;
     const int value=(!strcmp(w->type,"range")) ?
         lv_slider_get_value(w->control) : lv_arc_get_value(w->control);
-    if(w->live_sent&&w->live_last_value==value)return;
+    const lv_event_code_t code=lv_event_get_code(event);
     const uint32_t now=lv_tick_get();
-    if(lv_event_get_code(event)==LV_EVENT_VALUE_CHANGED&&
-       w->live_sent&&(uint32_t)(now-w->live_last_tick)<180u)return;
+    /* Arduino beta: range and roundrange send every changed value,
+     * including the release even if unchanged. Thermostat alone throttles
+     * VALUE_CHANGED by 130 ms and always sends on release. */
+    if(code==LV_EVENT_VALUE_CHANGED){
+        if(w->live_sent&&w->live_last_value==value)return;
+        if(!strcmp(w->type,"thermostat")&&w->live_last_tick!=0&&
+           (uint32_t)(now-w->live_last_tick)<130u)return;
+    }else if(code!=LV_EVENT_RELEASED)return;
     event_local(event);
     w->live_sent=true;
     w->live_last_value=value;
@@ -1505,8 +1511,8 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
             lv_obj_set_style_bg_color(w->control,cyan_c(),LV_PART_INDICATOR);
             lv_obj_set_style_bg_color(w->control,lv_color_hex(0xEAF7FF),LV_PART_KNOB);
         }
-        // Live beta-like drag with 180 ms rate limit; release sends any final
-        // value skipped by throttling, without duplicating the last command.
+        // Beta source: live changes (130 ms only for thermostat) and
+        // unconditional final release, including the final matching value.
         lv_obj_add_event_cb(w->control,event_live_range,LV_EVENT_VALUE_CHANGED,w);
         lv_obj_add_event_cb(w->control,event_live_range,LV_EVENT_RELEASED,w);
         return;
