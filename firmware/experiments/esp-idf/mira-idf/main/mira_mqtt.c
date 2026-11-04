@@ -13,6 +13,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <inttypes.h>
+#include <ctype.h>
 
 static const char *TAG="mira-mqtt-idf";
 static esp_mqtt_client_handle_t client;
@@ -37,6 +38,46 @@ static void stop_client(void) {
     esp_mqtt_client_destroy(client);
     client=NULL;
 }
+/* MiraMqtt::mqttPayloadValue in firmware-beta trims the MQTT envelope
+ * BEFORE parsing a small {"value":...} JSON object. The first IDF port
+ * rejected JSON envelopes larger than the final 159-byte info value and
+ * failed to recognize envelopes beginning with whitespace.
+ *
+ * Accept a bounded envelope (not arbitrary broker data), decode, then
+ * apply the existing 159/768-byte *decoded* value limit. Preserve any
+ * interior whitespace of JSON string properties, as Arduino does.
+ */
+static bool mqtt_decode_payload(const char *payload,int length,
+                                char *out,size_t capacity,size_t max_value){
+    if(!payload||!out||!capacity||length<0||length>1024)return false;
+    if(memchr(payload,0,(size_t)length)!=NULL)return false;
+    char envelope[1025]={0};
+    memcpy(envelope,payload,(size_t)length);
+    size_t used=(size_t)length,leading=0;
+    while(leading<used&&isspace((unsigned char)envelope[leading]))leading++;
+    while(used>leading&&isspace((unsigned char)envelope[used-1]))used--;
+    if(used==leading)return false;
+    if(leading)memmove(envelope,envelope+leading,used-leading);
+    envelope[used-leading]=0;
+    const char *decoded=envelope;
+    char *owned=NULL;
+    cJSON *json=NULL;
+    if(envelope[0]=='{'){
+        json=cJSON_Parse(envelope);
+        const cJSON *item=json?cJSON_GetObjectItemCaseSensitive(json,"value"):NULL;
+        if(cJSON_IsString(item)&&item->valuestring)decoded=item->valuestring;
+        else if(item){
+            owned=cJSON_PrintUnformatted(item);
+            if(owned)decoded=owned;
+        }
+    }
+    size_t final_len=strlen(decoded);
+    const bool valid=final_len<=max_value && final_len<capacity;
+    if(valid)memcpy(out,decoded,final_len+1);
+    if(owned)cJSON_free(owned);
+    if(json)cJSON_Delete(json);
+    return valid;
+}
 static void incoming_state(const char *topic, int tlen, const char *payload, int plen) {
     const size_t prefix_len=strlen(state_prefix);
     if(tlen <= (int)prefix_len || tlen > (int)prefix_len + 95 || plen<0)return;
@@ -46,29 +87,15 @@ static void incoming_state(const char *topic, int tlen, const char *payload, int
     const size_t n=strlen(name);
     const bool cover=n>=7&&!strcmp(name+n-7,"__cover");
     const size_t limit=cover?768u:159u;
-    if((size_t)plen>limit)return;
     char value[769]={0};
-    memcpy(value,payload,(size_t)plen);
-    if(memchr(value,'\0',(size_t)plen))return;
-    if(value[0]=='{'){
-        cJSON *root=cJSON_Parse(value);
-        const cJSON *v=root?cJSON_GetObjectItemCaseSensitive(root,"value"):NULL;
-        if(cJSON_IsString(v)&&v->valuestring){
-            if(strlen(v->valuestring)>limit){cJSON_Delete(root);return;}
-            snprintf(value,sizeof(value),"%s",v->valuestring);
-        }else if(cJSON_IsNumber(v))
-            snprintf(value,sizeof(value),"%.9g",v->valuedouble);
-        else if(cJSON_IsBool(v))
-            snprintf(value,sizeof(value),"%s",cJSON_IsTrue(v)?"1":"0");
-        if(root)cJSON_Delete(root);
-    }
+    if(!mqtt_decode_payload(payload,plen,value,sizeof(value),limit))return;
     (void)mira_full_enqueue_state(name,value);
 }
 // Mira beta: mira/<screen>/Display/<key>/set
 // Queue only; no LVGL calls or state-to-action MQTT feedback here.
 static void incoming_display(const char *topic,int length,const char *payload,int plen){
     const size_t prefix_len=strlen(display_prefix);
-    if(length<=(int)prefix_len+4||plen<1||plen>=48||
+    if(length<=(int)prefix_len+4||plen<1||
        strncmp(topic,display_prefix,prefix_len)!=0)return;
     const size_t remaining=(size_t)length-prefix_len;
     if(remaining<=4||memcmp(topic+length-4,"/set",4)!=0)return;
@@ -78,9 +105,15 @@ static void incoming_display(const char *topic,int length,const char *payload,in
     memcpy(key,topic+prefix_len,key_len);
     for(size_t i=0;i<key_len;i++)
         if(key[i]=='/'||key[i]=='+'||key[i]=='#')return;
-    memcpy(value,payload,(size_t)plen);
-    if(memchr(value,'\0',(size_t)plen)!=NULL)return;
-    (void)mira_full_enqueue_display_command(key,value);
+    if(!mqtt_decode_payload(payload,plen,value,sizeof(value),47u))return;
+    if(mira_full_enqueue_display_command(key,value)){
+        /* Arduino publishDisplayStates(true) sends the new retained values
+         * after every Display/<key>/set, without waiting for the normal
+         * 15-second change scan. The LVGL task will apply this command
+         * before sending the next snapshot; no cross-thread LVGL access.
+         */
+        last_display_signature[0]=0;
+    }
 }
 static void mqtt_event(void *arg, esp_event_base_t base,int32_t event_id,void *event_data) {
     (void)arg;(void)base;
