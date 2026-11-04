@@ -42,7 +42,7 @@
 #define MIRA_HEIGHT 480
 #define NAV_H 50
 #define CONTENT_H (MIRA_HEIGHT - NAV_H)
-#define MAX_WIDGETS 64
+#define MAX_WIDGETS 40 // beta MiraPanelUI::MAX_BINDINGS
 #define JSON_MAX 49152
 static const char *TAG="mira-full-43";
 static const char *JSON_PATH="/spiffs/miralvgl.json";
