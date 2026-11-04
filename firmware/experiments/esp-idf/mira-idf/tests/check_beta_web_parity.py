@@ -861,3 +861,19 @@ assert '!decimal_id(id)||!decimal_id(value)||' in jeedom
 assert 'if(!decimal_id(id)||!decimal_id(off)||!decimal_id(on)||' in jeedom
 assert 'if(!query_param(req,"value",id,sizeof(id))||!decimal_id(id))' in jeedom
 print('PASS Web/Jeedom mapping endpoints validate complete decimal IDs')
+
+# GET /get?infofa= must not return a different type's cached value.
+assert '(!strcmp(kind,"infofa")&&!strcmp(type,"infofa"))' in jeedom
+print('PASS exact Info vs InfoFA selector semantics on legacy /get')
+
+# The untouched original beta HTML submits all five /update Web forms
+# as POST URL query parameters. The native HTTP dispatcher must interpret
+# those selectors before the binary firmware-upload path and require auth.
+for selector in ("send=","send_range=","send_list=","send_color=","send_textbox="):
+    assert selector in recovery, selector
+for key in ('"send"','"send_range"','"send_list"','"send_color"','"send_textbox"'):
+    assert key in jeedom[jeedom.index('esp_err_t mira_jeedom_beta_web_action('):
+                          jeedom.index('esp_err_t mira_jeedom_beta_legacy_get_update(')]
+assert 'if(!mira_beta_web_authorized(req))return ESP_FAIL;' in recovery
+assert 'if(!mira_beta_web_authorized(req))return ESP_FAIL;' in jeedom
+print('PASS beta Web POST action dispatch, auth gate and selector names')
