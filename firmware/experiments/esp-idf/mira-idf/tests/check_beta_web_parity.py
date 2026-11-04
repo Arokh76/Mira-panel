@@ -553,3 +553,52 @@ assert 'esp_ota_set_boot_partition(partition)' in update
 assert 'mira_beta_update_trigger' in setup
 assert 'mira_beta_update_status' in setup
 print("PASS IDF OTA install and version check share exact target/hash policy")
+
+
+# In-depth behavioral parity contracts from the *actual Arduino source*.
+# These are not merely route/widget-count checks.
+beta_ui_header=(root/"firmware/source/consolidated/MIRA_PANEL/MiraPanelUI.h").read_text(encoding="utf-8")
+beta_ui_impl=(root/"firmware/source/consolidated/MIRA_PANEL/MiraPanelUI.cpp").read_text(encoding="utf-8")
+beta_server_impl=(root/"firmware/source/consolidated/MIRA_PANEL/MiraPanelServer.cpp").read_text(encoding="utf-8")
+assert "MAX_BINDINGS = 40" in beta_ui_header
+assert "#define MAX_WIDGETS 40" in full
+assert "if(count>40)valid=false;" in jeedom
+assert 'if(nvs_open("mira_idf_jeed",NVS_READONLY,&nv)!=ESP_OK)' in jeedom
+assert 'return httpd_resp_sendstr(req,"Null");' in jeedom
+assert 'const bool ready=saved_mode&&!strcmp(on,"1")&&' in jeedom
+assert 'const bool mapped=slot>=0&&links[slot].kind<2;' in gpio
+print("PASS exact 40-widget beta limit, no implicit Jeedom and no read-only GPIO interception")
+
+# Arduino IndexSetToggle stores symbolic On/Off, not MQTT booleans; /get
+# must return the symbolic value even when the widget cache has 1 or 0.
+assert 'Value_0 = "Off";' in beta_server_impl
+assert 'Value_1 = "On";' in beta_server_impl
+assert 'snprintf(result,sizeof(result),"%s",on?"On":"Off");' in jeedom
+assert 'jstr((cJSON*)entry,"state","Off")' in jeedom
+assert 'return httpd_resp_sendstr(req,err==ESP_OK?value:"Null");' in jeedom
+print("PASS Arduino symbolic toggle GET and absent parameter readback")
+
+# IndexAddList stores an INTEGER initial selected ID on ALL option rows.
+# The previously used string default for later options diverged from the
+# Jeedom plugin's JSON expectations.
+assert 'Action["value"] = Listes_Value[k];' in beta_server_impl
+assert 'cJSON_AddNumberToObject(entry,"value",first_id);' in jeedom
+assert 'cJSON_AddStringToObject(entry,"value",text);' not in jeedom
+print("PASS numeric list default types across all option rows")
+
+# Arduino trims the outer MQTT envelope, parses {"value":...} when present,
+# then dispatches the decoded text; a 150-character value enclosed in JSON
+# must not be rejected just because the raw envelope is >159 bytes.
+assert 'String value = payload;' in beta_ui_impl
+assert 'value.trim();' in beta_ui_impl
+assert 'value.startsWith("{")' in beta_ui_impl
+assert 'static bool mqtt_decode_payload(' in mqtt
+assert 'while(leading<used&&isspace((unsigned char)envelope[leading]))leading++;' in mqtt
+assert 'cJSON_GetObjectItemCaseSensitive(json,"value")' in mqtt
+assert 'final_len<=max_value' in mqtt
+assert 'mqtt_decode_payload(payload,plen,value,sizeof(value),limit)' in mqtt
+assert 'if(mira_full_enqueue_display_command(key,value)){' in mqtt
+assert 'last_display_signature[0]=0;' in mqtt
+assert 'out.trim();' in beta_ui_impl
+assert 'while(*src&&isspace((unsigned char)*src))src++;' in full
+print("PASS beta MQTT envelope decoding, topic trimming and immediate display feedback")
