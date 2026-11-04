@@ -478,3 +478,75 @@ assert 'esp_ota_get_partition_description(target,&candidate)' in (idf/"mira_beta
 assert 'set(PROJECT_VER "0.7.37")' in (idf.parent/"CMakeLists.txt").read_text(encoding="utf-8")
 assert "id='install'" not in web or "Installer la mise à jour IDF" in web
 print("PASS native OTA auto/manual target isolation, authenticated trigger and SHA-256 contract")
+
+# Deep source-derived contract audit: compare every GET/POST historical
+# AsyncWebServer route to the registered esp_http_server routes. The 4.3C
+# has native isolated DI/DO bindings, so GPIO routes must remain present
+# too, not dropped as if the hardware had no I/O.
+beta_server=(root/"firmware/source/consolidated/MIRA_PANEL/MiraPanelServer.cpp").read_text(encoding="utf-8")
+native_sources={
+    p.name:p.read_text(encoding="utf-8")
+    for p in idf.glob("*.c")
+}
+legacy_routes=set(
+    (verb,path)
+    for path,verb in re.findall(
+        r'server\.on\(\s*"([^"]+)"\s*,\s*HTTP_(GET|POST)',beta_server)
+)
+native_routes=set(
+    (verb,path)
+    for body in native_sources.values()
+    for path,verb in re.findall(
+        r'\.uri\s*=\s*"([^"]+)"\s*,\s*\.method\s*=\s*HTTP_(GET|POST)',
+        body,re.S
+    )
+)
+missing=sorted(legacy_routes-native_routes)
+assert not missing, f"Unported beta HTTP routes: {missing}"
+assert all(
+    ("POST",path) in native_routes
+    for path in ("/gpio/config","/gpio/link","/gpio/raw",
+                 "/gpio/multi/config","/gpio/set")
+)
+gpio=native_sources["mira_gpio43.c"]
+assert 'const bool mapped=slot>=0&&links[slot].kind<2;' in gpio
+assert 'mira_gpio43_toggle_mapped' in gpio
+assert 'mira_gpio43_multi_visible' in gpio
+assert 'mira_gpio43_write_physical' in gpio
+assert 'mira_gpio43_state' in gpio
+assert 'mira_gpio43_init' in gpio
+assert 'mira_beta_web_gpio_multi' in setup
+assert 'mira_beta_web_gpio_link' in setup
+print(f"PASS all {len(legacy_routes)} beta GET/POST routes present, "
+      "including Waveshare native isolated GPIO")
+
+# Jeedom-beta plugin confirms actions AND infos with exactly the remote
+# command ID. Preserve bounded acknowledgment capture and at-most-three
+# sends with 3-second retry spacing (beta SendQueud).
+jeedom_plugin=(root/"core/class/mira.class.php")
+# Plugin lives in a separate jeedom-beta branch, so source retrieval is
+# external to this CI checkout. Keep validation of the native contract here.
+assert 'capture_jeedom_ack' in jeedom
+assert 'acknowledgement.overflow' in jeedom
+assert 'for(unsigned attempt=1;attempt<=3;attempt++)' in jeedom
+assert 'vTaskDelay(pdMS_TO_TICKS(3000))' in jeedom
+assert '!strcmp(reply,remote_id)' in jeedom
+assert 'same_index_structure(local,remote)' in jeedom
+assert 'ui_config_hash(config)' in jeedom
+assert 'if(!mapped||strncmp(binding,expected_prefix,9)!=0)return;' in jeedom
+print("PASS Jeedom response acknowledgment, retry and index mapping safeguards")
+
+# The check and installer must share EXACTLY one eligibility validator.
+update=native_sources["mira_beta_update.c"]
+assert 'static bool ota_manifest_entry(' in update
+check=update.split('esp_err_t mira_beta_update_check(',1)[1].split(
+    'esp_err_t mira_beta_update_legacy_page(',1)[0]
+assert 'ota_manifest_entry(url,hash,&bytes,remote)' in check
+assert 'ota_manifest_entry(url,digest,&expected,remote_version)' in update
+assert 'strcasecmp(hex,digest)!=0' in update
+assert 'esp_ota_get_partition_description(partition,&candidate)' in update
+assert 'strcmp(candidate.project_name,"mira_idf_scroll")!=0' in update
+assert 'esp_ota_set_boot_partition(partition)' in update
+assert 'mira_beta_update_trigger' in setup
+assert 'mira_beta_update_status' in setup
+print("PASS IDF OTA install and version check share exact target/hash policy")
