@@ -4,6 +4,7 @@
 #include "mira_beta_setup.h"
 #include "mira_beta_setup_pages.h"
 #include "mira_beta_web.h"
+#include "mira_beta_networks.h"
 #include "mira_beta_ota.h"
 #include "mira_beta_update.h"
 #include "mira_beta_data.h"
@@ -310,6 +311,41 @@ static esp_err_t save_post(httpd_req_t *req){
             nvs_close(nv);
         }
         if(err==ESP_OK)err=esp_wifi_set_config(WIFI_IF_STA,&sta);
+        /* The initial wizard must populate the SAME saved-network directory
+         * used by the beta Web manager, not only ESP-IDF's STA NVS settings. */
+        if(err==ESP_OK){
+            mira_beta_network_t *profiles=calloc(MIRA_NET_MAX,sizeof(*profiles));
+            if(!profiles)err=ESP_ERR_NO_MEM;
+            else {
+                size_t count=0;
+                err=mira_beta_networks_list(profiles,&count,MIRA_NET_MAX);
+                int id=-1;
+                if(err==ESP_OK){
+                    for(size_t i=0;i<count;i++)
+                        if(!strcmp(profiles[i].ssid,ssid)){id=profiles[i].id;break;}
+                    if(id<0&&count>=MIRA_NET_MAX)err=ESP_ERR_INVALID_SIZE;
+                    if(err==ESP_OK&&id<0){
+                        for(int candidate=0;candidate<=999;candidate++){
+                            bool used=false;
+                            for(size_t i=0;i<count;i++)
+                                if(profiles[i].id==candidate){used=true;break;}
+                            if(!used){id=candidate;break;}
+                        }
+                        if(id<0)err=ESP_ERR_INVALID_SIZE;
+                    }
+                }
+                free(profiles);
+                if(err==ESP_OK){
+                    mira_beta_network_t profile={0};
+                    profile.id=id;
+                    snprintf(profile.ssid,sizeof(profile.ssid),"%s",ssid);
+                    snprintf(profile.ip_mode,sizeof(profile.ip_mode),"%s",
+                             auto_ip?"auto":"fixed_auto");
+                    if(!auto_ip)snprintf(profile.ip,sizeof(profile.ip),"%s",ip);
+                    err=mira_beta_networks_upsert(&profile,password);
+                }
+            }
+        }
         memset(password,0,sizeof(password));
         if(err!=ESP_OK){
             ESP_LOGE(TAG,"Wi-Fi profile save failed: %s",esp_err_to_name(err));
