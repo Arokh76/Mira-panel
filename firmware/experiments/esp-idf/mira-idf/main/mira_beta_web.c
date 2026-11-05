@@ -411,25 +411,18 @@ static esp_err_t registered_network_rows(httpd_req_t *req){
         free(profiles);
         return chunk(req,"<div class=\"empty\">Aucun réseau n'est enregistré.</div>");
     }
-    network_action_nonce=esp_random();
-    if(!network_action_nonce)network_action_nonce=1;
-    network_nonce_time=esp_timer_get_time();
+    // Match the original WT32 beta: a saved network is a clickable row
+    // leading to edit/delete. Do not add a separate "Activer" command,
+    // especially for the network already in use.
     for(size_t i=0;i<count;i++){
-        char head[210]={0},tail[260]={0};
+        char head[210]={0};
         int id=profiles[i].id;
         snprintf(head,sizeof(head),
                  "<div class=\"network-item\"><span class=\"network-id\">%d</span>"
-                 "<button class=\"network-button\" onclick=\"window.location.href='/load?nav=update&amp;network=%d'\">",
+                 "<button type=\"button\" class=\"network-button\" onclick=\"window.location.href='/load?nav=update&amp;network=%d'\">",
                  id,id);
         if(chunk(req,head)!=ESP_OK||escaped(req,profiles[i].ssid)!=ESP_OK||
-           chunk(req,"</button>")!=ESP_OK){free(profiles);return ESP_FAIL;}
-        snprintf(tail,sizeof(tail),
-                 "<form method=\"POST\" action=\"/mira/network?action=activate&amp;network=%d\" "
-                 "style=\"display:inline\">"
-                 "<input type=\"hidden\" name=\"nonce\" value=\"%08lx\">"
-                 "<button class=\"btn secondary\" type=\"submit\">Activer</button></form></div>",
-                 id,(unsigned long)network_action_nonce);
-        if(chunk(req,tail)!=ESP_OK){free(profiles);return ESP_FAIL;}
+           chunk(req,"</button></div>")!=ESP_OK){free(profiles);return ESP_FAIL;}
     }
     free(profiles);
     return ESP_OK;
