@@ -2438,6 +2438,9 @@ static esp_err_t save_remote_mapping(nvs_handle_t nvs,int local,int remote,uint3
     snprintf(value,sizeof(value),"%08" PRIx32 ":%d",hash,remote);
     return nvs_set_str(nvs,key,value);
 }
+/* Expose a sanitized mapping diagnostic for the Jeedom "unknown Mira ID"
+ * error. Do not guess a replacement ID or disable the plugin validation. */
+static volatile int last_binding_sync_http;
 static void sync_jeedom_bindings(void){
     nvs_handle_t cfg;
     if(nvs_open("mira_idf_jeed",NVS_READONLY,&cfg)!=ESP_OK)return;
@@ -2478,14 +2481,19 @@ static void sync_jeedom_bindings(void){
     esp_err_t result=esp_http_client_perform(client);
     const int status=esp_http_client_get_status_code(client);
     esp_http_client_cleanup(client);
+    last_binding_sync_http=status;
     if(result!=ESP_OK||status!=200||reply.overflow||reply.used<2){
         free(reply.buf);
-        ESP_LOGW(TAG,"Jeedom mapping not ready (HTTP %d)",status);
+        ESP_LOGW(TAG,"Jeedom Init Cmd ID %s not accepted: HTTP %d, transport %s",
+                 init,status,esp_err_to_name(result));
         return;
     }
     cJSON *remote=cJSON_ParseWithLength(reply.buf,reply.used);
     free(reply.buf);
-    if(!remote)return;
+    if(!remote){
+        ESP_LOGW(TAG,"Jeedom Init Cmd ID %s returned no valid command mapping",init);
+        return;
+    }
     char *config=read_config(NULL);
     if(!config){cJSON_Delete(remote);return;}
     const uint32_t hash=ui_config_hash(config);
@@ -2562,17 +2570,23 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
     if(nvs_ok)nvs_close(map);
     if(index)cJSON_Delete(index);
     nvs_handle_t cfg;
-    bool enabled=false; // Match beta GetParamBool("Jeedom") when absent.
+    bool enabled=false;
+    char init_id[24]={0};
     if(nvs_open("mira_idf_jeed",NVS_READONLY,&cfg)==ESP_OK){
         char v[8]={0};
         if(nvs_read_string(cfg,"Jeedom",v,sizeof(v)))enabled=strcmp(v,"0")!=0;
+        (void)nvs_read_string(cfg,"Jeedom_Init_Cmd",init_id,sizeof(init_id));
         nvs_close(cfg);
     }
-    char body[160];
+    if(!decimal_id(init_id))init_id[0]=0;
+    char body[248];
     snprintf(body,sizeof(body),
-        "{\"jeedom_enabled\":%s,\"mapping_valid\":%s,\"ids_valid\":%d,\"ids_expected\":%d}",
+        "{\"jeedom_enabled\":%s,\"mapping_valid\":%s,"
+        "\"ids_valid\":%d,\"ids_expected\":%d,"
+        "\"init_cmd_id\":\"%s\",\"last_init_http\":%d}",
         enabled?"true":"false",
-        (enabled&&total>0&&valid==total)?"true":"false",valid,total);
+        (enabled&&total>0&&valid==total)?"true":"false",valid,total,
+        init_id,last_binding_sync_http);
     httpd_resp_set_type(req,"application/json");
     return httpd_resp_sendstr(req,body);
 }
