@@ -1066,3 +1066,14 @@ assert 'for(int candidate=0;candidate<=999;candidate++)' in web_wifi
 assert web_wifi.index('mira_beta_networks_list(')<web_wifi.index('mira_recovery_save_beta_wifi(')
 assert 'mira_beta_network_t previous[MIRA_NET_MAX]' not in web_wifi
 print('PASS beta Web Wi-Fi setup validates NVS directory and allocates profiles off task stack')
+
+# The legacy cipher is initialized with the historical 16-byte key in
+# MiraPanelServer::Init(), NOT with Cipher's constructor default. Verify
+# both sides before trusting the NVS migration path.
+legacy_spiffs=(root/'firmware/source/consolidated/MIRA_PANEL/SPIFFS_Process.h').read_text(encoding='utf-8')
+legacy_server=(root/'firmware/source/consolidated/MIRA_PANEL/MiraPanelServer.cpp').read_text(encoding='utf-8')
+legacy_cipher=(idf/'mira_legacy_cipher.c').read_text(encoding='utf-8')
+assert 'char* key = "C1W0CleCipherMMn";' in legacy_spiffs
+assert 'cipher->setKey(key);' in legacy_server
+assert "'C','1','W','0','C','l','e','C','i','p','h','e','r','M','M','n'" in legacy_cipher
+print('PASS historic SPIFFS AES key matches Arduino server initialization')
