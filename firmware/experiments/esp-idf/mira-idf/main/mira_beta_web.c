@@ -150,6 +150,10 @@ static bool decimal(const char *s,unsigned max,unsigned *out){
     return true;
 }
 static esp_err_t chunk(httpd_req_t *r,const char *s){
+    // HTTP chunked transfer: a zero-length chunk TERMINATES the response.
+    // Empty beta placeholders (e.g. unchecked MQTTCHECKED, blank credentials)
+    // must emit nothing, not the final chunk of the HTML page.
+    if(!s||!*s)return ESP_OK;
     return httpd_resp_send_chunk(r,s,HTTPD_RESP_USE_STRLEN);
 }
 static esp_err_t escaped(httpd_req_t *r,const char *s){
