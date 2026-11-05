@@ -1166,3 +1166,12 @@ assert '/mira/clock/status' in recovery
 config=(root/'firmware/experiments/esp-idf/mira-idf/sdkconfig.defaults').read_text(encoding='utf-8')
 assert 'CONFIG_LWIP_SNTP_MAX_SERVERS=3' in config
 print('PASS NTP: 3 fallback servers and local clock diagnostics')
+
+# A stale Jeedom Init Cmd ID (e.g. after equipment recreation) must be
+# visible to diagnostics, never silently mapped to a different command type.
+assert 'init_cmd_id' in jeedom
+assert 'last_init_http' in jeedom
+assert 'last_binding_sync_http=status;' in jeedom
+assert 'Jeedom Init Cmd ID %s not accepted' in jeedom
+assert 'last_binding_sync_http' in jeedom
+print('PASS Jeedom Init Cmd diagnostic retains strict command ID validation')
