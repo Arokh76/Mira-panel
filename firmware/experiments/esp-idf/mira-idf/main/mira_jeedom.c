@@ -2570,7 +2570,7 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
     if(nvs_ok)nvs_close(map);
     if(index)cJSON_Delete(index);
     nvs_handle_t cfg;
-    bool enabled=false;
+    bool enabled=false; // Match beta GetParamBool("Jeedom") when absent.
     char init_id[24]={0};
     if(nvs_open("mira_idf_jeed",NVS_READONLY,&cfg)==ESP_OK){
         char v[8]={0};
