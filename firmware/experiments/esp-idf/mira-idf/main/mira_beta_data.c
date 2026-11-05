@@ -134,7 +134,18 @@ static esp_err_t do_scope(const char *scope){
         e=clear_namespace("mira_idf_mqtt");
         if(e!=ESP_OK)return e;
         e=clear_namespace("mira_idf_jeed");
-        return e;
+        if(e!=ESP_OK)return e;
+        // The Jeedom ID translation table is derived from miralvgl.json.
+        // Keeping the old map after resetting that file risks commands
+        // targeting the previous widget configuration on reboot.
+        e=clear_namespace("mira_idf_map");
+        if(e!=ESP_OK)return e;
+        // Wiring links and multiaction sequences refer to widget names
+        // that have just been erased. Drop those links, but retain
+        // physical DI/DO modes and calibration in mira43gpio.
+        e=clear_namespace("mira43links");
+        if(e!=ESP_OK)return e;
+        return clear_namespace("mira43multi");
     }
     if(!strcmp(scope,"rstall")){
         // Only after an authenticated, fresh POST confirmation.
