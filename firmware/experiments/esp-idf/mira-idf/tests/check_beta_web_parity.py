@@ -86,6 +86,20 @@ assert 'BETA_OVERLAY_KEY "wifi_profiles"' in networks
 assert 'mira_beta_web_network_post' in setup
 assert 'mira_beta_networks_remove(id)' in handlers and 'mira_beta_networks_activate(id)' in handlers
 assert 'mira_beta_known_networks_html' in handlers and 'mira_beta_edit_network_html' in handlers
+# Prevent the two network regressions observed on a physical 4.3C.
+# The Wi-Fi discovery must NOT run synchronously in the single HTTP worker,
+# and first-run credentials must be visible in Mira's saved-network directory.
+assert 'static void wifi_scan_worker(' in handlers
+assert 'xTaskCreate(wifi_scan_worker,' in handlers
+assert 'mira_beta_web_wifi_scan_get(' in handlers
+assert 'mira_beta_web_wifi_choices(req)' in setup
+assert 'uri="/mira/wifi/scan"' in setup
+assert 'mira_beta_web_authorized(req)' in setup
+assert 'mira_beta_networks_upsert(&profile,password)' in setup
+assert 'mira_beta_networks_recover_station();' in handlers
+assert 'mira_beta_networks_recover_station(void)' in networks
+assert 'if(err==ESP_OK)return ESP_OK; // Includes an intentionally empty list.' in networks
+print("PASS nonblocking Wi-Fi scan, authenticated listing and initial profile persistence")
 print("PASS beta network list, edit, activation and removal routes")
 print("PASS beta Wi-Fi AP and reset safety contracts")
 # The first physical Waveshare 4.3C setup entered HTTP 403 on
