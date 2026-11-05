@@ -5,6 +5,9 @@
 // No Arduino web server, no replacement UI.
 esp_err_t mira_beta_web_load(httpd_req_t *req);
 esp_err_t mira_beta_web_save(httpd_req_t *req);
+// Non-blocking Wi-Fi selector and authenticated cached scan endpoint.
+esp_err_t mira_beta_web_wifi_choices(httpd_req_t *req);
+esp_err_t mira_beta_web_wifi_scan_get(httpd_req_t *req);
 esp_err_t mira_beta_web_display_save(httpd_req_t *req);
 
 // Shared by beta System OTA and pages; enforces the original admin password.
