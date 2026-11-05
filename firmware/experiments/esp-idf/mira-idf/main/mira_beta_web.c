@@ -401,7 +401,7 @@ static esp_err_t registered_network_rows(httpd_req_t *req){
     if(recovered!=ESP_OK)
         ESP_LOGW(TAG,"Saved Wi-Fi list recovery unavailable: %s",esp_err_to_name(recovered));
     mira_beta_network_t *profiles=calloc(MIRA_NET_MAX,sizeof(*profiles));
-    if(!profiles)return html_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Mémoire réseaux insuffisante");
+    if(!profiles)return chunk(req,"<div class=\"empty\">Mémoire réseaux insuffisante.</div>");
     size_t count=0;
     if(mira_beta_networks_list(profiles,&count,MIRA_NET_MAX)!=ESP_OK){
         free(profiles);
@@ -422,14 +422,14 @@ static esp_err_t registered_network_rows(httpd_req_t *req){
                  "<button class=\"network-button\" onclick=\"window.location.href='/load?nav=update&amp;network=%d'\">",
                  id,id);
         if(chunk(req,head)!=ESP_OK||escaped(req,profiles[i].ssid)!=ESP_OK||
-           chunk(req,"</button>")!=ESP_OK)return ESP_FAIL;
+           chunk(req,"</button>")!=ESP_OK){free(profiles);return ESP_FAIL;}
         snprintf(tail,sizeof(tail),
                  "<form method=\"POST\" action=\"/mira/network?action=activate&amp;network=%d\" "
                  "style=\"display:inline\">"
                  "<input type=\"hidden\" name=\"nonce\" value=\"%08lx\">"
                  "<button class=\"btn secondary\" type=\"submit\">Activer</button></form></div>",
                  id,(unsigned long)network_action_nonce);
-        if(chunk(req,tail)!=ESP_OK)return ESP_FAIL;
+        if(chunk(req,tail)!=ESP_OK){free(profiles);return ESP_FAIL;}
     }
     free(profiles);
     return ESP_OK;
