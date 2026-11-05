@@ -36,6 +36,15 @@
 static const char *TAG = "mira-idf-ota";
 static volatile int pending_shadow_request = -1;
 static bool clock_sntp_started;
+static volatile bool clock_sntp_synced;
+static volatile time_t clock_last_sync_epoch;
+// Callback fires only after an NTP response actually updates the system clock.
+static void mira_ntp_synced(struct timeval *tv){
+    if(!tv)return;
+    clock_last_sync_epoch=tv->tv_sec;
+    clock_sntp_synced=true;
+    ESP_LOGI(TAG,"NTP time synchronized; UTC epoch=%lld",(long long)tv->tv_sec);
+}
 static volatile int pending_scroll_request = -1;
 static volatile int pending_auto_request = -1;
 static volatile int pending_bench_request = -1;
@@ -576,11 +585,13 @@ static void wifi_status_event(void *arg,esp_event_base_t base,int32_t id,void *d
     if(base==IP_EVENT&&id==IP_EVENT_STA_GOT_IP){
         station_connected=true;
         legacy_finish_fixed_auto();
-        if(!clock_sntp_started){
-            esp_err_t time_err=esp_netif_sntp_start();
-            if(time_err==ESP_OK)clock_sntp_started=true;
-            else ESP_LOGW(TAG,"SNTP start failed: %s",esp_err_to_name(time_err));
-        }
+        // Restart after every recovered IP lease, not only at first boot.
+        // esp_netif_sntp_start is explicitly restart-safe in ESP-IDF 5.5.
+        esp_err_t time_err=esp_netif_sntp_start();
+        if(time_err==ESP_OK){
+            clock_sntp_started=true;
+            ESP_LOGI(TAG,"NTP running; clock status at /mira/clock/status");
+        }else ESP_LOGW(TAG,"SNTP start/restart failed: %s",esp_err_to_name(time_err));
         ESP_LOGI(TAG,"Station Wi-Fi connected; recovery AP will be disabled");
     }else if(base==WIFI_EVENT&&id==WIFI_EVENT_STA_DISCONNECTED){
         station_connected=false;
@@ -593,6 +604,28 @@ static void wifi_status_event(void *arg,esp_event_base_t base,int32_t id,void *d
         }
         if(station_configured)esp_wifi_connect();
     }
+}
+static esp_err_t clock_status_get(httpd_req_t *req){
+    const time_t now=time(NULL);
+    const bool valid=now>1700000000;
+    char local[48]="";
+    if(valid){
+        struct tm tmv={0};
+        if(localtime_r(&now,&tmv))
+            strftime(local,sizeof(local),"%Y-%m-%d %H:%M:%S %z",&tmv);
+    }
+    char body[256];
+    snprintf(body,sizeof(body),
+        "{\"wifi_connected\":%s,\"ntp_started\":%s,\"ntp_synced\":%s,"
+        "\"time_valid\":%s,\"epoch\":%lld,\"last_sync\":%lld,"
+        "\"local\":\"%s\"}",
+        station_connected?"true":"false",
+        clock_sntp_started?"true":"false",
+        clock_sntp_synced?"true":"false",
+        valid?"true":"false",(long long)now,(long long)clock_last_sync_epoch,local);
+    httpd_resp_set_type(req,"application/json");
+    httpd_resp_set_hdr(req,"Cache-Control","no-store");
+    return httpd_resp_sendstr(req,body);
 }
 static esp_err_t wifi_info_get(httpd_req_t *req){
     char status[180];
@@ -877,8 +910,12 @@ esp_err_t mira_recovery_init(void) {
     // SNTP is initialized now but starts only when STA has an IP address.
     setenv("TZ","CET-1CEST,M3.5.0/2,M10.5.0/3",1);
     tzset();
-    esp_sntp_config_t sntp_cfg=ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+    /* Three distinct NTP servers allow recovery from DNS/server outages;
+     * a valid IP connection alone does not imply that time has synchronized. */
+    esp_sntp_config_t sntp_cfg=ESP_NETIF_SNTP_DEFAULT_CONFIG_MULTIPLE(
+        3,ESP_SNTP_SERVER_LIST("pool.ntp.org","time.cloudflare.com","time.google.com"));
     sntp_cfg.start=false;
+    sntp_cfg.sync_cb=mira_ntp_synced;
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_netif_sntp_init(&sntp_cfg));
 
     wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
@@ -1015,6 +1052,7 @@ esp_err_t mira_recovery_init(void) {
     httpd_uri_t shadow_light = {.uri="/shadow/light", .method=HTTP_GET, .handler=shadow_light_get};
     httpd_uri_t shadow_relief = {.uri="/shadow/relief", .method=HTTP_GET, .handler=shadow_relief_get};
     httpd_uri_t ota = {.uri="/update", .method=HTTP_POST, .handler=update_post};
+    httpd_uri_t clock_get={.uri="/mira/clock/status",.method=HTTP_GET,.handler=clock_status_get};
     httpd_uri_t wifi_get={.uri="/mira/wifi",.method=HTTP_GET,.handler=wifi_info_get};
     httpd_uri_t wifi_post={.uri="/mira/wifi",.method=HTTP_POST,.handler=wifi_profile_post};
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &root), TAG, "HTTP root");
@@ -1032,6 +1070,7 @@ esp_err_t mira_recovery_init(void) {
     mira_mqtt_register_http(httpd); // optional native MQTT settings
     mira_jeedom_register_http(httpd); // beta Jeedom protocol compatibility
     ESP_RETURN_ON_ERROR(mira_beta_setup_register(httpd),TAG,"Mira beta first-run setup");
+    ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_register_uri_handler(httpd,&clock_get));
     ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_register_uri_handler(httpd,&wifi_get));
     ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_register_uri_handler(httpd,&wifi_post));
     // Catch Android/iOS/Windows captive-portal probe paths only after all
