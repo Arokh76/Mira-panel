@@ -260,6 +260,55 @@ esp_err_t mira_beta_networks_upsert(const mira_beta_network_t *profile,const cha
     cJSON_Delete(root);
     return err;
 }
+/* A first-run IDF setup predating the profile-list implementation stored
+ * the STA credentials in ESP-IDF NVS, but never populated wifi_profiles.
+ * Only repair that historical state if NO native list and NO Arduino beta
+ * reseau.json exists. In particular, an explicitly emptied native list
+ * must never be repopulated: deletion is intentional. */
+esp_err_t mira_beta_networks_recover_station(void){
+    nvs_handle_t nv;
+    esp_err_t err=nvs_open(BETA_NET_NS,NVS_READONLY,&nv);
+    if(err==ESP_OK){
+        size_t len=0;
+        err=nvs_get_str(nv,BETA_OVERLAY_KEY,NULL,&len);
+        nvs_close(nv);
+        if(err==ESP_OK)return ESP_OK; // Includes an intentionally empty list.
+        if(err!=ESP_ERR_NVS_NOT_FOUND)return err; // Never overwrite corrupt data.
+    }else if(err!=ESP_ERR_NVS_NOT_FOUND)return err;
+    FILE *legacy=fopen(BETA_RESEAU_PATH,"rb");
+    if(legacy){fclose(legacy);return ESP_OK;} // Preserve original beta profiles.
+    wifi_config_t sta={0};
+    if(esp_wifi_get_config(WIFI_IF_STA,&sta)!=ESP_OK||!sta.sta.ssid[0])
+        return ESP_OK;
+    mira_beta_network_t profile={0};
+    profile.id=0;
+    const size_t ssid_len=strnlen((const char*)sta.sta.ssid,
+                                  sizeof(sta.sta.ssid));
+    if(!ssid_len||ssid_len>32)return ESP_ERR_INVALID_ARG;
+    memcpy(profile.ssid,sta.sta.ssid,ssid_len);
+    const size_t password_len=strnlen((const char*)sta.sta.password,
+                                      sizeof(sta.sta.password));
+    if(password_len>63||(password_len>0&&password_len<8))
+        return ESP_ERR_INVALID_ARG;
+    char password[65]={0};
+    memcpy(password,sta.sta.password,password_len);
+    snprintf(profile.ip_mode,sizeof(profile.ip_mode),"auto");
+    if(nvs_open(BETA_NET_NS,NVS_READONLY,&nv)==ESP_OK){
+        char ip[32]={0};size_t n=sizeof(ip);
+        if(nvs_get_str(nv,"setup_ip",ip,&n)==ESP_OK&&ip[0]){
+            snprintf(profile.ip_mode,sizeof(profile.ip_mode),"fixed_auto");
+            snprintf(profile.ip,sizeof(profile.ip),"%s",ip);
+        }
+        nvs_close(nv);
+    }
+    err=mira_beta_networks_upsert(&profile,password);
+    memset(password,0,sizeof(password));
+    if(err==ESP_OK)
+        ESP_LOGI(TAG,"Recovered pre-profile IDF Wi-Fi station into saved network list");
+    else
+        ESP_LOGW(TAG,"Could not recover pre-profile Wi-Fi list: %s",esp_err_to_name(err));
+    return err;
+}
 esp_err_t mira_beta_networks_remove(int id){
     if(id<0||id>999)return ESP_ERR_INVALID_ARG;
     cJSON *root=load();
