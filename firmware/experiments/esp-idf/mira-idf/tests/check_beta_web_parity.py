@@ -117,6 +117,21 @@ assert "getElementById('details')" not in gpio_view
 assert 'saveGPIO(event' not in gpio_view
 assert 'async function saveOutput(event)' in gpio_view
 assert 'async function toggleOutput(n)' in gpio_view
+# On-screen Settings are intentionally simpler than Web Paramètres.
+# Match 0.7.37 WT32: 4 cards, not extra day/night and 24-hour sliders.
+idf_ui = (idf / "mira_full.c").read_text(encoding="utf-8")
+settings_ui = idf_ui.split("static void settings(void){", 1)[1].split("static void empty_notice(", 1)[0]
+for item in ('"Paramètres"', '"Affichage"', '"Luminosité écran"',
+             '"Navigation"', '"Retour accueil : 60 s"', '"Veille"',
+             '"Horloge en veille"', '"Mira\\nSombre\\nGlass"'):
+    assert item in settings_ui, f"Missing WT32 on-screen parameter {item}"
+assert settings_ui.count("card(3,640,") == 4, "Extra settings cards reintroduced"
+assert '"Luminosité automatique jour / nuit"' not in settings_ui
+assert '"Délai de veille (0 = désactivée)"' not in settings_ui
+assert '"Luminosité en veille (%)"' not in settings_ui
+assert '"sleep_delay"' in idf_ui and '"night_auto"' in idf_ui, "Advanced config unavailable"
+assert 'settings_brightness_value' in idf_ui and '"%u%%"' in idf_ui
+print("PASS IDF 4.3C WT32 touchscreen settings parity: 4 cards and live percent")
 print("PASS Waveshare GPIO: beta navigation, correct 2DI/2DO, integrated System link")
 print("PASS beta network list, edit, activation and removal routes")
 print("PASS beta Wi-Fi AP and reset safety contracts")
