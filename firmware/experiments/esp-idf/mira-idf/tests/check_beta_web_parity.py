@@ -131,6 +131,23 @@ assert '"Délai de veille (0 = désactivée)"' not in settings_ui
 assert '"Luminosité en veille (%)"' not in settings_ui
 assert '"sleep_delay"' in idf_ui and '"night_auto"' in idf_ui, "Advanced config unavailable"
 assert 'settings_brightness_value' in idf_ui and '"%u%%"' in idf_ui
+# 800x480 Waveshare: the menu width is intentionally unchanged.
+# Validate that the four cards plus 3 * 6px row gap and the outer page
+# padding fit inside the 430px content area above the bottom nav.
+assert 'card(3,640,40)' in settings_ui
+assert 'card(3,640,154)' in settings_ui
+assert 'card(3,640,72)' in settings_ui
+assert 'card(3,640,120)' in settings_ui
+assert 40 + 154 + 72 + 120 + (3*6) + 14 <= 430
+assert 'lv_obj_set_size(row,622,height);' in idf_ui  # unchanged horizontal size
+assert 'lv_obj_set_size(theme_choice,205,32);' in settings_ui
+assert 'lv_obj_set_style_pad_row(display,8,0)' in settings_ui
+assert 'lv_obj_set_style_pad_row(sleep,8,0)' in settings_ui
+assert 'LV_EVENT_READY' in settings_ui
+assert 'lv_dropdown_get_list(' in idf_ui
+assert 'lv_obj_set_style_bg_color(theme_choice,panel2_c(),LV_PART_MAIN)' in settings_ui
+assert 'lv_obj_set_style_bg_color(list,panel2_c(),LV_PART_MAIN)' in idf_ui
+print("PASS Waveshare 800x480 touchscreen: vertical fit, stable widths, dark dropdown")
 print("PASS IDF 4.3C WT32 touchscreen settings parity: 4 cards and live percent")
 print("PASS Waveshare GPIO: beta navigation, correct 2DI/2DO, integrated System link")
 print("PASS beta network list, edit, activation and removal routes")
