@@ -110,6 +110,13 @@ assert 'GPIO du WT32' not in gpio_view and 'GPIO WT32' not in gpio_view
 assert 'DI0 · Entrée isolée' in gpio_view and 'DI1 · Entrée isolée' in gpio_view
 assert 'DO0 · Sortie isolée' in gpio_view and 'DO1 · Sortie isolée' in gpio_view
 assert 'GPIO Waveshare 4,3C' in handlers and 'const char *anchor="<button' in handlers
+assert 'Liaisons locales de commandes' not in gpio_view
+assert 'Boutons multiactions isolés' not in gpio_view
+assert 'État des paramètres' not in gpio_view
+assert "getElementById('details')" not in gpio_view
+assert 'saveGPIO(event' not in gpio_view
+assert 'async function saveOutput(event)' in gpio_view
+assert 'async function toggleOutput(n)' in gpio_view
 print("PASS Waveshare GPIO: beta navigation, correct 2DI/2DO, integrated System link")
 print("PASS beta network list, edit, activation and removal routes")
 print("PASS beta Wi-Fi AP and reset safety contracts")
