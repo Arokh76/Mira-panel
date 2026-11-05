@@ -111,7 +111,8 @@ assert 'esp_wifi_get_mode(&mode)==ESP_OK' in setup
 assert '(mode==WIFI_MODE_AP||mode==WIFI_MODE_APSTA)' in setup
 assert 'esp_netif_get_ip_info(sta_netif,&sta_ip)==ESP_OK' in setup
 assert 'sta_ip.ip.addr==0' in setup
-assert setup.count("if(!first_run_ap_access(req))return ESP_FAIL;")==2
+# The asynchronous Wi-Fi scan endpoint is also guarded on the initial AP.
+assert setup.count("if(!first_run_ap_access(req))return ESP_FAIL;")==3
 assert 'if(!mira_setup_require_ap(req))return ESP_FAIL;' in recovery
 assert 'mira_beta_web_authorized(req)' in (idf / "mira_beta_ota.c").read_text(encoding="utf-8")
 assert 'ESP_LOGI(TAG,"Mira beta setup step 1/2: local screen key saved");\n        /* Match firmware-beta' in setup
