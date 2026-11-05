@@ -2327,14 +2327,36 @@ static lv_obj_t *settings_row(lv_obj_t *parent,int height){
     make_flex(row,LV_FLEX_FLOW_ROW,LV_FLEX_ALIGN_SPACE_BETWEEN,LV_FLEX_ALIGN_CENTER);
     return row;
 }
+static void theme_dropdown_opened(lv_event_t *event){
+    // LVGL creates the popup list when the dropdown is opened (READY).
+    // Style that separate object as well as the closed button: never white.
+    lv_obj_t *list=lv_dropdown_get_list(lv_event_get_target_obj(event));
+    if(!list)return;
+    lv_obj_set_style_bg_color(list,panel2_c(),LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(list,LV_OPA_COVER,LV_PART_MAIN);
+    lv_obj_set_style_text_color(list,lv_color_hex(0xF3F6F7),LV_PART_MAIN);
+    lv_obj_set_style_text_font(list,&mira_font_fr_12,LV_PART_MAIN);
+    lv_obj_set_style_border_color(list,border_c(),LV_PART_MAIN);
+    lv_obj_set_style_border_width(list,1,LV_PART_MAIN);
+    lv_obj_set_style_radius(list,10,LV_PART_MAIN);
+    lv_obj_set_style_bg_color(list,cyan_c(),LV_PART_SELECTED | LV_STATE_CHECKED);
+    lv_obj_set_style_bg_opa(list,LV_OPA_COVER,LV_PART_SELECTED | LV_STATE_CHECKED);
+    lv_obj_set_style_text_color(list,bg_c(),LV_PART_SELECTED | LV_STATE_CHECKED);
+    lv_obj_set_style_bg_color(list,panel_c(),LV_PART_SELECTED | LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(list,lv_color_hex(0xF3F6F7),LV_PART_SELECTED | LV_STATE_PRESSED);
+}
 static void settings(void){
     settings_brightness_value=NULL;
+    // Waveshare 4.3C is 800x480: retain the already accepted 640px width,
+    // but fit the FOUR content blocks and their real LVGL padding/gaps
+    // inside CONTENT_H (430px, including bottom navigation clearance).
     lv_obj_t *head=card(3,640,40);
     lv_obj_t *h=label(head,"Paramètres",0xF3F6F7,&mira_font_fr_16);
     lv_obj_center(h);
 
-    lv_obj_t *display=card(3,640,130);
+    lv_obj_t *display=card(3,640,154);
     make_flex(display,LV_FLEX_FLOW_COLUMN,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_row(display,8,0);
     label(display,"Affichage",0x22BEEA,&mira_font_fr_14);
     lv_obj_t *bright_row=settings_row(display,26);
     label(bright_row,"Luminosité écran",0xF3F6F7,&mira_font_fr_12);
@@ -2354,6 +2376,14 @@ static void settings(void){
     lv_dropdown_set_options(theme_choice,"Mira\nSombre\nGlass");
     lv_dropdown_set_selected(theme_choice,ui_theme);
     lv_obj_set_size(theme_choice,205,32);
+    lv_obj_set_style_bg_color(theme_choice,panel2_c(),LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(theme_choice,LV_OPA_COVER,LV_PART_MAIN);
+    lv_obj_set_style_text_color(theme_choice,lv_color_hex(0xF3F6F7),LV_PART_MAIN);
+    lv_obj_set_style_text_font(theme_choice,&mira_font_fr_12,LV_PART_MAIN);
+    lv_obj_set_style_border_color(theme_choice,border_c(),LV_PART_MAIN);
+    lv_obj_set_style_border_width(theme_choice,1,LV_PART_MAIN);
+    lv_obj_set_style_radius(theme_choice,9,LV_PART_MAIN);
+    lv_obj_add_event_cb(theme_choice,theme_dropdown_opened,LV_EVENT_READY,NULL);
     lv_obj_add_event_cb(theme_choice,theme_changed,LV_EVENT_VALUE_CHANGED,NULL);
 
     lv_obj_t *navigation=card(3,640,72);
@@ -2366,8 +2396,9 @@ static void settings(void){
     if(return_home_enabled)lv_obj_add_state(home_switch,LV_STATE_CHECKED);
     lv_obj_add_event_cb(home_switch,return_home_changed,LV_EVENT_VALUE_CHANGED,NULL);
 
-    lv_obj_t *sleep=card(3,640,104);
+    lv_obj_t *sleep=card(3,640,120);
     make_flex(sleep,LV_FLEX_FLOW_COLUMN,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_row(sleep,8,0);
     label(sleep,"Veille",0x22BEEA,&mira_font_fr_14);
     lv_obj_t *sleep_row=settings_row(sleep,30);
     char sleep_text[80]={0};
