@@ -1142,3 +1142,27 @@ assert 'char* key = "C1W0CleCipherMMn";' in legacy_spiffs
 assert 'cipher->setKey(key);' in legacy_server
 assert "'C','1','W','0','C','l','e','C','i','p','h','e','r','M','M','n'" in legacy_cipher
 print('PASS historic SPIFFS AES key matches Arduino server initialization')
+
+# 0.7.37 datetime weather: passive Jeedom Infos must appear on screen.
+full=(idf/'mira_full.c').read_text(encoding='utf-8')
+for item in ('__mira_weather_temperature','__mira_weather_condition','__mira_weather_code'):
+    assert item in full and item in jeedom
+assert 'clock_weather_receive(msg->name,msg->value);' in full
+assert 'clock_weather_restore_cached();' in full
+assert 'clock_weather_temperature_label' in full
+assert 'clock_weather_condition_label' in full
+assert 'if(clock_weather_visible)' in full
+assert 'mira_full_enqueue_state(name,value)' in jeedom
+assert 'return;' in full.split('if(!strncmp(msg->name,"__mira_weather_",15)){',1)[1].split('for(uint8_t i=0;i<widget_n',1)[0]
+print('PASS datetime weather: passive indexed Infos have a dedicated on-screen view')
+
+# Synchronized clock must be observable separately from Wi-Fi link.
+assert 'ESP_NETIF_SNTP_DEFAULT_CONFIG_MULTIPLE(' in recovery
+assert 'sntp_cfg.start=false;' in recovery
+assert 'sntp_cfg.sync_cb=mira_ntp_synced;' in recovery
+assert 'esp_netif_sntp_start()' in recovery
+assert 'IP_EVENT_STA_GOT_IP' in recovery
+assert '/mira/clock/status' in recovery
+config=(root/'firmware/experiments/esp-idf/mira-idf/sdkconfig.defaults').read_text(encoding='utf-8')
+assert 'CONFIG_LWIP_SNTP_MAX_SERVERS=3' in config
+print('PASS NTP: 3 fallback servers and local clock diagnostics')
