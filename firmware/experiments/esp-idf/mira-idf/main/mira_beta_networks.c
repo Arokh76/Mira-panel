@@ -156,8 +156,8 @@ static bool assign(cJSON *obj,const char *key,const char *value){
 static void password_key(int id,char *key,size_t len){
     snprintf(key,len,"net_%d",id);
 }
-static esp_err_t save_password(int id,const char *password){
-    if(!password||!*password)return ESP_OK;
+static esp_err_t save_password(int id,const char *password,bool store_empty){
+    if(!password||(!*password&&!store_empty))return ESP_OK;
     char key[16];password_key(id,key,sizeof(key));
     nvs_handle_t nv;
     esp_err_t err=nvs_open(BETA_PASSWORD_NS,NVS_READWRITE,&nv);
@@ -204,7 +204,10 @@ esp_err_t mira_beta_networks_upsert(const mira_beta_network_t *profile,const cha
        assign(entry,"gateway",profile->gateway)&&
        assign(entry,"dns1",profile->dns1)&&
        assign(entry,"dns2",profile->dns2);
-    if(!existed&&ok)ok=assign(entry,"pass","");
+    /* Legacy JSON may contain the old ciphertext. Once a native secret
+     * is saved, never keep the obsolete ciphertext in the overlay. A
+     * stale secret must not resurrect if this profile is later edited. */
+    if(ok&&(*password||!existed))ok=assign(entry,"pass","");
     if(!ok){cJSON_Delete(root);return ESP_ERR_NO_MEM;}
 
     /* The new password lives in a separate native NVS namespace. If
@@ -232,9 +235,13 @@ esp_err_t mira_beta_networks_upsert(const mira_beta_network_t *profile,const cha
             return opened;
         }
     }
-    esp_err_t err=save_password(profile->id,password);
+    /* Store an explicit empty secret for a NEW open network. Otherwise
+     * a profile ID reused after deletion could accidentally inherit the
+     * previous network's leftover NVS password. */
+    const bool store_empty=!existed;
+    esp_err_t err=save_password(profile->id,password,store_empty);
     if(err==ESP_OK)err=save(root);
-    if(err!=ESP_OK&&*password){
+    if(err!=ESP_OK&&(*password||store_empty)){
         char key[16];password_key(profile->id,key,sizeof(key));
         nvs_handle_t nv;
         esp_err_t rollback=nvs_open(BETA_PASSWORD_NS,NVS_READWRITE,&nv);
@@ -272,12 +279,17 @@ esp_err_t mira_beta_networks_remove(int id){
     if(err!=ESP_OK)return err;
     char key[16];password_key(id,key,sizeof(key));
     nvs_handle_t nv;
-    if(nvs_open(BETA_PASSWORD_NS,NVS_READWRITE,&nv)==ESP_OK){
-        (void)nvs_erase_key(nv,key);
-        (void)nvs_commit(nv);
-        nvs_close(nv);
-    }
-    return ESP_OK;
+    esp_err_t erased=nvs_open(BETA_PASSWORD_NS,NVS_READWRITE,&nv);
+    if(erased==ESP_ERR_NVS_NOT_FOUND)return ESP_OK;
+    if(erased!=ESP_OK)return erased;
+    erased=nvs_erase_key(nv,key);
+    if(erased==ESP_ERR_NVS_NOT_FOUND)erased=ESP_OK;
+    if(erased==ESP_OK)erased=nvs_commit(nv);
+    nvs_close(nv);
+    if(erased!=ESP_OK)
+        ESP_LOGE(TAG,"Network removed, but stored secret could not be erased (id %d): %s",
+                 id,esp_err_to_name(erased));
+    return erased;
 }
 esp_err_t mira_beta_networks_activate(int id){
     if(id<0||id>999)return ESP_ERR_INVALID_ARG;
@@ -299,8 +311,10 @@ esp_err_t mira_beta_networks_activate(int id){
     }
     if(!found){
         const cJSON *old=cJSON_GetObjectItemCaseSensitive(entry,"pass");
-        if(cJSON_IsString(old)&&old->valuestring&&*old->valuestring)
-            found=mira_legacy_decrypt(old->valuestring,pass,sizeof(pass));
+        if(cJSON_IsString(old)&&old->valuestring){
+            if(!*old->valuestring)found=true; // open Wi-Fi profile
+            else found=mira_legacy_decrypt(old->valuestring,pass,sizeof(pass));
+        }
     }
     cJSON_Delete(root);
     if(!found){
