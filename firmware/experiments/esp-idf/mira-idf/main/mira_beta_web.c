@@ -275,25 +275,116 @@ static unsigned nvs_number(const char *ns,const char *key,unsigned fallback){
     nvs_close(nv);
     return v;
 }
-static esp_err_t wifi_choices(httpd_req_t *req){
-    if(chunk(req,"<label for=\"RS\">Réseaux détectés</label><select id=\"RS\" name=\"RS\" class=\"box\" onchange=\"Click(this.value)\"><option value=\"\">Saisir le SSID manuellement</option>")!=ESP_OK)
-        return ESP_FAIL;
+/* Wi-Fi discovery is never performed in esp_http_server's single
+ * request thread. The old esp_wifi_scan_start(..., true) here stopped
+ * rendering until channel scanning finished, delaying ALL Web requests.
+ * Keep at most ten non-sensitive SSIDs and return instantly from HTML. */
+#define MIRA_SCAN_MAX 10
+static portMUX_TYPE wifi_scan_mux=portMUX_INITIALIZER_UNLOCKED;
+static wifi_ap_record_t wifi_scan_results[MIRA_SCAN_MAX];
+static uint16_t wifi_scan_count;
+static bool wifi_scan_busy;
+static bool wifi_scan_finished;
+static bool wifi_scan_failed;
+static int64_t wifi_scan_finished_us;
+static void wifi_scan_worker(void *unused){
+    (void)unused;
     wifi_scan_config_t scan={0};
-    if(esp_wifi_scan_start(&scan,true)==ESP_OK){
-        wifi_ap_record_t records[10]={0};
-        uint16_t count=10;
-        if(esp_wifi_scan_get_ap_records(&count,records)==ESP_OK){
-            for(uint16_t i=0;i<count;i++){
-                char ssid[33]={0};
-                memcpy(ssid,records[i].ssid,32);
-                if(!ssid[0])continue;
-                if(chunk(req,"<option value=\"")!=ESP_OK||escaped(req,ssid)!=ESP_OK||
-                   chunk(req,"\">")!=ESP_OK||escaped(req,ssid)!=ESP_OK||
-                   chunk(req,"</option>")!=ESP_OK)return ESP_FAIL;
-            }
+    wifi_ap_record_t found[MIRA_SCAN_MAX]={0};
+    uint16_t n=MIRA_SCAN_MAX;
+    esp_err_t err=esp_wifi_scan_start(&scan,true);
+    if(err==ESP_OK)err=esp_wifi_scan_get_ap_records(&n,found);
+    if(err!=ESP_OK){
+        ESP_LOGW(TAG,"Background Wi-Fi scan unavailable: %s",esp_err_to_name(err));
+        n=0;
+    }
+    taskENTER_CRITICAL(&wifi_scan_mux);
+    memcpy(wifi_scan_results,found,sizeof(found));
+    wifi_scan_count=n;
+    wifi_scan_failed=err!=ESP_OK;
+    wifi_scan_finished_us=esp_timer_get_time();
+    wifi_scan_finished=true;
+    wifi_scan_busy=false;
+    taskEXIT_CRITICAL(&wifi_scan_mux);
+    vTaskDelete(NULL);
+}
+static void wifi_scan_start_background(void){
+    bool start=false;
+    const int64_t now=esp_timer_get_time();
+    taskENTER_CRITICAL(&wifi_scan_mux);
+    if(!wifi_scan_busy&&(!wifi_scan_finished||
+                         now-wifi_scan_finished_us>60000000LL)){
+        wifi_scan_busy=true;
+        start=true;
+    }
+    taskEXIT_CRITICAL(&wifi_scan_mux);
+    if(start&&xTaskCreate(wifi_scan_worker,"mira_scan",4096,NULL,2,NULL)!=pdPASS){
+        taskENTER_CRITICAL(&wifi_scan_mux);
+        wifi_scan_busy=false;
+        wifi_scan_failed=true;
+        wifi_scan_finished=true;
+        wifi_scan_finished_us=esp_timer_get_time();
+        taskEXIT_CRITICAL(&wifi_scan_mux);
+        ESP_LOGW(TAG,"Unable to start background Wi-Fi scan worker");
+    }
+}
+esp_err_t mira_beta_web_wifi_scan_get(httpd_req_t *req){
+    wifi_scan_start_background();
+    char ssids[MIRA_SCAN_MAX][33]={{0}};
+    uint16_t n=0;
+    bool busy=false,failed=false;
+    taskENTER_CRITICAL(&wifi_scan_mux);
+    busy=wifi_scan_busy;
+    failed=wifi_scan_failed;
+    if(!busy){
+        n=wifi_scan_count;
+        for(uint16_t i=0;i<n;i++)
+            memcpy(ssids[i],wifi_scan_results[i].ssid,32);
+    }
+    taskEXIT_CRITICAL(&wifi_scan_mux);
+    cJSON *root=cJSON_CreateObject();
+    cJSON *arr=root?cJSON_AddArrayToObject(root,"networks"):NULL;
+    if(!arr){if(root)cJSON_Delete(root);return html_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Scan Wi-Fi indisponible");}
+    cJSON_AddBoolToObject(root,"busy",busy);
+    cJSON_AddBoolToObject(root,"failed",!busy&&failed);
+    for(uint16_t i=0;i<n;i++){
+        if(!ssids[i][0])continue; // Hidden networks remain manually configurable.
+        if(!cJSON_AddItemToArray(arr,cJSON_CreateString(ssids[i]))){
+            cJSON_Delete(root);
+            return html_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Mémoire scan Wi-Fi insuffisante");
         }
     }
-    return chunk(req,"</select>");
+    char *json=cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if(!json)return html_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Mémoire scan Wi-Fi insuffisante");
+    httpd_resp_set_type(req,"application/json");
+    httpd_resp_set_hdr(req,"Cache-Control","no-store");
+    const esp_err_t sent=httpd_resp_sendstr(req,json);
+    cJSON_free(json);
+    return sent;
+}
+esp_err_t mira_beta_web_wifi_choices(httpd_req_t *req){
+    wifi_scan_start_background();
+    return chunk(req,
+        "<label for=\"RS\">Réseaux détectés</label>"
+        "<select id=\"RS\" name=\"RS\" class=\"box\" onchange=\"Click(this.value)\">"
+        "<option value=\"\">Saisir le SSID manuellement (recherche en cours)</option></select>"
+        "<script>(function(){"
+        "var s=document.getElementById('RS'),attempts=0;if(!s)return;"
+        "function refresh(){fetch('/mira/wifi/scan',{cache:'no-store'})"
+        ".then(function(r){if(!r.ok)throw Error('scan');return r.json();})"
+        ".then(function(d){"
+        "if(d.busy&&attempts++<20){setTimeout(refresh,750);return;}"
+        "s.options.length=1;s.options[0].text='Saisir le SSID manuellement';"
+        "(d.networks||[]).forEach(function(name){"
+        "var o=document.createElement('option');o.value=name;o.textContent=name;s.add(o);"
+        "});"
+        "if(d.failed)s.options[0].text='Recherche indisponible : saisir le SSID';"
+        "}).catch(function(){s.options[0].text='Saisir le SSID manuellement';});"
+        "}refresh();})();</script>");
+}
+static esp_err_t wifi_choices(httpd_req_t *req){
+    return mira_beta_web_wifi_choices(req);
 }
 static int network_id(httpd_req_t *req){
     char query[160]={0},number[10]={0};
@@ -305,11 +396,21 @@ static int network_id(httpd_req_t *req){
     return (int)id;
 }
 static esp_err_t registered_network_rows(httpd_req_t *req){
-    mira_beta_network_t profiles[MIRA_NET_MAX]={0};
+    // Repair older first-run IDF installs without touching deleted profiles.
+    esp_err_t recovered=mira_beta_networks_recover_station();
+    if(recovered!=ESP_OK)
+        ESP_LOGW(TAG,"Saved Wi-Fi list recovery unavailable: %s",esp_err_to_name(recovered));
+    mira_beta_network_t *profiles=calloc(MIRA_NET_MAX,sizeof(*profiles));
+    if(!profiles)return html_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Mémoire réseaux insuffisante");
     size_t count=0;
-    if(mira_beta_networks_list(profiles,&count,MIRA_NET_MAX)!=ESP_OK)
+    if(mira_beta_networks_list(profiles,&count,MIRA_NET_MAX)!=ESP_OK){
+        free(profiles);
         return chunk(req,"<div class=\"empty\">Impossible de lire les réseaux.</div>");
-    if(!count)return chunk(req,"<div class=\"empty\">Aucun réseau n'est enregistré.</div>");
+    }
+    if(!count){
+        free(profiles);
+        return chunk(req,"<div class=\"empty\">Aucun réseau n'est enregistré.</div>");
+    }
     network_action_nonce=esp_random();
     if(!network_action_nonce)network_action_nonce=1;
     network_nonce_time=esp_timer_get_time();
@@ -330,6 +431,7 @@ static esp_err_t registered_network_rows(httpd_req_t *req){
                  id,(unsigned long)network_action_nonce);
         if(chunk(req,tail)!=ESP_OK)return ESP_FAIL;
     }
+    free(profiles);
     return ESP_OK;
 }
 static esp_err_t registered_network_field(httpd_req_t *req,const char *name){
