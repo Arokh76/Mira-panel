@@ -630,32 +630,64 @@ static esp_err_t wifi_profile_post(httpd_req_t *req){
         httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Expected SSID (1..32) and password (0..63)");
         return ESP_FAIL;
     }
-    wifi_config_t sta={0};
-    snprintf((char*)sta.sta.ssid,sizeof(sta.sta.ssid),"%s",ssid->valuestring);
-    snprintf((char*)sta.sta.password,sizeof(sta.sta.password),"%s",pass->valuestring);
-    cJSON_Delete(json);
-    esp_wifi_disconnect();
-    esp_err_t err=esp_wifi_set_config(WIFI_IF_STA,&sta);
-    if(err==ESP_OK){
-        // An explicit user provisioning always supersedes a migrated beta
-        // static profile, including on subsequent reboots.
-        legacy_ip_mode=PROFILE_DHCP;
-        legacy_fixed_auto_attempted=false;
-        legacy_fixed_auto_applied=false;
-        nvs_handle_t nv;
-        if(nvs_open("mira_idf_net",NVS_READWRITE,&nv)==ESP_OK){
-            if(nvs_set_u8(nv,"legacy_wifi",0)==ESP_OK){
-                esp_err_t gone=nvs_erase_key(nv,"setup_ip");
-                if(gone==ESP_OK||gone==ESP_ERR_NVS_NOT_FOUND)
-                    (void)nvs_commit(nv);
-            }
-            nvs_close(nv);
-        }
-        if(sta_netif)(void)esp_netif_dhcpc_start(sta_netif);
-        station_configured=true;
-        err=esp_wifi_connect();
+    const size_t password_len=strlen(pass->valuestring);
+    if(password_len>0&&password_len<8){
+        cJSON_Delete(json);
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Wi-Fi password must be empty or 8..63 bytes");
+        return ESP_FAIL;
     }
-    if(err!=ESP_OK){httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"STA configuration failed");return ESP_FAIL;}
+
+    /* Match the full beta Web provisioning path. Previously this endpoint
+     * set WIFI_STORAGE_FLASH without updating wifi_profiles. On reboot,
+     * the startup stale-network check could then DELETE that STA config
+     * because the selected SSID was absent from the NVS overlay. */
+    mira_beta_network_t *saved=calloc(MIRA_NET_MAX,sizeof(*saved));
+    if(!saved){cJSON_Delete(json);return httpd_resp_send_err(req,
+                       HTTPD_500_INTERNAL_SERVER_ERROR,"Wi-Fi profile memory unavailable");}
+    size_t count=0;
+    esp_err_t err=mira_beta_networks_list(saved,&count,MIRA_NET_MAX);
+    if(err!=ESP_OK){
+        free(saved);cJSON_Delete(json);
+        return httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Wi-Fi profiles unavailable");
+    }
+    int profile_id=-1;
+    for(size_t i=0;i<count;i++)
+        if(!strcmp(saved[i].ssid,ssid->valuestring)){profile_id=saved[i].id;break;}
+    if(profile_id<0&&count>=MIRA_NET_MAX){
+        free(saved);cJSON_Delete(json);
+        return httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Too many saved Wi-Fi networks");
+    }
+    if(profile_id<0){
+        for(int candidate=0;candidate<=999;candidate++){
+            bool occupied=false;
+            for(size_t i=0;i<count;i++)
+                if(saved[i].id==candidate){occupied=true;break;}
+            if(!occupied){profile_id=candidate;break;}
+        }
+    }
+    free(saved);
+    if(profile_id<0){
+        cJSON_Delete(json);
+        return httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"No Wi-Fi profile ID available");
+    }
+    mira_beta_network_t profile={0};
+    profile.id=profile_id;
+    snprintf(profile.ssid,sizeof(profile.ssid),"%s",ssid->valuestring);
+    snprintf(profile.ip_mode,sizeof(profile.ip_mode),"auto");
+    // Keep the secrets in native NVS; no password goes into SPIFFS JSON.
+    char password[64]={0};
+    memcpy(password,pass->valuestring,password_len);
+    cJSON_Delete(json);
+    err=mira_recovery_save_beta_wifi(profile.ssid,password,"auto",
+                                      "","","","","");
+    if(err==ESP_OK)
+        err=mira_beta_networks_upsert(&profile,password);
+    memset(password,0,sizeof(password));
+    if(err!=ESP_OK){
+        ESP_LOGE(TAG,"Explicit Wi-Fi setup not fully saved: %s",esp_err_to_name(err));
+        return httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,
+                                   "Wi-Fi setup incomplete; verify saved network");
+    }
     httpd_resp_set_type(req,"application/json");
     return httpd_resp_sendstr(req,"{\"saved\":true,\"joining\":true}");
 }
