@@ -1969,6 +1969,7 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
     label(w->card,display,0xA8B2B8,&mira_font_fr_16);
 }
 
+static lv_obj_t *settings_brightness_value;
 static bool current_night_period(void); // implementation below
 // Match the old Waveshare43CDisplay brightness behavior, but save only on
 // release (never write flash on every pixel of a drag).  This callback runs
@@ -1986,6 +1987,10 @@ static void brightness_live(lv_event_t *event){
     }
     display_brightness_raw=raw;
     manual_brightness_override=true;
+    if(settings_brightness_value){
+        const unsigned pct=1u+(((unsigned)raw-30u)*99u+112u)/225u;
+        lv_label_set_text_fmt(settings_brightness_value,"%u%%",pct);
+    }
 }
 static void brightness_release(lv_event_t *event) {
     if(suppress_events||display_sleeping)return;
@@ -2005,6 +2010,10 @@ static void brightness_release(lv_event_t *event) {
     }
     display_brightness_raw=(uint8_t)value;
     manual_brightness_override=true;
+    if(settings_brightness_value){
+        const unsigned pct=1u+(((unsigned)value-30u)*99u+112u)/225u;
+        lv_label_set_text_fmt(settings_brightness_value,"%u%%",pct);
+    }
     // Do not wear NVS when a tap/drag returns to the saved raw value.
     if(persisted_brightness_raw==(uint8_t)value)return;
     // In automatic mode the same slider adjusts the active day/night level,
@@ -2039,26 +2048,6 @@ static void save_sleep_setting_u8(const char *key,uint8_t value){
     if(nvs_open("mira_idf_ui",NVS_READWRITE,&nv)!=ESP_OK)return;
     if(nvs_set_u8(nv,key,value)==ESP_OK)(void)nvs_commit(nv);
     nvs_close(nv);
-}
-static void sleep_delay_changed(lv_event_t *event){
-    if(display_sleeping||suppress_events)return;
-    int value=lv_slider_get_value(lv_event_get_target_obj(event));
-    if(value<0)value=0;
-    if(value>86400)value=86400;
-    if(sleep_timeout_seconds!=(uint32_t)value){
-        sleep_timeout_seconds=(uint32_t)value;
-        save_sleep_setting_u32("sleep_delay",sleep_timeout_seconds);
-    }
-}
-static void sleep_light_changed(lv_event_t *event){
-    if(display_sleeping||suppress_events)return;
-    int value=lv_slider_get_value(lv_event_get_target_obj(event));
-    if(value<0)value=0;
-    if(value>100)value=100;
-    if(sleep_brightness_percent!=(uint8_t)value){
-        sleep_brightness_percent=(uint8_t)value;
-        save_sleep_setting_u8("sleep_light",sleep_brightness_percent);
-    }
 }
 static void sleep_mode_changed(lv_event_t *event){
     if(display_sleeping||suppress_events)return;
@@ -2294,23 +2283,6 @@ static void return_home_changed(lv_event_t *event){
     return_home_enabled=lv_obj_has_state(src,LV_STATE_CHECKED);
     save_sleep_setting_u8("home_return",return_home_enabled?1:0);
 }
-static void night_auto_changed(lv_event_t *event){
-    if(suppress_events)return;
-    lv_obj_t *src=lv_event_get_target_obj(event);
-    const bool requested=lv_obj_has_state(src,LV_STATE_CHECKED);
-    // Refuse to enable an unspecified or degenerate beta schedule.
-    if(requested&&(night_start_minute<0||night_end_minute<0||
-                   night_start_minute==night_end_minute)){
-        lv_obj_remove_state(src,LV_STATE_CHECKED);
-        ESP_LOGW(TAG,"Day/night schedule not configured; retaining manual brightness");
-        return;
-    }
-    night_auto_enabled=requested;
-    save_sleep_setting_u8("night_auto",requested?1:0);
-    apply_auto_brightness();
-}
-// Theme transitions occur only on the LVGL task. Rebuild widgets with their
-// original JSON programming; never modify Jeedom values or SPIFFS on theme.
 static void build_config(void);
 static void settings(void);
 static void theme_changed(lv_event_t *event){
@@ -2342,76 +2314,75 @@ static void theme_apply_on_lvgl_task(void){
     show_page(current);
 }
 
+/* Native touchscreen settings mirror Mira 0.7.37 WT32:
+ * only quick controls live here. Advanced day/night/timeout/idle brightness
+ * are configured in the shared Web Paramètres page and remain functional. */
+static lv_obj_t *settings_row(lv_obj_t *parent,int height){
+    lv_obj_t *row=lv_obj_create(parent);
+    lv_obj_set_size(row,622,height);
+    no_scroll(row);
+    lv_obj_set_style_bg_opa(row,LV_OPA_TRANSP,0);
+    lv_obj_set_style_border_width(row,0,0);
+    lv_obj_set_style_pad_all(row,0,0);
+    make_flex(row,LV_FLEX_FLOW_ROW,LV_FLEX_ALIGN_SPACE_BETWEEN,LV_FLEX_ALIGN_CENTER);
+    return row;
+}
 static void settings(void){
+    settings_brightness_value=NULL;
     lv_obj_t *head=card(3,640,40);
     lv_obj_t *h=label(head,"Paramètres",0xF3F6F7,&mira_font_fr_16);
     lv_obj_center(h);
-    lv_obj_t *display=card(3,640,178);
+
+    lv_obj_t *display=card(3,640,130);
     make_flex(display,LV_FLEX_FLOW_COLUMN,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_START);
-    label(display,"Affichage",0x22BEEA,&mira_font_fr_16);
-    label(display,"Luminosité écran",0xF3F6F7,&mira_font_fr_16);
+    label(display,"Affichage",0x22BEEA,&mira_font_fr_14);
+    lv_obj_t *bright_row=settings_row(display,26);
+    label(bright_row,"Luminosité écran",0xF3F6F7,&mira_font_fr_12);
+    const uint8_t raw=desired_awake_brightness();
+    const unsigned percent=1u+(((unsigned)(raw<30?30:raw)-30u)*99u+112u)/225u;
+    settings_brightness_value=label(bright_row,"",0x22BEEA,&mira_font_fr_12);
+    lv_label_set_text_fmt(settings_brightness_value,"%u%%",percent);
     lv_obj_t *sl=lv_slider_create(display);
     lv_obj_set_size(sl,600,14);
     lv_slider_set_range(sl,30,255);
-    lv_slider_set_value(sl,desired_awake_brightness(),LV_ANIM_OFF);
+    lv_slider_set_value(sl,raw,LV_ANIM_OFF);
     lv_obj_add_event_cb(sl,brightness_live,LV_EVENT_VALUE_CHANGED,NULL);
     lv_obj_add_event_cb(sl,brightness_release,LV_EVENT_RELEASED,NULL);
-    label(display,"Thème de Mira Panel",0xA8B2B8,&mira_font_fr_16);
-    lv_obj_t *theme_choice=lv_dropdown_create(display);
+    lv_obj_t *theme_row=settings_row(display,34);
+    label(theme_row,"Thème",0xF3F6F7,&mira_font_fr_12);
+    lv_obj_t *theme_choice=lv_dropdown_create(theme_row);
     lv_dropdown_set_options(theme_choice,"Mira\nSombre\nGlass");
     lv_dropdown_set_selected(theme_choice,ui_theme);
-    lv_obj_set_size(theme_choice,260,38);
+    lv_obj_set_size(theme_choice,205,32);
     lv_obj_add_event_cb(theme_choice,theme_changed,LV_EVENT_VALUE_CHANGED,NULL);
-    lv_obj_t *schedule=card(3,640,106);
-    label(schedule,"Luminosité automatique jour / nuit",0x22BEEA,&mira_font_fr_16);
-    lv_obj_t *auto_switch=lv_switch_create(schedule);
-    lv_obj_set_pos(auto_switch,550,12);
-    if(night_auto_enabled)lv_obj_add_state(auto_switch,LV_STATE_CHECKED);
-    lv_obj_add_event_cb(auto_switch,night_auto_changed,LV_EVENT_VALUE_CHANGED,NULL);
-    char period[140];
-    if(night_start_minute>=0&&night_end_minute>=0){
-        snprintf(period,sizeof(period),"Nuit %02d:%02d - %02d:%02d | Jour %u%% / Nuit %u%%",
-                 night_start_minute/60,night_start_minute%60,
-                 night_end_minute/60,night_end_minute%60,
-                 (unsigned)day_brightness_percent,(unsigned)night_brightness_percent);
-    }else snprintf(period,sizeof(period),"Horaires à configurer dans les paramètres Mira");
-    lv_obj_t *period_label=label(schedule,period,0xA8B2B8,&mira_font_fr_14);
-    lv_obj_set_pos(period_label,12,49);
-    lv_obj_t *n=card(3,640,72);
-    label(n,"Navigation",0x22BEEA,&mira_font_fr_16);
-    label(n,"Retour accueil après 60 s",0xF3F6F7,&mira_font_fr_16);
-    lv_obj_t *home_switch=lv_switch_create(n);
-    lv_obj_set_pos(home_switch,550,28);
+
+    lv_obj_t *navigation=card(3,640,72);
+    make_flex(navigation,LV_FLEX_FLOW_COLUMN,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_START);
+    label(navigation,"Navigation",0x22BEEA,&mira_font_fr_14);
+    lv_obj_t *home_row=settings_row(navigation,30);
+    label(home_row,"Retour accueil : 60 s",0xF3F6F7,&mira_font_fr_12);
+    lv_obj_t *home_switch=lv_switch_create(home_row);
+    lv_obj_set_size(home_switch,48,25);
     if(return_home_enabled)lv_obj_add_state(home_switch,LV_STATE_CHECKED);
     lv_obj_add_event_cb(home_switch,return_home_changed,LV_EVENT_VALUE_CHANGED,NULL);
-    lv_obj_t *sleep=card(3,640,214);
-    lv_obj_t *shead=label(sleep,"Veille",0x22BEEA,&mira_font_fr_16);
-    lv_obj_set_pos(shead,12,6);
-    lv_obj_t *sleep_switch=lv_switch_create(sleep);
-    lv_obj_set_pos(sleep_switch,545,9);
+
+    lv_obj_t *sleep=card(3,640,104);
+    make_flex(sleep,LV_FLEX_FLOW_COLUMN,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_START);
+    label(sleep,"Veille",0x22BEEA,&mira_font_fr_14);
+    lv_obj_t *sleep_row=settings_row(sleep,30);
+    char sleep_text[80]={0};
+    snprintf(sleep_text,sizeof(sleep_text),"Mise en veille : %lu s",
+             (unsigned long)sleep_timeout_seconds);
+    label(sleep_row,sleep_text,0xF3F6F7,&mira_font_fr_12);
+    lv_obj_t *sleep_switch=lv_switch_create(sleep_row);
     lv_obj_set_size(sleep_switch,48,25);
-    if(sleep_enabled)lv_obj_add_state(sleep_switch,LV_STATE_CHECKED);
+    if(sleep_enabled && sleep_timeout_seconds>0)
+        lv_obj_add_state(sleep_switch,LV_STATE_CHECKED);
     lv_obj_add_event_cb(sleep_switch,sleep_mode_changed,LV_EVENT_VALUE_CHANGED,NULL);
-    lv_obj_t *delay_title=label(sleep,"Délai de veille (0 = désactivée)",0xF3F6F7,&mira_font_fr_16);
-    lv_obj_set_pos(delay_title,12,38);
-    lv_obj_t *delay=lv_slider_create(sleep);
-    lv_obj_set_size(delay,575,14);
-    lv_obj_set_pos(delay,18,75);
-    lv_slider_set_range(delay,0,86400);
-    lv_slider_set_value(delay,sleep_timeout_seconds,LV_ANIM_OFF);
-    lv_obj_add_event_cb(delay,sleep_delay_changed,LV_EVENT_RELEASED,NULL);
-    lv_obj_t *light_title=label(sleep,"Luminosité en veille (%)",0xF3F6F7,&mira_font_fr_16);
-    lv_obj_set_pos(light_title,12,104);
-    lv_obj_t *dim=lv_slider_create(sleep);
-    lv_obj_set_size(dim,575,14);
-    lv_obj_set_pos(dim,18,138);
-    lv_slider_set_range(dim,0,100);
-    lv_slider_set_value(dim,sleep_brightness_percent,LV_ANIM_OFF);
-    lv_obj_add_event_cb(dim,sleep_light_changed,LV_EVENT_RELEASED,NULL);
-    lv_obj_t *clock_label=label(sleep,"Horloge en veille",0xF3F6F7,&mira_font_fr_16);
-    lv_obj_set_pos(clock_label,12,169);
-    lv_obj_t *clock_switch=lv_switch_create(sleep);
-    lv_obj_set_pos(clock_switch,545,163);
+    lv_obj_t *clock_row=settings_row(sleep,30);
+    label(clock_row,"Horloge en veille",0xF3F6F7,&mira_font_fr_12);
+    lv_obj_t *clock_switch=lv_switch_create(clock_row);
+    lv_obj_set_size(clock_switch,48,25);
     if(sleep_clock_enabled)lv_obj_add_state(clock_switch,LV_STATE_CHECKED);
     lv_obj_add_event_cb(clock_switch,sleep_clock_changed,LV_EVENT_VALUE_CHANGED,NULL);
 }
