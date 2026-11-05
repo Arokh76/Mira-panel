@@ -1123,25 +1123,42 @@ static esp_err_t save_beta_wifi(httpd_req_t *req,cJSON *form){
     const char *dns2=field(form,"dns2");
     if(!ssid||!password||!mode)
         return html_err(req,HTTPD_400_BAD_REQUEST,"Formulaire réseau incomplet");
+    // Check the saved-network directory BEFORE changing the live Wi-Fi.
+    // The former code ignored list failures, silently overwrote profile 0
+    // and held a 3+ KB array on the HTTP task's limited stack.
+    mira_beta_network_t *previous=calloc(MIRA_NET_MAX,sizeof(*previous));
+    if(!previous)
+        return html_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Mémoire réseau indisponible");
+    size_t count=0;
+    esp_err_t list_err=mira_beta_networks_list(previous,&count,MIRA_NET_MAX);
+    if(list_err!=ESP_OK){
+        free(previous);
+        return html_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Liste des réseaux indisponible");
+    }
+    int id=-1;
+    for(size_t i=0;i<count;i++)
+        if(!strcmp(previous[i].ssid,ssid)){id=previous[i].id;break;}
+    if(id<0&&count>=MIRA_NET_MAX){
+        free(previous);
+        return html_err(req,HTTPD_400_BAD_REQUEST,"Limite de réseaux Mira atteinte");
+    }
+    if(id<0){
+        for(int candidate=0;candidate<=999;candidate++){
+            bool taken=false;
+            for(size_t i=0;i<count;i++)
+                if(previous[i].id==candidate){taken=true;break;}
+            if(!taken){id=candidate;break;}
+        }
+    }
+    free(previous);
+    if(id<0)
+        return html_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Identifiant réseau indisponible");
     esp_err_t result=mira_recovery_save_beta_wifi(ssid,password,mode,
         ip?ip:"",mask?mask:"",gw?gw:"",dns1?dns1:"",dns2?dns2:"");
     if(result==ESP_ERR_INVALID_ARG)
         return html_err(req,HTTPD_400_BAD_REQUEST,"Paramètres Wi-Fi ou IPv4 invalides");
     if(result!=ESP_OK)
         return html_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Enregistrement Wi-Fi impossible");
-    // Match beta network history without touching the rollback reseau.json.
-    mira_beta_network_t previous[MIRA_NET_MAX]={0};
-    size_t count=0;
-    int id=0;
-    if(mira_beta_networks_list(previous,&count,MIRA_NET_MAX)==ESP_OK){
-        for(size_t i=0;i<count;i++){
-            if(previous[i].id>=id)id=previous[i].id+1;
-            if(!strcmp(previous[i].ssid,ssid)){
-                id=previous[i].id;
-                break;
-            }
-        }
-    }
     mira_beta_network_t profile={0};
     profile.id=id;
     snprintf(profile.ssid,sizeof(profile.ssid),"%s",ssid);
