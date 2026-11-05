@@ -42,22 +42,6 @@ static esp_err_t serve_page(httpd_req_t *req,const char *page){
 // The beta fills SCANRESEAUX with a 10-network select box that copies the
 // choice to the SSID text field. Reuse that original behavior/markup.
 // Scanning failure must never block manual SSID entry.
-static esp_err_t send_html_escaped(httpd_req_t *req,const char *value){
-    for(const unsigned char *p=(const unsigned char *)value;*p;p++){
-        const char *entity=NULL;
-        if(*p=='&')entity="&amp;";
-        else if(*p=='<')entity="&lt;";
-        else if(*p=='>')entity="&gt;";
-        else if(*p=='"')entity="&quot;";
-        else if(*p==39)entity="&#39;";
-        if(entity){
-            if(httpd_resp_send_chunk(req,entity,HTTPD_RESP_USE_STRLEN)!=ESP_OK)
-                return ESP_FAIL;
-        }else if(httpd_resp_send_chunk(req,(const char *)p,1)!=ESP_OK)
-            return ESP_FAIL;
-    }
-    return ESP_OK;
-}
 static esp_err_t serve_wifi_page(httpd_req_t *req){
     const char *token="MIRA_SCAN_SLOT";
     const char *slot=strstr(mira_beta_wifi_page,token);
@@ -66,31 +50,10 @@ static esp_err_t serve_wifi_page(httpd_req_t *req){
     if(httpd_resp_send_chunk(req,mira_beta_wifi_page,
                             (ssize_t)(slot-mira_beta_wifi_page))!=ESP_OK)
         return ESP_FAIL;
-    const char *intro="<label for=\"RS\">Réseaux détectés</label>"
-        "<select id=\"RS\" name=\"RS\" class=\"box\" onchange=\"Click(this.value)\">"
-        "<option value=\"\">Saisir le nom du réseau manuellement</option>";
-    if(httpd_resp_send_chunk(req,intro,HTTPD_RESP_USE_STRLEN)!=ESP_OK)
-        return ESP_FAIL;
-    wifi_scan_config_t scan={0};
-    if(esp_wifi_scan_start(&scan,true)==ESP_OK){
-        wifi_ap_record_t records[10]={0};
-        uint16_t count=10;
-        if(esp_wifi_scan_get_ap_records(&count,records)==ESP_OK){
-            for(uint16_t i=0;i<count;i++){
-                char ssid[33]={0};
-                memcpy(ssid,records[i].ssid,32);
-                if(!ssid[0])continue;
-                if(httpd_resp_send_chunk(req,"<option value=\"",HTTPD_RESP_USE_STRLEN)!=ESP_OK ||
-                   send_html_escaped(req,ssid)!=ESP_OK ||
-                   httpd_resp_send_chunk(req,"\">",2)!=ESP_OK ||
-                   send_html_escaped(req,ssid)!=ESP_OK ||
-                   httpd_resp_send_chunk(req,"</option>",HTTPD_RESP_USE_STRLEN)!=ESP_OK)
-                    return ESP_FAIL;
-            }
-        }
-    }else ESP_LOGW(TAG,"Wi-Fi scan failed; manual SSID setup remains available");
-    if(httpd_resp_send_chunk(req,"</select>",HTTPD_RESP_USE_STRLEN)!=ESP_OK ||
-       httpd_resp_send_chunk(req,slot+strlen(token),HTTPD_RESP_USE_STRLEN)!=ESP_OK)
+    // Reuse the beta selector from the configured UI. The Wi-Fi scan is
+    // executed in a worker, never synchronously in this HTTP response.
+    if(mira_beta_web_wifi_choices(req)!=ESP_OK)return ESP_FAIL;
+    if(httpd_resp_send_chunk(req,slot+strlen(token),HTTPD_RESP_USE_STRLEN)!=ESP_OK)
         return ESP_FAIL;
     return httpd_resp_send_chunk(req,NULL,0);
 }
@@ -161,6 +124,12 @@ static bool first_run_ap_access(httpd_req_t *req){
         return true;
     }
     return mira_setup_require_ap(req);
+}
+static esp_err_t wifi_scan_get(httpd_req_t *req){
+    if(mira_beta_setup_unconfigured()){
+        if(!first_run_ap_access(req))return ESP_FAIL;
+    }else if(!mira_beta_web_authorized(req))return ESP_FAIL;
+    return mira_beta_web_wifi_scan_get(req);
 }
 static esp_err_t load_get(httpd_req_t *req){
     if(!mira_beta_setup_unconfigured())return mira_beta_web_load(req);
@@ -379,9 +348,12 @@ esp_err_t mira_beta_setup_register_captive(httpd_handle_t server){
     return httpd_register_uri_handler(server,&fallback);
 }
 esp_err_t mira_beta_setup_register(httpd_handle_t server){
+    const httpd_uri_t scan={.uri="/mira/wifi/scan",.method=HTTP_GET,.handler=wifi_scan_get};
+    esp_err_t err=httpd_register_uri_handler(server,&scan);
+    if(err!=ESP_OK)return err;
     const httpd_uri_t load={.uri="/load",.method=HTTP_GET,.handler=load_get};
     const httpd_uri_t save={.uri="/save",.method=HTTP_POST,.handler=save_post};
-    esp_err_t err=httpd_register_uri_handler(server,&load);
+    err=httpd_register_uri_handler(server,&load);
     if(err!=ESP_OK)return err;
     err=httpd_register_uri_handler(server,&save);
     if(err!=ESP_OK)return err;
