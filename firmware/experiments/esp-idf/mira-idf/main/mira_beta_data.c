@@ -64,14 +64,16 @@ esp_err_t mira_beta_data_confirm(httpd_req_t *req,const char *operation){
     httpd_resp_set_hdr(req,"Cache-Control","no-store");
     return httpd_resp_sendstr(req,content);
 }
-static void clear_namespace(const char *name){
+static esp_err_t clear_namespace(const char *name){
     nvs_handle_t nv;
-    if(nvs_open(name,NVS_READWRITE,&nv)==ESP_OK){
-        esp_err_t err=nvs_erase_all(nv);
-        if(err==ESP_OK)err=nvs_commit(nv);
-        if(err!=ESP_OK)ESP_LOGW(TAG,"Could not erase namespace %s: %s",name,esp_err_to_name(err));
-        nvs_close(nv);
-    }
+    esp_err_t err=nvs_open(name,NVS_READWRITE,&nv);
+    if(err==ESP_ERR_NVS_NOT_FOUND)return ESP_OK; // Already empty
+    if(err!=ESP_OK)return err;
+    err=nvs_erase_all(nv);
+    if(err==ESP_OK)err=nvs_commit(nv);
+    if(err!=ESP_OK)ESP_LOGE(TAG,"Could not erase namespace %s: %s",name,esp_err_to_name(err));
+    nvs_close(nv);
+    return err;
 }
 static bool erase_named_file(const char *path){
     if(remove(path)==0)return true;
@@ -91,14 +93,20 @@ static esp_err_t do_scope(const char *scope){
         if(nvs_open("mira_idf_net",NVS_READWRITE,&net)==ESP_OK){
             static const char *const keys[]={
                 "legacy_wifi","web_mode","web_ip","web_mask","web_gw",
-                "web_dns1","web_dns2","setup_ip","wifi_profiles"
+                "web_dns1","web_dns2","web_profile","setup_ip",
+                "wifi_profiles"
             };
-            for(size_t i=0;i<sizeof(keys)/sizeof(keys[0]);i++)
-                (void)nvs_erase_key(net,keys[i]);
-            (void)nvs_commit(net);
+            esp_err_t e=ESP_OK;
+            for(size_t i=0;i<sizeof(keys)/sizeof(keys[0]);i++){
+                esp_err_t one=nvs_erase_key(net,keys[i]);
+                if(one!=ESP_OK&&one!=ESP_ERR_NVS_NOT_FOUND){e=one;break;}
+            }
+            if(e==ESP_OK)e=nvs_commit(net);
             nvs_close(net);
-        }
-        clear_namespace("mira_idf_pw");
+            if(e!=ESP_OK)return e;
+        }else return ESP_FAIL;
+        esp_err_t wiped=clear_namespace("mira_idf_pw");
+        if(wiped!=ESP_OK)return wiped;
         wifi_config_t empty={0};
         esp_err_t e=esp_wifi_disconnect();
         if(e!=ESP_OK && e!=ESP_ERR_WIFI_NOT_CONNECT)return e;
@@ -121,10 +129,12 @@ static esp_err_t do_scope(const char *scope){
         saved=fwrite("{\"lvgl\":[]}",1,11,lvgl)==11;
         if(fclose(lvgl)!=0)saved=false;
         if(!saved)return ESP_FAIL;
-        clear_namespace("mira_idf_ui");
-        clear_namespace("mira_idf_mqtt");
-        clear_namespace("mira_idf_jeed");
-        return ESP_OK;
+        esp_err_t e=clear_namespace("mira_idf_ui");
+        if(e!=ESP_OK)return e;
+        e=clear_namespace("mira_idf_mqtt");
+        if(e!=ESP_OK)return e;
+        e=clear_namespace("mira_idf_jeed");
+        return e;
     }
     if(!strcmp(scope,"rstall")){
         // Only after an authenticated, fresh POST confirmation.
