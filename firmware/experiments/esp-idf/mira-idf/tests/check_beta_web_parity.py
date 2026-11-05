@@ -100,6 +100,17 @@ assert 'mira_beta_networks_recover_station();' in handlers
 assert 'mira_beta_networks_recover_station(void)' in networks
 assert 'if(err==ESP_OK)return ESP_OK; // Includes an intentionally empty list.' in networks
 print("PASS nonblocking Wi-Fi scan, authenticated listing and initial profile persistence")
+# The Waveshare 4.3C GPIO page must share the beta navigation and must
+# never expose WT32-specific EXT ports or platform labels.
+gpio_view = handlers.split('static esp_err_t beta_43c_gpio_page(httpd_req_t *req){', 1)[1].split('/* Keep the original beta System layout intact.', 1)[0]
+assert 'Navigation Mira Panel' in gpio_view and 'nav=gpio' in gpio_view
+assert all(nav in gpio_view for nav in ('nav=wifi', 'nav=mqtt', 'nav=params', 'nav=system'))
+assert 'GPIO · Waveshare 4,3C' in gpio_view
+assert 'GPIO du WT32' not in gpio_view and 'GPIO WT32' not in gpio_view
+assert 'DI0 · Entrée isolée' in gpio_view and 'DI1 · Entrée isolée' in gpio_view
+assert 'DO0 · Sortie isolée' in gpio_view and 'DO1 · Sortie isolée' in gpio_view
+assert 'GPIO Waveshare 4,3C' in handlers and 'const char *anchor="<button' in handlers
+print("PASS Waveshare GPIO: beta navigation, correct 2DI/2DO, integrated System link")
 print("PASS beta network list, edit, activation and removal routes")
 print("PASS beta Wi-Fi AP and reset safety contracts")
 # The first physical Waveshare 4.3C setup entered HTTP 403 on
