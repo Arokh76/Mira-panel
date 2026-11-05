@@ -1025,22 +1025,22 @@ static esp_err_t beta_43c_gpio_page(httpd_req_t *req){
       "</script></body></html>\n");
 }
 
-/* The raw beta System HTML deliberately hides GPIO on Waveshare,
- * because its old WT32 pins are wrong for this board. Preserve the source
- * template unchanged; add the new, correctly mapped 4.3C I/O entry only
- * in the native render path.
- */
+/* Keep the original beta System layout intact. The Waveshare 4.3C
+ * GPIO link belongs in the existing Maintenance button row, not in an
+ * extra card, and must never claim to expose WT32 EXT GPIOs. */
 static esp_err_t render_system_43c(httpd_req_t *req){
     const char *page=mira_beta_system_html;
-    const char *at=strstr(page,"<section class=\"card\"><h2>Maintenance</h2>");
-    if(!at)return render(req,page);
+    const char *anchor="<button class=\"btn\" onclick=\"window.location.href='/load?nav=rst'\">Gestion des données</button>";
+    const char *at=strstr(page,anchor);
+    if(!at)return html_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,
+                           "Modèle système Waveshare invalide");
+    at+=strlen(anchor);
     const char *insert=
-      "<section class=\"card\"><h2>Entrées / sorties 4.3C</h2>"
-      "<p class=\"hint\">Bornier isolé Waveshare : DI0, DI1, DO0, DO1.</p>"
-      "<a class=\"btn secondary\" href=\"/load?nav=gpio\">Configurer les E/S</a></section>";
+        "<a class=\"btn secondary\" href=\"/load?nav=gpio\">GPIO Waveshare 4,3C</a>";
     const size_t pre=(size_t)(at-page),len=strlen(page),extra=strlen(insert);
     char *copy=malloc(len+extra+1);
-    if(!copy)return html_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Mémoire HTML indisponible");
+    if(!copy)return html_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,
+                             "Mémoire HTML indisponible");
     memcpy(copy,page,pre);
     memcpy(copy+pre,insert,extra);
     memcpy(copy+pre+extra,at,len-pre+1);
