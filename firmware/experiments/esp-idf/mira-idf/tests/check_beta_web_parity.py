@@ -1052,3 +1052,17 @@ for namespace in ('mira_idf_ui','mira_idf_mqtt','mira_idf_jeed',
 for namespace in ('mira_idf_auth','miracam','mira43gpio'):
     assert f'clear_namespace("{namespace}")' not in reset_params
 print('PASS parameter reset invalidates stale mappings but preserves AP identity and camera URL')
+
+# Beta Web Wi-Fi save must check that the native profile list is healthy
+# and has room BEFORE changing live STA settings. It must not silently use
+# ID 0 on an NVS read failure or recreate a repeatedly deleted high ID.
+web_wifi=handlers[handlers.index('static esp_err_t save_beta_wifi('):
+                  handlers.index('static esp_err_t save_beta_ap(')]
+assert 'mira_beta_network_t *previous=calloc(MIRA_NET_MAX,sizeof(*previous));' in web_wifi
+assert 'esp_err_t list_err=mira_beta_networks_list(previous,&count,MIRA_NET_MAX);' in web_wifi
+assert 'if(list_err!=ESP_OK)' in web_wifi
+assert 'if(id<0&&count>=MIRA_NET_MAX)' in web_wifi
+assert 'for(int candidate=0;candidate<=999;candidate++)' in web_wifi
+assert web_wifi.index('mira_beta_networks_list(')<web_wifi.index('mira_recovery_save_beta_wifi(')
+assert 'mira_beta_network_t previous[MIRA_NET_MAX]' not in web_wifi
+print('PASS beta Web Wi-Fi setup validates NVS directory and allocates profiles off task stack')
