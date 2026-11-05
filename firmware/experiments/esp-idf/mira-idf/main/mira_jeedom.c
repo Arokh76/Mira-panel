@@ -10,6 +10,8 @@
 #include "mira_mqtt.h"
 #include "mira_beta_web.h"
 #include <stdio.h>
+#include <errno.h>
+#include <sys/stat.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -39,6 +41,41 @@
 #define MIRA_KEY_MAX 96
 
 static const char *TAG="mira-idf-jeedom";
+// SPIFFS rename does not replace an existing destination. Stage the previous
+// configuration under a backup name and restore it if promotion fails.
+// Recover a backup left behind by a reset between the two renames.
+static bool replace_lvgl_file_safely(void){
+    const char *backup="/spiffs/miralvgl.bak";
+    struct stat st;
+    const bool has_target=(stat(MIRA_JSON_PATH,&st)==0);
+    if(stat(backup,&st)==0){
+        if(!has_target){
+            if(rename(backup,MIRA_JSON_PATH)!=0){
+                ESP_LOGE(TAG,"Cannot recover previous widget JSON: errno=%d",errno);
+                return false;
+            }
+        }else if(remove(backup)!=0){
+            ESP_LOGE(TAG,"Cannot clear previous widget backup: errno=%d",errno);
+            return false;
+        }
+    }
+    const bool old_exists=(stat(MIRA_JSON_PATH,&st)==0);
+    if(old_exists&&rename(MIRA_JSON_PATH,backup)!=0){
+        ESP_LOGE(TAG,"Cannot back up widget JSON: errno=%d",errno);
+        return false;
+    }
+    if(rename(MIRA_JSON_TMP,MIRA_JSON_PATH)!=0){
+        const int saved_errno=errno;
+        if(old_exists&&rename(backup,MIRA_JSON_PATH)!=0)
+            ESP_LOGE(TAG,"CRITICAL: widget JSON restore failed; backup remains: errno=%d",errno);
+        ESP_LOGE(TAG,"Cannot promote widget JSON: errno=%d",saved_errno);
+        return false;
+    }
+    if(old_exists&&remove(backup)!=0)
+        ESP_LOGW(TAG,"Widget JSON installed; old backup cleanup failed: errno=%d",errno);
+    return true;
+}
+
 // Legacy HTTP is the default. MQTT is an explicitly selected advanced mode.
 // Beta GetParamBool("Jeedom") defaults to false when unset.
 static volatile bool jeedom_mode_enabled=false;
@@ -1368,7 +1405,7 @@ static esp_err_t beta_lvgl_save(httpd_req_t *req){
     size_t bytes=fwrite(out,1,len,file);
     int closed=fclose(file);
     cJSON_free(out);
-    if(bytes!=len||closed!=0||rename(MIRA_JSON_TMP,MIRA_JSON_PATH)!=0){
+    if(bytes!=len||closed!=0||!replace_lvgl_file_safely()){
         remove(MIRA_JSON_TMP);
         httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Sauvegarde LVGL impossible");
         return ESP_FAIL;
@@ -1435,7 +1472,7 @@ static esp_err_t programui(httpd_req_t *req) {
     size_t written=fwrite(encoded_json,1,len,out);
     int close_error=fclose(out);
     free(body);
-    if(written!=len||close_error!=0||rename(MIRA_JSON_TMP,MIRA_JSON_PATH)!=0){
+    if(written!=len||close_error!=0||!replace_lvgl_file_safely()){
         remove(MIRA_JSON_TMP);
         httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Enregistrement Mira echoue");return ESP_FAIL;
     }
