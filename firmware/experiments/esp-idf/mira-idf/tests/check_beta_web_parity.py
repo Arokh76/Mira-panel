@@ -1039,3 +1039,16 @@ assert 'if(password_len>0&&password_len<8)' in endpoint
 assert 'esp_wifi_set_config(WIFI_IF_STA,&sta);' not in endpoint
 assert 'memset(password,0,sizeof(password));' in endpoint
 print('PASS native AP provisioning indexes saved Wi-Fi profile, rejects short WPA password')
+
+# Resetting only the display programming must invalidate ID maps and
+# widget wiring derived from the erased miralvgl.json. Never erase
+# miracam (Arduino intentionally keeps camera URL preferences separately)
+# or the Mira setup key on a nonfactory parameter reset.
+reset_params=data[data.index('if(!strcmp(scope,"rstparams")){'):
+                  data.index('if(!strcmp(scope,"rstall")){')]
+for namespace in ('mira_idf_ui','mira_idf_mqtt','mira_idf_jeed',
+                  'mira_idf_map','mira43links','mira43multi'):
+    assert f'clear_namespace("{namespace}")' in reset_params
+for namespace in ('mira_idf_auth','miracam','mira43gpio'):
+    assert f'clear_namespace("{namespace}")' not in reset_params
+print('PASS parameter reset invalidates stale mappings but preserves AP identity and camera URL')
