@@ -211,6 +211,60 @@ static uint8_t ui_theme=0;
 static const char *page_names[6]={"Accueil","Lumières","Températures","Paramètres","Énergie","Multimédia"};
 static const int page_order[6]={0,1,2,4,5,3};
 static lv_obj_t *clock_text,*date_text,*clock_status_text;
+/* The beta datetime widget receives three *internal* Jeedom weather Infos.
+ * They are passive observations, not ordinary visible widget rows. */
+static lv_obj_t *clock_weather_temperature_label,*clock_weather_condition_label;
+static char clock_weather_temperature[32],clock_weather_condition[96];
+static char clock_weather_code[12];
+static bool clock_weather_visible;
+static void clock_weather_redraw(void){
+    if(!clock_weather_temperature_label||!clock_weather_condition_label)return;
+    char *end=NULL;
+    float temp=strtof(clock_weather_temperature,&end);
+    const bool present=clock_weather_temperature[0]&&end&&
+                       end!=clock_weather_temperature&&!*end&&isfinite(temp)&&
+                       temp>=-80.f&&temp<=70.f;
+    clock_weather_visible=present;
+    if(!present){
+        lv_obj_add_flag(clock_weather_temperature_label,LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(clock_weather_condition_label,LV_OBJ_FLAG_HIDDEN);
+    }else{
+        char displayed[64];
+        snprintf(displayed,sizeof(displayed),"%.1f °C",(double)temp);
+        lv_label_set_text(clock_weather_temperature_label,displayed);
+        const char *condition=clock_weather_condition[0]?
+                              clock_weather_condition:"Météo";
+        lv_label_set_text(clock_weather_condition_label,condition);
+        lv_obj_remove_flag(clock_weather_temperature_label,LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(clock_weather_condition_label,LV_OBJ_FLAG_HIDDEN);
+    }
+    if(clock_status_text)
+        lv_obj_set_y(clock_status_text,present?112:36);
+}
+static void clock_weather_receive(const char *name,const char *value){
+    char *dest=NULL;size_t cap=0;
+    if(!strcmp(name,"__mira_weather_temperature")){
+        dest=clock_weather_temperature;cap=sizeof(clock_weather_temperature);
+    }else if(!strcmp(name,"__mira_weather_condition")){
+        dest=clock_weather_condition;cap=sizeof(clock_weather_condition);
+    }else if(!strcmp(name,"__mira_weather_code")){
+        dest=clock_weather_code;cap=sizeof(clock_weather_code);
+    }
+    if(!dest)return;
+    snprintf(dest,cap,"%s",value);
+    clock_weather_redraw();
+}
+static void clock_weather_restore_cached(void){
+    char value[160];
+    static const char *const names[]={
+        "__mira_weather_temperature","__mira_weather_condition","__mira_weather_code"};
+    for(size_t i=0;i<3;i++){
+        if(mira_full_cached_state(names[i],value,sizeof(value)))
+            clock_weather_receive(names[i],value);
+    }
+    clock_weather_redraw();
+}
+
 static uint32_t widget_count;
 static uint32_t last_clock_ms;
 static uint32_t last_user_touch_ms,last_user_touch_count;
@@ -1416,6 +1470,14 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         clock_status_text=label(c,"MIRA PANEL\nConnexion...\nMode jour",0xA8B2B8,&mira_font_fr_16);
         lv_obj_set_pos(clock_status_text,422,36);
         lv_obj_set_width(clock_status_text,350);
+        clock_weather_temperature_label=label(c,"",0xF3F6F7,&lv_font_montserrat_28);
+        lv_obj_set_pos(clock_weather_temperature_label,422,13);
+        lv_obj_set_width(clock_weather_temperature_label,345);
+        clock_weather_condition_label=label(c,"",0xA8B2B8,&mira_font_fr_16);
+        lv_obj_set_pos(clock_weather_condition_label,422,63);
+        lv_obj_set_width(clock_weather_condition_label,345);
+        lv_label_set_long_mode(clock_weather_condition_label,LV_LABEL_LONG_DOT);
+        clock_weather_restore_cached();
         w->card=c;return;
     }
     if(!strcmp(type,"info")){
@@ -2509,7 +2571,9 @@ static void build_config(void){
     }
     artwork_reset(); // detach any old cover before deleting media cards
     scroll_cache_reset(); // release every LVGL image reference BEFORE card deletion
-    widget_n=0;clock_text=NULL;date_text=NULL;clock_status_text=NULL;widget_count=0;
+    widget_n=0;clock_text=NULL;date_text=NULL;clock_status_text=NULL;
+    clock_weather_temperature_label=NULL;clock_weather_condition_label=NULL;
+    clock_weather_visible=false;widget_count=0;
     for(int i=0;i<6;i++)if(i!=3)lv_obj_clean(pages[i]);
     int home_info=0,seen=0;
     for(int i=0;i<count;i++){
@@ -3028,6 +3092,12 @@ static void mira_media_display_text(const char *src,char *out,size_t cap){
     out[used]=0;
 }
 static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
+    // Weather is an internal read-only input of the clock widget.
+    // Do not issue an action or require a separately configured weather tile.
+    if(!strncmp(msg->name,"__mira_weather_",15)){
+        clock_weather_receive(msg->name,msg->value);
+        return;
+    }
     for(uint8_t i=0;i<widget_n;i++){
         mira_widget_t *w=&widgets[i];
         if(!strcmp(w->type,"energy")||!strcmp(w->type,"media")){
@@ -3573,12 +3643,20 @@ void mira_full_ui_tick(void){
         if(clock_status_text){
             wifi_ap_record_t access_point={0};
             char status[150];
-            if(esp_wifi_sta_get_ap_info(&access_point)==ESP_OK)
-                snprintf(status,sizeof(status),"MIRA PANEL\nWi-Fi  %d dBm\nMode %s",
-                    (int)access_point.rssi,current_night_period()?"nuit":"jour");
-            else
-                snprintf(status,sizeof(status),"MIRA PANEL\nWi-Fi déconnecté\nMode %s",
-                    current_night_period()?"nuit":"jour");
+            const bool connected=esp_wifi_sta_get_ap_info(&access_point)==ESP_OK;
+            if(clock_weather_visible){
+                if(connected)
+                    snprintf(status,sizeof(status),"Wi-Fi %d dBm  |  Mode %s",
+                             (int)access_point.rssi,current_night_period()?"nuit":"jour");
+                else snprintf(status,sizeof(status),"Wi-Fi déconnecté  |  Mode %s",
+                              current_night_period()?"nuit":"jour");
+            }else{
+                if(connected)
+                    snprintf(status,sizeof(status),"MIRA PANEL\nWi-Fi %d dBm\nMode %s",
+                             (int)access_point.rssi,current_night_period()?"nuit":"jour");
+                else snprintf(status,sizeof(status),"MIRA PANEL\nWi-Fi déconnecté\nMode %s",
+                              current_night_period()?"nuit":"jour");
+            }
             lv_label_set_text(clock_status_text,status);
         }
         time_t now=time(NULL);
