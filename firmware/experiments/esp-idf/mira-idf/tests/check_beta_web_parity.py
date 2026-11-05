@@ -1025,3 +1025,17 @@ assert 'return erased;' in native_networks
 assert 'if(!*old->valuestring)found=true;' in native_networks
 assert 'if(ok&&(*password||!existed))ok=assign(entry,"pass","");' in native_networks
 print('PASS network deletion, ID reuse and open-network secrets')
+
+# The AP-only /mira/wifi JSON endpoint must NOT write a new STA SSID
+# without indexing it in the native beta network list: the boot-time
+# stale-network filter would erase that valid STA config on next reboot.
+assert 'static esp_err_t wifi_profile_post(httpd_req_t *req)' in recovery
+endpoint=recovery[recovery.index('static esp_err_t wifi_profile_post('):
+                  recovery.index('static bool restore_legacy_wifi_profile(')]
+assert 'mira_beta_networks_list(saved,&count,MIRA_NET_MAX)' in endpoint
+assert 'mira_recovery_save_beta_wifi(profile.ssid,password,"auto",' in endpoint
+assert 'err=mira_beta_networks_upsert(&profile,password);' in endpoint
+assert 'if(password_len>0&&password_len<8)' in endpoint
+assert 'esp_wifi_set_config(WIFI_IF_STA,&sta);' not in endpoint
+assert 'memset(password,0,sizeof(password));' in endpoint
+print('PASS native AP provisioning indexes saved Wi-Fi profile, rejects short WPA password')
