@@ -291,7 +291,7 @@ assert 'if(!strcmp(nav,"id"))return mira_jeedom_render_http_reference(req);' in 
 assert 'if(!strcmp(nav,"checkupdate"))return beta_checkupdate_page(req);' in web
 assert 'if(!strcmp(nav,"gpio"))return beta_43c_gpio_page(req);' in web
 assert 'if(!strcmp(nav,"system"))return render_system_43c(req);' in web
-assert 'Configurer les E/S' in web
+assert 'GPIO Waveshare 4,3C' in web  # Exact 4.3C link within System maintenance
 assert 'esp_err_t mira_beta_web_gpio_state(httpd_req_t *req)' in web
 assert 'esp_err_t mira_beta_web_gpio_set(httpd_req_t *req)' in web
 assert 'mira_beta_web_authorized(req)' in web
