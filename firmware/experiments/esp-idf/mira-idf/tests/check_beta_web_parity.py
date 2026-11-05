@@ -956,7 +956,7 @@ for required in (
     'char previous_password[96]={0};',
     'bool had_previous_password=false;',
     'if(err==ESP_OK)err=save(root);',
-    'if(err!=ESP_OK&&*password){',
+    'if(err!=ESP_OK&&(*password||store_empty)){',
     'had_previous_password?',
     'nvs_erase_key(nv,key)',
     'memset(previous_password,0,sizeof(previous_password));',
@@ -999,3 +999,29 @@ assert 'atomic_web_field("mode",value,sizeof(value))' in handlers
 assert 'atomic_web_field(network_fields[i].atom,value,sizeof(value))' in handlers
 assert 'nvs_text("mira_idf_net",network_fields[i].key,"",value,sizeof(value));' in handlers
 print('PASS single-record IPv4 config, STA rollback, legacy profile fallback and Web fields')
+
+# Reset must remove the NEW web_profile key as well as old six-key IP fields.
+# Every failed erase or commit must fail the request instead of claiming
+# completion and allowing an old static-IP profile to reappear at boot.
+data=(idf/'mira_beta_data.c').read_text(encoding='utf-8')
+assert '"web_dns1","web_dns2","web_profile","setup_ip",' in data
+assert 'static esp_err_t clear_namespace(const char *name)' in data
+assert 'if(e==ESP_OK)e=nvs_commit(net);' in data
+assert 'if(e!=ESP_OK)return e;' in data
+assert 'esp_err_t wiped=clear_namespace("mira_idf_pw");' in data
+assert 'if(wiped!=ESP_OK)return wiped;' in data
+assert 'e=clear_namespace("mira_idf_mqtt");' in data
+assert 'e=clear_namespace("mira_idf_jeed");' in data
+print('PASS network/parameter reset clears atomic IP profile and reports NVS failures')
+
+# Removing a network must delete its native secret or report an error;
+# a newly-created open SSID must store an explicit empty password so an
+# orphan from a previous profile with the same ID is never accidentally used.
+assert 'static esp_err_t save_password(int id,const char *password,bool store_empty)' in native_networks
+assert 'const bool store_empty=!existed;' in native_networks
+assert 'save_password(profile->id,password,store_empty)' in native_networks
+assert 'if(erased!=ESP_OK)' in native_networks
+assert 'return erased;' in native_networks
+assert 'if(!*old->valuestring)found=true;' in native_networks
+assert 'if(ok&&(*password||!existed))ok=assign(entry,"pass","");' in native_networks
+print('PASS network deletion, ID reuse and open-network secrets')
