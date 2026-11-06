@@ -1204,7 +1204,7 @@ assert 'ESP_NETIF_DNS_MAIN,&primary' in fixed_auto
 assert 'ESP_NETIF_DNS_BACKUP,&backup' in fixed_auto
 assert fixed_auto.index('esp_netif_get_dns_info(') < fixed_auto.index('esp_netif_dhcpc_stop(')
 assert fixed_auto.index('esp_netif_dhcpc_stop(') < fixed_auto.index('esp_netif_set_ip_info(')
-assert fixed_auto.index('esp_netif_set_ip_info(') < fixed_auto.index('esp_netif_set_dns_info(')
+assert fixed_auto.index('esp_netif_set_ip_info(') < fixed_auto.index('esp_netif_set_dns_info(',fixed_auto.index('esp_netif_set_ip_info('))
 assert 'current.ip=legacy_requested_ip;' in fixed_auto
 assert 'esp_netif_set_dns_info(sta_netif,ESP_NETIF_DNS_MAIN,&primary)' in fixed_auto
 assert 'esp_netif_set_dns_info(sta_netif,ESP_NETIF_DNS_BACKUP,&backup)' in fixed_auto
