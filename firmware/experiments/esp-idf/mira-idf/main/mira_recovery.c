@@ -563,7 +563,8 @@ static void legacy_finish_fixed_auto(void){
         sta_netif,ESP_NETIF_DNS_MAIN,&primary);
     const esp_err_t dns_backup_err=esp_netif_get_dns_info(
         sta_netif,ESP_NETIF_DNS_BACKUP,&backup);
-    if(!legacy_dns_valid(&primary)){
+    const bool had_dhcp_dns=dns_primary_err==ESP_OK&&legacy_dns_valid(&primary);
+    if(!had_dhcp_dns){
         // A DHCP server may omit DNS, in which case the local router often
         // offers DNS forwarding. Use ONLY the discovered DHCP gateway as
         // a last resort, never a hard-coded/public DNS or a user IP change.
@@ -579,9 +580,14 @@ static void legacy_finish_fixed_auto(void){
     // DHCP may already have leased exactly the requested IP. In that case
     // keep the running DHCP client and its valid DNS, as Arduino does.
     if(legacy_requested_ip.addr==current.ip.addr){
-        if(dns_primary_err!=ESP_OK||
-           !legacy_dns_valid(&(esp_netif_dns_info_t){.ip=primary.ip})){
-            ESP_LOGW(TAG,"fixed_auto same DHCP IP but no DNS information");
+        if(!had_dhcp_dns){
+            // DHCP-provided IP is already the requested one, but the
+            // router did not advertise a resolver; keep this lease and
+            // apply its gateway as DNS only as an explicit last resort.
+            esp_err_t dns_err=esp_netif_set_dns_info(
+                sta_netif,ESP_NETIF_DNS_MAIN,&primary);
+            ESP_LOGW(TAG,"fixed_auto requested IP equals DHCP lease; DNS gateway fallback: %s",
+                     esp_err_to_name(dns_err));
         }
         return;
     }
