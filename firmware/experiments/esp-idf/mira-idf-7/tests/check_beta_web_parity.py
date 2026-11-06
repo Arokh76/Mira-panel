@@ -18,13 +18,16 @@ shared = [
     "mira_beta_data.c", "mira_beta_captive_dns.c",
     "mira_french_font.c", "mira_sleep_120.c", "mira_home_96.c",
     "mira_info_glyphs.c", "mira_legacy_cipher.c",
-    "idf_component.yml",
 ]
 for name in shared:
     orig = (common / "main" / name).read_bytes()
     port = (main / name).read_bytes()
     assert orig == port, f"7-inch software core diverged from beta: {name}"
 assert (common / "partitions.csv").read_bytes() == (target / "partitions.csv").read_bytes()
+# Display adapter is deliberately added only on the 7-inch test hardware.
+deps = (main / "idf_component.yml").read_text()
+assert 'espressif/esp_lvgl_adapter: "0.5.2"' in deps
+assert 'espressif/esp_jpeg: "1.3.2"' in deps
 # Display timing and DMA mitigation are independent 7-inch hardware choices.
 # Keep all other ESP-IDF settings synchronized with the 4.3C beta.
 def config_values(path):
