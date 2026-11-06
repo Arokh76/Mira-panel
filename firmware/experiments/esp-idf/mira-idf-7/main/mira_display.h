@@ -35,8 +35,4 @@ esp_err_t mira_display_set_brightness(uint8_t raw);
 lv_display_t *mira_display_lvgl(void);
 void mira_display_touch_read(lv_indev_t *indev, lv_indev_data_t *data);
 bool mira_display_touch_ready(void);
-// Called only on the LVGL task. Recover RGB DMA once after widget JSON reload.
-void mira_display_schedule_rgb_recovery(void);
-void mira_display_service_rgb_recovery(void);
-void mira_display_set_render_task(void);
 void mira_display_stats(mira_display_stats_t *out);
