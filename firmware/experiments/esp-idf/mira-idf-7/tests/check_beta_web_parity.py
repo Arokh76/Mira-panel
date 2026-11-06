@@ -10,7 +10,7 @@ import re
 
 root = Path(__file__).resolve().parents[5]
 src = root / "firmware/source/consolidated/MIRA_PANEL/HTML"
-idf = root / "firmware/experiments/esp-idf/mira-idf/main"
+idf = Path(__file__).resolve().parents[1] / "main"
 native = (idf / "mira_beta_web_pages.h").read_text(encoding="utf-8")
 handlers = (idf / "mira_beta_web.c").read_text(encoding="utf-8")
 jeedom = (idf / "mira_jeedom.c").read_text(encoding="utf-8")
