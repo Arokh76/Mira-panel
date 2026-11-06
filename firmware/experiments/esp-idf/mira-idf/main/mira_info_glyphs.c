@@ -17,13 +17,14 @@ static bool known(const char *kind){
     return kind&&(!strcasecmp(kind,"temperature")||!strcasecmp(kind,"humidity")||
                  !strcasecmp(kind,"pressure")||!strcasecmp(kind,"light")||
                  !strcasecmp(kind,"energy")||!strcasecmp(kind,"plug")||
-                 !strcasecmp(kind,"door"));
+                 !strcasecmp(kind,"door")||
+                 !strcasecmp(kind,"cloud")||!strcasecmp(kind,"rain"));
 }
 const char *mira_info_glyph_kind(const char *override,const char *name,const char *unit){
     // Explicit unknown icons are NOT replaced with guessed ones.
     if(known(override)){
         static const char *const names[]={
-            "temperature","humidity","pressure","light","energy","plug","door"
+            "temperature","humidity","pressure","light","energy","plug","door","cloud","rain"
         };
         for(size_t i=0;i<sizeof(names)/sizeof(names[0]);i++)
             if(!strcasecmp(override,names[i]))return names[i];
@@ -77,6 +78,26 @@ lv_obj_t *mira_info_glyph_create(lv_obj_t *card,const char *kind,
         part(root,d/2-stroke/2,d*4/5,stroke,d/5,false,2,accent);
         part(root,0,d/2-stroke/2,d/5,stroke,false,2,accent);
         part(root,d*4/5,d/2-stroke/2,d/5,stroke,false,2,accent);
+    }else if(!strcmp(kind,"cloud")||!strcmp(kind,"rain")){
+        /* Compact weather pictogram using native shapes, as on Arduino.
+         * The lower cloud bar joins three circular lobes; optional rain
+         * streaks are strictly within this icon's 28px bounding box. */
+        const bool rainy=!strcmp(kind,"rain");
+        const int base_y=d*50/100;
+        part(root,d*12/100,base_y,d*76/100,d*24/100,
+             false,LV_RADIUS_CIRCLE,accent);
+        part(root,d*23/100,d*34/100,d*30/100,d*36/100,
+             false,LV_RADIUS_CIRCLE,accent);
+        part(root,d*47/100,d*39/100,d*32/100,d*32/100,
+             false,LV_RADIUS_CIRCLE,accent);
+        if(rainy){
+            part(root,d*24/100,d*79/100,stroke,d*15/100,
+                 false,2,accent);
+            part(root,d*48/100,d*79/100,stroke,d*15/100,
+                 false,2,accent);
+            part(root,d*70/100,d*79/100,stroke,d*15/100,
+                 false,2,accent);
+        }
     }else if(!strcmp(kind,"pressure")){
         part(root,d/7,d/6,d*5/7,d*5/7,true,LV_RADIUS_CIRCLE,accent);
         part(root,d*29/100,d*56/100,d*42/100,stroke,false,2,accent);
