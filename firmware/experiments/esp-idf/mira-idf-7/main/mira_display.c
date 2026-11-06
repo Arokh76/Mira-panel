@@ -1,5 +1,5 @@
 // Mira ESP-IDF Waveshare 7-inch STANDARD 800x480 -- independent experimental firmware.
-// Native ESP-IDF RGB frame swap + LVGL 9 direct mode, no Arduino/Waveshare LVGL port.
+// Waveshare ESP-IDF LVGL9 baseline: vendor RGB profile + Espressif LVGL adapter.
 #include <assert.h>
 #include <string.h>
 #include <inttypes.h>
@@ -10,6 +10,7 @@
 #include "driver/gpio.h"
 #include "esp_lcd_panel_rgb.h"
 #include "esp_lcd_panel_ops.h"
+#include "esp_lv_adapter.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_check.h"
@@ -17,7 +18,11 @@
 
 #define WIDTH 800
 #define HEIGHT 480
-#define LCD_PCLK_HZ (13 * 1000 * 1000) // 7-inch RGB stable clock: 16MHz may cause continuous horizontal drift with PSRAM EDMA
+#define LCD_PCLK_HZ (16 * 1000 * 1000) // Waveshare ESP-IDF 09_lvgl_v9_demo baseline
+// Reserve only eight RGB scanlines per DMA bounce buffer (800 * 8 * 2 = 12800 bytes each).
+// The previous vendor-sized expression produced 16000 *pixels* (32000 bytes per buffer).
+#define LCD_BOUNCE_BUFFER_LINES 8
+#define LCD_BOUNCE_BUFFER_PIXELS (WIDTH * LCD_BOUNCE_BUFFER_LINES)
 
 static const char *TAG = "mira-idf-rgb";
 static i2c_master_bus_handle_t i2c_bus;
@@ -40,7 +45,6 @@ static volatile uint8_t touch_irq_level;
 static bool finger_down;
 static esp_lcd_panel_handle_t panel;
 static lv_display_t *lvdisp;
-static TaskHandle_t render_task;
 static volatile uint32_t frames;
 static volatile uint32_t vsync_missed;
 static volatile uint32_t last_refresh_us;
@@ -48,31 +52,8 @@ static volatile uint32_t wait_total_us;
 static volatile uint32_t vsync_events;
 static volatile uint32_t frame_complete_events;
 
-// ESP32-S3 RGB may lose DMA/panel alignment while SPIFFS writes share the
-// external memory bus. Resync once AFTER JSON reload and the LVGL draw,
-// never at every VSYNC (which caused visible horizontal jitter).
-// Both functions are deliberately called only by the LVGL task.
-static int64_t rgb_recovery_deadline_us;
-static uint32_t rgb_recovery_count;
-void mira_display_schedule_rgb_recovery(void) {
-    if (panel) rgb_recovery_deadline_us = esp_timer_get_time() + 250000;
-}
-void mira_display_service_rgb_recovery(void) {
-    if (!panel || !rgb_recovery_deadline_us ||
-        esp_timer_get_time() < rgb_recovery_deadline_us) return;
-    rgb_recovery_deadline_us = 0;
-    const esp_err_t err = esp_lcd_rgb_panel_restart(panel);
-    if (err == ESP_OK) {
-        rgb_recovery_count++;
-        ESP_LOGI(TAG, "RGB DMA manual VSYNC resync after widget reload (#%lu)",
-                 (unsigned long)rgb_recovery_count);
-    } else {
-        ESP_LOGW(TAG, "RGB DMA manual resync failed: %s", esp_err_to_name(err));
-    }
-}
-void mira_display_set_render_task(void) {
-    render_task = xTaskGetCurrentTaskHandle();
-}
+// No forced per-frame VSYNC restart or manual post-widget RGB restart.
+// The Espressif adapter owns panel buffering and VSYNC coordination.
 void mira_display_stats(mira_display_stats_t *out) {
     out->frames = frames;
     out->vsync_missed = vsync_missed;
@@ -317,56 +298,28 @@ static void init_i2c(void) {
              touch_addr, product[0], product[1], product[2], product[3]);
 }
 
-static bool IRAM_ATTR lcd_frame_complete(esp_lcd_panel_handle_t h,
-                      const esp_lcd_rgb_panel_event_data_t *data, void *ctx) {
-    (void)h; (void)data; (void)ctx;
-    frame_complete_events++;
-    BaseType_t woken = pdFALSE;
-    if (render_task) vTaskNotifyGiveFromISR(render_task, &woken);
-    return woken == pdTRUE;
-}
-static bool IRAM_ATTR lcd_vsync_event(esp_lcd_panel_handle_t h,
-                      const esp_lcd_rgb_panel_event_data_t *data, void *ctx) {
-    (void)h; (void)data; (void)ctx;
-    vsync_events++;
-    return false;
-}
-static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
-    if (!lv_display_flush_is_last(disp)) {
-        lv_display_flush_ready(disp);
-        return;
-    }
-    // Native IDF frame swap: only submit the final region, as the buffer is already
-    // an entire offscreen 800x480 RGB565 framebuffer allocated by esp_lcd.
-    ulTaskNotifyTake(pdTRUE, 0);
-    esp_err_t err = esp_lcd_panel_draw_bitmap(panel, 0, 0, WIDTH, HEIGHT, px_map);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "RGB swap failed: %s", esp_err_to_name(err));
-        lv_display_flush_ready(disp);
-    }
-}
-static void flush_wait_cb(lv_display_t *disp) {
-    int64_t t0 = esp_timer_get_time();
-    // NEVER mark a framebuffer available while DMA can still reference it:
-    // the previous implementation acknowledged a timeout and could render into
-    // a framebuffer still being scanned, producing tearing / a moving image.
-    while (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(125)) == 0) {
-        vsync_missed++;
-        if (vsync_missed <= 5 || vsync_missed % 30 == 0) {
-            ESP_LOGW(TAG, "RGB frame-complete callback timeout (%lu); retaining framebuffer",
-                     (unsigned long)vsync_missed);
-        }
-        // The WiFi recovery HTTP service remains on another FreeRTOS task.
-    }
-    last_refresh_us = (uint32_t)(esp_timer_get_time() - t0);
-    wait_total_us += last_refresh_us;
+// Count LVGL refreshes for /perf. Native RGB VSYNC is managed by adapter.
+static void refresh_ready_cb(lv_event_t *e) {
+    (void)e;
     frames++;
-    lv_display_flush_ready(disp);
 }
-static void tick_cb(void *arg) { (void)arg; lv_tick_inc(2); }
 
-esp_err_t mira_display_init(void) {
-    init_i2c();
+
+static void log_rgb_dma_heap(const char *stage) {
+    const uint32_t dma_caps = MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL;
+    ESP_LOGI(TAG, "%s: DMA-internal free=%u largest=%u, PSRAM free=%u",
+             stage,
+             (unsigned)heap_caps_get_free_size(dma_caps),
+             (unsigned)heap_caps_get_largest_free_block(dma_caps),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+}
+
+// The RGB driver allocates two bounce buffers from internal DMA-capable RAM.
+// Reserve these and the PSRAM framebuffers before Wi-Fi/HTTP/Jeedom consume
+// the scarce internal heap; LCD timing, CH422G and GT911 remain unchanged.
+esp_err_t mira_display_preallocate_rgb(void) {
+    if (panel != NULL) return ESP_OK;
+    log_rgb_dma_heap("Before early RGB DMA allocation");
     esp_lcd_rgb_panel_config_t cfg = {
         .clk_src = LCD_CLK_SRC_DEFAULT,
         .timings = {
@@ -383,11 +336,11 @@ esp_err_t mira_display_init(void) {
         },
         .data_width = 16,
         .bits_per_pixel = 16,
-        .num_fbs = 2,
-        // At PCLK 13 MHz + octal PSRAM, direct EDMA avoids racing the
-        // LVGL rasterizer against ISR-driven PSRAM->SRAM bounce copies.
-        .bounce_buffer_size_px = 0,
-        .dma_burst_size = 64,
+        .num_fbs = esp_lv_adapter_get_required_frame_buffer_count(
+            ESP_LV_ADAPTER_TEAR_AVOID_MODE_DEFAULT_RGB, ESP_LV_ADAPTER_ROTATE_0),
+        // DMA bounce buffers are deliberately smaller than the vendor demo's
+        // to coexist with Mira's Wi-Fi, HTTP and Jeedom tasks in internal RAM.
+        .bounce_buffer_size_px = LCD_BOUNCE_BUFFER_PIXELS,
         .sram_trans_align = 4,
         .psram_trans_align = 64,
         .hsync_gpio_num = GPIO_NUM_46,
@@ -398,36 +351,41 @@ esp_err_t mira_display_init(void) {
         .data_gpio_nums = {14, 38, 18, 17, 10, 39, 0, 45, 48, 47, 21, 1, 2, 42, 41, 40},
         .flags.fb_in_psram = 1,
     };
-    ESP_RETURN_ON_ERROR(esp_lcd_new_rgb_panel(&cfg, &panel), TAG, "RGB panel allocate");
+    esp_err_t err = esp_lcd_new_rgb_panel(&cfg, &panel);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Early RGB panel allocation failed: %s", esp_err_to_name(err));
+        log_rgb_dma_heap("RGB panel allocation failed");
+        return err;
+    }
+    log_rgb_dma_heap("After early RGB DMA allocation");
+    return ESP_OK;
+}
+
+esp_err_t mira_display_init(void) {
+    if (panel == NULL) {
+        ESP_LOGE(TAG, "RGB panel was not preallocated");
+        return ESP_ERR_INVALID_STATE;
+    }
+    init_i2c();
     ESP_RETURN_ON_ERROR(esp_lcd_panel_reset(panel), TAG, "RGB reset");
     ESP_RETURN_ON_ERROR(esp_lcd_panel_init(panel), TAG, "RGB init");
-    ESP_LOGI(TAG, "Waveshare 7 LCD RGB panel started at %d Hz (800x480, 4/8/8 porch)", LCD_PCLK_HZ);
-    esp_lcd_rgb_panel_event_callbacks_t cb = {
-        .on_frame_buf_complete = lcd_frame_complete,
-        .on_vsync = lcd_vsync_event,
-    };
-    ESP_RETURN_ON_ERROR(esp_lcd_rgb_panel_register_event_callbacks(panel, &cb, NULL), TAG, "VSYNC callback");
-    void *fb1 = NULL, *fb2 = NULL;
-    ESP_RETURN_ON_ERROR(esp_lcd_rgb_panel_get_frame_buffer(panel, 2, &fb1, &fb2), TAG, "RGB double buffers");
-    ESP_LOGI(TAG, "RGB565 %dx%d PCLK=%d NO_BOUNCE, fb1=%p fb2=%p, PSRAM=%zu", WIDTH,HEIGHT,
-         LCD_PCLK_HZ,fb1,fb2,heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
-    lv_init();
-    lvdisp = lv_display_create(WIDTH, HEIGHT);
-    assert(lvdisp);
-    lv_display_set_user_data(lvdisp, panel);
-    lv_display_set_color_format(lvdisp, LV_COLOR_FORMAT_RGB565);
-    lv_display_set_buffers(lvdisp, fb1, fb2, WIDTH * HEIGHT * 2, LV_DISPLAY_RENDER_MODE_DIRECT);
-    lv_display_set_flush_cb(lvdisp, flush_cb);
-    lv_display_set_flush_wait_cb(lvdisp, flush_wait_cb);
+    ESP_LOGI(TAG, "Waveshare 7 RGB vendor baseline PCLK=%d (800x480, 4/8/8, bounce=%u)",
+             LCD_PCLK_HZ, (unsigned)LCD_BOUNCE_BUFFER_PIXELS);
+    esp_lv_adapter_config_t adapter_cfg = ESP_LV_ADAPTER_DEFAULT_CONFIG();
+    adapter_cfg.task_stack_size = 12 * 1024;
+    adapter_cfg.stack_in_psram = true;
+    ESP_RETURN_ON_ERROR(esp_lv_adapter_init(&adapter_cfg), TAG, "LVGL adapter init");
+    esp_lv_adapter_display_config_t disp_cfg = ESP_LV_ADAPTER_DISPLAY_RGB_DEFAULT_CONFIG(
+        panel, NULL, WIDTH, HEIGHT, ESP_LV_ADAPTER_ROTATE_0);
+    disp_cfg.profile.use_psram = true;
+    lvdisp = esp_lv_adapter_register_display(&disp_cfg);
+    if (!lvdisp) return ESP_ERR_NO_MEM;
+    lv_display_add_event_cb(lvdisp, refresh_ready_cb, LV_EVENT_REFR_READY, NULL);
     lv_indev_t *touch = lv_indev_create();
     assert(touch);
     lv_indev_set_type(touch, LV_INDEV_TYPE_POINTER);
     lv_indev_set_display(touch, lvdisp);
     lv_indev_set_read_cb(touch, mira_display_touch_read);
-    esp_timer_handle_t timer;
-    const esp_timer_create_args_t timer_cfg = {.callback = tick_cb, .name="lv_tick"};
-    ESP_RETURN_ON_ERROR(esp_timer_create(&timer_cfg, &timer), TAG, "LVGL tick");
-    ESP_RETURN_ON_ERROR(esp_timer_start_periodic(timer, 2000), TAG, "LVGL tick start");
     return ESP_OK;
 }
 

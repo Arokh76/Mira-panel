@@ -20,7 +20,14 @@ CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
 CONFIG_FREERTOS_HZ=1000
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
-CONFIG_LV_DEF_REFR_PERIOD=10
+# Match Waveshare ESP-IDF 09_lvgl_v9_demo LVGL 9 runtime/cache profile.
+CONFIG_LV_OS_FREERTOS=y
+CONFIG_LV_MEMCPY_MEMSET_STD=y
+CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM=y
+CONFIG_LV_OBJ_STYLE_CACHE=y
+CONFIG_LV_DRAW_SW_DRAW_UNIT_CNT=2
+CONFIG_LV_COLOR_DEPTH_16=y
+CONFIG_LV_DEF_REFR_PERIOD=15
 # Preserve firmware-beta's GET /addlistlvgl query with styles/free layout.
 CONFIG_HTTPD_MAX_URI_LEN=2048
 CONFIG_LV_USE_CLIB_STRING=y
@@ -52,4 +59,5 @@ CONFIG_LWIP_SNTP_MAX_SERVERS=2
 # Do NOT restart DMA automatically on every VSYNC: it can cause visible jitter.
 # Hardware timings (13 MHz, CH422G, GT911) and LVGL double buffers unchanged.
 CONFIG_SPIRAM_XIP_FROM_PSRAM=y
+# A/B test: restore pre-Waveshare memory/cache defaults; retain RGB timing and LVGL settings.
 CONFIG_LCD_RGB_RESTART_IN_VSYNC=n
