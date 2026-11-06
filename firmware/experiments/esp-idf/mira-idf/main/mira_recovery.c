@@ -560,6 +560,7 @@ static void legacy_finish_fixed_auto(void){
 }
 
 static volatile bool station_connected;
+static TickType_t clock_last_attempt_tick;
 // Keep the recovery AP while unprovisioned; once STA is connected it can be
 // disabled without changing or deleting any saved configuration. On network
 // loss it is restored, so the firmware remains reachable for recovery.
@@ -570,6 +571,18 @@ static void recovery_ap_supervisor(void *arg){
     (void)arg;
     for(;;){
         vTaskDelay(pdMS_TO_TICKS(3000));
+        // WT32 starts NTP once Wi-Fi is available and lets lwIP retry.
+        // If a lost DNS/initial response leaves time invalid, retry in
+        // the existing network-supervisor task (never block the LVGL task).
+        if(station_connected&&!clock_sntp_synced&&time(NULL)<1700000000){
+            const TickType_t now=xTaskGetTickCount();
+            if((TickType_t)(now-clock_last_attempt_tick)>=pdMS_TO_TICKS(60000)){
+                clock_last_attempt_tick=now;
+                esp_err_t sntp_err=esp_netif_sntp_start();
+                if(sntp_err==ESP_OK)clock_sntp_started=true;
+                ESP_LOGW(TAG,"NTP retry while clock unset: %s",esp_err_to_name(sntp_err));
+            }
+        }
         const bool want_ap=beta_ap_persistent||!station_connected;
         if(want_ap==recovery_ap_active)continue;
         esp_err_t err=esp_wifi_set_mode(want_ap?WIFI_MODE_APSTA:WIFI_MODE_STA);
@@ -585,6 +598,7 @@ static void wifi_status_event(void *arg,esp_event_base_t base,int32_t id,void *d
     if(base==IP_EVENT&&id==IP_EVENT_STA_GOT_IP){
         station_connected=true;
         legacy_finish_fixed_auto();
+        clock_last_attempt_tick=xTaskGetTickCount();
         // Restart after every recovered IP lease, not only at first boot.
         // esp_netif_sntp_start is explicitly restart-safe in ESP-IDF 5.5.
         esp_err_t time_err=esp_netif_sntp_start();
@@ -908,12 +922,12 @@ esp_err_t mira_recovery_init(void) {
     if(!sta_netif)return ESP_ERR_NO_MEM;
     // France / Europe-Paris local time, including automatic summer-time changes.
     // SNTP is initialized now but starts only when STA has an IP address.
-    setenv("TZ","CET-1CEST,M3.5.0/2,M10.5.0/3",1);
+    setenv("TZ","CET-1CEST,M3.5.0,M10.5.0/3",1);
     tzset();
-    /* Three distinct NTP servers allow recovery from DNS/server outages;
-     * a valid IP connection alone does not imply that time has synchronized. */
+    // Direct port of the validated WT32 MiraPanelUI::startNtpIfPossible()
+    // time servers and Europe/Paris TZ. IDF starts after the station has IP.
     esp_sntp_config_t sntp_cfg=ESP_NETIF_SNTP_DEFAULT_CONFIG_MULTIPLE(
-        3,ESP_SNTP_SERVER_LIST("pool.ntp.org","time.cloudflare.com","time.google.com"));
+        2,ESP_SNTP_SERVER_LIST("pool.ntp.org","time.nist.gov"));
     sntp_cfg.start=false;
     sntp_cfg.sync_cb=mira_ntp_synced;
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_netif_sntp_init(&sntp_cfg));
