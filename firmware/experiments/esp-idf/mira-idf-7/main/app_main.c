@@ -1,13 +1,10 @@
-// Mira Panel ESP-IDF + LVGL 9.6 scrolling performance baseline.
-// All display hardware details isolated in mira_display.c.
-#include <inttypes.h>
+// Mira ESP-IDF Waveshare 7 STD: manufacturer RGB/LVGL9 baseline.
+// Espressif adapter owns VSYNC, framebuffers and LVGL task; Mira UI is a timer callback.
 #include <stdint.h>
 #include "esp_log.h"
 #include "esp_err.h"
-#include "esp_heap_caps.h"
 #include "esp_timer.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
+#include "esp_lv_adapter.h"
 #include "lvgl.h"
 #include "mira_display.h"
 #include "mira_full.h"
@@ -19,72 +16,60 @@
 void mira_recovery_set_fps(uint32_t lvgl_fps_tenths, uint32_t rgb_fps_tenths);
 void mira_recovery_set_profile(uint32_t draw_us, uint32_t wait_us, uint32_t handler_max_us);
 static const char *TAG = "mira-idf";
-static void lvgl_loop(void *arg) {
-    (void)arg;
-    mira_display_set_render_task();
-    mira_display_stats_t prev = {0};
-    uint64_t last_us = esp_timer_get_time();
-    uint32_t last_wait_total = 0;
-    uint32_t last_frames = 0;
-    uint64_t draw_total = 0, wait_total = 0;
-    uint32_t drawn = 0, max_handler = 0;
-    for (;;) {
-        mira_full_ui_tick(); // configuration reloads only on the LVGL task
-        const uint64_t t0 = esp_timer_get_time();
-        uint32_t next_ms = lv_timer_handler();
-        uint32_t handler = (uint32_t)(esp_timer_get_time()-t0);
-        // Recover RGB alignment once after a widget JSON update, not continuously.
-        mira_display_service_rgb_recovery();
-        mira_display_stats_t st;
-        mira_display_stats(&st);
-        uint32_t waits=st.wait_total_us-last_wait_total;
-        uint32_t frames=st.frames-last_frames;
-        last_wait_total=st.wait_total_us;
-        last_frames=st.frames;
-        if(frames) {
-            drawn += frames;
-            draw_total += handler>waits ? handler-waits : 0;
-            wait_total += waits;
-            if(handler>max_handler)max_handler=handler;
-        }
-        const uint64_t now=esp_timer_get_time();
-        if(now-last_us >= 1000000) {
-            mira_display_stats_t cur;
-            mira_display_stats(&cur);
-            uint32_t dur=(uint32_t)(now-last_us);
-            uint32_t lvfps=(uint32_t)((uint64_t)(cur.frames-prev.frames)*10000000ULL/dur);
-            uint32_t rgbfps=(uint32_t)((uint64_t)(cur.vsync_events-prev.vsync_events)*10000000ULL/dur);
-            mira_recovery_set_fps(lvfps,rgbfps);
-            mira_recovery_set_profile(drawn?(uint32_t)(draw_total/drawn):0,
-                                      drawn?(uint32_t)(wait_total/drawn):0,max_handler);
-            mira_recovery_set_cache_state(0,0);
-            mira_recovery_set_bench_state(0);
-            mira_recovery_set_shadow_mode(0);
-            mira_recovery_set_auto_state(0);
-            mira_recovery_set_scroll_state(0,0,0);
-            ESP_LOGI(TAG,"Mira full UI: widgets=%u FPS=%u.%u RGB=%u.%u draw=%u us wait=%u us",
-                     (unsigned)mira_full_widget_count(),lvfps/10,lvfps%10,
-                     rgbfps/10,rgbfps%10,
-                     drawn?(unsigned)(draw_total/drawn):0,
-                     drawn?(unsigned)(wait_total/drawn):0);
-            prev=cur;last_us=now;drawn=0;draw_total=0;wait_total=0;max_handler=0;
-        }
-        if(next_ms<2)next_ms=2;
-        if(next_ms>12)next_ms=12;
-        vTaskDelay(pdMS_TO_TICKS(next_ms));
-    }
+
+static void mira_lvgl_timer(lv_timer_t *timer) {
+    (void)timer;
+    static uint64_t last_us;
+    static uint32_t last_frames;
+    static uint64_t ui_total_us;
+    static uint32_t ui_calls;
+    static uint32_t ui_max_us;
+    const uint64_t start_us = esp_timer_get_time();
+    // Called by the adapter LVGL task, not HTTP/MQTT worker tasks.
+    mira_full_ui_tick();
+    const uint32_t elapsed_us = (uint32_t)(esp_timer_get_time() - start_us);
+    ui_total_us += elapsed_us;
+    ui_calls++;
+    if (elapsed_us > ui_max_us) ui_max_us = elapsed_us;
+    const uint64_t now_us = esp_timer_get_time();
+    if (!last_us) last_us = now_us;
+    if (now_us - last_us < 1000000) return;
+
+    mira_display_stats_t st;
+    mira_display_stats(&st);
+    const uint32_t interval_us = (uint32_t)(now_us - last_us);
+    const uint32_t lvfps = (uint32_t)(((uint64_t)(st.frames - last_frames) * 10000000ULL) / interval_us);
+    // Native VSYNC count is owned by Espressif adapter. Report 0 = unavailable.
+    mira_recovery_set_fps(lvfps, 0);
+    mira_recovery_set_profile(ui_calls ? (uint32_t)(ui_total_us / ui_calls) : 0, 0, ui_max_us);
+    mira_recovery_set_cache_state(0, 0);
+    mira_recovery_set_bench_state(0);
+    mira_recovery_set_shadow_mode(0);
+    mira_recovery_set_auto_state(0);
+    mira_recovery_set_scroll_state(0, 0, 0);
+    ESP_LOGI(TAG, "Mira 7 vendor adapter: widgets=%u LVGL=%u.%u FPS UIavg=%u us (RGB VSYNC managed by adapter)",
+             (unsigned)mira_full_widget_count(), lvfps / 10, lvfps % 10,
+             ui_calls ? (unsigned)(ui_total_us / ui_calls) : 0);
+    last_us = now_us;
+    last_frames = st.frames;
+    ui_total_us = 0;
+    ui_calls = 0;
+    ui_max_us = 0;
 }
+
 void app_main(void) {
-    ESP_LOGI(TAG,"Mira native UI 0.7.37 -> ESP-IDF + LVGL %d.%d.%d on Waveshare 7 STD",
-             LVGL_VERSION_MAJOR,LVGL_VERSION_MINOR,LVGL_VERSION_PATCH);
-    ESP_LOGW(TAG,"EXPERIMENTAL Mira port: Jeedom/MQTT transports present, composite widgets, camera and hardware stability still require validation");
-    mira_full_storage_init(); // no format, preserve original SPIFFS
-    ESP_ERROR_CHECK(mira_recovery_init()); // Wi-Fi AP and separate OTA recovery
-    ESP_ERROR_CHECK(mira_mqtt_init()); // native optional MQTT transport, read NVS settings
-    ESP_ERROR_CHECK(mira_jeedom_action_init()); // queued HTTP actions, never block LVGL
-    ESP_ERROR_CHECK(mira_camera_init()); // background RGB24 BMP snapshots, no LVGL in network task
-    ESP_ERROR_CHECK(mira_display_init());  // 7 STD 13MHz RGB + CH422G + GT911
+    ESP_LOGI(TAG, "Mira 7 STD ESP-IDF Waveshare RGB 16MHz/bounce + Espressif LVGL adapter 0.5.2");
+    ESP_LOGW(TAG, "EXPERIMENTAL vendor baseline: hardware stability needs real 7-inch validation");
+    // Preserve the existing Mira settings, widgets, firmware partitioning and Wi-Fi.
+    mira_full_storage_init();
+    ESP_ERROR_CHECK(mira_recovery_init());
+    ESP_ERROR_CHECK(mira_mqtt_init());
+    ESP_ERROR_CHECK(mira_jeedom_action_init());
+    ESP_ERROR_CHECK(mira_camera_init());
+    ESP_ERROR_CHECK(mira_display_init()); // CH422G, GT911, vendor RGB 800x480 16MHz
+    ESP_ERROR_CHECK(esp_lv_adapter_start());
+    ESP_ERROR_CHECK(esp_lv_adapter_lock(-1));
     mira_full_ui_create(mira_display_lvgl());
-    BaseType_t ok=xTaskCreatePinnedToCore(lvgl_loop,"mira_lvgl",8192,NULL,5,NULL,1);
-    ESP_ERROR_CHECK(ok==pdPASS?ESP_OK:ESP_ERR_NO_MEM);
+    lv_timer_create(mira_lvgl_timer, 10, NULL);
+    esp_lv_adapter_unlock();
 }
