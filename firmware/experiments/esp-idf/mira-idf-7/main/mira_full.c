@@ -3697,7 +3697,7 @@ void mira_full_ui_tick(void){
         camera_close();
         theme_apply_on_lvgl_task();
     }
-    if(reload_pending){reload_pending=false;camera_close();build_config();mira_display_schedule_rgb_recovery();}
+    if(reload_pending){reload_pending=false;camera_close();build_config();}
     if(settings_reload_pending){
         settings_reload_pending=false;
         load_ui_configuration();
