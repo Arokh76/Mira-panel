@@ -1247,7 +1247,21 @@ assert 'sleep_refresh_clock(ms);' in full
 assert 'days[t.tm_wday]' in standby and 'months[t.tm_mon]' in standby
 assert '60000u' in standby and 'offsets_x[9]' in standby
 assert 'lv_obj_align(sleep_clock_text,LV_ALIGN_CENTER,sleep_move_x,-56+sleep_move_y)' in standby
-assert 'lv_obj_align(sleep_date_text,LV_ALIGN_CENTER,sleep_move_x,31+sleep_move_y)' in standby
-assert 'lv_obj_align(sleep_temperature_text,LV_ALIGN_CENTER,sleep_move_x,72+sleep_move_y)' in standby
+assert 'lv_obj_align(sleep_date_text,LV_ALIGN_CENTER,sleep_move_x,55+sleep_move_y)' in standby
+assert 'lv_obj_align(sleep_temperature_text,LV_ALIGN_CENTER,sleep_move_x,125+sleep_move_y)' in standby
 assert 'mira_display_set_brightness(raw)' in full
+# Display sizing for Waveshare 800x480: keep the validated 120px clock,
+# make both of the smaller fields much more readable and preserve accents.
+assert 'sleep_clock_text=label(sleep_overlay,"--:--",0xffffff,&mira_sleep_montserrat_120);' in full
+assert 'sleep_date_text=label(sleep_overlay,"",0xA8B2B8,&mira_font_fr_28);' in full
+assert 'sleep_temperature_text=label(sleep_overlay,"",0xffffff,&lv_font_montserrat_40);' in full
+fr_font=(idf/'mira_french_font.c').read_text(encoding='utf-8')
+fr_header=(idf/'mira_french_font.h').read_text(encoding='utf-8')
+assert 'static const uint8_t fr28_bitmap[]' in fr_font
+assert 'static const MiraFontSpec fr28_spec' in fr_font
+assert 'const lv_font_t mira_font_fr_28' in fr_font
+assert '.fallback=&lv_font_montserrat_28' in fr_font
+assert 'extern const lv_font_t mira_font_fr_28;' in fr_header
+assert 55>31 and 125>72
+print('PASS 800x480 standby: large 28px French date, 40px temperature, unchanged 120px clock')
 print('PASS exact Arduino Waveshare standby bitmap, 120px clock, date, temperature and anti-burn')
