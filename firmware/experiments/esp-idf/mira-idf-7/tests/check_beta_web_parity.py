@@ -14,7 +14,7 @@ shared = [
     "mira_full.c", "mira_full.h", "mira_recovery.c", "mira_recovery.h",
     "mira_mqtt.c", "mira_mqtt.h", "mira_jeedom.c", "mira_jeedom.h",
     "mira_camera.c", "mira_camera.h", "mira_album_art.c",
-    "mira_beta_setup.c", "mira_beta_web.c", "mira_beta_networks.c",
+    "mira_beta_setup.c", "mira_beta_setup_pages.h", "mira_beta_web.c", "mira_beta_networks.c",
     "mira_beta_ota.c", "mira_beta_data.c", "mira_beta_captive_dns.c",
     "mira_french_font.c", "mira_sleep_120.c", "mira_home_96.c",
     "mira_info_glyphs.c", "mira_legacy_cipher.c",
@@ -27,6 +27,17 @@ for name in shared:
 for name in ("partitions.csv", "sdkconfig.defaults", "CMakeLists.txt"):
     assert (common / name).read_bytes() == (target / name).read_bytes(), name
 print("PASS 7-inch includes unchanged latest 4.3C beta app, config, NTP/DNS, Jeedom/MQTT and standby core")
+# Initial provisioning must have all three IPv4 modes on both display targets.
+page = (main / "mira_beta_setup_pages.h").read_text(encoding="utf-8")
+setup = (main / "mira_beta_setup.c").read_text(encoding="utf-8")
+for value in ('auto', 'fixed_auto', 'manual'):
+    assert f'value=\\\"{value}\\\"' in page, value
+for field in ('mask', 'gateway', 'dns1', 'dns2', 'ip_mode'):
+    assert f'name=\\\"{field}\\\"' in page, field
+assert 'serve_saved_wifi_page(req,mode,ip)' in setup
+assert 'nvs_set_str(nv,"web_profile",encoded)' in setup
+print("PASS 7-inch first-boot DHCP, fixed-auto, manual and DNS UI parity")
+
 
 driver = (main / "mira_display.c").read_text(encoding="utf-8")
 app = (main / "app_main.c").read_text(encoding="utf-8")
