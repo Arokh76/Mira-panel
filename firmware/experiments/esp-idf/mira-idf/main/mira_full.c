@@ -198,7 +198,10 @@ static bool sleep_enabled=true;
 static bool return_home_enabled=true;
 static uint8_t sleep_brightness_percent=8;
 static bool sleep_clock_enabled=true,display_sleeping;
-static lv_obj_t *sleep_overlay,*sleep_clock_text;
+static lv_obj_t *sleep_overlay,*sleep_clock_text,*sleep_date_text,*sleep_temperature_text;
+static uint32_t last_sleep_clock_ms,last_sleep_move_ms;
+static uint8_t sleep_clock_position;
+static int8_t sleep_move_x,sleep_move_y;
 static bool spiffs_ready=false;
 static lv_obj_t *screen, *pages[6], *nav, *page_picker;
 static lv_obj_t *favorite_btn[4],*picker_buttons[6],*picker_card;
@@ -319,6 +322,8 @@ static uint32_t camera_last_update;
 
 typedef struct {
     char name[96], unit[24], type[24], value[160];
+    uint8_t page_index;
+    bool sleep_temperature_info;
     lv_obj_t *card,*control,*value_label,*info_status;
     lv_obj_t *info_icon,*info_name;
     lv_obj_t *thermostat_temperature,*thermostat_mode,*thermostat_mode_select;
@@ -1476,6 +1481,13 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
     snprintf(w->unit,sizeof(w->unit),"%s",str(o,"unit",""));
     snprintf(w->type,sizeof(w->type),"%s",type);
     snprintf(w->value,sizeof(w->value),"%s",str(o,"value",""));
+    w->page_index=(uint8_t)pg;
+    // Exactly like Arduino firstSleepTemperature(): first configured INFO
+    // whose resolved icon is a thermometer; prefer Accueil over other pages.
+    const char *resolved_sleep_icon=!strcmp(type,"info")?
+        mira_info_glyph_kind(str(o,"icon","auto"),name,w->unit):NULL;
+    w->sleep_temperature_info=resolved_sleep_icon&&
+                             !strcmp(resolved_sleep_icon,"temperature");
     // The beta thermostat uses 5..30 C and half-degree setpoints,
     // unlike ordinary integer range widgets.
     const bool thermostat=!strcmp(type,"thermostat");
@@ -2240,6 +2252,94 @@ static void apply_auto_brightness(void){
     if(wanted==applied_brightness_raw)return;
     if(mira_display_set_brightness(wanted)==ESP_OK)applied_brightness_raw=wanted;
 }
+/* Standby overlay from the validated 0.7.37 Arduino Waveshare build:
+ * 120px Montserrat clock + full French date + first temperature INFO tile.
+ * No extra Jeedom/MQTT command and no weather API request.
+ * All LVGL updates stay on the LVGL task.
+ */
+static void sleep_align_all(void){
+    if(sleep_clock_text)
+        lv_obj_align(sleep_clock_text,LV_ALIGN_CENTER,sleep_move_x,-56+sleep_move_y);
+    if(sleep_date_text)
+        lv_obj_align(sleep_date_text,LV_ALIGN_CENTER,sleep_move_x,31+sleep_move_y);
+    if(sleep_temperature_text)
+        lv_obj_align(sleep_temperature_text,LV_ALIGN_CENTER,sleep_move_x,72+sleep_move_y);
+}
+static void sleep_refresh_temperature(void){
+    if(!sleep_temperature_text)return;
+    const mira_widget_t *chosen=NULL;
+    for(uint8_t pass=0;pass<2&&!chosen;pass++){
+        for(uint8_t i=0;i<widget_n;i++){
+            const mira_widget_t *w=&widgets[i];
+            if(!w->sleep_temperature_info)continue;
+            const bool home=w->page_index==0;
+            if((pass==0&&!home)||(pass==1&&home))continue;
+            chosen=w;break;
+        }
+    }
+    if(!chosen){
+        lv_obj_add_flag(sleep_temperature_text,LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    // Reject placeholder/invalid sensor states; do not treat "--" or
+    // "null" as 0°C. The temperature comes from the existing INFO value.
+    char normalized[sizeof(chosen->value)]={0};
+    snprintf(normalized,sizeof(normalized),"%s",chosen->value);
+    for(size_t i=0;normalized[i];i++)if(normalized[i]==',')normalized[i]='.';
+    char *end=NULL;
+    const double degrees=strtod(normalized,&end);
+    while(end&&isspace((unsigned char)*end))end++;
+    if(end==normalized||!end||*end||!isfinite(degrees)||
+       degrees<-80.0||degrees>100.0){
+        lv_obj_add_flag(sleep_temperature_text,LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    char display[36];
+    snprintf(display,sizeof(display),"%.1f °C",degrees);
+    if(strcmp(lv_label_get_text(sleep_temperature_text),display))
+        lv_label_set_text(sleep_temperature_text,display);
+    lv_obj_remove_flag(sleep_temperature_text,LV_OBJ_FLAG_HIDDEN);
+}
+static void sleep_refresh_clock(uint32_t now_tick){
+    if(!display_sleeping||!sleep_clock_enabled||!sleep_clock_text)return;
+    if((uint32_t)(now_tick-last_sleep_clock_ms)>=1000u||last_sleep_clock_ms==0){
+        last_sleep_clock_ms=now_tick;
+        time_t now=time(NULL);
+        if(now>1700000000){
+            struct tm t={0};
+            if(localtime_r(&now,&t)){
+                char hhmm[8];
+                strftime(hhmm,sizeof(hhmm),"%H:%M",&t);
+                if(strcmp(lv_label_get_text(sleep_clock_text),hhmm))
+                    lv_label_set_text(sleep_clock_text,hhmm);
+                if(sleep_date_text){
+                    static const char *const days[]={
+                        "dimanche","lundi","mardi","mercredi","jeudi","vendredi","samedi"};
+                    static const char *const months[]={
+                        "janvier","février","mars","avril","mai","juin",
+                        "juillet","août","septembre","octobre","novembre","décembre"};
+                    char date[80];
+                    snprintf(date,sizeof(date),"%s %u %s %u",
+                             days[t.tm_wday],(unsigned)t.tm_mday,
+                             months[t.tm_mon],(unsigned)(t.tm_year+1900));
+                    if(strcmp(lv_label_get_text(sleep_date_text),date))
+                        lv_label_set_text(sleep_date_text,date);
+                }
+            }
+        }
+        sleep_refresh_temperature();
+    }
+    // 9-position 3x3 anti-marking path, same 60s cadence as WT32.
+    if((uint32_t)(now_tick-last_sleep_move_ms)>=60000u){
+        static const int8_t offsets_x[9]={-12,0,12,-12,0,12,-12,0,12};
+        static const int8_t offsets_y[9]={-8,-8,-8,0,0,0,8,8,8};
+        last_sleep_move_ms=now_tick;
+        sleep_clock_position=(uint8_t)((sleep_clock_position+1)%9);
+        sleep_move_x=offsets_x[sleep_clock_position];
+        sleep_move_y=offsets_y[sleep_clock_position];
+        sleep_align_all();
+    }
+}
 static void display_enter_sleep(void){
     if(display_sleeping)return;
     const uint8_t raw=sleep_clock_enabled?raw_from_percent(sleep_brightness_percent):0;
@@ -2250,7 +2350,10 @@ static void display_enter_sleep(void){
     }
     display_sleeping=true;
     applied_brightness_raw=raw;
+    last_sleep_clock_ms=0; // Populate date/INFO immediately on entering sleep.
+    last_sleep_move_ms=lv_tick_get();
     camera_close();
+    sleep_refresh_clock(last_sleep_move_ms);
     if(sleep_overlay && sleep_clock_enabled && raw>0)
         lv_obj_remove_flag(sleep_overlay,LV_OBJ_FLAG_HIDDEN);
     ESP_LOGI(TAG,"Mira sleep entered, clock=%d, brightness=%u%%",
@@ -2930,8 +3033,22 @@ void mira_full_ui_create(lv_display_t *disp){
     lv_obj_set_style_radius(sleep_overlay,0,0);
     lv_obj_set_style_pad_all(sleep_overlay,0,0);
     no_scroll(sleep_overlay);
-    sleep_clock_text=label(sleep_overlay,"--:--",0xffffff,&lv_font_montserrat_48);
-    lv_obj_center(sleep_clock_text);
+    // Arduino Waveshare standby: font 120, date below, first configured
+    // temperature INFO at the bottom. Keep width independent of WT32.
+    sleep_clock_text=label(sleep_overlay,"--:--",0xffffff,&mira_sleep_montserrat_120);
+    lv_obj_set_width(sleep_clock_text,784);
+    lv_label_set_long_mode(sleep_clock_text,LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_align(sleep_clock_text,LV_TEXT_ALIGN_CENTER,0);
+    sleep_date_text=label(sleep_overlay,"",0xA8B2B8,&mira_font_fr_16);
+    lv_obj_set_width(sleep_date_text,788);
+    lv_label_set_long_mode(sleep_date_text,LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_align(sleep_date_text,LV_TEXT_ALIGN_CENTER,0);
+    sleep_temperature_text=label(sleep_overlay,"",0xffffff,&lv_font_montserrat_28);
+    lv_obj_set_width(sleep_temperature_text,784);
+    lv_obj_set_style_text_align(sleep_temperature_text,LV_TEXT_ALIGN_CENTER,0);
+    lv_obj_add_flag(sleep_temperature_text,LV_OBJ_FLAG_HIDDEN);
+    sleep_clock_position=0;sleep_move_x=0;sleep_move_y=0;
+    sleep_align_all();
     lv_obj_add_flag(sleep_overlay,LV_OBJ_FLAG_HIDDEN);
     feedback=label(screen,"APERÇU IDF : interactions locales (Jeedom non connecté)",0xA8B2B8,&mira_font_fr_12);
     lv_obj_set_pos(feedback,6,CONTENT_H-17);
@@ -3688,6 +3805,7 @@ void mira_full_ui_tick(void){
             }
         }
     }
+    sleep_refresh_clock(ms);
     if(ms-last_status_ms>=2000u){
         last_status_ms=ms;
         apply_auto_brightness();
