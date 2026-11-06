@@ -169,6 +169,28 @@ assert 'ESP_LOGI(TAG,"Mira beta setup step 1/2: local screen key saved");\n     
 assert 'return serve_wifi_page(req);' in setup.split('if(!strcmp(config,"key")){',1)[1].split('if(!strcmp(config,"wifi")){',1)[0]
 assert 'httpd_resp_set_status(req,"303 See Other")' not in setup
 print("PASS first-install beta direct key-to-Wi-Fi render, production and OTA access unchanged")
+
+# Regressions seen on the first 7-inch test: the initial Wi-Fi screen exposed
+# only a free-text IP and the confirmation always displayed 'Auto'.
+# Verify it now exposes exactly the beta's three IPv4 modes and manual fields,
+# writes the same native atomic profile as the configured beta editor, and
+# displays the requested address after saving.
+for token in ('name=\\\"ip_mode\\\"', 'value=\\\"auto\\\"',
+              'value=\\\"fixed_auto\\\"', 'value=\\\"manual\\\"',
+              'name=\\\"ip\\\"', 'name=\\\"mask\\\"',
+              'name=\\\"gateway\\\"', 'name=\\\"dns1\\\"',
+              'name=\\\"dns2\\\"', 'showIPFields()', 'validIPv4(v)'):
+    assert token in setup_pages, f"Missing first-run Wi-Fi field or mode: {token}"
+for token in ('setup_manual_ip_valid(ip,mask,gateway,dns1,dns2)',
+              'nvs_set_str(nv,"web_profile",encoded)',
+              'mira_beta_networks_upsert(&profile,password)',
+              'snprintf(profile.ip_mode,sizeof(profile.ip_mode),"%s",mode)',
+              'serve_saved_wifi_page(req,mode,ip)'):
+    assert token in setup, f"Missing Wi-Fi first-run native behavior: {token}"
+assert 'esp_err_t response=serve_page(req,mira_beta_saved_page);' not in setup
+assert 'snprintf(label,sizeof(label),"<strong id=\\\"ipValue\\\">%s</strong>",ip)' in setup
+print("PASS first-run IPv4 mode/manual DNS fields and non-Auto confirmation")
+
 # The direct-served key/Wi-Fi/saved HTML templates are not fed through the
 # percent-unescaping template renderer used by other beta pages.
 setup_pages=(idf / "mira_beta_setup_pages.h").read_text(encoding="utf-8")
