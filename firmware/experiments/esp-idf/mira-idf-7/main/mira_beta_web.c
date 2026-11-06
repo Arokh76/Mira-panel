@@ -517,7 +517,7 @@ static esp_err_t replacement(httpd_req_t *r,const char *name){
         snprintf(state,sizeof(state),"IP " IPSTR " | RSSI %d dBm",IP2STR(&ip.ip),(int)ap.rssi);
         return escaped(r,state);
     }
-    if(!strcmp(name,"VERSION"))return chunk(r,"0.7.37-IDF-beta");
+    if(!strcmp(name,"VERSION"))return chunk(r,"0.7.37-IDF-7STD-beta");
     if(!strcmp(name,"LOCALIP")){
         esp_netif_t *netif=esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
         esp_netif_ip_info_t ip={0};
