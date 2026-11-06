@@ -2261,9 +2261,9 @@ static void sleep_align_all(void){
     if(sleep_clock_text)
         lv_obj_align(sleep_clock_text,LV_ALIGN_CENTER,sleep_move_x,-56+sleep_move_y);
     if(sleep_date_text)
-        lv_obj_align(sleep_date_text,LV_ALIGN_CENTER,sleep_move_x,31+sleep_move_y);
+        lv_obj_align(sleep_date_text,LV_ALIGN_CENTER,sleep_move_x,55+sleep_move_y);
     if(sleep_temperature_text)
-        lv_obj_align(sleep_temperature_text,LV_ALIGN_CENTER,sleep_move_x,72+sleep_move_y);
+        lv_obj_align(sleep_temperature_text,LV_ALIGN_CENTER,sleep_move_x,125+sleep_move_y);
 }
 static void sleep_refresh_temperature(void){
     if(!sleep_temperature_text)return;
@@ -3039,11 +3039,11 @@ void mira_full_ui_create(lv_display_t *disp){
     lv_obj_set_width(sleep_clock_text,784);
     lv_label_set_long_mode(sleep_clock_text,LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_align(sleep_clock_text,LV_TEXT_ALIGN_CENTER,0);
-    sleep_date_text=label(sleep_overlay,"",0xA8B2B8,&mira_font_fr_16);
+    sleep_date_text=label(sleep_overlay,"",0xA8B2B8,&mira_font_fr_28);
     lv_obj_set_width(sleep_date_text,788);
     lv_label_set_long_mode(sleep_date_text,LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_align(sleep_date_text,LV_TEXT_ALIGN_CENTER,0);
-    sleep_temperature_text=label(sleep_overlay,"",0xffffff,&lv_font_montserrat_28);
+    sleep_temperature_text=label(sleep_overlay,"",0xffffff,&lv_font_montserrat_40);
     lv_obj_set_width(sleep_temperature_text,784);
     lv_obj_set_style_text_align(sleep_temperature_text,LV_TEXT_ALIGN_CENTER,0);
     lv_obj_add_flag(sleep_temperature_text,LV_OBJ_FLAG_HIDDEN);
