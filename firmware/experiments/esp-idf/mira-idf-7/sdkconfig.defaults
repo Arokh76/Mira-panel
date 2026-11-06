@@ -47,8 +47,9 @@ CONFIG_JD_DEFAULT_HUFFMAN=y
 
 # Match WT32's two configured NTP servers: pool.ntp.org + time.nist.gov.
 CONFIG_LWIP_SNTP_MAX_SERVERS=2
-# Diagnostic for permanent horizontal shift after Mira JSON reconfiguration.
-# ESP32-S3 RGB DMA/PSRAM can desynchronize under flash-write load.
-# Restart LCD DMA at VSYNC to recover without resetting the device.
-# Experimental: may reduce frame rate; reassess after hardware validation.
-CONFIG_LCD_RGB_RESTART_IN_VSYNC=y
+# Experimental 7-inch RGB stability test: PSRAM XIP reduces flash/PSRAM bus
+# contention during widget/configuration writes, avoiding DMA underflow.
+# Do NOT restart DMA automatically on every VSYNC: it can cause visible jitter.
+# Hardware timings (13 MHz, CH422G, GT911) and LVGL double buffers unchanged.
+CONFIG_SPIRAM_XIP_FROM_PSRAM=y
+CONFIG_LCD_RGB_RESTART_IN_VSYNC=n
