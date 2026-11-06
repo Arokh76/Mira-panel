@@ -23,6 +23,12 @@ shared = [
 for name in shared:
     orig = (common / "main" / name).read_bytes()
     port = (main / name).read_bytes()
+    if name == "mira_full.c":
+        # The 7-inch alone schedules a one-shot LCD DMA restart after a
+        # widget JSON reload. All the rest of this shared file must match.
+        hook = b"build_config();mira_display_schedule_rgb_recovery();"
+        assert port.count(hook) == 1, "7-inch LVGL reload resync hook missing"
+        port = port.replace(hook, b"build_config();")
     assert orig == port, f"7-inch software core diverged from beta: {name}"
 assert (common / "partitions.csv").read_bytes() == (target / "partitions.csv").read_bytes()
 # Display timing and DMA mitigation are independent 7-inch hardware choices.
@@ -96,4 +102,9 @@ assert 'mira_display_io_write(' not in h
 assert 'ESP_ERR_NOT_SUPPORTED' in gpio
 assert 'mira_gpio43_action_mapped' in gpio and 'return false;' in gpio
 assert 'return ESP_OK;' in driver.split('esp_err_t mira_display_set_brightness(uint8_t raw)',1)[1]
+assert 'esp_lcd_rgb_panel_restart(panel)' in driver
+assert 'rgb_recovery_deadline_us = esp_timer_get_time() + 250000' in driver
+assert 'mira_display_service_rgb_recovery();' in app
+assert 'mira_display_schedule_rgb_recovery(void);' in h
+print("PASS 7-inch uses one-shot RGB DMA resync after widget JSON reload")
 print("PASS 7-inch uses 13MHz RGB, CH422G, GT911 and no unsafe 4.3C GPIO/PWM commands")
