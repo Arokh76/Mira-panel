@@ -45,7 +45,7 @@ jobs:
           grep -Fq 'mira_beta_setup_register_captive(httpd)' "$ROOT/main/mira_recovery.c"
           grep -Fq 'mira_beta_captive_dns_start()' "$ROOT/main/mira_recovery.c"
           ! grep -Fq 'esp_vfs_spiffs_format' "$ROOT/main/mira_full.c"
-          # Guard validated 7-inch hardware mapping independently from the 4.3C.
+          # Guard validated 7-inch hardware mapping independently from the 4.3C.\n          grep -Fq 'project(mira_idf_7std)' "$ROOT/CMakeLists.txt"\n          grep -Fq 'Waveshare ESP32-S3 Touch LCD 7 STD' "$ROOT/main/mira_beta_web_pages.h"\n          grep -Fq 'render_system_7std' "$ROOT/main/mira_beta_web.c"\n          grep -Fq 'waveshare-esp32s3-touch-lcd-7-std-idf' "$ROOT/main/mira_beta_update.c"\n          ! grep -Fq 'GPIO Waveshare 4,3C' "$ROOT/main/mira_beta_web.c"
           grep -Fq '#define LCD_PCLK_HZ (13 * 1000 * 1000)' "$ROOT/main/mira_display.c"
           grep -Fq 'ext_cfg.device_address = 0x38;' "$ROOT/main/mira_display.c"
           grep -Fq 'ioexp_write(ioexp_mode, 0x01)' "$ROOT/main/mira_display.c"
@@ -73,13 +73,13 @@ jobs:
           set -euo pipefail
           ROOT=firmware/experiments/esp-idf/mira-idf-7/build
           mkdir -p mira_idf_release
-          cp "$ROOT/mira_idf_scroll.bin" mira_idf_release/Mira_LVGL96_7_STD_UI_OTA.bin
+          cp "$ROOT/mira_idf_7std.bin" mira_idf_release/Mira_LVGL96_7_STD_UI_OTA.bin
           export ROOT
           python3 - <<'PY'
           import os
           from pathlib import Path
           p=Path(os.environ['ROOT'])
-          parts=[(0,p/'bootloader/bootloader.bin'),(0x8000,p/'partition_table/partition-table.bin'),(0x10000,p/'mira_idf_scroll.bin')]
+          parts=[(0,p/'bootloader/bootloader.bin'),(0x8000,p/'partition_table/partition-table.bin'),(0x10000,p/'mira_idf_7std.bin')]
           out=bytearray()
           for off,path in parts:
               data=path.read_bytes()

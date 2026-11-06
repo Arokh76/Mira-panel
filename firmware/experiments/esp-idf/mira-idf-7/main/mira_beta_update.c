@@ -25,9 +25,9 @@
 #include <stdint.h>
 #include <ctype.h>
 
-#define MIRA_IDF_PROFILE "waveshare-esp32s3-touch-lcd-4.3c-idf"
+#define MIRA_IDF_PROFILE "waveshare-esp32s3-touch-lcd-7-std-idf"
 #define MIRA_IDF_BASELINE "0.7.37"
-#define MIRA_IDF_LABEL "0.7.37-IDF-beta"
+#define MIRA_IDF_LABEL "0.7.37-IDF-7STD-beta"
 #define MANIFEST_URL "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/targets.json"
 #define APPROVED_OTA_PREFIX "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/releases/"
 #define MANIFEST_LIMIT 8192
@@ -133,7 +133,7 @@ esp_err_t mira_beta_update_check(httpd_req_t *req){
     size_t bytes=0;
     if(!ota_manifest_entry(url,hash,&bytes,remote))
         return json_response(req,"error",
-            "Aucun OTA ESP-IDF 4.3C officiel plus récent et valide n'est publié.",NULL);
+            "Aucun OTA ESP-IDF 7 STD officiel plus récent et valide n'est publié.",NULL);
     return json_response(req,"available",
         "Mise à jour IDF vérifiée. Installation possible depuis Système.",remote);
 }
@@ -207,7 +207,7 @@ static bool ota_manifest_entry(char url[420],char expected_hash[65],
                   (double)(size_t)size->valuedouble==size->valuedouble;
     if(accepted){
         const size_t n=strlen(ota->valuestring);
-        const char *suffix="/waveshare-esp32s3-touch-lcd-4.3c-idf/ota.bin";
+        const char *suffix="/waveshare-esp32s3-touch-lcd-7-std-idf/ota.bin";
         const size_t end=strlen(suffix);
         /* Only the project-owned HTTPS release path, ending in this exact
          * native target. URL parameters, redirects, other repos and Arduino
@@ -238,7 +238,7 @@ static void ota_install_worker(void *unused){
     size_t expected=0;
     ota_update_status("checking","Vérification du manifeste ESP-IDF",0,0);
     if(!ota_manifest_entry(url,digest,&expected,remote_version)){
-        ota_update_status("error","Aucune version IDF 4.3C signalee par un manifeste valide",0,0);
+        ota_update_status("error","Aucune version IDF 7 STD signalee par un manifeste valide",0,0);
         goto finish;
     }
     const esp_partition_t *partition=esp_ota_get_next_update_partition(NULL);
@@ -313,9 +313,9 @@ static void ota_install_worker(void *unused){
         const esp_app_desc_t *running=esp_app_get_description();
         if(!running||esp_ota_get_partition_description(partition,&candidate)!=ESP_OK||
            strcmp(candidate.project_name,running->project_name)!=0 ||
-           strcmp(candidate.project_name,"mira_idf_scroll")!=0||
+           strcmp(candidate.project_name,"mira_idf_7std")!=0||
            strcmp(candidate.version,remote_version)!=0){
-            ota_update_status("error","Image refusée : projet ESP-IDF 4.3C incompatible",0,0);
+            ota_update_status("error","Image refusée : projet ESP-IDF 7 STD incompatible",0,0);
             break;
         }
         if(esp_ota_set_boot_partition(partition)!=ESP_OK)break;

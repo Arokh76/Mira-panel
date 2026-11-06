@@ -14,17 +14,17 @@ shared = [
     "mira_full.c", "mira_full.h", "mira_recovery.c", "mira_recovery.h",
     "mira_mqtt.c", "mira_mqtt.h", "mira_jeedom.c", "mira_jeedom.h",
     "mira_camera.c", "mira_camera.h", "mira_album_art.c",
-    "mira_beta_setup.c", "mira_beta_setup_pages.h", "mira_beta_web.c", "mira_beta_networks.c",
-    "mira_beta_ota.c", "mira_beta_data.c", "mira_beta_captive_dns.c",
+    "mira_beta_setup.c", "mira_beta_setup_pages.h", "mira_beta_networks.c",
+    "mira_beta_data.c", "mira_beta_captive_dns.c",
     "mira_french_font.c", "mira_sleep_120.c", "mira_home_96.c",
     "mira_info_glyphs.c", "mira_legacy_cipher.c",
-    "CMakeLists.txt", "idf_component.yml",
+    "idf_component.yml",
 ]
 for name in shared:
     orig = (common / "main" / name).read_bytes()
     port = (main / name).read_bytes()
     assert orig == port, f"7-inch software core diverged from beta: {name}"
-for name in ("partitions.csv", "sdkconfig.defaults", "CMakeLists.txt"):
+for name in ("partitions.csv", "sdkconfig.defaults"):
     assert (common / name).read_bytes() == (target / name).read_bytes(), name
 print("PASS 7-inch includes unchanged latest 4.3C beta app, config, NTP/DNS, Jeedom/MQTT and standby core")
 # Initial provisioning must have all three IPv4 modes on both display targets.
@@ -37,6 +37,28 @@ for field in ('mask', 'gateway', 'dns1', 'dns2', 'ip_mode'):
 assert 'serve_saved_wifi_page(req,mode,ip)' in setup
 assert 'nvs_set_str(nv,"web_profile",encoded)' in setup
 print("PASS 7-inch first-boot DHCP, fixed-auto, manual and DNS UI parity")
+# Platform-specific Web pages and OTA must not share 4.3C hardware identity.
+web=(main / "mira_beta_web.c").read_text(encoding="utf-8")
+pages=(main / "mira_beta_web_pages.h").read_text(encoding="utf-8")
+ota=(main / "mira_beta_ota.c").read_text(encoding="utf-8")
+update=(main / "mira_beta_update.c").read_text(encoding="utf-8")
+project=(target / "CMakeLists.txt").read_text(encoding="utf-8")
+pipeline=(root / ".github/workflows/build-mira-idf-waveshare7.yml").read_text(encoding="utf-8")
+assert "Waveshare ESP32-S3 Touch LCD 7 STD" in pages
+assert "Waveshare ESP32-S3 Touch LCD 4.3C" not in pages
+assert "waveshare-esp32s3-touch-lcd-7-std-idf" in pages
+assert "waveshare-esp32s3-touch-lcd-4.3c-idf" not in pages
+assert "render_system_7std(req)" in web
+assert 'if(!strcmp(nav,"gpio"))return html_err(req,HTTPD_404_NOT_FOUND' in web
+assert 'GPIO Waveshare 4,3C</a>' not in web
+assert "static esp_err_t beta_43c_gpio_page(" not in web
+assert "project(mira_idf_7std)" in project
+assert 'strcmp(candidate.project_name,"mira_idf_7std")!=0' in ota
+assert 'strcmp(candidate.project_name,"mira_idf_7std")!=0' in update
+assert "waveshare-esp32s3-touch-lcd-7-std-idf" in update
+assert "mira_idf_7std.bin" in pipeline
+print("PASS 7-inch hardware identity, isolated GPIO routes and distinct OTA project")
+
 
 
 driver = (main / "mira_display.c").read_text(encoding="utf-8")

@@ -175,7 +175,7 @@ esp_err_t mira_beta_ota_upload(httpd_req_t *req){
         return fail(req,HTTPD_400_BAD_REQUEST,"Firmware OTA invalide, actif inchangé");
     }
     /* ESP32-S3 chip validation alone does NOT distinguish Arduino builds
-     * from this native ESP-IDF 4.3C port. Inspect the downloaded app image
+     * from this native ESP-IDF Waveshare 7 STD port. Inspect the downloaded app image
      * descriptor before selecting the next boot partition.
      */
     esp_app_desc_t candidate={0};
@@ -183,10 +183,10 @@ esp_err_t mira_beta_ota_upload(httpd_req_t *req){
     if(!running||
        esp_ota_get_partition_description(target,&candidate)!=ESP_OK||
        strcmp(candidate.project_name,running->project_name)!=0||
-       strcmp(candidate.project_name,"mira_idf_scroll")!=0){
-        ESP_LOGW(TAG,"Manual OTA rejected: not a native Mira 4.3C app");
+       strcmp(candidate.project_name,"mira_idf_7std")!=0){
+        ESP_LOGW(TAG,"Manual OTA rejected: not a native Mira 7 STD app");
         return fail(req,HTTPD_400_BAD_REQUEST,
-                    "Image ESP-IDF 4.3C requise (Arduino interdit)");
+                    "Image ESP-IDF Waveshare 7 STD requise (Arduino interdit)");
     }
     err=esp_ota_set_boot_partition(target);
     if(err!=ESP_OK)

@@ -688,7 +688,7 @@ static esp_err_t beta_checkupdate_page(httpd_req_t *req){
       "<header>Mira Panel</header><main>"
       "<p><a href=\"/load?nav=system\">Retour au système</a></p>"
       "<h1>Mise à jour</h1>"
-      "<p>Cette version utilise ESP-IDF 5.5.6 sur Waveshare 4.3C. "
+      "<p>Cette version utilise ESP-IDF 5.5.6 sur Waveshare 7 STD. "
       "Une mise à jour Arduino/WT32 ne doit jamais être installée ici.</p>"
       "<button type=\"button\" id=\"check\">Vérifier les mises à jour</button>"
       " <button type=\"button\" id=\"install\" disabled>Installer la mise à jour IDF</button>"
@@ -696,7 +696,7 @@ static esp_err_t beta_checkupdate_page(httpd_req_t *req){
       "Aucune mise à jour automatique lancée.</p>"
       "<p id=\"result\" class=\"status\" aria-live=\"polite\">Vérification non lancée.</p>"
       "<h2>Mise à jour manuelle</h2>"
-      "<p>Sélectionne exclusivement un fichier OTA ESP-IDF 4.3C compatible.</p>"
+      "<p>Sélectionne exclusivement un fichier OTA ESP-IDF Waveshare 7 STD compatible.</p>"
       "<form method=\"POST\" action=\"/doUpdateFile\" enctype=\"multipart/form-data\">"
       "<input type=\"file\" name=\"update\" accept=\".bin\" required>"
       "<input type=\"submit\" value=\"Installer le fichier .bin\"></form>"
@@ -712,7 +712,7 @@ static esp_err_t beta_checkupdate_page(httpd_req_t *req){
       "}catch(err){e.textContent='Vérification impossible : '+err.message;}}"
       "document.getElementById('check').addEventListener('click',check);"
       "document.getElementById('install').onclick=async()=>{"
-      "if(!confirm('Installer le firmware ESP-IDF officiel pour Waveshare 4.3C ?'))return;"
+      "if(!confirm('Installer le firmware ESP-IDF officiel pour Waveshare 7 STD ?'))return;"
       "document.getElementById('install').disabled=true;"
       "let e=document.getElementById('installResult');"
       "try{let r=await fetch('/updatemodule',{method:'POST',"
@@ -906,129 +906,7 @@ esp_err_t mira_beta_web_gpio_multi(httpd_req_t *req){
     cJSON_Delete(form);
     return gpio_post_result(req,err);
 }
-static esp_err_t beta_43c_gpio_page(httpd_req_t *req){
-    httpd_resp_set_type(req,"text/html; charset=utf-8");
-    httpd_resp_set_hdr(req,"Cache-Control","no-store");
-    return httpd_resp_sendstr(req,
-      "<!doctype html>\n"
-      "<html lang=\"fr\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
-      "<title>Mira Panel - GPIO Waveshare 4.3C</title>\n"
-      "<style>\n"
-      ":root{--bg:#7193A0;--panel:#1E5064;--active:#D39E55;--txt:#fff;--muted:#5f7987}\n"
-      "*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#24343d;font:15px Arial,sans-serif}\n"
-      "header{background:var(--panel);color:var(--txt);position:sticky;top:0;z-index:5;box-shadow:0 2px 12px #0002}\n"
-      "header .bar{max-width:1040px;margin:auto;min-height:66px;padding:0 18px;display:flex;flex-wrap:wrap;gap:14px;align-items:center;justify-content:space-between}\n"
-      ".brand{font-weight:800;font-size:22px;color:#fff}\n"
-      "nav{display:flex;gap:8px;flex-wrap:wrap}nav a{color:#fff;text-decoration:none;font-weight:bold;padding:10px 12px;border-radius:12px}\n"
-      "nav a.active,nav a:hover{background:#ffffff24}\n"
-      "main{max-width:1000px;margin:26px auto;padding:0 18px 40px}\n"
-      "h1{margin:0 0 7px;font-size:31px}p{line-height:1.48}\n"
-      ".intro{color:#455a64;margin:0 0 20px}\n"
-      ".notice{padding:14px 16px;background:#fff6e7;border:1px solid #e9c990;border-radius:12px;margin-bottom:18px}\n"
-      ".grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}\n"
-      ".card{background:white;border-radius:18px;padding:18px;box-shadow:0 4px 18px #0002;margin-bottom:14px}\n"
-      ".card h2{font-size:19px;margin:0 0 12px}\n"
-      ".row{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:9px 0}\n"
-      "select,input[type=text]{min-width:185px;max-width:100%;padding:9px;border:1px solid #cbd9df;border-radius:9px;background:#fff}\n"
-      "input[type=checkbox]{width:17px;height:17px;accent-color:var(--active)}\n"
-      "button{padding:10px 13px;background:var(--active);color:white;border:0;border-radius:10px;font-weight:bold;cursor:pointer}\n"
-      "button.secondary{background:#607d8b}button:disabled{opacity:.45;cursor:default}\n"
-      ".state{font-weight:bold;padding:6px 10px;border-radius:8px;background:#edf4f5}\n"
-      ".state.high{background:#d8f5e5;color:#176b42}.state.low{background:#ffe9e8;color:#934040}\n"
-      ".small{color:var(--muted);font-size:13px}\n"
-      "#message{min-height:24px;font-weight:bold;margin:12px 0}\n"
-      "@media(max-width:700px){.grid{grid-template-columns:1fr}h1{font-size:26px}header .bar{padding-top:12px;padding-bottom:12px}}\n"
-      "</style></head>\n"
-      "<body><header><div class=\"bar\"><div class=\"brand\">Mira Panel</div>\n"
-      "<nav aria-label=\"Navigation Mira Panel\"><a href=\"/\">Accueil</a><a href=\"/load?nav=wifi\">Réseau</a><a href=\"/load?nav=mqtt\">MQTT</a><a href=\"/load?nav=params\">Paramètres</a><a href=\"/load?nav=system\">Système</a><a class=\"active\" href=\"/load?nav=gpio\" aria-current=\"page\">GPIO</a></nav>\n"
-      "</div></header>\n"
-      "<main><h1>GPIO · Waveshare 4,3C</h1>\n"
-      "<p class=\"intro\">Pilotage local des deux entrées DI0/DI1 et des deux sorties DO0/DO1 du bornier isolé.</p>\n"
-      "<div class=\"notice\"><b>Attention :</b> bornier isolé via contrôleur CH32 : DI0 et DI1 sont des entrées ; DO0 et DO1 sont des sorties. Vérifier la polarité et les limites électriques de la carte avant tout raccordement. Ne jamais brancher directement le secteur sur ces bornes. Les sorties démarrent au niveau bas par défaut ; les autres modes de démarrage sont à utiliser uniquement avec une charge adaptée.</div>\n"
-      "<p id=\"message\" role=\"status\" aria-live=\"polite\"></p>\n"
-      "<div class=\"grid\">\n"
-      "<section class=\"card\"><h2>DI0 · Entrée isolée</h2><div class=\"row\"><span id=\"di0\" class=\"state\">Lecture…</span></div><p class=\"small\">Entrée EXIO0, lecture seule.</p></section>\n"
-      "<section class=\"card\"><h2>DI1 · Entrée isolée</h2><div class=\"row\"><span id=\"di1\" class=\"state\">Lecture…</span></div><p class=\"small\">Entrée EXIO5, lecture seule.</p></section>\n"
-      "<section class=\"card\"><h2>DO0 · Sortie isolée</h2>\n"
-      "<form class=\"output-form\" data-output=\"0\" onsubmit=\"saveOutput(event)\">\n"
-      "<div class=\"row\"><label>Mode <select name=\"mode\"><option value=\"off\">Désactivée</option><option value=\"output\">Sortie</option></select></label></div>\n"
-      "<div class=\"row\"><label><input type=\"checkbox\" name=\"inverted\"> Inverser la commande</label></div>\n"
-      "<div class=\"row\"><label>Démarrage <select name=\"boot\"><option value=\"off\">Arrêt</option><option value=\"restore\">Restaurer dernier état</option><option value=\"on\">Actif</option></select></label></div>\n"
-      "<div class=\"row\"><span id=\"do0\" class=\"state\">Lecture…</span><button type=\"button\" id=\"b0\" onclick=\"toggleOutput(0)\" disabled>Changer DO0</button></div>\n"
-      "<div class=\"row\"><button class=\"secondary\" type=\"submit\">Enregistrer DO0</button></div>\n"
-      "</form></section>\n"
-      "<section class=\"card\"><h2>DO1 · Sortie isolée</h2>\n"
-      "<form class=\"output-form\" data-output=\"1\" onsubmit=\"saveOutput(event)\">\n"
-      "<div class=\"row\"><label>Mode <select name=\"mode\"><option value=\"off\">Désactivée</option><option value=\"output\">Sortie</option></select></label></div>\n"
-      "<div class=\"row\"><label><input type=\"checkbox\" name=\"inverted\"> Inverser la commande</label></div>\n"
-      "<div class=\"row\"><label>Démarrage <select name=\"boot\"><option value=\"off\">Arrêt</option><option value=\"restore\">Restaurer dernier état</option><option value=\"on\">Actif</option></select></label></div>\n"
-      "<div class=\"row\"><span id=\"do1\" class=\"state\">Lecture…</span><button type=\"button\" id=\"b1\" onclick=\"toggleOutput(1)\" disabled>Changer DO1</button></div>\n"
-      "<div class=\"row\"><button class=\"secondary\" type=\"submit\">Enregistrer DO1</button></div>\n"
-      "</form></section>\n"
-      "</div>\n"
-      "<p class=\"small\">États des quatre voies actualisés toutes les deux secondes. Les configurations de sorties sont mémorisées.</p>\n"
-      "</main><script>\n"
-      "let latest=null,busy=false,configInitialized=false;\n"
-      "const msg=document.getElementById('message');\n"
-      "function badge(id,on){const el=document.getElementById(id);el.textContent=on?'HIGH / ON':'LOW / OFF';el.className='state '+(on?'high':'low');}\n"
-      "function syncForms(){if(!latest)return;document.querySelectorAll('form.output-form').forEach(form=>{\n"
-      "const n=Number(form.dataset.output),conf=latest.config[n];form.elements.mode.value=conf.enabled?'output':'off';\n"
-      "form.elements.inverted.checked=!!conf.inverted;\n"
-      "form.elements.boot.value=conf.boot===2?'on':conf.boot===1?'restore':'off';\n"
-      "});configInitialized=true;}\n"
-      "async function read(){if(busy)return;\n"
-      "try{const r=await fetch('/gpio/state',{credentials:'same-origin',cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);\n"
-      "const j=await r.json();if(j.hardware!=='waveshare-43c'||!j.inputs||!j.outputs||!j.config)throw Error('Profil matériel incompatible');\n"
-      "latest=j;badge('di0',j.inputs[0]);badge('di1',j.inputs[1]);\n"
-      "badge('do0',j.outputs[0]);badge('do1',j.outputs[1]);\n"
-      "for(let i=0;i<2;i++)document.getElementById('b'+i).disabled=!j.config[i].enabled;\n"
-      "if(!configInitialized)syncForms();\n"
-      "}catch(e){msg.textContent='Lecture des E/S impossible : '+e.message;}}\n"
-      "async function post(url,body){const r=await fetch(url,{method:'POST',credentials:'same-origin',\n"
-      "headers:{'Content-Type':'application/x-www-form-urlencoded','X-Mira-GPIO':'1'},body});\n"
-      "if(!r.ok)throw Error('HTTP '+r.status+' : '+await r.text());}\n"
-      "async function toggleOutput(n){if(!latest||busy||!latest.config[n].enabled)return;\n"
-      "const state=latest.config[n].logical_on?0:1;\n"
-      "if(state&&!confirm('Activer physiquement DO'+n+' ?'))return;\n"
-      "busy=true;try{await post('/gpio/set',new URLSearchParams({output:String(n),state:String(state)}));\n"
-      "msg.textContent='DO'+n+' mis à '+state+'.';}catch(e){msg.textContent='Erreur : '+e.message;}\n"
-      "finally{busy=false;await read();}}\n"
-      "async function saveOutput(event){event.preventDefault();if(busy)return;\n"
-      "const form=event.target,n=Number(form.dataset.output),values=new FormData(form),boot=values.get('boot');\n"
-      "if((boot==='on'||boot==='restore')&&!confirm('Cette sortie pourra se réactiver au démarrage. Continuer ?'))return;\n"
-      "const body=new URLSearchParams({gpio:'DO'+n,mode:String(values.get('mode')),\n"
-      "inverted:form.elements.inverted.checked?'1':'0',boot:String(boot)});\n"
-      "busy=true;try{await post('/gpio/config',body);msg.textContent='Configuration DO'+n+' enregistrée.';configInitialized=false;}\n"
-      "catch(e){msg.textContent='Erreur : '+e.message;}finally{busy=false;await read();}}\n"
-      "read();setInterval(read,2000);\n"
-      "</script></body></html>\n");
-}
-
-/* Keep the original beta System layout intact. The Waveshare 4.3C
- * GPIO link belongs in the existing Maintenance button row, not in an
- * extra card, and must never claim to expose WT32 EXT GPIOs. */
-static esp_err_t render_system_43c(httpd_req_t *req){
-    const char *page=mira_beta_system_html;
-    const char *anchor="<button class=\"btn\" onclick=\"window.location.href='/load?nav=rst'\">Gestion des données</button>";
-    const char *at=strstr(page,anchor);
-    if(!at)return html_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,
-                           "Modèle système Waveshare invalide");
-    at+=strlen(anchor);
-    const char *insert=
-        "<a class=\"btn secondary\" href=\"/load?nav=gpio\">GPIO Waveshare 4,3C</a>";
-    const size_t pre=(size_t)(at-page),len=strlen(page),extra=strlen(insert);
-    char *copy=malloc(len+extra+1);
-    if(!copy)return html_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,
-                             "Mémoire HTML indisponible");
-    memcpy(copy,page,pre);
-    memcpy(copy+pre,insert,extra);
-    memcpy(copy+pre+extra,at,len-pre+1);
-    esp_err_t result=render(req,copy);
-    free(copy);
-    return result;
-}
-
-esp_err_t mira_beta_web_home(httpd_req_t *req){
+/* Waveshare 7 STD: CH422G controls the screen/backlight, not the\n * 4.3C's isolated DI0/DI1/DO0/DO1. Never expose the 4.3C GPIO UI.\n * Keep the original beta System page, with the correct target identity. */\nstatic esp_err_t render_system_7std(httpd_req_t *req){\n    return render(req,mira_beta_system_html);\n}\n\nesp_err_t mira_beta_web_home(httpd_req_t *req){
     if(!mira_beta_web_authorized(req))return ESP_FAIL;
     return render(req,mira_beta_index_html);
 }
@@ -1040,10 +918,10 @@ esp_err_t mira_beta_web_load(httpd_req_t *req){
     if(!strcmp(nav,"params"))return render(req,mira_beta_params_html);
     if(!strcmp(nav,"id"))return mira_jeedom_render_http_reference(req);
     if(!strcmp(nav,"checkupdate"))return beta_checkupdate_page(req);
-    if(!strcmp(nav,"gpio"))return beta_43c_gpio_page(req);
+    if(!strcmp(nav,"gpio"))return html_err(req,HTTPD_404_NOT_FOUND,"GPIO 4.3C indisponibles sur Waveshare 7 STD");
     if(!strcmp(nav,"mqtt"))return render(req,mira_beta_mqtt_html);
     if(!strcmp(nav,"wifi"))return render(req,mira_beta_wifi_manager_html);
-    if(!strcmp(nav,"system"))return render_system_43c(req);
+    if(!strcmp(nav,"system"))return render_system_7std(req);
     if(!strcmp(nav,"rst"))return render(req,mira_beta_data_html);
     if(!strcmp(nav,"configAP"))return render(req,mira_beta_config_ap_html);
     if(!strcmp(nav,"listnetwork"))return render(req,mira_beta_known_networks_html);

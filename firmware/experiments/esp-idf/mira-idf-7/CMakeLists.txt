@@ -4,4 +4,4 @@ set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/components/lvgl")
 # authenticated automatic OTA. Bump this on official native-only releases.
 set(PROJECT_VER "0.7.37")
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-project(mira_idf_scroll)
+project(mira_idf_7std)
