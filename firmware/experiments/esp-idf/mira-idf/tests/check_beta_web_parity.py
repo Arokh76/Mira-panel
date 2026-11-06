@@ -1202,9 +1202,9 @@ fixed_auto=recovery.split('static void legacy_finish_fixed_auto(void){',1)[1].sp
 assert 'esp_netif_get_dns_info(' in fixed_auto
 assert 'ESP_NETIF_DNS_MAIN,&primary' in fixed_auto
 assert 'ESP_NETIF_DNS_BACKUP,&backup' in fixed_auto
-assert fixed_auto.index('esp_netif_get_dns_info(') < fixed_auto.index('esp_netif_dhcpc_stop(')
-assert fixed_auto.index('esp_netif_dhcpc_stop(') < fixed_auto.index('esp_netif_set_ip_info(')
-assert fixed_auto.index('esp_netif_set_ip_info(') < fixed_auto.index('esp_netif_set_dns_info(',fixed_auto.index('esp_netif_set_ip_info('))
+assert fixed_auto.index('dns_primary_err=esp_netif_get_dns_info(') < fixed_auto.index('err=esp_netif_dhcpc_stop(sta_netif);')
+assert fixed_auto.index('err=esp_netif_dhcpc_stop(sta_netif);') < fixed_auto.index('err=esp_netif_set_ip_info(sta_netif,&current);')
+assert fixed_auto.index('err=esp_netif_set_ip_info(sta_netif,&current);') < fixed_auto.index('err=esp_netif_set_dns_info(sta_netif,ESP_NETIF_DNS_MAIN,&primary);')
 assert 'current.ip=legacy_requested_ip;' in fixed_auto
 assert 'esp_netif_set_dns_info(sta_netif,ESP_NETIF_DNS_MAIN,&primary)' in fixed_auto
 assert 'esp_netif_set_dns_info(sta_netif,ESP_NETIF_DNS_BACKUP,&backup)' in fixed_auto
