@@ -5,6 +5,8 @@
 extern const lv_font_t mira_font_fr_12;
 extern const lv_font_t mira_font_fr_14;
 extern const lv_font_t mira_font_fr_16;
+// 28px French accented glyphs for the 800x480 standby date.
+extern const lv_font_t mira_font_fr_28;
 
 // Exact 96px home clock from the Waveshare 4.3C beta.
 extern const lv_font_t mira_home_montserrat_96;
