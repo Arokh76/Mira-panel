@@ -24,9 +24,21 @@ for name in shared:
     orig = (common / "main" / name).read_bytes()
     port = (main / name).read_bytes()
     assert orig == port, f"7-inch software core diverged from beta: {name}"
-for name in ("partitions.csv", "sdkconfig.defaults"):
-    assert (common / name).read_bytes() == (target / name).read_bytes(), name
-print("PASS 7-inch includes unchanged latest 4.3C beta app, config, NTP/DNS, Jeedom/MQTT and standby core")
+assert (common / "partitions.csv").read_bytes() == (target / "partitions.csv").read_bytes()
+# Display timing and DMA mitigation are independent 7-inch hardware choices.
+# Keep all other ESP-IDF settings synchronized with the 4.3C beta.
+def config_values(path):
+    return dict(line.split("=", 1) for line in path.read_text().splitlines()
+                if line.startswith("CONFIG_") and "=" in line)
+common_config = config_values(common / "sdkconfig.defaults")
+target_config = config_values(target / "sdkconfig.defaults")
+display_only = {"CONFIG_LCD_RGB_RESTART_IN_VSYNC", "CONFIG_SPIRAM_XIP_FROM_PSRAM"}
+assert {k: v for k, v in common_config.items() if k not in display_only} == {
+    k: v for k, v in target_config.items() if k not in display_only
+}, "7-inch shared SDK settings diverged"
+assert target_config["CONFIG_LCD_RGB_RESTART_IN_VSYNC"] == "n"
+assert target_config["CONFIG_SPIRAM_XIP_FROM_PSRAM"] == "y"
+print("PASS 7-inch shares latest 4.3C app and SDK settings except isolated RGB DMA/PSRAM controls")
 # Initial provisioning must have all three IPv4 modes on both display targets.
 page = (main / "mira_beta_setup_pages.h").read_text(encoding="utf-8")
 setup = (main / "mira_beta_setup.c").read_text(encoding="utf-8")
