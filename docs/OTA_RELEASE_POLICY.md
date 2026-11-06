@@ -1,11 +1,9 @@
-# Mira Panel — OTA et publications
+# OTA et publications — firmware-beta
 
-Le firmware est construit par cible matérielle : WT32-SC01 Plus, Waveshare 4.3C et Open Nextion Genius 2.8. Ne jamais interchanger les binaires, même quand le numéro de version applicatif est identique.
+Les profils Arduino actifs dans cette branche sont WT32-SC01 Plus et Open Nextion Genius 2.8.
 
-La source consolidée est compilée par `.github/workflows/build-mira.yml`. La publication multi-cible depuis `main` valide les artefacts d'un même commit avant de modifier `firmware/targets.json`, les binaires OTA/FACTORY et les manifestes `docs/`.
+La cible **Waveshare 4.3C Arduino** n'est plus proposée : son pilote, sa compilation et ses artefacts ont été retirés de `firmware-beta`. Le profil ESP-IDF 4.3C sera intégré après validation. Les anciens installateurs et firmwares du dépôt `main` ne sont pas modifiés.
 
-**Version publiée conservée dans `firmware-beta` : 0.7.37.** Les modifications plus récentes de la source bêta WT32 (correctifs JSON, thème Rose et logo) ne sont pas automatiquement présentes dans ces binaires déjà publiés.
+Le code WT32 peut être plus récent que les binaires 0.7.37 archivés : les derniers correctifs JSON/thème Rose/logo se trouvent dans la source bêta, sans mise à jour OTA automatique.
 
-Les mises à jour OTA utilisent le profil matériel correspondant et préservent normalement les réglages. Les installations usine peuvent effacer des données. Les chemins historiques `firmware/version.json`, `firmware/version-wt32.json` et `firmware/Mira_Panel.bin` sont conservés pour éviter de modifier les mécanismes de transition des anciens appareils.
-
-La validation par compilation ne remplace pas les essais physiques. Le profil Open Nextion doit notamment rester considéré comme distinctement à valider sur son propre matériel.
+Toujours sélectionner un binaire adapté à la carte. L'ancienne URL non typée `firmware/version.json` est volontairement figée, car elle était utilisée par des appareils plus anciens.

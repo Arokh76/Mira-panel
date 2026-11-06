@@ -1,7 +1,7 @@
 # Mira Panel — source consolidée
 
-Le dossier `MIRA_PANEL/` contient l'intégralité du code utilisé par la compilation multi-cible.
+Base Arduino 0.7.37, avec les derniers correctifs WT32 validés (JSON, Rose, logo Mira compact).
 
-Base 0.7.37, enrichie de correctifs bêta WT32 testés : gestion des valeurs JSON, thème Rose optionnel, logo Mira compact au démarrage. Le dépôt contient également les ressources LVGL, Web, MQTT, caméra et les pilotes matériels.
+Les cibles Arduino compilées sont désormais WT32 et Open Nextion 2.8. Le pilote Arduino Waveshare 4.3C a été retiré. Les éventuels blocs conditionnels historiques dans l'interface partagée sont inactifs et ne sont pas des cibles distribuables.
 
-Le build prend directement cette source, avec les réglages spécifiques WT32/Waveshare/Nextion dans `.github/workflows/build-mira.yml`. Les anciens scripts de reconstruction par versions et fichiers ZIP ne sont plus requis.
+La prochaine implémentation du Waveshare 4.3C sera réalisée sous ESP-IDF, après validation séparée.

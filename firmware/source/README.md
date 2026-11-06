@@ -1,7 +1,7 @@
-# Sources firmware
+# Sources Arduino du firmware-beta
 
-Source de compilation active : [consolidated/MIRA_PANEL/](consolidated/MIRA_PANEL/).
+Source active : `consolidated/MIRA_PANEL/`.
 
-Base 0.7.37 avec correctifs bêta WT32 validés : stockage JSON, thème Rose optionnel, logo de démarrage. Le workflow `.github/workflows/build-mira.yml` compile cette source directement, sans rejouer les anciens correctifs Python.
+Profils : WT32-SC01 Plus et Open Nextion 2.8. Le port Arduino Waveshare 4.3C est retiré en prévision d'un remplacement ESP-IDF indépendant. Le fichier de partitionnement 16 Mo pour Nextion a été conservé sous le nom `MiraPartitions16MB.csv`.
 
-Les archives de source antérieures et les scripts de reconstruction ont été retirés de la branche active, mais restent accessibles dans l'historique Git et dans la branche de sauvegarde créée avant nettoyage.
+Le workflow `.github/workflows/build-mira.yml` construit directement la source consolidée et vérifie les deux profils.
