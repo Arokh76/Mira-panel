@@ -906,7 +906,14 @@ esp_err_t mira_beta_web_gpio_multi(httpd_req_t *req){
     cJSON_Delete(form);
     return gpio_post_result(req,err);
 }
-/* Waveshare 7 STD: CH422G controls the screen/backlight, not the\n * 4.3C's isolated DI0/DI1/DO0/DO1. Never expose the 4.3C GPIO UI.\n * Keep the original beta System page, with the correct target identity. */\nstatic esp_err_t render_system_7std(httpd_req_t *req){\n    return render(req,mira_beta_system_html);\n}\n\nesp_err_t mira_beta_web_home(httpd_req_t *req){
+/* Waveshare 7 STD: CH422G controls the screen/backlight, not the
+ * 4.3C's isolated DI0/DI1/DO0/DO1. Never expose the 4.3C GPIO UI.
+ * Keep the original beta System page, with the correct target identity. */
+static esp_err_t render_system_7std(httpd_req_t *req){
+    return render(req,mira_beta_system_html);
+}
+
+esp_err_t mira_beta_web_home(httpd_req_t *req){
     if(!mira_beta_web_authorized(req))return ESP_FAIL;
     return render(req,mira_beta_index_html);
 }
