@@ -40,6 +40,9 @@ display_only = {
     "CONFIG_LV_DEF_REFR_PERIOD", "CONFIG_SPIRAM_RODATA", "CONFIG_SPIRAM_MEMTEST",
     "CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB", "CONFIG_ESP32S3_DATA_CACHE_64KB",
     "CONFIG_ESP32S3_DATA_CACHE_LINE_64B",
+    "CONFIG_LV_OS_FREERTOS", "CONFIG_LV_MEMCPY_MEMSET_STD",
+    "CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM", "CONFIG_LV_OBJ_STYLE_CACHE",
+    "CONFIG_LV_DRAW_SW_DRAW_UNIT_CNT", "CONFIG_LV_COLOR_DEPTH_16",
 }
 assert {k: v for k, v in common_config.items() if k not in display_only} == {
     k: v for k, v in target_config.items() if k not in display_only
