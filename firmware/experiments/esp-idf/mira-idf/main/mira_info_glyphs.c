@@ -79,24 +79,18 @@ lv_obj_t *mira_info_glyph_create(lv_obj_t *card,const char *kind,
         part(root,0,d/2-stroke/2,d/5,stroke,false,2,accent);
         part(root,d*4/5,d/2-stroke/2,d/5,stroke,false,2,accent);
     }else if(!strcmp(kind,"cloud")||!strcmp(kind,"rain")){
-        /* Compact weather pictogram using native shapes, as on Arduino.
-         * The lower cloud bar joins three circular lobes; optional rain
-         * streaks are strictly within this icon's 28px bounding box. */
-        const bool rainy=!strcmp(kind,"rain");
-        const int base_y=d*50/100;
-        part(root,d*12/100,base_y,d*76/100,d*24/100,
+        // Direct C port of beta MiraPanelUI::miraCreateInfoGlyph:
+        // same cloud lobes and rain strokes, no bitmap or icon font.
+        part(root,d/9,d*43/100,d*45/100,d*38/100,
              false,LV_RADIUS_CIRCLE,accent);
-        part(root,d*23/100,d*34/100,d*30/100,d*36/100,
+        part(root,d*31/100,d/4,d*45/100,d*49/100,
              false,LV_RADIUS_CIRCLE,accent);
-        part(root,d*47/100,d*39/100,d*32/100,d*32/100,
+        part(root,d*52/100,d*45/100,d*38/100,d*32/100,
              false,LV_RADIUS_CIRCLE,accent);
-        if(rainy){
-            part(root,d*24/100,d*79/100,stroke,d*15/100,
-                 false,2,accent);
-            part(root,d*48/100,d*79/100,stroke,d*15/100,
-                 false,2,accent);
-            part(root,d*70/100,d*79/100,stroke,d*15/100,
-                 false,2,accent);
+        part(root,d/8,d*57/100,d*3/4,d/5,false,4,accent);
+        if(!strcmp(kind,"rain")){
+            part(root,d/4,d*82/100,stroke,d/6,false,1,accent);
+            part(root,d*62/100,d*82/100,stroke,d/6,false,1,accent);
         }
     }else if(!strcmp(kind,"pressure")){
         part(root,d/7,d/6,d*5/7,d*5/7,true,LV_RADIUS_CIRCLE,accent);
