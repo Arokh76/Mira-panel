@@ -19,8 +19,10 @@
 #define WIDTH 800
 #define HEIGHT 480
 #define LCD_PCLK_HZ (16 * 1000 * 1000) // Waveshare ESP-IDF 09_lvgl_v9_demo baseline
-// Vendor EXAMPLE_RGB_BOUNCE_BUFFER_SIZE = 800 * 10 * 16/8 (=16000) passed as pixels.
-#define LCD_BOUNCE_BUFFER_PIXELS (WIDTH * 10 * 16 / 8)
+// Reserve only eight RGB scanlines per DMA bounce buffer (800 * 8 * 2 = 12800 bytes each).
+// The previous vendor-sized expression produced 16000 *pixels* (32000 bytes per buffer).
+#define LCD_BOUNCE_BUFFER_LINES 8
+#define LCD_BOUNCE_BUFFER_PIXELS (WIDTH * LCD_BOUNCE_BUFFER_LINES)
 
 static const char *TAG = "mira-idf-rgb";
 static i2c_master_bus_handle_t i2c_bus;
@@ -303,8 +305,21 @@ static void refresh_ready_cb(lv_event_t *e) {
 }
 
 
-esp_err_t mira_display_init(void) {
-    init_i2c();
+static void log_rgb_dma_heap(const char *stage) {
+    const uint32_t dma_caps = MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL;
+    ESP_LOGI(TAG, "%s: DMA-internal free=%u largest=%u, PSRAM free=%u",
+             stage,
+             (unsigned)heap_caps_get_free_size(dma_caps),
+             (unsigned)heap_caps_get_largest_free_block(dma_caps),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+}
+
+// The RGB driver allocates two bounce buffers from internal DMA-capable RAM.
+// Reserve these and the PSRAM framebuffers before Wi-Fi/HTTP/Jeedom consume
+// the scarce internal heap; LCD timing, CH422G and GT911 remain unchanged.
+esp_err_t mira_display_preallocate_rgb(void) {
+    if (panel != NULL) return ESP_OK;
+    log_rgb_dma_heap("Before early RGB DMA allocation");
     esp_lcd_rgb_panel_config_t cfg = {
         .clk_src = LCD_CLK_SRC_DEFAULT,
         .timings = {
@@ -323,8 +338,8 @@ esp_err_t mira_display_init(void) {
         .bits_per_pixel = 16,
         .num_fbs = esp_lv_adapter_get_required_frame_buffer_count(
             ESP_LV_ADAPTER_TEAR_AVOID_MODE_DEFAULT_RGB, ESP_LV_ADAPTER_ROTATE_0),
-        // Exact Waveshare 09_lvgl_v9_demo parameter: vendor-defined SRAM bounce
-        // buffers isolate RGB DMA from PSRAM contention during UI redraw.
+        // DMA bounce buffers are deliberately smaller than the vendor demo's
+        // to coexist with Mira's Wi-Fi, HTTP and Jeedom tasks in internal RAM.
         .bounce_buffer_size_px = LCD_BOUNCE_BUFFER_PIXELS,
         .sram_trans_align = 4,
         .psram_trans_align = 64,
@@ -336,7 +351,22 @@ esp_err_t mira_display_init(void) {
         .data_gpio_nums = {14, 38, 18, 17, 10, 39, 0, 45, 48, 47, 21, 1, 2, 42, 41, 40},
         .flags.fb_in_psram = 1,
     };
-    ESP_RETURN_ON_ERROR(esp_lcd_new_rgb_panel(&cfg, &panel), TAG, "RGB panel allocate");
+    esp_err_t err = esp_lcd_new_rgb_panel(&cfg, &panel);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Early RGB panel allocation failed: %s", esp_err_to_name(err));
+        log_rgb_dma_heap("RGB panel allocation failed");
+        return err;
+    }
+    log_rgb_dma_heap("After early RGB DMA allocation");
+    return ESP_OK;
+}
+
+esp_err_t mira_display_init(void) {
+    if (panel == NULL) {
+        ESP_LOGE(TAG, "RGB panel was not preallocated");
+        return ESP_ERR_INVALID_STATE;
+    }
+    init_i2c();
     ESP_RETURN_ON_ERROR(esp_lcd_panel_reset(panel), TAG, "RGB reset");
     ESP_RETURN_ON_ERROR(esp_lcd_panel_init(panel), TAG, "RGB init");
     ESP_LOGI(TAG, "Waveshare 7 RGB vendor baseline PCLK=%d (800x480, 4/8/8, bounce=%u)",

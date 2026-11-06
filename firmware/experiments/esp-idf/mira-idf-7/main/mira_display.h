@@ -28,6 +28,8 @@ typedef struct {
     bool touch_ready;
 } mira_display_stats_t;
 
+// Allocate RGB PSRAM framebuffers and internal DMA bounce buffers before Wi-Fi startup.
+esp_err_t mira_display_preallocate_rgb(void);
 esp_err_t mira_display_init(void);
 // Waveshare 7 STD: validated CH422G panel power; hardware brightness PWM not validated.
 // No isolated DI0/DI1 or DO0/DO1 from the 4.3C are controlled by this driver.

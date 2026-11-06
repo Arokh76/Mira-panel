@@ -62,6 +62,9 @@ void app_main(void) {
     ESP_LOGW(TAG, "EXPERIMENTAL vendor baseline: hardware stability needs real 7-inch validation");
     // Preserve the existing Mira settings, widgets, firmware partitioning and Wi-Fi.
     mira_full_storage_init();
+    // Early RGB driver allocation reserves scarce internal DMA memory before Wi-Fi.
+    // Physical CH422G/GT911 bring-up and LVGL start remain after the services.
+    ESP_ERROR_CHECK(mira_display_preallocate_rgb());
     ESP_ERROR_CHECK(mira_recovery_init());
     ESP_ERROR_CHECK(mira_mqtt_init());
     ESP_ERROR_CHECK(mira_jeedom_action_init());

@@ -95,7 +95,12 @@ gpio = (main / "mira_gpio43.c").read_text(encoding="utf-8")
 h = (main / "mira_display.h").read_text(encoding="utf-8")
 assert '#define WIDTH 800' in driver and '#define HEIGHT 480' in driver
 assert '#define LCD_PCLK_HZ (16 * 1000 * 1000)' in driver
-assert '#define LCD_BOUNCE_BUFFER_PIXELS (WIDTH * 10 * 16 / 8)' in driver
+assert '#define LCD_BOUNCE_BUFFER_LINES 8' in driver
+assert '#define LCD_BOUNCE_BUFFER_PIXELS (WIDTH * LCD_BOUNCE_BUFFER_LINES)' in driver
+assert 'esp_err_t mira_display_preallocate_rgb(void)' in driver
+assert app.index('mira_display_preallocate_rgb()') < app.index('mira_recovery_init()')
+assert app.index('mira_recovery_init()') < app.index('mira_display_init()')
+assert 'heap_caps_get_largest_free_block(dma_caps)' in driver
 assert '.bounce_buffer_size_px = LCD_BOUNCE_BUFFER_PIXELS' in driver
 assert 'esp_lv_adapter_get_required_frame_buffer_count(' in driver
 for v in (
