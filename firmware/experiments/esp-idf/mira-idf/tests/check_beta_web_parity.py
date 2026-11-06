@@ -172,6 +172,7 @@ print("PASS first-install beta direct key-to-Wi-Fi render, production and OTA ac
 
 # Regressions seen on the first 7-inch test: the initial Wi-Fi screen exposed
 # only a free-text IP and the confirmation always displayed 'Auto'.
+setup_pages = (idf / "mira_beta_setup_pages.h").read_text(encoding="utf-8")
 # Verify it now exposes exactly the beta's three IPv4 modes and manual fields,
 # writes the same native atomic profile as the configured beta editor, and
 # displays the requested address after saving.
