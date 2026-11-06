@@ -238,7 +238,7 @@ static void clock_weather_redraw(void){
     for(size_t i=0;parsed[i];i++)if(parsed[i]==',')parsed[i]='.';
     char *end=NULL;
     const float degrees=strtof(parsed,&end);
-    const bool valid=parsed[0]&&end!=parsed&&*end=='\\0'&&
+    const bool valid=parsed[0]&&end!=parsed&&*end=='\0'&&
                      isfinite(degrees)&&degrees>=-80.f&&degrees<=70.f;
     clock_weather_visible=valid;
     if(valid){
@@ -300,6 +300,7 @@ static void clock_weather_restore_cached(void){
 
 static uint32_t widget_count;
 static uint32_t last_clock_ms;
+static uint32_t last_status_ms;
 static uint32_t last_user_touch_ms,last_user_touch_count;
 static volatile uint32_t nav_count,nav_last_heap,nav_lowest_heap;
 void mira_full_navigation_stats(uint32_t *count,uint32_t *last_heap,uint32_t *min_heap){
@@ -3658,8 +3659,37 @@ void mira_full_ui_tick(void){
         mira_touch_diagnostic_refresh();
     }
     uint32_t ms=lv_tick_get();
-    if(ms-last_clock_ms>2000){
+    // Arduino MiraPanelUI::updateClock() runs every 1000 ms and is
+    // independent of the MQTT/display-status publication cycle.
+    if(ms-last_clock_ms>=1000u){
         last_clock_ms=ms;
+        const time_t now=time(NULL);
+        if(now>1700000000){
+            struct tm tmv={0};
+            if(localtime_r(&now,&tmv)){
+                char buff[8];
+                strftime(buff,sizeof(buff),"%H:%M",&tmv);
+                if(clock_text&&strcmp(lv_label_get_text(clock_text),buff))
+                    lv_label_set_text(clock_text,buff);
+                if(date_text){
+                    static const char *const days[]={"Dimanche","Lundi","Mardi","Mercredi",
+                        "Jeudi","Vendredi","Samedi"};
+                    static const char *const months[]={"Janvier","Février","Mars","Avril",
+                        "Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"};
+                    char datebuf[80];
+                    snprintf(datebuf,sizeof(datebuf),"%s, %02d %s %04d",
+                        days[tmv.tm_wday],tmv.tm_mday,months[tmv.tm_mon],tmv.tm_year+1900);
+                    if(strcmp(lv_label_get_text(date_text),datebuf))
+                        lv_label_set_text(date_text,datebuf);
+                }
+                if(display_sleeping&&sleep_clock_enabled&&sleep_clock_text&&
+                   strcmp(lv_label_get_text(sleep_clock_text),buff))
+                    lv_label_set_text(sleep_clock_text,buff);
+            }
+        }
+    }
+    if(ms-last_status_ms>=2000u){
+        last_status_ms=ms;
         apply_auto_brightness();
         // Restore firmware-beta MQTT Display/<key>/state retained feedback.
         // This snapshot is read ONLY from the LVGL task, never an MQTT
@@ -3702,24 +3732,6 @@ void mira_full_ui_tick(void){
                               current_night_period()?"nuit":"jour");
             }
             lv_label_set_text(clock_status_text,status);
-        }
-        time_t now=time(NULL);
-        if(now>1700000000){
-            struct tm tmv;localtime_r(&now,&tmv);
-            char buff[24];snprintf(buff,sizeof(buff),"%02d:%02d",tmv.tm_hour,tmv.tm_min);
-            if(clock_text)lv_label_set_text(clock_text,buff);
-            if(date_text){
-                static const char *const days[]={"Dimanche","Lundi","Mardi","Mercredi",
-                                                   "Jeudi","Vendredi","Samedi"};
-                static const char *const months[]={"Janvier","Février","Mars","Avril",
-                    "Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"};
-                char datebuf[80];
-                snprintf(datebuf,sizeof(datebuf),"%s, %02d %s %04d",
-                         days[tmv.tm_wday],tmv.tm_mday,months[tmv.tm_mon],tmv.tm_year+1900);
-                lv_label_set_text(date_text,datebuf);
-            }
-            if(display_sleeping&&sleep_clock_enabled&&sleep_clock_text)
-                lv_label_set_text(sleep_clock_text,buff);
         }
     }
 }
