@@ -8,3 +8,5 @@ extern const lv_font_t mira_font_fr_16;
 
 // Exact 96px home clock from the Waveshare 4.3C beta.
 extern const lv_font_t mira_home_montserrat_96;
+// Exact 120px sleep clock glyphs from Arduino Waveshare beta (LVGL9).
+extern const lv_font_t mira_sleep_montserrat_120;
