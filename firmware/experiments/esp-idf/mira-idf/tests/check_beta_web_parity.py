@@ -1158,9 +1158,16 @@ print('PASS datetime weather: passive indexed Infos have a dedicated on-screen v
 
 # Synchronized clock must be observable separately from Wi-Fi link.
 assert 'ESP_NETIF_SNTP_DEFAULT_CONFIG_MULTIPLE(' in recovery
-assert 'sntp_cfg.start=false;' in recovery
-assert 'sntp_cfg.sync_cb=mira_ntp_synced;' in recovery
+# WT32 configTzTime is invoked only AFTER Wi-Fi is connected.
+# For IDF use the official static-server init path after STA_GOT_IP.
+assert 'clock_start_requested=true;' in recovery
+assert 'cfg.sync_cb=mira_ntp_synced;' in recovery
+assert 'err=esp_netif_sntp_init(&cfg);' in recovery
+assert 'clock_sntp_initialized=true;' in recovery
 assert 'esp_netif_sntp_start()' in recovery
+assert 'ntp_reachability' in recovery
+assert 'dns_main' in recovery and 'dns_backup' in recovery
+assert 'gateway' in recovery and 'last_ntp_start_error' in recovery
 assert 'IP_EVENT_STA_GOT_IP' in recovery
 assert '/mira/clock/status' in recovery
 config=(root/'firmware/experiments/esp-idf/mira-idf/sdkconfig.defaults').read_text(encoding='utf-8')
