@@ -1,0 +1,108 @@
+# Mira Panel 4.3C — parité obligatoire avec firmware-beta 0.7.37
+
+> État réel au 2 novembre 2026 : ce document décrit une cible de parité, pas une
+> homologation. La branche a depuis porté les vraies pages Web beta (Accueil,
+> Paramètres, MQTT, Wi-Fi, ConfigAP, Système, Gestion des données, réseaux
+> enregistrés), l'import MQTT, les commandes d'affichage et les routes Jeedom
+> /get, /events, /sync/toggle. Les six routes historiques /addlistlvgl,
+> /removelistlvgl, /savelistlvgl, /screenadd, /screenformat, /screensave utilisent
+> désormais un document JSON temporaire (écriture atomique au "save").
+> Leurs tests de contrat statiques sont intégrés à la CI.
+>
+> **Toujours manquant / à valider** : mise à jour automatique IDF spécifique
+> (/api/checkupdate, /updatemodule, GET /update) : NE JAMAIS installer un OTA
+> Arduino de la même cible Waveshare sur un port IDF; MJPEG multipart et HTTPS
+> pour la caméra; fidélité de chaque widget, styles et interactions, migration
+> des secrets sur un appareil réel, sécurité des APIs et essais physiques
+> (premier démarrage, Wi-Fi, tactile GT911, actions Jeedom, stabilité PSRAM,
+> veille, FPS, reboot). Les endpoints GPIO optionnels de l'Arduino ne sont
+> pas actifs sur la 4.3C et ne sont pas un obstacle.
+>
+> **Complément portage du 2 novembre (suite)** : HTTPS caméra ajouté avec
+> vérification CA Espressif, pour les snapshots JPEG et les flux MJPEG
+> multipart. Une session MJPEG persistante sur une seule connexion TCP/TLS
+> est désormais codée, avec détection des images JPEG SOI/EOI entre les blocs
+> réseau, tampon PSRAM borné, 4 FPS maximum et arrêt sur changement de caméra.
+> Sa compilation au SHA courant et ses tests physiques restent à qualifier.
+> Les diagnostics IDF ont été déplacés sous `/recovery/mira` ; `/mira`
+> redirige vers Mira, et `POST /mira/state` exige maintenant une
+> authentification avant l'injection d'un état passif.
+> Les routes historiques `/api/checkupdate`, `GET /update`,
+> `/updatemodule` ont un équivalent sécurisé : la vérification HTTPS
+> accepte seulement le profil `waveshare-esp32s3-touch-lcd-4.3c-idf`
+> dans le manifeste GitHub. **Aucun OTA Arduino n'est sélectionné
+> automatiquement**. L'activation réelle de mise à jour automatique
+> reste conditionnée à la publication d'un binaire officiel IDF.
+> La version de référence IDF demeure expérimentale et n'est pas distribuée.
+>
+> **Parité graphique LVGL 9.6 (lot du 2 novembre)** : palettes exactes des
+> trois thèmes Mira/Sombre/Glass, sélecteur enregistré en NVS et reconstruction
+> différée hors du callback LVGL; roue Hue de 150 px (carte 786×196 px,
+> saturation/luminosité conservées en interne, comme dans la bêta); valeurs
+> d'Info ajustées selon la largeur réelle UTF-8; cache RGB565 des tuiles
+> d'Info préparé au repos avec budget PSRAM et restauration des objets
+> interactifs à la fin du défilement. La carte multimédia retrouve la
+> présentation Jeedom/Spotify 786×558, pochettes HTTPS autorisées chargées
+> sur une tâche dédiée, actions et volume, avec transport de l'URL `__cover`
+> jusqu'à 768 octets sans augmenter la file des autres Infos.
+>
+> **Complément LVGL 9 / Infos** : corrections du pas mémoire ARGB8888
+> vers RGB565 (stride, taille des données et lignes alignées), exclusion
+> des cartes hors écran du cache, reprise sur pression PSRAM temporaire,
+> affichage immédiat des nouvelles valeurs Jeedom durant un défilement.
+> Portage des pictogrammes bêta (température, hygrométrie, pression,
+> éclairage, porte, énergie/prise), `labelMode=auto/text/icon/both`,
+> et des variantes Info `hero/value/compact/wide`. Horodatage `MAJ hh:mm`
+> identique à la bêta. Ces changements restent sous validation CI
+> et devront être comparés sur l'écran réel.
+>
+> **Tableau Énergie** : le rendu ESP-IDF est passé de 7 lignes
+> génériques au cadran de la bêta 786×344 : quatre blocs teintés
+> Solaire/Maison/Réseau/Batterie, section STOCKAGE et jauge uniquement
+> lorsqu'un pourcentage est fourni. Les sections Batterie 2 / Batterie 3
+> restent masquées tant que leurs données n'existent pas, puis ajoutent
+> chacune 47 px à la carte. Les mises à jour sont passives Jeedom/MQTT.
+>
+> **Attention** : la compilation d'un lot précédent de cette parité a
+> réussi, mais seule la CI sur le SHA final confirme l'absence d'erreur de
+> build de l'ensemble. La comparaison visuelle et l'interaction sur écran
+> (toucher la roue, changer de thème, défilement et pochettes) restent à
+> effectuer. Ne pas annoncer une parité visuelle observée à 100 % avant
+> ces essais. Aucune modification des sources Arduino n'a été faite.
+>
+> Le dernier build doit être vérifié sur **son SHA exact** : un ancien build
+> réussi ne suffit pas à valider les nouveaux commits. N'attribuer le statut
+> "firmware prêt à tester" qu'après validation du build courant et cohérence
+> de tous les parcours critiques.
+
+
+**Source de vérité :** `firmware-beta/firmware/source/consolidated/MIRA_PANEL/` (sources `MiraPanelUI.cpp`, `MiraPanelServer.cpp`, `MiraDisplayProfile.h`, `SPIFFS_Process.h`, `HTML/*.h`). Ce portage ESP-IDF doit conserver les parcours et contrats, pas inventer un nouveau Mira.
+
+## Étapes déjà implémentées dans experiment/mira-idf-mira-ui-43c
+
+- RGB 800 × 480 / PCLK 12 MHz, GT911, LVGL 9.6, polices françaises, horloge 96px.
+- Préférence HTTP/Jeedom par défaut ; MQTT strictement optionnel, événements Jeedom passifs.
+- Import et rendu des widgets connus depuis `miralvgl.json`, synchronisation HTTP et commandes locales en files FreeRTOS.
+- Configuration initiale beta `HTML_Key.h` et `HTML_ManageurWiFiSansR.h` : étape clé et Wi-Fi, scan de 10 réseaux et saisie manuelle, IP Auto/IPv4 fixe contrôlée, portail DNS AP 192.168.4.1.
+- Widgets bouton, toggle, range, roundrange, thermostat 0,5 °C, list, listbutton, multiaction, énergie, media, couleur HSV -> RGB et caméra BMP/JPEG.
+- Routes de navigation `/navpages` et `/navfavorites` GET/POST, stockage historique `miraui`, mise à jour sans redémarrage. `/mira-health` et `/reboot` ont leur équivalent natif.
+- `/displayinfo` utilise l'identifiant `waveshare-esp32s3-touch-lcd-4.3c`, une grille logique 1000×1000 et les dimensions **430px de contenu + 50px de navigation** de la bêta.
+- Firmware factory USB / OTA avec partition SPIFFS initialisée seulement si la partition entière est vierge.
+
+**Important :** ces implémentations restent à qualifier par compilation du dernier commit **et** essais sur écran 4,3C. Un build réussi n'est pas un test de parité.
+
+## Écarts fonctionnels connus restant à traiter
+
+1. **Interface Web après configuration** : remplacer les pages de banc d'essai par les pages et les routes de `HTML_Index.h`, `HTML_Parametres.h`, `HTML_ManageurWiFi.h`, `HTML_ConfigAP.h`, `HTML_MQTT.h`, `HTML_Sys.h`, `HTML_Donnees.h`, `HTML_Message.h`; conserver l'authentification historique.
+2. **Routes secondaires de l'ancien serveur, encore absentes** (inventaire par comparaison `server.on` vs `httpd_uri_t` ; vérification manuelle nécessaire) : `/addlistlvgl`, `/addparam`, `/api/checkupdate`, `/get`, `/getallparams`, `/removelistlvgl`, `/savelistlvgl`, `/screenadd`, `/screenformat`, `/screensave`, `/sync/toggle`, `GET /update`, `/updatemodule`, `/updateparam`, `POST /display-save`, `POST /doUpdateFile`. Les routes GPIO ne concernent pas la cible 4.3C car désactivées dans la bêta de ce matériel.
+3. **Widgets avancés et visuels** : revoir chaque `create*` et chaque traitement d'état de `MiraPanelUI.cpp` avec le rendu LVGL natif. Le contrôle RGB actuel n'est pas l'ancienne roue graphique; des styles avancés et la parité complète de l'UI restent à vérifier.
+4. **Caméra** : HTTP JPEG/BMP existe ; MJPEG multipart et HTTPS manquent.
+5. **Sécurité/maintenance** : Wi-Fi configuré, clé écran, export et reset, mise à jour OTA manuelle et version doivent respecter les mêmes actions que la bêta ; routes de banc d'essai séparées de l'interface normale.
+6. **Validation physique** : premier démarrage avec erase flash, AP + DNS + pages clé/Wi-Fi, IP DHCP et fixe, GT911, gestes, rendu, réveil et veille, commandes Jeedom HTTP, reprogrammation, camera, et absence de fuite mémoire ou reboot.
+
+## Règles non négociables
+
+- Ne pas modifier `main/stable`, `firmware-beta`, la bêta Dimitri ni les releases 7 pouces.
+- Ne pas remplacer le serveur HTTP par MQTT ; MQTT n'est qu'une option avancée.
+- Ne pas annoncer le portage « terminé » avant la parité fonctionnelle et des tests réels concluants.
+- Chaque correction d'écart passe par la compilation native ESP-IDF 5.5.6/LVGL 9.6, puis par une validation sur écran physique, sans binaire périmé.
