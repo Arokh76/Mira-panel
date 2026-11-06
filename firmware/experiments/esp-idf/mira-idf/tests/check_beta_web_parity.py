@@ -1164,8 +1164,29 @@ assert 'esp_netif_sntp_start()' in recovery
 assert 'IP_EVENT_STA_GOT_IP' in recovery
 assert '/mira/clock/status' in recovery
 config=(root/'firmware/experiments/esp-idf/mira-idf/sdkconfig.defaults').read_text(encoding='utf-8')
-assert 'CONFIG_LWIP_SNTP_MAX_SERVERS=3' in config
-print('PASS NTP: 3 fallback servers and local clock diagnostics')
+assert 'CONFIG_LWIP_SNTP_MAX_SERVERS=2' in config
+assert 'CET-1CEST,M3.5.0,M10.5.0/3' in recovery
+assert '2,ESP_SNTP_SERVER_LIST("pool.ntp.org","time.nist.gov")' in recovery
+assert 'clock_last_attempt_tick' in recovery
+assert 'time(NULL)<1700000000' in recovery
+arduino_ui=(root/'firmware/source/consolidated/MIRA_PANEL/MiraPanelUI.cpp').read_text(encoding='utf-8')
+assert 'configTzTime("CET-1CEST,M3.5.0,M10.5.0/3", "pool.ntp.org", "time.nist.gov")' in arduino_ui
+assert 'if (millis() - _lastClockUpdate < 1000) return;' in arduino_ui
+assert 'if(ms-last_clock_ms>=1000u)' in full
+assert 'if(ms-last_status_ms>=2000u)' in full
+assert 'clock_weather_icons[0]=mira_info_glyph_create(c,"light"' in full
+assert 'clock_weather_icons[1]=mira_info_glyph_create(c,"cloud"' in full
+assert 'clock_weather_icons[2]=mira_info_glyph_create(c,"rain"' in full
+glyphs=(idf/'mira_info_glyphs.c').read_text(encoding='utf-8')
+for part in ('part(root,d/9,d*43/100,d*45/100,d*38/100,',
+             'part(root,d*31/100,d/4,d*45/100,d*49/100,',
+             'part(root,d*52/100,d*45/100,d*38/100,d*32/100,',
+             'part(root,d/8,d*57/100,d*3/4,d/5,false,4,accent);'):
+    assert part in glyphs
+assert 'const bool cloudy=code==1003||code==1006||code==1009||' in full
+assert 'const bool sunny=code==1000||' in full
+assert 'const bool wet=code==0&&(' in full
+print('PASS validated WT32 NTP, timezone, 1s clock loop and weather glyph port')
 
 # A stale Jeedom Init Cmd ID (e.g. after equipment recreation) must be
 # visible to diagnostics, never silently mapped to a different command type.
