@@ -50,7 +50,10 @@ assert {k: v for k, v in common_config.items() if k not in display_only} == {
 assert target_config["CONFIG_LCD_RGB_RESTART_IN_VSYNC"] == "n"
 assert target_config["CONFIG_SPIRAM_XIP_FROM_PSRAM"] == "y"
 assert target_config["CONFIG_LV_DEF_REFR_PERIOD"] == "15"
-assert target_config["CONFIG_ESP32S3_DATA_CACHE_LINE_64B"] == "y"
+for key in ("CONFIG_SPIRAM_RODATA", "CONFIG_SPIRAM_MEMTEST",
+            "CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB", "CONFIG_ESP32S3_DATA_CACHE_64KB",
+            "CONFIG_ESP32S3_DATA_CACHE_LINE_64B"):
+    assert key not in target_config, f"Memory A/B test must leave {key} to ESP-IDF defaults"
 print("PASS 7-inch shares latest 4.3C app and SDK settings except isolated RGB DMA/PSRAM controls")
 # Initial provisioning must have all three IPv4 modes on both display targets.
 page = (main / "mira_beta_setup_pages.h").read_text(encoding="utf-8")
