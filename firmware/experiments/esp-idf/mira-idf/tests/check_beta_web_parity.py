@@ -1193,6 +1193,27 @@ for part in ('part(root,d/9,d*43/100,d*45/100,d*38/100,',
 assert 'const bool cloudy=code==1003||code==1006||code==1009||' in full
 assert 'const bool sunny=code==1000||' in full
 assert 'const bool wet=code==0&&(' in full
+
+# Native fixed_auto must reproduce Arduino miraFinishWifiProfile(): obtain
+# mask, gateway AND both DNS servers from the DHCP lease, then override
+# only the requested IP. esp_netif_set_ip_info() does NOT preserve DNS by
+# itself across a stopped DHCP client.
+fixed_auto=recovery.split('static void legacy_finish_fixed_auto(void){',1)[1].split('static volatile bool station_connected;',1)[0]
+assert 'esp_netif_get_dns_info(' in fixed_auto
+assert 'ESP_NETIF_DNS_MAIN,&primary' in fixed_auto
+assert 'ESP_NETIF_DNS_BACKUP,&backup' in fixed_auto
+assert fixed_auto.index('esp_netif_get_dns_info(') < fixed_auto.index('esp_netif_dhcpc_stop(')
+assert fixed_auto.index('esp_netif_dhcpc_stop(') < fixed_auto.index('esp_netif_set_ip_info(')
+assert fixed_auto.index('esp_netif_set_ip_info(') < fixed_auto.index('esp_netif_set_dns_info(')
+assert 'current.ip=legacy_requested_ip;' in fixed_auto
+assert 'esp_netif_set_dns_info(sta_netif,ESP_NETIF_DNS_MAIN,&primary)' in fixed_auto
+assert 'esp_netif_set_dns_info(sta_netif,ESP_NETIF_DNS_BACKUP,&backup)' in fixed_auto
+assert 'current.gw.addr' in fixed_auto  # bounded fallback to discovered gateway
+assert 'esp_netif_dhcpc_start(sta_netif);' in fixed_auto
+assert 'legacy_fixed_auto_applied=true;' in fixed_auto
+assert 'miraFinishWifiProfile(' in legacy_server
+assert 'WiFi.config(chosen,gateway,mask,dns1,dns2)' in legacy_server
+print('PASS Arduino fixed_auto parity: DHCP IP options including DNS preserved in IDF')
 print('PASS validated WT32 NTP, timezone, 1s clock loop and weather glyph port')
 
 # A stale Jeedom Init Cmd ID (e.g. after equipment recreation) must be
