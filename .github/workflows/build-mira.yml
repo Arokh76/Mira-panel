@@ -8,13 +8,9 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/build-mira.yml'
-      - 'firmware/scripts/v0.6.25.py'
-      - 'firmware/scripts/v0.6.26.py'
-      - 'firmware/scripts/**'
+      - 'firmware/scripts/publish_multi.py'
       - 'firmware/source/**'
-      - 'firmware/patches/**'
-      - 'firmware/overrides/**'
-      - 'firmware/final-overrides/**'
+      - 'tests/test_publish_multi.py'
 
 permissions:
   contents: read
@@ -47,6 +43,12 @@ jobs:
           mkdir -p firmware/source/work/MIRA_PANEL
           cp -a firmware/source/consolidated/MIRA_PANEL/. firmware/source/work/MIRA_PANEL/
           grep -q '"0.7.37"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
+          # Keep the physically validated WT32 beta fixes in the normal build:
+          # JSON action values, optional Rose theme and compact Mira boot logo.
+          grep -Fq 'miraCompactActionValues()' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
+          grep -Fq 'THEME_ROSE = 3' firmware/source/work/MIRA_PANEL/MiraPanelUI.h
+          grep -Fq 'MiraBootLogo::image()' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -Fq 'W = 150' firmware/source/work/MIRA_PANEL/MiraBootLogo.h
           # Regression protection: never publish a build without the
           # clock weather overlay AND passive light state restoration.
           grep -Fq '__mira_weather_temperature' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp

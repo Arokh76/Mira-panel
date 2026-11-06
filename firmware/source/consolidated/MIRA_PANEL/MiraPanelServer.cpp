@@ -521,6 +521,48 @@ static void miraObserveNavigation(const char* page) {
                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 }
 
+// DIMITRI JSON BETA: ArduinoJson 6 keeps replaced String allocations until GC.
+static uint32_t miraJsonActionWrites = 0;
+static uint32_t miraJsonActionCompactions = 0;
+static uint32_t miraJsonActionCompactionFailures = 0;
+static uint32_t miraJsonActionWriteFailures = 0;
+
+static bool miraCompactActionValues() {
+  if (!SPIFFS_Config_Actions.garbageCollect()) {
+    ++miraJsonActionCompactionFailures;
+    if (_Debug) Serial.println(F("[MIRA][JSON] Compactage impossible"));
+    return false;
+  }
+  ++miraJsonActionCompactions;
+  if (_Debug) Serial.printf("[MIRA][JSON] Compactage %lu, utilisation %u/%u\n",
+                            (unsigned long)miraJsonActionCompactions,
+                            (unsigned)SPIFFS_Config_Actions.memoryUsage(),
+                            (unsigned)SPIFFS_Config_Actions.capacity());
+  return true;
+}
+
+static void miraSetActionValue(size_t index, const String& value) {
+  JsonVariant current = SPIFFS_Config_Actions["actions"][index]["value"];
+  // Re-sent unchanged values must not allocate another copy of the String.
+  if (!current.isNull() && current.as<String>() == value) return;
+  ++miraJsonActionWrites;
+  const size_t capacity = SPIFFS_Config_Actions.capacity();
+  if (capacity && SPIFFS_Config_Actions.memoryUsage() >= capacity * 3 / 4)
+    miraCompactActionValues();
+
+  // Re-acquire after garbageCollect(): existing variants are invalidated.
+  SPIFFS_Config_Actions["actions"][index]["value"] = value;
+  if (!SPIFFS_Config_Actions["actions"][index]["value"].isNull()) return;
+
+  // If allocation failed, compact and retry once.
+  ++miraJsonActionWriteFailures;
+  if (miraCompactActionValues())
+    SPIFFS_Config_Actions["actions"][index]["value"] = value;
+  if (SPIFFS_Config_Actions["actions"][index]["value"].isNull() && _Debug)
+    Serial.printf("[MIRA][JSON] Echec enregistrement valeur action %u\n",
+                  (unsigned)index);
+}
+
 void MiraPanelServer::ServeurStation() {
 #if !defined(MIRA_TARGET_WAVESHARE_43C) && !defined(MIRA_TARGET_NEXTION_28)
   MiraWT32GPIO::begin();
@@ -650,19 +692,38 @@ void MiraPanelServer::ServeurStation() {
   });
 #endif
   server.on("/mira-health", HTTP_GET, [](AsyncWebServerRequest* request) {
-    char body[440];
+    // Observe the action table without exposing widget names or API keys.
+    unsigned nullInfos = 0;
+    JsonArray actions = SPIFFS_Config_Actions["actions"].as<JsonArray>();
+    for (JsonObject entry : actions) {
+      if (entry["type"].as<String>() == "info" && entry["value"].isNull())
+        ++nullInfos;
+    }
+    char body[768];
     snprintf(body, sizeof(body),
       "{\"uptime_ms\":%lu,\"wifi\":%d,\"rssi_dbm\":%d,\"heap_free\":%u,"
       "\"heap_min\":%u,\"heap_largest_block\":%u,\"psram_free\":%u,"
       "\"nav_count\":%u,\"nav_last_heap\":%u,\"nav_lowest_heap\":%u,"
-      "\"internal_heap_free\":%u,\"internal_largest_block\":%u}",
+      "\"internal_heap_free\":%u,\"internal_largest_block\":%u,"
+      "\"json_actions_used\":%u,\"json_actions_capacity\":%u,"
+      "\"json_actions_overflow\":%s,\"json_actions_null_infos\":%u,"
+      "\"json_actions_writes\":%lu,\"json_actions_compactions\":%lu,"
+      "\"json_actions_compaction_failures\":%lu,\"json_actions_write_failures\":%lu,"
+      "\"test_build\":\"WT32-DIMITRI-JSON-B1\"}",
       (unsigned long)millis(), (int)WiFi.status(), (int)WiFi.RSSI(),
       (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
       (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
       (unsigned)ESP.getFreePsram(), (unsigned)miraNavCount,
       (unsigned)miraNavLastHeap, (unsigned)miraNavLowestHeap,
       (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
-      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+      (unsigned)SPIFFS_Config_Actions.memoryUsage(),
+      (unsigned)SPIFFS_Config_Actions.capacity(),
+      SPIFFS_Config_Actions.overflowed() ? "true" : "false", nullInfos,
+      (unsigned long)miraJsonActionWrites,
+      (unsigned long)miraJsonActionCompactions,
+      (unsigned long)miraJsonActionCompactionFailures,
+      (unsigned long)miraJsonActionWriteFailures);
     AsyncWebServerResponse* response =
         request->beginResponse(200, "application/json", body);
     response->addHeader("Cache-Control", "no-store");
@@ -731,7 +792,7 @@ void MiraPanelServer::ServeurStation() {
         if (SPIFFS_Config_Actions["actions"][i]["id"].as<String>() == ID) {
           String SNom = String(p->value().c_str());
           p = request->getParam(1);
-          SPIFFS_Config_Actions["actions"][i]["value"] = String(p->value().c_str());
+          miraSetActionValue(i, String(p->value().c_str()));
 
           char CNom[50];
           SNom.toCharArray(CNom, 50);
@@ -767,7 +828,7 @@ void MiraPanelServer::ServeurStation() {
           String Value = SPIFFS_Config_Actions["actions"][j]["id"].as<String>();
           for (int i = 0; i < Actions.size(); i++) {
             if (SNom == SPIFFS_Config_Actions["actions"][i]["nomliste"].as<String>()) {
-              SPIFFS_Config_Actions["actions"][i]["value"] = Value;
+              miraSetActionValue(i, Value);
             }
           }
           break;
@@ -782,7 +843,7 @@ void MiraPanelServer::ServeurStation() {
       for (int i = 0; i < Actions.size(); i++) {
         if (SPIFFS_Config_Actions["actions"][i]["id"].as<String>() == ID) {
           p = request->getParam(1);
-          SPIFFS_Config_Actions["actions"][i]["value"] = String(p->value().c_str());
+          miraSetActionValue(i, String(p->value().c_str()));
           String SNom = String(p->value().c_str());
 
           char CNom[50];
@@ -844,7 +905,7 @@ void MiraPanelServer::ServeurStation() {
             char CNom[50];
             SNom.toCharArray(CNom, 50);
             p = request->getParam(2);
-            SPIFFS_Config_Actions["actions"][i]["value"] = String(p->value().c_str());
+            miraSetActionValue(i, String(p->value().c_str()));
             String SValue = String(p->value().c_str());
             char CValue[50];
             SValue.toCharArray(CValue, 50);
@@ -864,7 +925,7 @@ void MiraPanelServer::ServeurStation() {
             char CNom[50];
             SNom.toCharArray(CNom, 50);
             p = request->getParam(2);
-            SPIFFS_Config_Actions["actions"][i]["value"] = String(p->value().c_str());
+            miraSetActionValue(i, String(p->value().c_str()));
             String SValue = String(p->value().c_str());
             char CValue[50];
             SValue.toCharArray(CValue, 50);
@@ -883,7 +944,7 @@ void MiraPanelServer::ServeurStation() {
             char CNom[50];
             SNom.toCharArray(CNom, 50);
             p = request->getParam(2);
-            SPIFFS_Config_Actions["actions"][i]["value"] = String(p->value().c_str());
+            miraSetActionValue(i, String(p->value().c_str()));
             String SValue = String(p->value().c_str());
             char CValue[50];
             SValue.toCharArray(CValue, 50);
@@ -935,7 +996,7 @@ void MiraPanelServer::ServeurStation() {
           if (SPIFFS_Config_Actions["actions"][i]["id"].as<String>() == ID) {
             String SNom = String(p->value().c_str());
             p = request->getParam(2);
-            SPIFFS_Config_Actions["actions"][i]["value"] = String(p->value().c_str());
+            miraSetActionValue(i, String(p->value().c_str()));
 
             char CNom[50];
             SNom.toCharArray(CNom, 50);
@@ -965,7 +1026,7 @@ void MiraPanelServer::ServeurStation() {
             JsonArray Actions = SPIFFS_Config_Actions["actions"];
             for (int j = 0; j < Actions.size(); j++) {
               if (Nom_Liste == SPIFFS_Config_Actions["actions"][j]["nomliste"].as<String>()) {
-                SPIFFS_Config_Actions["actions"][j]["value"] = SValue;
+                miraSetActionValue(j, SValue);
               }
             }
 
@@ -1039,7 +1100,7 @@ void MiraPanelServer::ServeurStation() {
             char CNom[50];
             SNom.toCharArray(CNom, 50);
             p = request->getParam(2);
-            SPIFFS_Config_Actions["actions"][i]["value"] = String(p->value().c_str());
+            miraSetActionValue(i, String(p->value().c_str()));
             String SValue = String(p->value().c_str());
             char CValue[50];
             SValue.toCharArray(CValue, 50);
@@ -1059,7 +1120,7 @@ void MiraPanelServer::ServeurStation() {
             char CNom[50];
             SNom.toCharArray(CNom, 50);
             p = request->getParam(2);
-            SPIFFS_Config_Actions["actions"][i]["value"] = String(p->value().c_str());
+            miraSetActionValue(i, String(p->value().c_str()));
             String SValue = String(p->value().c_str());
             char CValue[50];
             SValue.toCharArray(CValue, 50);
@@ -1079,7 +1140,7 @@ void MiraPanelServer::ServeurStation() {
             char CNom[50];
             SNom.toCharArray(CNom, 50);
             p = request->getParam(2);
-            SPIFFS_Config_Actions["actions"][i]["value"] = String(p->value().c_str());
+            miraSetActionValue(i, String(p->value().c_str()));
             String SValue = String(p->value().c_str());
             char CValue[50];
             SValue.toCharArray(CValue, 50);
@@ -1133,7 +1194,7 @@ void MiraPanelServer::ServeurStation() {
           if (SPIFFS_Config_Actions["actions"][i]["id"].as<String>() == ID) {
             String SNom = String(p->value().c_str());
             p = request->getParam(2);
-            SPIFFS_Config_Actions["actions"][i]["value"] = String(p->value().c_str());
+            miraSetActionValue(i, String(p->value().c_str()));
 
             char CNom[50];
             SNom.toCharArray(CNom, 50);
@@ -1163,7 +1224,7 @@ void MiraPanelServer::ServeurStation() {
             JsonArray Actions = SPIFFS_Config_Actions["actions"];
             for (int j = 0; j < Actions.size(); j++) {
               if (Nom_Liste == SPIFFS_Config_Actions["actions"][j]["nomliste"].as<String>()) {
-                SPIFFS_Config_Actions["actions"][j]["value"] = SValue;
+                miraSetActionValue(j, SValue);
               }
             }
 
@@ -1197,7 +1258,7 @@ void MiraPanelServer::ServeurStation() {
 
                 for (int l = 0; l < Actions.size(); l++) {
                   if (Nom_Liste == SPIFFS_Config_Actions["actions"][l]["nomliste"].as<String>()) {
-                    SPIFFS_Config_Actions["actions"][l]["value"] = SPIFFS_Config_Actions["actions"][j]["nom"].as<String>();
+                    miraSetActionValue(l, SPIFFS_Config_Actions["actions"][j]["nom"].as<String>());
                   }
                 }
                 request->send(200, "text/plain", SValue);
@@ -1321,7 +1382,7 @@ void MiraPanelServer::ServeurStation() {
             char CNom[50];
             SNom.toCharArray(CNom, 50);
             p = request->getParam(2);
-            SPIFFS_Config_Actions["actions"][i]["value"] = String(p->value().c_str());
+            miraSetActionValue(i, String(p->value().c_str()));
             String SValue = String(p->value().c_str());
             char CValue[50];
             SValue.toCharArray(CValue, 50);
@@ -1341,7 +1402,7 @@ void MiraPanelServer::ServeurStation() {
             char CNom[50];
             SNom.toCharArray(CNom, 50);
             p = request->getParam(2);
-            SPIFFS_Config_Actions["actions"][i]["value"] = String(p->value().c_str());
+            miraSetActionValue(i, String(p->value().c_str()));
             String SValue = String(p->value().c_str());
             char CValue[50];
             SValue.toCharArray(CValue, 50);
@@ -1361,7 +1422,7 @@ void MiraPanelServer::ServeurStation() {
             char CNom[50];
             SNom.toCharArray(CNom, 50);
             p = request->getParam(2);
-            SPIFFS_Config_Actions["actions"][i]["value"] = String(p->value().c_str());
+            miraSetActionValue(i, String(p->value().c_str()));
             String SValue = String(p->value().c_str());
             char CValue[50];
             SValue.toCharArray(CValue, 50);
@@ -1415,7 +1476,7 @@ void MiraPanelServer::ServeurStation() {
           if (SPIFFS_Config_Actions["actions"][i]["id"].as<String>() == ID) {
             String SNom = String(p->value().c_str());
             p = request->getParam(2);
-            SPIFFS_Config_Actions["actions"][i]["value"] = String(p->value().c_str());
+            miraSetActionValue(i, String(p->value().c_str()));
 
             char CNom[50];
             SNom.toCharArray(CNom, 50);
@@ -1445,7 +1506,7 @@ void MiraPanelServer::ServeurStation() {
             JsonArray Actions = SPIFFS_Config_Actions["actions"];
             for (int j = 0; j < Actions.size(); j++) {
               if (Nom_Liste == SPIFFS_Config_Actions["actions"][j]["nomliste"].as<String>()) {
-                SPIFFS_Config_Actions["actions"][j]["value"] = SValue;
+                miraSetActionValue(j, SValue);
               }
             }
 
@@ -1479,7 +1540,7 @@ void MiraPanelServer::ServeurStation() {
 
                 for (int l = 0; l < Actions.size(); l++) {
                   if (Nom_Liste == SPIFFS_Config_Actions["actions"][l]["nomliste"].as<String>()) {
-                    SPIFFS_Config_Actions["actions"][l]["value"] = SPIFFS_Config_Actions["actions"][j]["nom"].as<String>();
+                    miraSetActionValue(l, SPIFFS_Config_Actions["actions"][j]["nom"].as<String>());
                   }
                 }
                 request->send(200, "text/plain", SValue);
@@ -3609,6 +3670,7 @@ void MiraPanelServer::IndexSetRange(int ID, float Value) {
   JsonArray Actions = SPIFFS_Config_Actions["actions"];
   for (int i = 0; i < Actions.size(); i++) {
     if (SPIFFS_Config_Actions["actions"][i]["id"].as<String>() == String(ID)) {
+      // Keep range values numeric; String compaction applies to Info values.
       SPIFFS_Config_Actions["actions"][i]["value"] = Value;
       char cID[5] = "";
       sprintf(cID, "%d", ID);
@@ -3651,7 +3713,7 @@ void MiraPanelServer::IndexSetInputBox(int ID, String Value) {
   JsonArray Actions = SPIFFS_Config_Actions["actions"];
   for (int i = 0; i < Actions.size(); i++) {
     if (SPIFFS_Config_Actions["actions"][i]["id"].as<String>() == String(ID)) {
-      SPIFFS_Config_Actions["actions"][i]["value"] = Value;
+      miraSetActionValue(i, Value);
       char cID[5] = "";
       sprintf(cID, "%d", ID);
 
@@ -3694,7 +3756,7 @@ void MiraPanelServer::IndexSetInfo(int ID, String Value) {
   for (int i = 0; i < Actions.size(); i++) {
     if (SPIFFS_Config_Actions["actions"][i]["id"].as<String>() == String(ID)) {
       Action = ID;
-      SPIFFS_Config_Actions["actions"][i]["value"] = Value;
+      miraSetActionValue(i, Value);
       char cID[5] = "";
       sprintf(cID, "%d", ID);
 
@@ -3738,7 +3800,7 @@ void MiraPanelServer::IndexSetInfoFA(int ID, String Value) {
   JsonArray Actions = SPIFFS_Config_Actions["actions"];
   for (int i = 0; i < Actions.size(); i++) {
     if (SPIFFS_Config_Actions["actions"][i]["id"].as<String>() == String(ID)) {
-      SPIFFS_Config_Actions["actions"][i]["value"] = Value;
+      miraSetActionValue(i, Value);
       char cID[5] = "";
       sprintf(cID, "%d", ID);
 
@@ -4160,7 +4222,7 @@ void MiraPanelServer::IndexSetList(int ID) {
       String NomListe = SPIFFS_Config_Actions["actions"][i]["nomliste"].as<String>();
       for (int j = 0; j < Actions.size(); j++) {
         if (SPIFFS_Config_Actions["actions"][i]["nomliste"].as<String>() == SPIFFS_Config_Actions["actions"][j]["nomliste"].as<String>()) {
-          SPIFFS_Config_Actions["actions"][j]["value"] = Value;
+          miraSetActionValue(j, Value);
         }
       }
 
@@ -4196,7 +4258,7 @@ int MiraPanelServer::IndexSetListByOption(String NameList, String Option) {
       String ID = SPIFFS_Config_Actions["actions"][i]["id"].as<String>();
       for (int j = 0; j < Actions.size(); j++) {
         if (SPIFFS_Config_Actions["actions"][i]["nomliste"].as<String>() == SPIFFS_Config_Actions["actions"][j]["nomliste"].as<String>()) {
-          SPIFFS_Config_Actions["actions"][j]["value"] = Value;
+          miraSetActionValue(j, Value);
         }
       }
 
