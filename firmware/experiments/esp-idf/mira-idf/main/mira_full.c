@@ -214,32 +214,65 @@ static lv_obj_t *clock_text,*date_text,*clock_status_text;
 /* The beta datetime widget receives three *internal* Jeedom weather Infos.
  * They are passive observations, not ordinary visible widget rows. */
 static lv_obj_t *clock_weather_temperature_label,*clock_weather_condition_label;
+static lv_obj_t *clock_weather_icons[3];  // WT32 sun, cloud, rain
+static bool clock_weather_contains(const char *text,const char *word){
+    if(!text||!word||!*word)return false;
+    for(const char *p=text;*p;p++){
+        const char *s=p,*w=word;
+        while(*s&&*w&&tolower((unsigned char)*s)==tolower((unsigned char)*w)){
+            ++s;++w;
+        }
+        if(!*w)return true;
+    }
+    return false;
+}
+
 static char clock_weather_temperature[32],clock_weather_condition[96];
 static char clock_weather_code[12];
 static bool clock_weather_visible;
 static void clock_weather_redraw(void){
     if(!clock_weather_temperature_label||!clock_weather_condition_label)return;
+    // Same validity range and comma normalization as WT32 updateClock().
+    char parsed[sizeof(clock_weather_temperature)];
+    snprintf(parsed,sizeof(parsed),"%s",clock_weather_temperature);
+    for(size_t i=0;parsed[i];i++)if(parsed[i]==',')parsed[i]='.';
     char *end=NULL;
-    float temp=strtof(clock_weather_temperature,&end);
-    const bool present=clock_weather_temperature[0]&&end&&
-                       end!=clock_weather_temperature&&!*end&&isfinite(temp)&&
-                       temp>=-80.f&&temp<=70.f;
-    clock_weather_visible=present;
-    if(!present){
-        lv_obj_add_flag(clock_weather_temperature_label,LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(clock_weather_condition_label,LV_OBJ_FLAG_HIDDEN);
-    }else{
-        char displayed[64];
-        snprintf(displayed,sizeof(displayed),"%.1f °C",(double)temp);
+    const float degrees=strtof(parsed,&end);
+    const bool valid=parsed[0]&&end!=parsed&&*end=='\\0'&&
+                     isfinite(degrees)&&degrees>=-80.f&&degrees<=70.f;
+    clock_weather_visible=valid;
+    if(valid){
+        char displayed[48];
+        snprintf(displayed,sizeof(displayed),"%.1f°C",(double)degrees);
         lv_label_set_text(clock_weather_temperature_label,displayed);
-        const char *condition=clock_weather_condition[0]?
-                              clock_weather_condition:"Météo";
-        lv_label_set_text(clock_weather_condition_label,condition);
+        lv_label_set_text(clock_weather_condition_label,
+            clock_weather_condition[0]?clock_weather_condition:"Météo");
         lv_obj_remove_flag(clock_weather_temperature_label,LV_OBJ_FLAG_HIDDEN);
         lv_obj_remove_flag(clock_weather_condition_label,LV_OBJ_FLAG_HIDDEN);
+    }else{
+        lv_obj_add_flag(clock_weather_temperature_label,LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(clock_weather_condition_label,LV_OBJ_FLAG_HIDDEN);
     }
-    if(clock_status_text)
-        lv_obj_set_y(clock_status_text,present?112:36);
+    // Port of the exact WT32 beta weather-code mapping.
+    const int code=atoi(clock_weather_code);
+    const bool cloudy=code==1003||code==1006||code==1009||
+                      code==1030||code==1135||code==1147;
+    const bool sunny=code==1000||(code==0&&(
+                      clock_weather_contains(clock_weather_condition,"soleil")||
+                      clock_weather_contains(clock_weather_condition,"ensoleill")||
+                      clock_weather_contains(clock_weather_condition,"clair")));
+    const bool wet=code==0&&(
+                   clock_weather_contains(clock_weather_condition,"pluie")||
+                   clock_weather_contains(clock_weather_condition,"averse")||
+                   clock_weather_contains(clock_weather_condition,"neige")||
+                   clock_weather_contains(clock_weather_condition,"orage"));
+    const size_t active=sunny?0u:((cloudy||(code==0&&!wet))?1u:2u);
+    for(size_t i=0;i<3;i++){
+        if(!clock_weather_icons[i])continue;
+        if(valid&&i==active)lv_obj_remove_flag(clock_weather_icons[i],LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(clock_weather_icons[i],LV_OBJ_FLAG_HIDDEN);
+    }
+    if(clock_status_text)lv_obj_set_y(clock_status_text,valid?112:36);
 }
 static void clock_weather_receive(const char *name,const char *value){
     char *dest=NULL;size_t cap=0;
@@ -1470,12 +1503,22 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         clock_status_text=label(c,"MIRA PANEL\nConnexion...\nMode jour",0xA8B2B8,&mira_font_fr_16);
         lv_obj_set_pos(clock_status_text,422,36);
         lv_obj_set_width(clock_status_text,350);
+        // Scale only the layout to 800px; WT32 weather source, glyphs and
+        // code mapping are retained unchanged.
+        clock_weather_icons[0]=mira_info_glyph_create(c,"light",28,lv_color_hex(0xF5C451));
+        clock_weather_icons[1]=mira_info_glyph_create(c,"cloud",28,lv_color_hex(0xA8B2B8));
+        clock_weather_icons[2]=mira_info_glyph_create(c,"rain",28,cyan_c());
+        for(size_t i=0;i<3;i++){
+            if(!clock_weather_icons[i])continue;
+            lv_obj_set_pos(clock_weather_icons[i],422,20);
+            lv_obj_add_flag(clock_weather_icons[i],LV_OBJ_FLAG_HIDDEN);
+        }
         clock_weather_temperature_label=label(c,"",0xF3F6F7,&lv_font_montserrat_28);
-        lv_obj_set_pos(clock_weather_temperature_label,422,13);
-        lv_obj_set_width(clock_weather_temperature_label,345);
+        lv_obj_set_pos(clock_weather_temperature_label,461,13);
+        lv_obj_set_width(clock_weather_temperature_label,305);
         clock_weather_condition_label=label(c,"",0xA8B2B8,&mira_font_fr_16);
-        lv_obj_set_pos(clock_weather_condition_label,422,63);
-        lv_obj_set_width(clock_weather_condition_label,345);
+        lv_obj_set_pos(clock_weather_condition_label,461,63);
+        lv_obj_set_width(clock_weather_condition_label,305);
         lv_label_set_long_mode(clock_weather_condition_label,LV_LABEL_LONG_DOT);
         clock_weather_restore_cached();
         w->card=c;return;
@@ -2573,6 +2616,7 @@ static void build_config(void){
     scroll_cache_reset(); // release every LVGL image reference BEFORE card deletion
     widget_n=0;clock_text=NULL;date_text=NULL;clock_status_text=NULL;
     clock_weather_temperature_label=NULL;clock_weather_condition_label=NULL;
+    for(size_t i=0;i<3;i++)clock_weather_icons[i]=NULL;
     clock_weather_visible=false;widget_count=0;
     for(int i=0;i<6;i++)if(i!=3)lv_obj_clean(pages[i]);
     int home_info=0,seen=0;
