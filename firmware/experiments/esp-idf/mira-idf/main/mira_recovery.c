@@ -533,6 +533,11 @@ esp_err_t mira_recovery_save_beta_wifi(const char *ssid,const char *password,
     ESP_LOGI(TAG,"Beta Wi-Fi profile applied and atomically saved (%s)",mode);
     return esp_wifi_connect();
 }
+static bool legacy_dns_valid(const esp_netif_dns_info_t *dns){
+    return dns && dns->ip.type==ESP_IPADDR_TYPE_V4 &&
+           dns->ip.u_addr.ip4.addr!=0 &&
+           dns->ip.u_addr.ip4.addr!=0xffffffffu;
+}
 static void legacy_finish_fixed_auto(void){
     if(legacy_ip_mode!=PROFILE_FIXED_AUTO||legacy_fixed_auto_attempted||!sta_netif)return;
     legacy_fixed_auto_attempted=true;
@@ -547,16 +552,65 @@ static void legacy_finish_fixed_auto(void){
         ESP_LOGW(TAG,"Mira beta fixed_auto IP outside DHCP network; keeping DHCP");
         return;
     }
-    if(legacy_requested_ip.addr==current.ip.addr)return;
+
+    // Port of Arduino MiraPanelServer::miraFinishWifiProfile():
+    // WiFi.config(chosen,gateway,mask,dns1,dns2) preserves the DHCP
+    // DNS *explicitly*. ESP-IDF esp_netif_set_ip_info() ONLY sets IP,
+    // gateway and netmask, and stopping DHCP may clear DNS.
+    // Capture both DNS servers while DHCP is still running.
+    esp_netif_dns_info_t primary={0},backup={0};
+    const esp_err_t dns_primary_err=esp_netif_get_dns_info(
+        sta_netif,ESP_NETIF_DNS_MAIN,&primary);
+    const esp_err_t dns_backup_err=esp_netif_get_dns_info(
+        sta_netif,ESP_NETIF_DNS_BACKUP,&backup);
+    if(!legacy_dns_valid(&primary)){
+        // A DHCP server may omit DNS, in which case the local router often
+        // offers DNS forwarding. Use ONLY the discovered DHCP gateway as
+        // a last resort, never a hard-coded/public DNS or a user IP change.
+        ESP_LOGW(TAG,"fixed_auto DHCP did not expose DNS (err=%s); using DHCP gateway as DNS fallback",
+                 esp_err_to_name(dns_primary_err));
+        memset(&primary,0,sizeof(primary));
+        primary.ip.type=ESP_IPADDR_TYPE_V4;
+        primary.ip.u_addr.ip4.addr=current.gw.addr;
+    }
+    if(dns_backup_err!=ESP_OK||!legacy_dns_valid(&backup))
+        memset(&backup,0,sizeof(backup));
+
+    // DHCP may already have leased exactly the requested IP. In that case
+    // keep the running DHCP client and its valid DNS, as Arduino does.
+    if(legacy_requested_ip.addr==current.ip.addr){
+        if(dns_primary_err!=ESP_OK||
+           !legacy_dns_valid(&(esp_netif_dns_info_t){.ip=primary.ip})){
+            ESP_LOGW(TAG,"fixed_auto same DHCP IP but no DNS information");
+        }
+        return;
+    }
+
     esp_err_t err=esp_netif_dhcpc_stop(sta_netif);
     if(err==ESP_OK||err==ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED){
         current.ip=legacy_requested_ip;
         err=esp_netif_set_ip_info(sta_netif,&current);
         if(err==ESP_OK){
+            // Restore DNS *after* stop/set_ip_info to avoid losing it.
+            err=esp_netif_set_dns_info(sta_netif,ESP_NETIF_DNS_MAIN,&primary);
+            if(err==ESP_OK&&legacy_dns_valid(&backup))
+                err=esp_netif_set_dns_info(sta_netif,ESP_NETIF_DNS_BACKUP,&backup);
+            if(err==ESP_OK){
+                esp_netif_dns_info_t verify={0};
+                err=esp_netif_get_dns_info(sta_netif,ESP_NETIF_DNS_MAIN,&verify);
+                if(err==ESP_OK&&!legacy_dns_valid(&verify))
+                    err=ESP_FAIL;
+            }
+        }
+        if(err==ESP_OK){
             legacy_fixed_auto_applied=true;
-            ESP_LOGI(TAG,"Mira beta fixed_auto IP applied with DHCP gateway/mask/DNS");
+            ESP_LOGI(TAG,"Mira beta fixed_auto: IP + DHCP gateway/mask/DNS restored");
             return;
         }
+        // Retain the last good network path, never stay on a fixed IP with
+        // missing DNS and never change the stored user configuration.
+        ESP_LOGW(TAG,"fixed_auto transition failed (%s); returning to DHCP",
+                 esp_err_to_name(err));
         (void)esp_netif_dhcpc_start(sta_netif);
     }
     ESP_LOGW(TAG,"Mira beta fixed_auto IP setup failed; DHCP restored");
