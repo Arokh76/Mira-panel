@@ -78,7 +78,6 @@
           <select id="hardware" required>
             <option value="">Choisir le modèle…</option>
             <option value="wt32-sc01-plus">WT32-SC01 Plus — 320 × 480</option>
-            <option value="waveshare-esp32s3-touch-lcd-4.3c">Waveshare Touch LCD 4.3C — 800 × 480</option>
             <option value="opennextion-onx2432g028" disabled>Open Nextion 2,8″ — bientôt disponible</option>
           </select>
           <div id="deviceHelp" class="deviceHelp warning">Sélectionnez le modèle indiqué sur votre carte avant de flasher.</div>
@@ -116,10 +115,6 @@
           manifest: 'manifest-wt32.json',
           factory: 'firmware/Mira_Panel_WT32_SC01_Plus_FACTORY.bin',
           legacyFactory: 'firmware/Mira_Panel_Factory.bin'
-        },
-        'waveshare-esp32s3-touch-lcd-4.3c': {
-          manifest: 'manifest-waveshare.json',
-          factory: 'firmware/Mira_Panel_Waveshare_4.3C_FACTORY.bin'
         }
       };
       let requestToken = 0;

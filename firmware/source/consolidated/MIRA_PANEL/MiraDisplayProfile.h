@@ -2,17 +2,10 @@
 
 // Mira hardware profile. UI/business logic must never depend on one panel.
 #if defined(MIRA_TARGET_WAVESHARE_43C)
-  #define MIRA_DISPLAY_PROFILE_ID "waveshare-esp32s3-touch-lcd-4.3c"
-  #define MIRA_HARDWARE_NAME "WAVESHARE-ESP32-S3-TOUCH-LCD-4.3C"
-  #define MIRA_DISPLAY_WIDTH 800
-  #define MIRA_DISPLAY_HEIGHT 480
-  #define MIRA_NAV_HEIGHT 50
-  #define MIRA_CONTENT_HEIGHT (MIRA_DISPLAY_HEIGHT - MIRA_NAV_HEIGHT)
-  #define MIRA_DISPLAY_ROTATION 0
-  // First conservative RGB-panel bring-up: 2 x 800 x 10 x RGB565 = 32 KB.
-  #define MIRA_DRAW_BUFFER_LINES 10
-  #define MIRA_RGB_DIRECT_FRAMEBUFFER 1
-#elif defined(MIRA_TARGET_NEXTION_28)
+  #error "Waveshare 4.3C Arduino retired: use ESP-IDF"
+#endif
+
+#if defined(MIRA_TARGET_NEXTION_28)
   #define MIRA_DISPLAY_PROFILE_ID "onx2432g028"
   #define MIRA_HARDWARE_NAME "OPEN-NEXTION-GENIUS-2.8"
   #define MIRA_DISPLAY_WIDTH 240
