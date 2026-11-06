@@ -15,6 +15,7 @@
 #include <strings.h>
 #include <stdint.h>
 #include "nvs.h"
+#include "cJSON.h"
 #include "esp_wifi.h"
 #include "lwip/ip4_addr.h"
 #include "esp_log.h"
@@ -55,6 +56,40 @@ static esp_err_t serve_wifi_page(httpd_req_t *req){
     if(mira_beta_web_wifi_choices(req)!=ESP_OK)return ESP_FAIL;
     if(httpd_resp_send_chunk(req,slot+strlen(token),HTTPD_RESP_USE_STRLEN)!=ESP_OK)
         return ESP_FAIL;
+    return httpd_resp_send_chunk(req,NULL,0);
+}
+// First-run IPv4 follows the same three modes as the beta network editor.
+static bool setup_ipv4(const char *s,ip4_addr_t *out){
+    if(!s||!*s||!ip4addr_aton(s,out))return false;
+    const uint32_t value=ntohl(out->addr);
+    const uint8_t first=(uint8_t)(value>>24);
+    return value!=0&&value!=0xffffffffu&&first!=0&&first!=127&&first<224;
+}
+static bool setup_manual_ip_valid(const char *ip,const char *mask,
+        const char *gateway,const char *dns1,const char *dns2){
+    ip4_addr_t addr={0},nm={0},gw={0},dn={0},backup={0};
+    if(!setup_ipv4(ip,&addr)||!mask||!ip4addr_aton(mask,&nm)||
+       !setup_ipv4(gateway,&gw)||!setup_ipv4(dns1,&dn)||
+       (dns2[0]&&!setup_ipv4(dns2,&backup)))return false;
+    const uint32_t m=ntohl(nm.addr),inv=~m;
+    const uint32_t host=addr.addr&~nm.addr;
+    return m!=0&&(inv&(inv+1u))==0&&
+           (addr.addr&nm.addr)==(gw.addr&nm.addr)&&
+           addr.addr!=gw.addr&&host!=0&&host!=~nm.addr;
+}
+static esp_err_t serve_saved_wifi_page(httpd_req_t *req,const char *mode,const char *ip){
+    // Original confirmation page hardcodes Auto regardless of saved choice.
+    const char *needle="<strong id=\"ipValue\">Auto</strong>";
+    const char *slot=strstr(mira_beta_saved_page,needle);
+    if(!slot||!strcmp(mode,"auto"))return serve_page(req,mira_beta_saved_page);
+    httpd_resp_set_type(req,"text/html; charset=utf-8");
+    if(httpd_resp_send_chunk(req,mira_beta_saved_page,
+            (ssize_t)(slot-mira_beta_saved_page))!=ESP_OK)return ESP_FAIL;
+    char label[96];
+    snprintf(label,sizeof(label),"<strong id=\"ipValue\">%s</strong>",ip);
+    if(httpd_resp_send_chunk(req,label,HTTPD_RESP_USE_STRLEN)!=ESP_OK)return ESP_FAIL;
+    if(httpd_resp_send_chunk(req,slot+strlen(needle),
+            HTTPD_RESP_USE_STRLEN)!=ESP_OK)return ESP_FAIL;
     return httpd_resp_send_chunk(req,NULL,0);
 }
 bool mira_beta_setup_unconfigured(void){
@@ -242,43 +277,74 @@ static esp_err_t save_post(httpd_req_t *req){
             httpd_resp_send_err(req,HTTPD_403_FORBIDDEN,"Etape Wi-Fi initiale indisponible");
             return ESP_FAIL;
         }
-        char ssid[33]={0},password[65]={0},ip[48]={0};
+        char ssid[33]={0},password[65]={0},mode[16]={0};
+        char ip[32]={0},mask[32]={0},gateway[32]={0},dns1[32]={0},dns2[32]={0};
         const bool valid=parse_form_param(body,"ssid",ssid,sizeof(ssid))&&
                          parse_form_param(body,"pass",password,sizeof(password));
+        const bool mode_present=parse_form_param(body,"ip_mode",mode,sizeof(mode));
         (void)parse_form_param(body,"ip",ip,sizeof(ip));
         if(!valid||!ssid[0]||strlen(password)>63){
             httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"SSID ou mot de passe invalide");
             return ESP_FAIL;
         }
-        // Match beta first-run "Auto" or requested IPv4. As on the beta,
-        // a requested IP uses a DHCP lease to discover mask/gateway/DNS,
-        // then replaces only the client address on that same subnet.
-        const bool auto_ip=!ip[0]||!strcasecmp(ip,"Auto")||!strcasecmp(ip,"DHCP");
-        if(!auto_ip){
+        // Support previously cached first-install forms with only an IP.
+        if(!mode_present)snprintf(mode,sizeof(mode),"%s",
+             !ip[0]||!strcasecmp(ip,"Auto")||!strcasecmp(ip,"DHCP")?
+             "auto":"fixed_auto");
+        if(strcmp(mode,"auto")&&strcmp(mode,"fixed_auto")&&strcmp(mode,"manual")){
+            httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Mode IPv4 invalide");
+            return ESP_FAIL;
+        }
+        if(!strcmp(mode,"manual")){
+            if(!parse_form_param(body,"mask",mask,sizeof(mask))||
+               !parse_form_param(body,"gateway",gateway,sizeof(gateway))||
+               !parse_form_param(body,"dns1",dns1,sizeof(dns1))||
+               !parse_form_param(body,"dns2",dns2,sizeof(dns2))||
+               !setup_manual_ip_valid(ip,mask,gateway,dns1,dns2)){
+                httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,
+                                    "Adresse, masque, passerelle ou DNS invalides");
+                return ESP_FAIL;
+            }
+        }else if(!strcmp(mode,"fixed_auto")){
             ip4_addr_t requested={0};
-            const bool parsed=ip4addr_aton(ip,&requested)!=0;
-            const uint32_t addr=ntohl(requested.addr);
-            const uint8_t first=(uint8_t)(addr>>24);
-            if(!parsed||!addr||addr==0xffffffffu||
-               first==0||first==127||first>=224){
+            if(!setup_ipv4(ip,&requested)){
                 httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,
                                     "Adresse IP fixe invalide");
                 return ESP_FAIL;
             }
-        }
+        }else ip[0]=0;
         wifi_config_t sta={0};
         memcpy(sta.sta.ssid,ssid,strlen(ssid));
         memcpy(sta.sta.password,password,strlen(password));
-        // Persist the optional beta first-boot IP before joining Wi-Fi.
-        // Recovery validates the DHCP subnet before applying this address.
+        // Persist IPv4 mode and all related fields together in one NVS value.
+        cJSON *json=cJSON_CreateObject();
+        bool built=json&&cJSON_AddStringToObject(json,"mode",mode)&&
+            cJSON_AddStringToObject(json,"ip",ip)&&
+            cJSON_AddStringToObject(json,"mask",mask)&&
+            cJSON_AddStringToObject(json,"gateway",gateway)&&
+            cJSON_AddStringToObject(json,"dns1",dns1)&&
+            cJSON_AddStringToObject(json,"dns2",dns2);
+        char *encoded=built?cJSON_PrintUnformatted(json):NULL;
+        if(json)cJSON_Delete(json);
+        if(!encoded||strlen(encoded)>511){
+            if(encoded)cJSON_free(encoded);
+            httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,
+                                "Profil IPv4 non disponible");
+            return ESP_FAIL;
+        }
         nvs_handle_t nv;
         esp_err_t err=nvs_open("mira_idf_net",NVS_READWRITE,&nv);
         if(err==ESP_OK){
-            err=auto_ip?nvs_erase_key(nv,"setup_ip"):nvs_set_str(nv,"setup_ip",ip);
-            if(auto_ip&&err==ESP_ERR_NVS_NOT_FOUND)err=ESP_OK;
+            err=nvs_set_str(nv,"web_profile",encoded);
+            if(err==ESP_OK){
+                err=!strcmp(mode,"fixed_auto")?
+                    nvs_set_str(nv,"setup_ip",ip):nvs_erase_key(nv,"setup_ip");
+                if(strcmp(mode,"fixed_auto")&&err==ESP_ERR_NVS_NOT_FOUND)err=ESP_OK;
+            }
             if(err==ESP_OK)err=nvs_commit(nv);
             nvs_close(nv);
         }
+        cJSON_free(encoded);
         if(err==ESP_OK)err=esp_wifi_set_config(WIFI_IF_STA,&sta);
         /* The initial wizard must populate the SAME saved-network directory
          * used by the beta Web manager, not only ESP-IDF's STA NVS settings. */
@@ -308,9 +374,12 @@ static esp_err_t save_post(httpd_req_t *req){
                     mira_beta_network_t profile={0};
                     profile.id=id;
                     snprintf(profile.ssid,sizeof(profile.ssid),"%s",ssid);
-                    snprintf(profile.ip_mode,sizeof(profile.ip_mode),"%s",
-                             auto_ip?"auto":"fixed_auto");
-                    if(!auto_ip)snprintf(profile.ip,sizeof(profile.ip),"%s",ip);
+                    snprintf(profile.ip_mode,sizeof(profile.ip_mode),"%s",mode);
+                    snprintf(profile.ip,sizeof(profile.ip),"%s",ip);
+                    snprintf(profile.mask,sizeof(profile.mask),"%s",mask);
+                    snprintf(profile.gateway,sizeof(profile.gateway),"%s",gateway);
+                    snprintf(profile.dns1,sizeof(profile.dns1),"%s",dns1);
+                    snprintf(profile.dns2,sizeof(profile.dns2),"%s",dns2);
                     err=mira_beta_networks_upsert(&profile,password);
                 }
             }
@@ -323,7 +392,7 @@ static esp_err_t save_post(httpd_req_t *req){
             return ESP_FAIL;
         }
         ESP_LOGI(TAG,"Mira beta setup step 2/2: Wi-Fi saved, restart requested");
-        esp_err_t response=serve_page(req,mira_beta_saved_page);
+        esp_err_t response=serve_saved_wifi_page(req,mode,ip);
         vTaskDelay(pdMS_TO_TICKS(1200));
         esp_restart();
         return response;
