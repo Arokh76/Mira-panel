@@ -1,19 +1,7 @@
-# Mira Panel — consolidated source 0.6.52
+# Mira Panel — source consolidée
 
-This snapshot is generated from the **already released and tested
-Mira 0.6.52 code**, not a new firmware feature.
+Le dossier `MIRA_PANEL/` contient l'intégralité du code utilisé par la compilation multi-cible.
 
-- Source: MIRA_PANEL project in this directory
-- Original reconstruction: firmware/source/Mira_Panel_Source_V0.4.3.zip
-  + firmware/patches + overrides + scripts through 0.6.52
-- Bundled: generated Montserrat home/sleep fonts (fixed upstream commit)
-- WT32: sketch lv_conf.h, LVGL 8.3.11, LVGL allocations in PSRAM
-- Waveshare: external official pin and LVGL 8.4, 12 MHz RGB +
-  triple-buffer, configured in the GitHub build workflow
+Base 0.7.37, enrichie de correctifs bêta WT32 testés : gestion des valeurs JSON, thème Rose optionnel, logo Mira compact au démarrage. Le dépôt contient également les ressources LVGL, Web, MQTT, caméra et les pilotes matériels.
 
-Do not build the Waveshare with the WT32 sketch-local lv_conf.h.
-The build deletes that file on the Waveshare target as before.
-
-Historical reconstruction files remain available for audit/rollback.
-Only merge the new snapshot pipeline after WT32 and Waveshare
-compilation succeeds independently with matching firmware targets.
+Le build prend directement cette source, avec les réglages spécifiques WT32/Waveshare/Nextion dans `.github/workflows/build-mira.yml`. Les anciens scripts de reconstruction par versions et fichiers ZIP ne sont plus requis.

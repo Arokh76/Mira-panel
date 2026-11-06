@@ -49,7 +49,8 @@ private:
   enum ThemeMode : uint8_t {
     THEME_MIRA = 0,
     THEME_DARK = 1,
-    THEME_GLASS = 2
+    THEME_GLASS = 2,
+    THEME_ROSE = 3
   };
 
   enum WidgetType : uint8_t {
