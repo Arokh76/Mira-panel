@@ -1224,3 +1224,30 @@ assert 'last_binding_sync_http=status;' in jeedom
 assert 'Jeedom Init Cmd ID %s not accepted' in jeedom
 assert 'last_binding_sync_http' in jeedom
 print('PASS Jeedom Init Cmd diagnostic retains strict command ID validation')
+
+# Standby Waveshare 800x480 must match the validated WT32 Arduino beta
+# behavior (exact 120px Waveshare font, time + date + first temperature INFO).
+# The comparison explicitly excludes the home 96px clock font.
+standby_font=(idf/'mira_sleep_120.c').read_text(encoding='utf-8')
+arduino_font=(root/'firmware/source/consolidated/MIRA_PANEL/mira_sleep_montserrat_120.cpp').read_text(encoding='utf-8')
+def standby_bitmap(source):
+    return source.split('static const uint8_t glyph_bitmap[] = {',1)[1].split('};',1)[0].strip()
+assert standby_bitmap(standby_font)==standby_bitmap(arduino_font)
+assert 'const lv_font_t mira_sleep_montserrat_120' in standby_font
+assert '.line_height=148,.base_line=31' in standby_font
+assert '"mira_sleep_120.c"' in (idf/'CMakeLists.txt').read_text(encoding='utf-8')
+standby=full.split('static void sleep_align_all(void){',1)[1].split('static void display_enter_sleep(void){',1)[0]
+assert '&mira_sleep_montserrat_120' in full
+assert 'sleep_date_text=label(' in full
+assert 'sleep_temperature_text=label(' in full
+assert 'w->sleep_temperature_info' in standby
+assert 'w->page_index==0' in standby
+assert 'mira_info_glyph_kind(str(o,"icon","auto"),name,w->unit)' in full
+assert 'sleep_refresh_clock(ms);' in full
+assert 'days[t.tm_wday]' in standby and 'months[t.tm_mon]' in standby
+assert '60000u' in standby and 'offsets_x[9]' in standby
+assert 'lv_obj_align(sleep_clock_text,LV_ALIGN_CENTER,sleep_move_x,-56+sleep_move_y)' in standby
+assert 'lv_obj_align(sleep_date_text,LV_ALIGN_CENTER,sleep_move_x,31+sleep_move_y)' in standby
+assert 'lv_obj_align(sleep_temperature_text,LV_ALIGN_CENTER,sleep_move_x,72+sleep_move_y)' in standby
+assert 'mira_display_set_brightness(raw)' in full
+print('PASS exact Arduino Waveshare standby bitmap, 120px clock, date, temperature and anti-burn')
