@@ -33,6 +33,8 @@ static void lvgl_loop(void *arg) {
         const uint64_t t0 = esp_timer_get_time();
         uint32_t next_ms = lv_timer_handler();
         uint32_t handler = (uint32_t)(esp_timer_get_time()-t0);
+        // Recover RGB alignment once after a widget JSON update, not continuously.
+        mira_display_service_rgb_recovery();
         mira_display_stats_t st;
         mira_display_stats(&st);
         uint32_t waits=st.wait_total_us-last_wait_total;
