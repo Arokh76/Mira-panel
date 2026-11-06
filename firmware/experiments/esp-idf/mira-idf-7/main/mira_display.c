@@ -48,6 +48,28 @@ static volatile uint32_t wait_total_us;
 static volatile uint32_t vsync_events;
 static volatile uint32_t frame_complete_events;
 
+// ESP32-S3 RGB may lose DMA/panel alignment while SPIFFS writes share the
+// external memory bus. Resync once AFTER JSON reload and the LVGL draw,
+// never at every VSYNC (which caused visible horizontal jitter).
+// Both functions are deliberately called only by the LVGL task.
+static int64_t rgb_recovery_deadline_us;
+static uint32_t rgb_recovery_count;
+void mira_display_schedule_rgb_recovery(void) {
+    if (panel) rgb_recovery_deadline_us = esp_timer_get_time() + 250000;
+}
+void mira_display_service_rgb_recovery(void) {
+    if (!panel || !rgb_recovery_deadline_us ||
+        esp_timer_get_time() < rgb_recovery_deadline_us) return;
+    rgb_recovery_deadline_us = 0;
+    const esp_err_t err = esp_lcd_rgb_panel_restart(panel);
+    if (err == ESP_OK) {
+        rgb_recovery_count++;
+        ESP_LOGI(TAG, "RGB DMA manual VSYNC resync after widget reload (#%lu)",
+                 (unsigned long)rgb_recovery_count);
+    } else {
+        ESP_LOGW(TAG, "RGB DMA manual resync failed: %s", esp_err_to_name(err));
+    }
+}
 void mira_display_set_render_task(void) {
     render_task = xTaskGetCurrentTaskHandle();
 }
