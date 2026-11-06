@@ -23,12 +23,6 @@ shared = [
 for name in shared:
     orig = (common / "main" / name).read_bytes()
     port = (main / name).read_bytes()
-    if name == "mira_full.c":
-        # The 7-inch alone schedules a one-shot LCD DMA restart after a
-        # widget JSON reload. All the rest of this shared file must match.
-        hook = b"build_config();mira_display_schedule_rgb_recovery();"
-        assert port.count(hook) == 1, "7-inch LVGL reload resync hook missing"
-        port = port.replace(hook, b"build_config();")
     assert orig == port, f"7-inch software core diverged from beta: {name}"
 assert (common / "partitions.csv").read_bytes() == (target / "partitions.csv").read_bytes()
 # Display timing and DMA mitigation are independent 7-inch hardware choices.
@@ -38,12 +32,19 @@ def config_values(path):
                 if line.startswith("CONFIG_") and "=" in line)
 common_config = config_values(common / "sdkconfig.defaults")
 target_config = config_values(target / "sdkconfig.defaults")
-display_only = {"CONFIG_LCD_RGB_RESTART_IN_VSYNC", "CONFIG_SPIRAM_XIP_FROM_PSRAM"}
+display_only = {
+    "CONFIG_LCD_RGB_RESTART_IN_VSYNC", "CONFIG_SPIRAM_XIP_FROM_PSRAM",
+    "CONFIG_LV_DEF_REFR_PERIOD", "CONFIG_SPIRAM_RODATA", "CONFIG_SPIRAM_MEMTEST",
+    "CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB", "CONFIG_ESP32S3_DATA_CACHE_64KB",
+    "CONFIG_ESP32S3_DATA_CACHE_LINE_64B",
+}
 assert {k: v for k, v in common_config.items() if k not in display_only} == {
     k: v for k, v in target_config.items() if k not in display_only
 }, "7-inch shared SDK settings diverged"
 assert target_config["CONFIG_LCD_RGB_RESTART_IN_VSYNC"] == "n"
 assert target_config["CONFIG_SPIRAM_XIP_FROM_PSRAM"] == "y"
+assert target_config["CONFIG_LV_DEF_REFR_PERIOD"] == "15"
+assert target_config["CONFIG_ESP32S3_DATA_CACHE_LINE_64B"] == "y"
 print("PASS 7-inch shares latest 4.3C app and SDK settings except isolated RGB DMA/PSRAM controls")
 # Initial provisioning must have all three IPv4 modes on both display targets.
 page = (main / "mira_beta_setup_pages.h").read_text(encoding="utf-8")
@@ -84,27 +85,32 @@ app = (main / "app_main.c").read_text(encoding="utf-8")
 gpio = (main / "mira_gpio43.c").read_text(encoding="utf-8")
 h = (main / "mira_display.h").read_text(encoding="utf-8")
 assert '#define WIDTH 800' in driver and '#define HEIGHT 480' in driver
-assert '#define LCD_PCLK_HZ (13 * 1000 * 1000)' in driver
+assert '#define LCD_PCLK_HZ (16 * 1000 * 1000)' in driver
+assert '#define LCD_BOUNCE_BUFFER_PIXELS (WIDTH * 10 * 16 / 8)' in driver
+assert '.bounce_buffer_size_px = LCD_BOUNCE_BUFFER_PIXELS' in driver
+assert 'esp_lv_adapter_get_required_frame_buffer_count(' in driver
 for v in (
     'ext_cfg.device_address = 0x38;',
     'ioexp_write(ioexp_mode, 0x01)',
     'ioexp_write(ioexp_out, 0x5e)',
     'GPIO_NUM_4',
     'i2c_reg_read(0x814f, xy, sizeof(xy))',
-    'lv_display_set_buffers(lvdisp, fb1, fb2',
+    'esp_lv_adapter_register_display(&disp_cfg)',
 ):
     assert v in driver, f"7-inch hardware driver missing {v}"
 assert 'mira_gpio43_init()' not in app
-assert '7 STD 13MHz RGB + CH422G + GT911' in app
+assert 'vendor RGB 800x480 16MHz' in app
+assert 'esp_lv_adapter_start()' in app
+assert 'lv_timer_create(mira_lvgl_timer, 10, NULL)' in app
+assert 'esp_lv_adapter_lock(-1)' in app
 assert 'ioexp_write(ioexp_device' not in driver
 assert 'mira_display_io_write(' not in driver
 assert 'mira_display_io_write(' not in h
 assert 'ESP_ERR_NOT_SUPPORTED' in gpio
 assert 'mira_gpio43_action_mapped' in gpio and 'return false;' in gpio
 assert 'return ESP_OK;' in driver.split('esp_err_t mira_display_set_brightness(uint8_t raw)',1)[1]
-assert 'esp_lcd_rgb_panel_restart(panel)' in driver
-assert 'rgb_recovery_deadline_us = esp_timer_get_time() + 250000' in driver
-assert 'mira_display_service_rgb_recovery();' in app
-assert 'mira_display_schedule_rgb_recovery(void);' in h
-print("PASS 7-inch uses one-shot RGB DMA resync after widget JSON reload")
-print("PASS 7-inch uses 13MHz RGB, CH422G, GT911 and no unsafe 4.3C GPIO/PWM commands")
+assert 'esp_lcd_rgb_panel_restart(panel)' not in driver
+assert 'mira_display_schedule_rgb_recovery' not in driver
+assert 'esp_lv_adapter_register_display' in driver
+assert 'esp_lv_adapter_get_required_frame_buffer_count' in driver
+print("PASS 7-inch uses Waveshare ESP-IDF 16MHz RGB bounce buffers and Espressif LVGL adapter")
