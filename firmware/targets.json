@@ -19,15 +19,6 @@
       "otaSha256": "e412562d17d9b19fa2399d2558d81cb999c3d11a9346864d620990efadd6259e",
       "factorySha256": "e1aead79138c76a7bd96119946ee3f51cca2cf6542d7cdff0833e3dd15aa5ba1",
       "otaBytes": 1948000
-    },
-    "waveshare-esp32s3-touch-lcd-4.3c": {
-      "label": "Waveshare ESP32-S3 Touch LCD 4.3C",
-      "flashMB": 16,
-      "ota": "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/releases/0.7.37/waveshare-esp32s3-touch-lcd-4.3c/ota.bin",
-      "factory": "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/releases/0.7.37/waveshare-esp32s3-touch-lcd-4.3c/factory.bin",
-      "otaSha256": "18e4709bfc5d965b49a354dab40da0a2d66425fe952c48aa2947f7f6390be619",
-      "factorySha256": "8e8fa01af7abac6cba2662210a3c79ed15003382c525ca386f18fde0ea154d6b",
-      "otaBytes": 2050016
     }
   }
 }

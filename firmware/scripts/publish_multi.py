@@ -29,15 +29,7 @@ TARGETS = {
         "manifest": "manifest-nextion.json",
         "flash_mb": 16,
     },
-    "waveshare-esp32s3-touch-lcd-4.3c": {
-        "label": "Waveshare ESP32-S3 Touch LCD 4.3C",
-        "dir": "waveshare",
-        "ota": "Mira_Panel_Waveshare_4.3C_{version}.bin",
-        "factory": "Mira_Panel_Waveshare_4.3C_{version}_FACTORY.bin",
-        "docs_factory": "Mira_Panel_Waveshare_4.3C_FACTORY.bin",
-        "manifest": "manifest-waveshare.json",
-        "flash_mb": 16,
-    },
+
 }
 RAW_BASE = "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/"
 VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")

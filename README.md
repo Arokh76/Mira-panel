@@ -1,17 +1,22 @@
-# Mira Panel — firmware
+# Mira Panel — firmware-beta
 
-Firmware pour Jeedom et MQTT. Ce dépôt conserve une source consolidée et des profils matériels spécifiques : WT32-SC01 Plus, Waveshare 4.3C et Open Nextion 2.8.
+## Firmwares Arduino maintenus
 
-## Travail en cours : branche firmware-beta
+- **WT32-SC01 Plus** : base 0.7.37, avec les derniers correctifs bêta validés (stockage des valeurs JSON, thème Rose optionnel et logo Mira compact).
+- **Open Nextion Genius 2.8** : profil Arduino distinct, destiné aux essais matériels.
 
-- **Sources actives** : `firmware/source/consolidated/MIRA_PANEL/`, base 0.7.37.
-- **Bêta WT32** : correctif de stockage JSON, thème Rose optionnel, logo Mira compact haute résolution au démarrage. Modifications issues de la version testée physiquement, conservées sans refonte.
-- **Versions binaires conservées dans cette branche** : `firmware/releases/0.7.37/`. Attention : ces binaires publiés sont ceux de la version 0.7.37 antérieure aux modifications WT32 ci-dessus ; ils ne sont pas une compilation de la bêta Rose.
-- **Manifeste des binaires publiés** : `firmware/targets.json` ; fichiers d'installation USB sous `docs/`.
-- **Compilation** : `.github/workflows/build-mira.yml` construit séparément les profils. Ne pas interchanger les binaires des modèles.
-- **Publication** : `.github/workflows/publish-mira-targets.yml` est réservé au processus validé depuis `main`.
-- **Plugin Jeedom** : `jeedom/source/mira.zip` ; publication sur sa branche propre.
+Sources : `firmware/source/consolidated/MIRA_PANEL/`. Compilation et tests : `.github/workflows/build-mira.yml`.
 
-Les scripts correctifs historiques, vieux snapshots ZIP et anciennes releases ont été retirés de l'arborescence active. Ils restent accessibles dans l'historique Git et dans `backup/firmware-beta-pre-cleanup-20261106`.
+## Waveshare 4,3 pouces
 
-Le portage ESP-IDF (4,3 et 7 pouces) se poursuit séparément. Cette opération de nettoyage ne modifie pas `main` ni les branches IDF.
+**L'ancien firmware Waveshare 4.3C Arduino a été retiré de `firmware-beta`.** Son pilote, son build GitHub Actions, ses binaires et son manifeste USB ont été supprimés. Le port **ESP-IDF** 4.3C sera intégré séparément après compilation et validation sur l'écran réel.
+
+Les modifications de cette branche ne changent pas les anciens firmwares publiés depuis `main`, ne déclenchent pas de mise à jour sur les écrans déjà installés et ne touchent pas au développement ESP-IDF 7 pouces.
+
+## Versions / distribution
+
+Les binaires `firmware/releases/0.7.37/` encore présents concernent WT32 et Nextion. Ces binaires ont été produits **avant** les derniers correctifs WT32 JSON/Rose/logo ; ils ne sont donc pas équivalents au code bêta actuel. Les nouveaux artefacts ne sont pas publiés automatiquement.
+
+`firmware/targets.json` ne liste plus la cible Waveshare Arduino. L'installateur sous `docs/` reflète les profils Arduino restants dans cette branche. La version publique sur `main` est inchangée.
+
+Sauvegarde de la branche avant suppression : `backup/firmware-beta-before-wave-arduino-removal-20261106`. Sauvegarde de la bêta WT32 validée : `backup/wt32-dimitri-rose-logo-valide-20261106`.

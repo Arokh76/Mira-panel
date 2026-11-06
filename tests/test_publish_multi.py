@@ -11,21 +11,22 @@ class MultiReleaseTests(unittest.TestCase):
             (sub / spec["ota"].format(version=version)).write_bytes(b"A" * 700_000 + version.encode() + key.encode())
             (sub / spec["factory"].format(version=version)).write_bytes(b"B" * 1_500_000)
 
-    def test_release_contains_three_profiles(self):
+    def test_release_contains_two_profiles(self):
         with tempfile.TemporaryDirectory() as work:
             p = Path(work)
             self.write_inputs(p / "inputs")
             release = prepare(p / "inputs", p / "repo", "0.6.38")
             self.assertEqual(set(release["targets"]), set(TARGETS))
             self.assertTrue((p / "repo/docs/manifest-wt32.json").is_file())
-            self.assertTrue((p / "repo/docs/manifest-waveshare.json").is_file())
+            self.assertFalse((p / "repo/docs/manifest-waveshare.json").exists())
             self.assertTrue((p / "repo/docs/manifest-nextion.json").is_file())
             self.assertTrue((p / "repo/firmware/targets.json").is_file())
             import json
             published = json.loads((p / "repo/firmware/targets.json").read_text())
-            self.assertEqual(len(published["targets"]), 3)
+            self.assertEqual(len(published["targets"]), 2)
             self.assertEqual(published["version"], "0.6.38")
             self.assertIn("onx2432g028", published["targets"])
+            self.assertNotIn("waveshare-esp32s3-touch-lcd-4.3c", published["targets"])
             # The untyped legacy WT32 OTA must not be advanced. Older
             # Waveshare builds also read it and could flash the wrong target.
             self.assertFalse((p / "repo/firmware/version.json").exists())
