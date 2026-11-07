@@ -3853,6 +3853,27 @@ void mira_full_ui_tick(void){
         }
     }
 }
+// Isolated Waveshare 7 offline UI diagnostic: mount existing user SPIFFS
+// strictly read-only from Mira's point of view. Never format, import or write.
+// No other Mira tasks/services are started in this diagnostic build.
+bool mira_full_storage_mount_existing_only(void){
+    const esp_vfs_spiffs_conf_t cfg={
+        .base_path="/spiffs",
+        .partition_label="spiffs",
+        .max_files=4,
+        .format_if_mount_failed=false,
+    };
+    const esp_err_t err=esp_vfs_spiffs_register(&cfg);
+    spiffs_ready=(err==ESP_OK);
+    if(spiffs_ready){
+        ESP_LOGI(TAG,"UI OFFLINE: existing Mira SPIFFS mounted (never formatted)");
+    }else{
+        ESP_LOGW(TAG,"UI OFFLINE: existing SPIFFS unavailable (%s), no format performed",
+                 esp_err_to_name(err));
+    }
+    return spiffs_ready;
+}
+
 // Fresh-install safeguard: a full-chip erase leaves the entire SPIFFS
 // partition at 0xff. Mounting it needs a one-time filesystem initialization.
 // Never format on a mount failure unless the WHOLE partition is confirmed

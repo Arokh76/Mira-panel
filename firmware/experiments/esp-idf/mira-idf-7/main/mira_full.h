@@ -6,6 +6,8 @@
 #include "esp_http_server.h"
 
 bool mira_full_storage_init(void);
+// Hardware-only offline UI test: mount existing SPIFFS; never format user data.
+bool mira_full_storage_mount_existing_only(void);
 void mira_full_ui_create(lv_display_t *disp);
 void mira_full_ui_tick(void);
 void mira_full_register_http(httpd_handle_t server);
