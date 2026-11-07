@@ -57,7 +57,7 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           out=Path("mira7_wifi_dma10")
-          (out/"MIRA7_OTADATA_VIERGE_0xE000.bin").write_bytes(b"\\xff"*0x2000)
+          (out/"MIRA7_OTADATA_VIERGE_0xE000.bin").write_bytes(b"\xff"*0x2000)
           PY
           cat > mira7_wifi_dma10/ADRESSES_FLASH.txt <<'EOF'
           Important: NE PAS utiliser d'image FACTORY fusionnee a 0x0.
