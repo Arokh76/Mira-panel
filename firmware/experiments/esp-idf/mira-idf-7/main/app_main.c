@@ -14,8 +14,9 @@
 #include "lvgl.h"
 #include "mira_display.h"
 #include "mira_full.h"
+#include "mira_net_diag.h"
 
-static const char *TAG = "mira7-ui-offline";
+static const char *TAG = "mira7-ui-wifi-diag";
 static volatile uint32_t ui_ticks;
 static lv_obj_t *health_dot;
 
@@ -63,7 +64,7 @@ static void install_offline_indicator(void)
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "STAGE 2 Mira real UI, proven Waveshare 7 RGB profile, network OFF");
+    ESP_LOGI(TAG, "STAGE 3 Mira real UI + minimal AP/HTTP, proven Waveshare RGB profile");
     // Avoid discarding existing NVS if it is incompatible.
     esp_err_t nvs_err=nvs_flash_init();
     if (nvs_err!=ESP_OK) {
@@ -94,5 +95,12 @@ void app_main(void)
     lv_timer_create(ui_tick, 10, NULL);
     lv_timer_create(heartbeat, 500, NULL);
     esp_lv_adapter_unlock();
-    ESP_LOGI(TAG,"OFFLINE_UI_READY: real Mira pages, Wi-Fi intentionally disabled");
+    ESP_LOGI(TAG, "OFFLINE_UI_READY: Mira rendered, starting DIAGNOSTIC AP only");
+    // The panel, LVGL and touchscreen have now been initialized successfully.
+    // Keep all Wi-Fi and HTTP callbacks outside the LVGL task and never call
+    // the original Mira network/recovery, Jeedom, MQTT or camera startup.
+    // Failure here must NOT restart the display or erase any configuration.
+    const esp_err_t net_err=mira_net_diag_start();
+    if(net_err!=ESP_OK)
+        ESP_LOGE(TAG,"MIRA7_NET_DIAG_FAILED: %s; display remains alive",esp_err_to_name(net_err));
 }
