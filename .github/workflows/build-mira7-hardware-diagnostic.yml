@@ -1,0 +1,75 @@
+name: DIAGNOSTIC - Waveshare 7 RGB LVGL sans reseau
+on:
+  push:
+    branches:
+      - test/waveshare7-hw-rgb-diag
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout diagnostic branch
+        uses: actions/checkout@v4
+      - name: Checkout pinned LVGL 9.6.0
+        uses: actions/checkout@v4
+        with:
+          repository: lvgl/lvgl
+          ref: v9.6.0
+          path: firmware/experiments/esp-idf/mira-idf-7/components/lvgl
+          submodules: false
+      - name: Guard the hardware-only diagnostic boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=firmware/experiments/esp-idf/mira-idf-7
+          grep -Fq 'DIAG_READY:' "$ROOT/main/app_main.c"
+          grep -Fq '#define LCD_BOUNCE_BUFFER_PIXELS (WIDTH * 10 * 16 / 8)' "$ROOT/main/mira_display.c"
+          grep -Fq '#define LCD_PCLK_HZ (16 * 1000 * 1000)' "$ROOT/main/mira_display.c"
+          grep -Fq 'esp_lv_adapter_register_display(&disp_cfg)' "$ROOT/main/mira_display.c"
+          ! grep -Eq 'mira_recovery_init|mira_mqtt_init|mira_jeedom_action_init|mira_camera_init|mira_full_storage_init' "$ROOT/main/app_main.c"
+          grep -Fq 'CONFIG_ESP32S3_DATA_CACHE_64KB=y' "$ROOT/sdkconfig.defaults"
+          grep -Fq 'project(mira_idf_7std)' "$ROOT/CMakeLists.txt"
+      - name: Native ESP-IDF 5.5.6 diagnostic build
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.6
+          target: esp32s3
+          path: firmware/experiments/esp-idf/mira-idf-7
+          command: idf.py build
+      - name: Package safe USB factory firmware
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=firmware/experiments/esp-idf/mira-idf-7/build
+          mkdir -p mira7_hardware_diagnostic
+          cp "$ROOT/mira_idf_7std.bin" mira7_hardware_diagnostic/MIRA7_DIAG_WAVESHARE_APP_OTA.bin
+          export ROOT
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          p=Path(os.environ["ROOT"])
+          parts=[(0,p/"bootloader/bootloader.bin"),
+                 (0x8000,p/"partition_table/partition-table.bin"),
+                 (0x10000,p/"mira_idf_7std.bin")]
+          output=bytearray()
+          for offset,filename in parts:
+              data=filename.read_bytes()
+              assert data, filename
+              limit=0x8000 if offset==0 else 0x10000 if offset==0x8000 else 0x310000
+              assert offset+len(data)<=limit,(filename,len(data),limit)
+              if len(output)<offset:
+                  output.extend(b"\xff"*(offset-len(output)))
+              output.extend(data)
+          (Path("mira7_hardware_diagnostic")/
+           "MIRA7_DIAG_WAVESHARE_FACTORY_USB_0x0.bin").write_bytes(output)
+          print("Diagnostic USB 0x0:",len(output),"bytes")
+          PY
+      - name: Upload diagnostic flash binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: MIRA7_DIAG_WAVESHARE_RGB_LVGL_FACTORY
+          path: mira7_hardware_diagnostic/
+          retention-days: 14
+          if-no-files-found: error

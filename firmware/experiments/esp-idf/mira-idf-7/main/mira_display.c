@@ -19,10 +19,10 @@
 #define WIDTH 800
 #define HEIGHT 480
 #define LCD_PCLK_HZ (16 * 1000 * 1000) // Waveshare ESP-IDF 09_lvgl_v9_demo baseline
-// Reserve only eight RGB scanlines per DMA bounce buffer (800 * 8 * 2 = 12800 bytes each).
-// The previous vendor-sized expression produced 16000 *pixels* (32000 bytes per buffer).
-#define LCD_BOUNCE_BUFFER_LINES 8
-#define LCD_BOUNCE_BUFFER_PIXELS (WIDTH * LCD_BOUNCE_BUFFER_LINES)
+// EXACT Waveshare 09_lvgl_v9_demo bounce size: 800*10*16/8 = 16000 PIXELS.
+// At RGB565 each DMA bounce buffer uses 32000 bytes of internal RAM.
+// No Wi-Fi/Jeedom or other Mira services run in this hardware-only test.
+#define LCD_BOUNCE_BUFFER_PIXELS (WIDTH * 10 * 16 / 8)
 
 static const char *TAG = "mira-idf-rgb";
 static i2c_master_bus_handle_t i2c_bus;
