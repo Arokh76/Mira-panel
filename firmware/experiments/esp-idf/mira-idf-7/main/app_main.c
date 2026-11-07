@@ -54,8 +54,8 @@ static void install_offline_indicator(void)
 {
     health_dot=lv_obj_create(lv_layer_top());
     lv_obj_remove_style_all(health_dot);
-    lv_obj_set_size(8, 8);
-    lv_obj_set_pos(780, 8);
+    lv_obj_set_size(health_dot, 8, 8);
+    lv_obj_set_pos(health_dot, 780, 8);
     lv_obj_set_style_bg_color(health_dot, lv_color_hex(0x00FF00), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(health_dot, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_remove_flag(health_dot, LV_OBJ_FLAG_CLICKABLE);
