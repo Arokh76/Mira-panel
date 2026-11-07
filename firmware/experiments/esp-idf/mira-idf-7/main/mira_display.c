@@ -19,10 +19,14 @@
 #define WIDTH 800
 #define HEIGHT 480
 #define LCD_PCLK_HZ (16 * 1000 * 1000) // Waveshare ESP-IDF 09_lvgl_v9_demo baseline
-// EXACT Waveshare 09_lvgl_v9_demo bounce size: 800*10*16/8 = 16000 PIXELS.
-// At RGB565 each DMA bounce buffer uses 32000 bytes of internal RAM.
-// No Wi-Fi/Jeedom or other Mira services run in this hardware-only test.
-#define LCD_BOUNCE_BUFFER_PIXELS (WIDTH * 10 * 16 / 8)
+// WaveShare 09_lvgl_v9_demo declares 10 bounce LINES at RGB565.
+// Important: esp_lcd_rgb_panel_config_t.bounce_buffer_size_px accepts PIXELS,
+// not BYTES. The vendor macro multiplies by 16/8 as if this field used
+// bytes, which would allocate 20 lines (32000 bytes) per DMA bounce buffer.
+// Keep the intended 10 scanlines: 8000 pixels / 16000 bytes per buffer.
+// Only this memory correction differs from the user-validated RGB profile.
+#define LCD_BOUNCE_BUFFER_LINES 10
+#define LCD_BOUNCE_BUFFER_PIXELS (WIDTH * LCD_BOUNCE_BUFFER_LINES)
 
 static const char *TAG = "mira-idf-rgb";
 static i2c_master_bus_handle_t i2c_bus;
@@ -338,8 +342,8 @@ esp_err_t mira_display_preallocate_rgb(void) {
         .bits_per_pixel = 16,
         .num_fbs = esp_lv_adapter_get_required_frame_buffer_count(
             ESP_LV_ADAPTER_TEAR_AVOID_MODE_DEFAULT_RGB, ESP_LV_ADAPTER_ROTATE_0),
-        // DMA bounce buffers are deliberately smaller than the vendor demo's
-        // to coexist with Mira's Wi-Fi, HTTP and Jeedom tasks in internal RAM.
+        // Exactly 10 RGB565 scanlines per bounce buffer (pixel units),
+        // so the two internal-DMA allocations use 16KB each, not 32KB.
         .bounce_buffer_size_px = LCD_BOUNCE_BUFFER_PIXELS,
         .sram_trans_align = 4,
         .psram_trans_align = 64,

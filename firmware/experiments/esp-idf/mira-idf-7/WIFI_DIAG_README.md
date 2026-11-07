@@ -38,3 +38,14 @@ Un second échec AP sous cette version n'accuserait plus la gestion Jeedom,
 MQTT ou les caméras, puisqu'ils ne sont pas démarrés. S'il reste un écran noir
 ici, comparer les logs \`OFFLINE_UI_READY\` vs \`NET_DIAG_READY\` et la quantité
 de mémoire DMA libre avant le démarrage Wi-Fi.
+
+## Essai DMA 10 lignes (après logs ESP_ERR_NO_MEM)
+- Logs transmis le 7 novembre 2026 : `DMA-internal free=106839`,
+  `largest=53248`; `lcd_rgb_panel_alloc_frame_buffers: no mem for bounce buffer`.
+- Le code précédent passait 16000 PIXELS par bounce buffer (2 × 32000 octets).
+- Cet essai passe réellement 800 × 10 = 8000 PIXELS, donc 2 × 16000 octets.
+- **Aucun autre réglage d'affichage ou de réseau n'est modifié.**
+- Écran noir et Wi-Fi absent sur l'ancienne version : elle s'arrêtait
+  avant la création du réseau. Le Wi-Fi reste **à valider physiquement**.
+- Flasher `MIRA7_WIFI_DMA10_FACTORY_USB_0x0.bin` à l'adresse 0x0,
+  **Erase Flash désactivé**.

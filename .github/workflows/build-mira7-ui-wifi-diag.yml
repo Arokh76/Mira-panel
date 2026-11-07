@@ -1,8 +1,8 @@
-name: DIAGNOSTIC - Mira 7 affichage + Wi-Fi isole
+name: DIAGNOSTIC - Mira 7 Wi-Fi / RGB DMA 10 lignes
 on:
   push:
     branches:
-      - test/waveshare7-ui-wifi-diag
+      - test/waveshare7-ui-wifi-dma10
   workflow_dispatch:
 permissions:
   contents: read
@@ -32,7 +32,8 @@ jobs:
           grep -Fq 'mira_full_ui_create(mira_display_lvgl())' "$ROOT/main/app_main.c"
           grep -Fq 'mira_full_storage_mount_existing_only()' "$ROOT/main/app_main.c"
           grep -Fq '.format_if_mount_failed=false' "$ROOT/main/mira_full.c"
-          grep -Fq '#define LCD_BOUNCE_BUFFER_PIXELS (WIDTH * 10 * 16 / 8)' "$ROOT/main/mira_display.c"
+          grep -Fq '#define LCD_BOUNCE_BUFFER_LINES 10' "$ROOT/main/mira_display.c"
+          grep -Fq '#define LCD_BOUNCE_BUFFER_PIXELS (WIDTH * LCD_BOUNCE_BUFFER_LINES)' "$ROOT/main/mira_display.c"
           grep -Fq '#define LCD_PCLK_HZ (16 * 1000 * 1000)' "$ROOT/main/mira_display.c"
           ! grep -Eq 'mira_recovery_init|mira_mqtt_init|mira_jeedom_action_init|mira_camera_init|mira_full_storage_init\(' "$ROOT/main/app_main.c"
           ! grep -Eq 'nvs_flash_erase|esp_vfs_spiffs_format|esp_wifi_init' "$ROOT/main/app_main.c"
@@ -49,8 +50,8 @@ jobs:
         run: |
           set -euo pipefail
           ROOT=firmware/experiments/esp-idf/mira-idf-7/build
-          mkdir -p mira7_wifi_diag
-          cp "$ROOT/mira_idf_7std.bin" mira7_wifi_diag/MIRA7_WIFI_DIAG_APP_OTA.bin
+          mkdir -p mira7_wifi_dma10
+          cp "$ROOT/mira_idf_7std.bin" mira7_wifi_dma10/MIRA7_WIFI_DMA10_APP_OTA.bin
           export ROOT
           python3 - <<'PY'
           import os
@@ -67,12 +68,12 @@ jobs:
               assert off+len(data)<=limit
               if len(out)<off:out.extend(b"\xff"*(off-len(out)))
               out.extend(data)
-          Path("mira7_wifi_diag/MIRA7_WIFI_DIAG_FACTORY_USB_0x0.bin").write_bytes(out)
+          Path("mira7_wifi_dma10/MIRA7_WIFI_DMA10_FACTORY_USB_0x0.bin").write_bytes(out)
           PY
       - name: Upload offline UI USB factory
         uses: actions/upload-artifact@v4
         with:
-          name: MIRA7_WIFI_DIAG_FACTORY_OTA
-          path: mira7_wifi_diag/
+          name: MIRA7_WIFI_DMA10_FACTORY_OTA
+          path: mira7_wifi_dma10/
           retention-days: 14
           if-no-files-found: error
