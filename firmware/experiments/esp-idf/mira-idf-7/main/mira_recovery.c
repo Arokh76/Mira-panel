@@ -260,7 +260,7 @@ static esp_err_t full_status_get(httpd_req_t *req){
        "\"rgb_refreshes\":%" PRIu32 ",\"gt911_ready\":%s,"
        "\"widgets\":%" PRIu32 ",\"setup_required\":%s,"
        "\"dma_internal_free\":%u,\"dma_internal_largest_block\":%u,"
-       "\"psram_free\":%u}\\n",
+       "\"psram_free\":%u}",
        d.frames,d.touch_ready?"true":"false",
        mira_full_widget_count(),mira_beta_setup_unconfigured()?"true":"false",
        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA),
