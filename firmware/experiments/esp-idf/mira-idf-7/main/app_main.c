@@ -173,5 +173,14 @@ void app_main(void){
     ESP_LOGI(TAG,"CLOCK_UI_ISOLATION_READY: widgets=%" PRIu32 " setup=%s network=%s storage=%s",
         mira_full_widget_count(),setup?"YES":"NO",net==ESP_OK?"OK":"FAIL",
         storage?"OK":"FAIL");
+    checkpoint("JEEDOM_PASSIVE_BEFORE");
+    const bool passive_cache=mira_full_passive_init();
+    const esp_err_t passive_event=passive_cache?mira_jeedom_passive_init():ESP_ERR_NO_MEM;
+    checkpoint("JEEDOM_PASSIVE_AFTER");
+    if(passive_cache&&passive_event==ESP_OK)
+        ESP_LOGI(TAG,"MIRA_JEEDOM_PASSIVE_READY: UI %u widgets; HTTP info and SSE active, actions OFF, MQTT OFF",
+            (unsigned)mira_full_widget_count());
+    else ESP_LOGW(TAG,"MIRA_JEEDOM_PASSIVE_DISABLED: UI remains usable; init=%d event=%s",
+                  passive_cache?1:0,esp_err_to_name(passive_event));
     checkpoint("FINAL");
 }
