@@ -204,6 +204,11 @@ void mira_splash_set_progress(uint8_t percent)
     if(progress_label)lv_label_set_text_fmt(progress_label,"Chargement %u %%",(unsigned)(percent>100u?100u:percent));
 }
 
+void mira_splash_set_message(const char *message)
+{
+    if(progress_label && message)lv_label_set_text(progress_label,message);
+}
+
 void mira_splash_hide(void)
 {
     if(overlay)lv_obj_delete(overlay);
