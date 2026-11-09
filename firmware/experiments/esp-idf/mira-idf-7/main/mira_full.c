@@ -2962,6 +2962,8 @@ static void load_ui_configuration(void){
     }
 }
 void mira_full_ui_create(lv_display_t *disp){
+    ESP_LOGI(TAG,"CLOCK_UI_PHASE 1: load settings (internal largest=%u)",
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
     load_ui_configuration();
     persisted_brightness_raw=display_brightness_raw;
     applied_brightness_raw=display_brightness_raw;
@@ -2976,6 +2978,7 @@ void mira_full_ui_create(lv_display_t *disp){
     no_scroll(screen);
     lv_display_set_default(disp);
     lv_screen_load(screen);
+    ESP_LOGI(TAG,"CLOCK_UI_PHASE 2: root created; creating six pages");
     for(int i=0;i<6;i++){
         pages[i]=lv_obj_create(screen);
         lv_obj_set_size(pages[i],800,CONTENT_H);
@@ -2997,6 +3000,7 @@ void mira_full_ui_create(lv_display_t *disp){
             lv_obj_add_event_cb(pages[i],scroll_cache_on_move,LV_EVENT_SCROLL,NULL);
         if(i)lv_obj_add_flag(pages[i],LV_OBJ_FLAG_HIDDEN);
     }
+    ESP_LOGI(TAG,"CLOCK_UI_PHASE 3: pages ready, creating navigation");
     nav=lv_obj_create(screen);
     lv_obj_set_pos(nav,0,CONTENT_H);lv_obj_set_size(nav,800,NAV_H);
     lv_obj_set_style_bg_color(nav,nav_c(),0);
@@ -3019,11 +3023,17 @@ void mira_full_ui_create(lv_display_t *disp){
                             (void *)(intptr_t)(i==3?6:7+i));
         if(i==3)mira_nav_pages(bt);
     }
+    ESP_LOGI(TAG,"CLOCK_UI_PHASE 4: navigation ready, creating settings");
     settings();
+    ESP_LOGI(TAG,"CLOCK_UI_PHASE 5: settings ready, creating picker");
     create_picker();
     poll_navigation_settings();
     refresh_nav_favorites();
+    ESP_LOGI(TAG,"CLOCK_UI_PHASE 6: parsing imported widget JSON");
     build_config();
+    ESP_LOGI(TAG,"CLOCK_UI_PHASE 7: parsed widgets=%u, internal largest=%u",
+             (unsigned)widget_count,
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
     sleep_overlay=lv_obj_create(lv_layer_top());
     lv_obj_set_size(sleep_overlay,800,480);
     lv_obj_align(sleep_overlay,LV_ALIGN_CENTER,0,0);
@@ -3076,6 +3086,7 @@ void mira_full_ui_create(lv_display_t *disp){
     // actual Mira programming. The test button is no longer a UI shortcut.
     lv_obj_add_flag(touch_diag_label,LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(touch_diag_button,LV_OBJ_FLAG_HIDDEN);
+    ESP_LOGI(TAG,"CLOCK_UI_PHASE 8: overlays and touch diagnostic ready");
     mira_touch_diagnostic_refresh();
     last_clock_ms=lv_tick_get();
     last_user_touch_ms=last_clock_ms;
