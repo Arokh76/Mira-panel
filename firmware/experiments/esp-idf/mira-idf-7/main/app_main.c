@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <inttypes.h>
+#include <sys/stat.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_err.h"
@@ -119,18 +120,46 @@ void app_main(void){
         checkpoint("FIRST_SETUP_IDLE");
         return; // app_main task may terminate; LVGL/HTTP tasks remain running
     }
-    if(!setup){
-        checkpoint("BEFORE_SERVICES");
-        if(!mira_full_storage_init())ESP_LOGW(TAG,"SPIFFS still unavailable for widgets");
-        const esp_err_t jeedom=mira_jeedom_action_init();
-        if(jeedom!=ESP_OK)ESP_LOGW(TAG,"Jeedom action worker unavailable: %s",esp_err_to_name(jeedom));
-        if(net==ESP_OK){
-            const esp_err_t mqtt=mira_mqtt_init();
-            if(mqtt!=ESP_OK)ESP_LOGW(TAG,"MQTT service unavailable: %s",esp_err_to_name(mqtt));
+    // A first-time unit has no /spiffs/miralvgl.json yet. Previous firmware
+    // unconditionally started Jeedom/MQTT workers and built six LVGL pages;
+    // that wastes scarce internal RAM and may trigger a reset right after 60%.
+    // Keep native Wi-Fi + HTTP import routes running until a real config exists.
+    struct stat ui_config_info={0};
+    const bool has_ui_config=storage &&
+        stat("/spiffs/miralvgl.json",&ui_config_info)==0 &&
+        ui_config_info.st_size>2;
+    if(!has_ui_config){
+        if(esp_lv_adapter_lock(-1)==ESP_OK){
+            mira_splash_set_message("Reseau pret - aucun widget\\nImporte les tuiles, puis redemarre");
+            esp_lv_adapter_unlock();
         }
-        checkpoint("AFTER_SERVICES");
+        ESP_LOGW(TAG,"MIRA_NO_WIDGETS_IDLE: saved Wi-Fi OK, no tile JSON; Jeedom/MQTT/UI deferred");
+        checkpoint("NO_WIDGETS_IDLE");
+        return; // HTTP server and LVGL remain active to import configuration
     }
-
+    ESP_LOGI(TAG,"MIRA_WIDGET_CONFIG_FOUND: %ld bytes",
+             (long)ui_config_info.st_size);
+    progress(65);
+    vTaskDelay(pdMS_TO_TICKS(300));
+    checkpoint("BEFORE_SERVICES");
+    // Progress is an actual stage boundary and has time to render.
+    progress(70);
+    if(!mira_full_storage_init())ESP_LOGW(TAG,"SPIFFS still unavailable for widgets");
+    checkpoint("AFTER_RUNTIME_STORAGE");
+    progress(75);
+    vTaskDelay(pdMS_TO_TICKS(300));
+    checkpoint("BEFORE_JEEDOM");
+    const esp_err_t jeedom=mira_jeedom_action_init();
+    if(jeedom!=ESP_OK)ESP_LOGW(TAG,"Jeedom action worker unavailable: %s",esp_err_to_name(jeedom));
+    checkpoint("AFTER_JEEDOM");
+    progress(85);
+    vTaskDelay(pdMS_TO_TICKS(300));
+    checkpoint("BEFORE_MQTT");
+    const esp_err_t mqtt=mira_mqtt_init();
+    if(mqtt!=ESP_OK)ESP_LOGW(TAG,"MQTT service unavailable: %s",esp_err_to_name(mqtt));
+    checkpoint("AFTER_MQTT");
+    progress(92);
+    vTaskDelay(pdMS_TO_TICKS(300));
     checkpoint("BEFORE_UI");
     err=esp_lv_adapter_lock(-1);
     if(err!=ESP_OK)halt_boot("UI lock",err);
