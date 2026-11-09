@@ -5,6 +5,8 @@
 esp_err_t mira_recovery_init(void);
 // Last internal network step for on-screen first-run diagnosis.
 const char *mira_recovery_last_stage(void);
+// True when the small HTTP diagnostic server started but full web did not.
+bool mira_recovery_web_fallback(void);
 // Called in the LVGL render task; -1 none, 0 shadows OFF, 1 ON.
 int mira_recovery_take_shadow_request(void);
 void mira_recovery_set_shadow_mode(int mode);
