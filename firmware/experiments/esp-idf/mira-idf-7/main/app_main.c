@@ -139,31 +139,22 @@ void app_main(void){
     }
     ESP_LOGI(TAG,"MIRA_WIDGET_CONFIG_FOUND: %ld bytes",
              (long)ui_config_info.st_size);
-    progress(65);
-    vTaskDelay(pdMS_TO_TICKS(300));
-    checkpoint("BEFORE_SERVICES");
-    // Progress is an actual stage boundary and has time to render.
-    progress(70);
-    if(!mira_full_storage_init())ESP_LOGW(TAG,"SPIFFS still unavailable for widgets");
-    checkpoint("AFTER_RUNTIME_STORAGE");
+    // CLOCK-ONLY ISOLATION A/B: keep the saved widget JSON and real full
+    // 800x480 dashboard, but do not create Jeedom event workers or MQTT
+    // client, and do not pre-allocate the passive state queues. This is a
+    // diagnostic firmware only: never send Jeedom commands from this version.
+    ESP_LOGW(TAG,"MIRA_UI_ISOLATED: Jeedom+MQTT+state queues intentionally disabled");
     progress(75);
-    vTaskDelay(pdMS_TO_TICKS(300));
-    checkpoint("BEFORE_JEEDOM");
-    const esp_err_t jeedom=mira_jeedom_action_init();
-    if(jeedom!=ESP_OK)ESP_LOGW(TAG,"Jeedom action worker unavailable: %s",esp_err_to_name(jeedom));
-    checkpoint("AFTER_JEEDOM");
-    progress(85);
-    vTaskDelay(pdMS_TO_TICKS(300));
-    checkpoint("BEFORE_MQTT");
-    const esp_err_t mqtt=mira_mqtt_init();
-    if(mqtt!=ESP_OK)ESP_LOGW(TAG,"MQTT service unavailable: %s",esp_err_to_name(mqtt));
-    checkpoint("AFTER_MQTT");
+    vTaskDelay(pdMS_TO_TICKS(350));
+    checkpoint("CLOCK_UI_ONLY_NO_SERVICES");
     progress(92);
-    vTaskDelay(pdMS_TO_TICKS(300));
+    vTaskDelay(pdMS_TO_TICKS(350));
     checkpoint("BEFORE_UI");
     err=esp_lv_adapter_lock(-1);
     if(err!=ESP_OK)halt_boot("UI lock",err);
+    ESP_LOGW(TAG,"MIRA_UI_CREATION_BEGIN: only widgets and LVGL, no MQTT/Jeedom");
     mira_full_ui_create(mira_display_lvgl());
+    ESP_LOGI(TAG,"MIRA_UI_CREATION_RETURN: widgets=%" PRIu32,mira_full_widget_count());
     lv_timer_create(ui_tick,10,NULL);
     mira_splash_set_progress(100);
     esp_lv_adapter_unlock();
@@ -174,7 +165,7 @@ void app_main(void){
         mira_splash_hide();
         esp_lv_adapter_unlock();
     }
-    ESP_LOGI(TAG,"FULL_UI_READY: widgets=%" PRIu32 " setup=%s network=%s storage=%s",
+    ESP_LOGI(TAG,"CLOCK_UI_ISOLATION_READY: widgets=%" PRIu32 " setup=%s network=%s storage=%s",
         mira_full_widget_count(),setup?"YES":"NO",net==ESP_OK?"OK":"FAIL",
         storage?"OK":"FAIL");
     checkpoint("FINAL");
