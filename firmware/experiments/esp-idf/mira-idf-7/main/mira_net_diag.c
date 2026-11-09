@@ -3,6 +3,7 @@
 // The RGB/LVGL/GT911 driver and real Mira UI are initialized BEFORE Wi-Fi.
 // AP SSID intentionally differs from the legacy "Mira Panel" Windows profile.
 #include "mira_net_diag.h"
+#include "sdkconfig.h"
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
@@ -177,8 +178,20 @@ esp_err_t mira_net_diag_start(void)
     if(err!=ESP_OK && err!=ESP_ERR_INVALID_STATE)return err;
     esp_netif_t *ap=esp_netif_create_default_wifi_ap();
     if(!ap)return ESP_ERR_NO_MEM;
+    ESP_LOGI(TAG,"WIFI_CONFIG: PSRAM allocation preferred, RX static=%d, RX dynamic=%d, TX static=%d, RX management=%d",
+        CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM, CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM,
+        CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM, CONFIG_ESP_WIFI_RX_MGMT_BUF_NUM_DEF);
+    ESP_LOGI(TAG,"BEFORE_WIFI_INIT: internal DMA free=%u largest=%u, PSRAM free=%u",
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
     const wifi_init_config_t init=WIFI_INIT_CONFIG_DEFAULT();
     err=esp_wifi_init(&init);
+    ESP_LOGI(TAG,"AFTER_WIFI_INIT: err=%s, internal DMA free=%u largest=%u, PSRAM free=%u",
+        esp_err_to_name(err),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
     if(err!=ESP_OK)return err;
     // The Wi-Fi driver stays on its ESP-IDF default core 0; this stage does
     // not change the validated LVGL task scheduling or RGB timings.

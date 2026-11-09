@@ -49,3 +49,20 @@ de mémoire DMA libre avant le démarrage Wi-Fi.
   avant la création du réseau. Le Wi-Fi reste **à valider physiquement**.
 - Flasher `MIRA7_WIFI_DMA10_FACTORY_USB_0x0.bin` à l'adresse 0x0,
   **Erase Flash désactivé**.
+
+
+## Essai Wi-Fi faible mémoire (branche `test/waveshare7-ui-wifi-lowmem`)
+- Basé sur les journaux où RGB/LVGL/GT911 démarrent, mais où
+  esp_wifi_init() échoue avec `esf_buf_setup_static: alloc eb fail(10)`.
+- Ajout CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP, RX statique 4 / TX statique 4,
+  AMPDU désactivé, moins de buffers de gestion, optimisations IRAM Wi-Fi
+  désactivées. Suffisant théoriquement pour un point d'accès local, débit
+  réduit volontairement.
+- L'ordre de démarrage écran/GUI/Wi-Fi, les timings RGB et les 10 lignes
+  de bounce buffer ne changent pas.
+- Le firmware journalise la RAM disponible avant et après esp_wifi_init().
+- Tester avec deux fichiers adressés : application à 0x10000 et sélecteur
+  OTA vierge à 0xE000. Aucun Full Chip Erase.
+- Cette configuration est une **hypothèse de correction**, en attente de
+  validation sur le matériel. Pour une version Mira complète, le réglage
+  mémoire Wi-Fi sera revu après validation.
