@@ -7,6 +7,9 @@ void mira_jeedom_register_http(httpd_handle_t server);
 
 // Called once after NVS, Wi-Fi and SPIFFS are initialized.
 esp_err_t mira_jeedom_action_init(void);
+// First memory-budget phase: passive HTTP/SSE without any outbound task.
+esp_err_t mira_jeedom_passive_init(void);
+bool mira_jeedom_passive_ready(void);
 // Nonblocking, ONLY called by LVGL direct-user-touch callbacks. Never by States.
 bool mira_jeedom_queue_local_action(const char *name,const char *type,const char *value);
 
