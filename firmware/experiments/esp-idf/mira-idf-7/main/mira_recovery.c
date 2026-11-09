@@ -35,6 +35,9 @@
 #include "freertos/task.h"
 
 static const char *TAG = "mira-idf-ota";
+static bool http_recovery_only;
+static uint32_t http_stack_configured;
+bool mira_recovery_web_fallback(void){return http_recovery_only;}
 static const char *volatile boot_stage="not_started";
 const char *mira_recovery_last_stage(void){return boot_stage;}
 static volatile int pending_shadow_request = -1;
@@ -253,6 +256,15 @@ static esp_err_t perf_get(httpd_req_t *req) {
     return httpd_resp_sendstr(req, text);
 }
 // Consistent with Stage 3 /status: a tiny, read-only runtime memory endpoint.
+static esp_err_t web_rescue_page_get(httpd_req_t *req){
+    static const char *html=
+        "<!doctype html><html lang='fr'><meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<title>Mira Panel - mode secours</title><h2>Mira Panel : serveur HTTP allege</h2>"
+        "<p>Memoire interne insuffisante pour le serveur complet. Les donnees sont conservees.</p>"
+        "<p><a href='/status'>Diagnostic memoire /status</a></p>";
+    httpd_resp_set_type(req,"text/html; charset=utf-8");
+    return httpd_resp_sendstr(req,html);
+}
 static esp_err_t full_status_get(httpd_req_t *req){
     mira_display_stats_t d={0};
     mira_display_stats(&d);
@@ -262,12 +274,13 @@ static esp_err_t full_status_get(httpd_req_t *req){
        "\"rgb_refreshes\":%" PRIu32 ",\"gt911_ready\":%s,"
        "\"widgets\":%" PRIu32 ",\"setup_required\":%s,"
        "\"dma_internal_free\":%u,\"dma_internal_largest_block\":%u,"
-       "\"psram_free\":%u}",
+       "\"psram_free\":%u,\"http_mode\":\"%s\",\"http_stack\":%u}",
        d.frames,d.touch_ready?"true":"false",
        mira_full_widget_count(),mira_beta_setup_unconfigured()?"true":"false",
        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA),
        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA),
-       (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+       (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+       http_recovery_only?"RECOVERY":"FULL",(unsigned)http_stack_configured);
     if(n<0||(size_t)n>=sizeof(out))return httpd_resp_send_500(req);
     httpd_resp_set_type(req,"application/json");
     httpd_resp_set_hdr(req,"Cache-Control","no-store");
@@ -1083,10 +1096,9 @@ esp_err_t mira_recovery_init(void) {
     // memory recovery A/B, connect manually to http://192.168.4.1 instead.
     // No captive DNS startup until we verify the heap reserve.
     ESP_LOGI(TAG,"Captive DNS deferred to preserve RAM; use http://192.168.4.1");
-    // No persistent AP supervisor needed before the user saves Wi-Fi credentials.
-    if(!mira_beta_setup_unconfigured() &&
-       xTaskCreate(recovery_ap_supervisor,"mira_ap_guard",3072,NULL,3,NULL)!=pdPASS)
-        ESP_LOGW(TAG,"Recovery AP supervisor unavailable; AP remains enabled");
+    // Important: the 3KB AP supervisor was created before the 10KB HTTP
+    // server and made the required contiguous internal stack impossible.
+    // Start it ONLY AFTER the complete HTTP server is running.
     wifi_config_t saved_sta={0};
     bool have_sta=esp_wifi_get_config(WIFI_IF_STA,&saved_sta)==ESP_OK&&saved_sta.sta.ssid[0];
     nvs_handle_t profile_nv;
@@ -1181,13 +1193,40 @@ esp_err_t mira_recovery_init(void) {
     conf.uri_match_fn = httpd_uri_match_wildcard;
     // Beta HTML templates, JSON status pages and multipart OTA need deeper
     // handler call chains than the initial diagnostic web server.
-    conf.stack_size = setup_only?6144:10240;
+    // The configured 10KB HTTP task stack did not fit alongside RGB DMA
+    // and AP+STA. Keep stack INTERNAL: NVS and OTA handlers write flash.
+    // 7168 is a compromise; report its observed high-water mark via /status.
+    conf.stack_size = setup_only?6144:7168;
+    conf.task_caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
     conf.recv_wait_timeout = 15;
-    ESP_LOGI(TAG, "HTTP URI capacity=%u, registered routes=9",
-             (unsigned)conf.max_uri_handlers);
+    const uint32_t internal=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
+    ESP_LOGI(TAG,"HTTPD_PREFLIGHT setup=%u stack=%u routes=%u internal_free=%u largest=%u dma_free=%u",
+        setup_only?1u:0u,(unsigned)conf.stack_size,(unsigned)conf.max_uri_handlers,
+        (unsigned)heap_caps_get_free_size(internal),
+        (unsigned)heap_caps_get_largest_free_block(internal),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA));
     httpd_handle_t httpd = NULL;
     boot_stage="httpd_start";
-    ESP_RETURN_ON_ERROR(httpd_start(&httpd, &conf), TAG, "HTTP start");
+    http_stack_configured=conf.stack_size;
+    esp_err_t http_error=httpd_start(&httpd, &conf);
+    if(http_error!=ESP_OK && !setup_only &&
+       (http_error==ESP_ERR_HTTPD_TASK||http_error==ESP_ERR_HTTPD_ALLOC_MEM)){
+        ESP_LOGW(TAG,"Full HTTP server rejected (%s); using internal-RAM rescue server",
+                 esp_err_to_name(http_error));
+        // Last-resort small server keeps /status and Wi-Fi reachable and
+        // avoids a boot loop. No full API/UI task startup in this mode.
+        conf.max_uri_handlers=8;
+        conf.stack_size=4096;
+        conf.max_open_sockets=2;
+        http_stack_configured=conf.stack_size;
+        boot_stage="httpd_rescue";
+        ESP_LOGW(TAG,"HTTPD_RESCUE preflight: free=%u largest=%u",
+                 (unsigned)heap_caps_get_free_size(internal),
+                 (unsigned)heap_caps_get_largest_free_block(internal));
+        http_error=httpd_start(&httpd,&conf);
+        if(http_error==ESP_OK)http_recovery_only=true;
+    }
+    ESP_RETURN_ON_ERROR(http_error,TAG,"HTTP task start");
     httpd_uri_t root = {.uri="/", .method=HTTP_GET, .handler=index_get};
     httpd_uri_t status = {.uri="/status", .method=HTTP_GET, .handler=full_status_get};
     httpd_uri_t debug = {.uri="/recovery", .method=HTTP_GET, .handler=recovery_debug_get};
@@ -1203,6 +1242,19 @@ esp_err_t mira_recovery_init(void) {
     httpd_uri_t wifi_get={.uri="/mira/wifi",.method=HTTP_GET,.handler=wifi_info_get};
     httpd_uri_t wifi_post={.uri="/mira/wifi",.method=HTTP_POST,.handler=wifi_profile_post};
     boot_stage="routes";
+    if(http_recovery_only){
+        const httpd_uri_t rescue_index={
+            .uri="/",.method=HTTP_GET,.handler=web_rescue_page_get
+        };
+        ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd,&rescue_index),TAG,"HTTP rescue root");
+        ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd,&status),TAG,"HTTP rescue status");
+        ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd,&perf),TAG,"HTTP rescue perf");
+        ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd,&wifi_get),TAG,"HTTP rescue Wi-Fi GET");
+        ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd,&wifi_post),TAG,"HTTP rescue Wi-Fi POST");
+        boot_stage="httpd_rescue_ready";
+        ESP_LOGW(TAG,"HTTPD_RESCUE_READY: /status and basic Wi-Fi, full Mira services deferred");
+        return ESP_OK;
+    }
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &root), TAG, "HTTP root");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &perf), TAG, "HTTP perf");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &status), TAG, "HTTP status");
@@ -1235,6 +1287,12 @@ esp_err_t mira_recovery_init(void) {
     // explicit Jeedom/API/OTA handlers have been registered.
     ESP_ERROR_CHECK_WITHOUT_ABORT(mira_beta_setup_register_captive(httpd));
     boot_stage="full_ready";
-    ESP_LOGI(TAG, "Mira 0.7.37 first-run AP SSID Mira Panel (open until setup); http://192.168.4.1");
+    // This task is optional. Start only after the 7KB HTTP task has reserved
+    // its internal stack, otherwise it starves HTTP with a 3KB stack.
+    if(heap_caps_get_largest_free_block(internal)>=4096){
+        if(xTaskCreate(recovery_ap_supervisor,"mira_ap_guard",3072,NULL,3,NULL)!=pdPASS)
+            ESP_LOGW(TAG,"AP guard task unavailable (deferred)");
+    }else ESP_LOGW(TAG,"AP guard deferred: low internal heap");
+    ESP_LOGI(TAG, "Mira 0.7.37 configured AP SSID Mira Panel; http://192.168.4.1");
     return ESP_OK;
 }
