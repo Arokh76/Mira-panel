@@ -38,7 +38,12 @@ CONFIG_LV_DEF_REFR_PERIOD=15
 # Preserve firmware-beta's GET /addlistlvgl query with styles/free layout.
 CONFIG_HTTPD_MAX_URI_LEN=2048
 CONFIG_LV_USE_CLIB_STRING=y
-CONFIG_LV_USE_CLIB_MALLOC=y
+# Place LVGL's many small objects in 8MB octal PSRAM, not internal DMA RAM.
+# Before this change, with only a 138B clock tile JSON, internal largest was
+# 1600..1920 bytes and LVGL aborted during build_config().
+# Preserve standard malloc preference and the 32KB reserved internal pool
+# for Wi-Fi, HTTP and DMA; override ONLY the LVGL allocator backend.
+CONFIG_LV_USE_CUSTOM_MALLOC=y
 CONFIG_LV_USE_CLIB_SPRINTF=y
 CONFIG_LV_FONT_MONTSERRAT_20=y
 
