@@ -1067,8 +1067,10 @@ esp_err_t mira_recovery_init(void) {
     ESP_RETURN_ON_ERROR(esp_wifi_start(), TAG, "wifi start");
     // Only the unconfigured setup AP needs a DNS wildcard. On a configured
     // display, skipping this 4KB task preserves internal DRAM for MQTT/Jeedom.
-    if(mira_beta_setup_unconfigured())
-        ESP_ERROR_CHECK_WITHOUT_ABORT(mira_beta_captive_dns_start());
+    // DNS wildcard requires a permanent 4KB FreeRTOS task. For the first
+    // memory recovery A/B, connect manually to http://192.168.4.1 instead.
+    // No captive DNS startup until we verify the heap reserve.
+    ESP_LOGI(TAG,"Captive DNS deferred to preserve RAM; use http://192.168.4.1");
     // No persistent AP supervisor needed before the user saves Wi-Fi credentials.
     if(!mira_beta_setup_unconfigured() &&
        xTaskCreate(recovery_ap_supervisor,"mira_ap_guard",3072,NULL,3,NULL)!=pdPASS)
@@ -1167,7 +1169,7 @@ esp_err_t mira_recovery_init(void) {
     conf.uri_match_fn = httpd_uri_match_wildcard;
     // Beta HTML templates, JSON status pages and multipart OTA need deeper
     // handler call chains than the initial diagnostic web server.
-    conf.stack_size = setup_only?8192:10240;
+    conf.stack_size = setup_only?6144:10240;
     conf.recv_wait_timeout = 15;
     ESP_LOGI(TAG, "HTTP URI capacity=%u, registered routes=9",
              (unsigned)conf.max_uri_handlers);
