@@ -49,6 +49,15 @@ void app_main(void){
     err=mira_display_preallocate_rgb();
     if(err!=ESP_OK)halt_boot("RGB DMA",err);
     checkpoint("RGB_RESERVED");
+
+    // Formatting a fully erased SPIFFS partition performs many flash writes.
+    // Complete this operation BEFORE starting the LVGL task whose stack is in PSRAM.
+    // Never format a nonblank partition; user data takes priority over a mount error.
+    checkpoint("BEFORE_STORAGE");
+    const bool storage=mira_full_storage_prepare();
+    checkpoint("AFTER_STORAGE");
+    if(!storage)ESP_LOGW(TAG,"SPIFFS unavailable: widgets cannot be imported yet");
+
     err=mira_display_init();
     if(err!=ESP_OK)halt_boot("RGB GT911 LVGL",err);
     err=esp_lv_adapter_start();
@@ -60,13 +69,6 @@ void app_main(void){
     mira_splash_show(mira_display_lvgl());
     mira_splash_set_progress(20);
     esp_lv_adapter_unlock();
-
-    // Mount existing SPIFFS without ever formatting a nonblank partition.
-    // For fully erased user flash, initialize only the empty filesystem.
-    checkpoint("BEFORE_STORAGE");
-    const bool storage=mira_full_storage_prepare();
-    checkpoint("AFTER_STORAGE");
-    if(!storage)ESP_LOGW(TAG,"SPIFFS unavailable: widgets cannot be imported yet");
 
     // Reserve network and HTTP before creating the full LVGL widget tree.
     progress(35);
