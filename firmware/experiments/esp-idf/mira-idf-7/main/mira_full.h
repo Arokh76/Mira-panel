@@ -7,6 +7,9 @@
 
 bool mira_full_storage_prepare(void); // mount/format only if blank, no queues
 bool mira_full_storage_init(void);
+// Experimental Jeedom receive-only /updatenr and /get transport, no workers.
+bool mira_full_passive_init(void);
+bool mira_full_passive_ready(void);
 // Hardware-only offline UI test: mount existing SPIFFS; never format user data.
 bool mira_full_storage_mount_existing_only(void);
 void mira_full_ui_create(lv_display_t *disp);
