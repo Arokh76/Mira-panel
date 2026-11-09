@@ -2880,6 +2880,16 @@ static void import_legacy_http_settings(void) {
     ESP_LOGI(TAG,"Legacy HTTP parameters: imported=%d, encrypted examined=%d, errors=%d",
              imported,encrypted,errors);
 }
+// Receive-only beta HTTP/SSE: no FreeRTOS HTTP action worker, no outbound
+// Jeedom commands. The event-group is needed by /events clients.
+esp_err_t mira_jeedom_passive_init(void){
+    if(!mira_sse_signal)mira_sse_signal=xEventGroupCreate();
+    if(!mira_sse_signal)return ESP_ERR_NO_MEM;
+    ESP_LOGI(TAG,"JEEDOM_PASSIVE_HTTP_READY: /updatenr, /get, /events; outbound actions deferred");
+    return ESP_OK;
+}
+bool mira_jeedom_passive_ready(void){return mira_sse_signal!=NULL;}
+
 esp_err_t mira_jeedom_action_init(void) {
     if(action_queue)return ESP_OK;
     // Keep the SSE event group immutable after the HTTP server starts:
