@@ -1,0 +1,104 @@
+name: Mira 7 clock UI isolated without Jeedom MQTT
+on:
+  push:
+    branches:
+      - test/waveshare7-clock-ui-isolated
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout staged boot diagnostic
+        uses: actions/checkout@v4
+      - name: Checkout pinned LVGL 9.6.0
+        uses: actions/checkout@v4
+        with:
+          repository: lvgl/lvgl
+          ref: v9.6.0
+          path: firmware/experiments/esp-idf/mira-idf-7/components/lvgl
+          submodules: false
+      - name: Verify full provisioning is wired without erasing preserved data
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=firmware/experiments/esp-idf/mira-idf-7
+          grep -Fq 'FULL_UI_READY' "$ROOT/main/app_main.c"
+          grep -Fq 'NETWORK_FAILED_HALT' "$ROOT/main/app_main.c"
+          grep -Fq 'FIRST_SETUP_READY' "$ROOT/main/app_main.c"
+          grep -Fq 'mira_splash_set_message' "$ROOT/main/mira_splash.c"
+          grep -Fq 'conf.stack_size = setup_only?6144:7168' "$ROOT/main/mira_recovery.c"
+          grep -Fq 'HTTPD_RESCUE_READY' "$ROOT/main/mira_recovery.c"
+          grep -Fq 'HTTPD_PREFLIGHT' "$ROOT/main/mira_recovery.c"
+          grep -Fq 'mira_recovery_web_fallback()' "$ROOT/main/app_main.c"
+          grep -Fq 'MIRA_NO_WIDGETS_IDLE' "$ROOT/main/app_main.c"
+          grep -Fq 'MIRA_WIDGET_CONFIG_FOUND' "$ROOT/main/app_main.c"
+          grep -Fq 'stat("/spiffs/miralvgl.json"' "$ROOT/main/app_main.c"
+          grep -Fq 'BEFORE_JEEDOM' "$ROOT/main/app_main.c"
+          grep -Fq 'CLOCK_UI_ONLY_NO_SERVICES' "$ROOT/main/app_main.c"
+          grep -Fq 'MIRA_UI_CREATION_BEGIN' "$ROOT/main/app_main.c"
+          grep -Fq 'CLOCK_UI_PHASE 7:' "$ROOT/main/mira_full.c"
+          ! grep -Eq 'mira_jeedom_action_init\\(' "$ROOT/main/app_main.c"
+          ! grep -Eq 'mira_mqtt_init\\(' "$ROOT/main/app_main.c"
+          grep -Fq 'mira_recovery_init()' "$ROOT/main/app_main.c"
+          grep -Fq 'mira_full_storage_prepare()' "$ROOT/main/app_main.c"
+          grep -Fq 'mira_full_storage_init()' "$ROOT/main/app_main.c"
+          grep -Fq 'mira_mqtt_init()' "$ROOT/main/app_main.c"
+          grep -Fq 'mira_jeedom_action_init()' "$ROOT/main/app_main.c"
+          grep -Fq 'mira_beta_setup_register_minimal(httpd)' "$ROOT/main/mira_recovery.c"
+          grep -Fq 'MIRA_SETUP_READY' "$ROOT/main/mira_recovery.c"
+          grep -Fq 'CONFIG_SPIRAM_XIP_FROM_PSRAM=y' "$ROOT/sdkconfig.defaults"
+          grep -Fq 'CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y' "$ROOT/sdkconfig.defaults"
+          grep -Fq '#define LCD_BOUNCE_BUFFER_PIXELS (WIDTH * LCD_BOUNCE_BUFFER_LINES)' "$ROOT/main/mira_display.c"
+          grep -Fq '#define LCD_PCLK_HZ (16 * 1000 * 1000)' "$ROOT/main/mira_display.c"
+          grep -Fq 'const bool blank=spiffs_partition_is_blank();' "$ROOT/main/mira_full.c"
+          grep -Fq '.format_if_mount_failed=blank' "$ROOT/main/mira_full.c"
+          ! grep -Eq 'mira_net_diag_start|mira_camera_init\\(' "$ROOT/main/app_main.c"
+          ! grep -Eq 'nvs_flash_erase|esp_vfs_spiffs_format' "$ROOT/main/app_main.c"
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('firmware/experiments/esp-idf/mira-idf-7/main/app_main.c').read_text()
+          assert p.index('mira_display_preallocate_rgb()') < p.index('mira_display_init()') < p.index('mira_recovery_init()') < p.index('mira_full_ui_create(mira_display_lvgl())')
+          PY
+      - name: Native ESP-IDF 5.5.6 build
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.6
+          target: esp32s3
+          path: firmware/experiments/esp-idf/mira-idf-7
+          command: idf.py build
+      - name: Package safe, partition-addressed USB flashing files
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=firmware/experiments/esp-idf/mira-idf-7/build
+          mkdir -p mira7_clock_ui_isolated
+          cp "$ROOT/bootloader/bootloader.bin" mira7_clock_ui_isolated/BOOTLOADER_0x0.bin
+          cp "$ROOT/partition_table/partition-table.bin" mira7_clock_ui_isolated/PARTITIONS_0x8000.bin
+          cp "$ROOT/mira_idf_7std.bin" mira7_clock_ui_isolated/MIRA7_CLOCK_UI_ONLY_APP_0x10000.bin
+          python3 - <<'PY'
+          from pathlib import Path
+          out=Path("mira7_clock_ui_isolated")
+          (out/"MIRA7_OTADATA_VIERGE_0xE000.bin").write_bytes(b"\xff"*0x2000)
+          PY
+          cat > mira7_clock_ui_isolated/ADRESSES_FLASH.txt <<'EOF'
+          Important: NE PAS utiliser d'image FACTORY fusionnee a 0x0.
+          Elle ecraserait potentiellement NVS et le selecteur OTA dans les trous 0xff.
+          Pour une carte qui possede deja notre bootloader et cette table :
+          MIRA7_CLOCK_UI_ONLY_APP_0x10000.bin       -> 0x10000
+          MIRA7_OTADATA_VIERGE_0xE000.bin        -> 0xE000
+          Pour une carte deja sur app0, flasher SEULEMENT le fichier APP 0x10000.
+          OTADATA vierge (0xE000) : seulement si la selection app0 a change.
+          Ne pas cocher Full Chip Erase. Puis appuyer sur RESET apres FINISH.
+          La remise a 0xff du selecteur OTA fait demarrer app0, pas app1.
+          BOOTLOADER_0x0.bin et PARTITIONS_0x8000.bin : disponibles seulement
+          en secours ; ne pas les reflasher inutilement.
+          EOF
+      - name: Upload safe partition-addressed flash files
+        uses: actions/upload-artifact@v4
+        with:
+          name: MIRA7_CLOCK_UI_ONLY_FLASH_SANS_EFFACEMENT
+          path: mira7_clock_ui_isolated/
+          retention-days: 14
+          if-no-files-found: error
