@@ -77,15 +77,15 @@ void app_main(void){
     const esp_err_t net=mira_recovery_init();
     checkpoint("AFTER_NETWORK");
     if(net!=ESP_OK){
-        ESP_LOGE(TAG,"FULL_NET_FAILED: %s (0x%x)",
-                 esp_err_to_name(net),(unsigned)net);
+        ESP_LOGE(TAG,"FULL_NET_FAILED at %s: %s (0x%x)",
+                 mira_recovery_last_stage(),esp_err_to_name(net),(unsigned)net);
         progress(50);
         // Failure used to continue creating the complete Mira UI and
         // could panic/reboot while internal DMA RAM was exhausted.
         // Do NOT start a second Wi-Fi stack or erase user configuration.
         if(esp_lv_adapter_lock(-1)==ESP_OK){
             char msg[96];
-            snprintf(msg,sizeof(msg),"Reseau : %s (0x%x)",esp_err_to_name(net),(unsigned)net);
+            snprintf(msg,sizeof(msg),"Reseau %s : %s",mira_recovery_last_stage(),esp_err_to_name(net));
             mira_splash_set_message(msg);
             esp_lv_adapter_unlock();
         }
