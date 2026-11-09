@@ -1,106 +1,119 @@
-// Waveshare 7 STD diagnostic stage 2: REAL Mira UI, no network/services.
-// Based on the independently user-validated RGB/GT911 + LVGL9 baseline.
-// No Wi-Fi, HTTP, MQTT, Jeedom actions, camera or album-art worker.
-// Preserve SPIFFS, NVS, RGB timing, DMA bounce size and LVGL configuration.
+// Waveshare 7" staged boot A/B. Preserve stable stage-3 firmware on its own branch.
+// RGB/GT911 validated settings, Wi-Fi lowmem sdkconfig and SPIFFS untouched.
+// Order: early RGB DMA -> display/LVGL -> tiny splash -> AP/HTTP -> storage -> Mira UI.
+// No Jeedom/MQTT/camera/OTA workers enabled by this diagnostic build.
+#include <stdbool.h>
 #include <stdint.h>
 #include <inttypes.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_err.h"
 #include "esp_log.h"
-#include "esp_timer.h"
+#include "esp_heap_caps.h"
 #include "nvs_flash.h"
 #include "esp_lv_adapter.h"
 #include "lvgl.h"
 #include "mira_display.h"
 #include "mira_full.h"
 #include "mira_net_diag.h"
+#include "mira_splash.h"
 
-static const char *TAG = "mira7-ui-wifi-diag";
-static volatile uint32_t ui_ticks;
-static lv_obj_t *health_dot;
+static const char *TAG="mira7-staged-boot";
 
-static void halt_on_error(const char *stage, esp_err_t err)
+static void memory_checkpoint(const char *stage)
 {
-    ESP_LOGE(TAG, "OFFLINE_UI_FAILED at %s: %s (0x%x)",
-             stage, esp_err_to_name(err), (unsigned)err);
-    for (;;) vTaskDelay(pdMS_TO_TICKS(1000));
+    const uint32_t caps=MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA;
+    ESP_LOGI(TAG,"BOOT_MEM %s: internal_dma_free=%u largest=%u min_free=%u psram_free=%u",
+         stage,
+         (unsigned)heap_caps_get_free_size(caps),
+         (unsigned)heap_caps_get_largest_free_block(caps),
+         (unsigned)heap_caps_get_minimum_free_size(caps),
+         (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 }
 
-static void ui_tick(lv_timer_t *t)
+static void halt_on_error(const char *stage,esp_err_t err)
 {
-    (void)t;
+    ESP_LOGE(TAG,"STAGED_BOOT_FAILED at %s: %s (0x%x)",
+             stage,esp_err_to_name(err),(unsigned)err);
+    for(;;)vTaskDelay(pdMS_TO_TICKS(1000));
+}
+
+// Called from app_main; LVGL adapter task renders asynchronously.
+static void progress(uint8_t value)
+{
+    if(esp_lv_adapter_lock(-1)==ESP_OK){
+        mira_splash_set_progress(value);
+        esp_lv_adapter_unlock();
+    }
+}
+static void ui_tick(lv_timer_t *unused)
+{
+    (void)unused;
     mira_full_ui_tick();
-}
-
-static void heartbeat(lv_timer_t *t)
-{
-    (void)t;
-    ui_ticks++;
-    // Tiny marker on top layer indicates LVGL is still rendering and updating.
-    if (health_dot) {
-        lv_obj_set_x(health_dot,(ui_ticks & 1U) ? 764 : 780);
-    }
-    if ((ui_ticks % 4U) == 0) {
-        mira_display_stats_t d;
-        mira_display_stats(&d);
-        ESP_LOGI(TAG, "OFFLINE_UI_ALIVE: widgets=%" PRIu32
-                  ", refreshes=%" PRIu32 ", GT911=%s, uptime=%" PRIu32 "s",
-                 mira_full_widget_count(), d.frames,
-                 d.touch_ready ? "ready" : "not ready", ui_ticks / 2U);
-    }
-}
-
-static void install_offline_indicator(void)
-{
-    health_dot=lv_obj_create(lv_layer_top());
-    lv_obj_remove_style_all(health_dot);
-    lv_obj_set_size(health_dot, 8, 8);
-    lv_obj_set_pos(health_dot, 780, 8);
-    lv_obj_set_style_bg_color(health_dot, lv_color_hex(0x00FF00), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(health_dot, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_remove_flag(health_dot, LV_OBJ_FLAG_CLICKABLE);
 }
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "STAGE 3 Mira real UI + minimal AP/HTTP, proven Waveshare RGB profile");
-    // Avoid discarding existing NVS if it is incompatible.
+    ESP_LOGI(TAG,"MIRA7 STAGED BOOT: RGB -> splash -> Wi-Fi -> Mira UI");
+    // Do not reset, erase, or format any user data.
     esp_err_t nvs_err=nvs_flash_init();
-    if (nvs_err!=ESP_OK) {
-        ESP_LOGW(TAG, "NVS unavailable (%s). Reading UI defaults only; no erase",
-                 esp_err_to_name(nvs_err));
-    }
+    if(nvs_err!=ESP_OK)
+        ESP_LOGW(TAG,"NVS unavailable (%s), no erase attempted",esp_err_to_name(nvs_err));
 
-    // Exactly as in the successful hardware-only diagnostic: reserve RGB DMA
-    // before any filesystem or UI allocations.
+    memory_checkpoint("BEFORE_RGB");
     esp_err_t err=mira_display_preallocate_rgb();
-    if (err!=ESP_OK) halt_on_error("early RGB allocation",err);
-
-    const bool have_spiffs=mira_full_storage_mount_existing_only();
-    ESP_LOGI(TAG,"OFFLINE_UI_STORAGE: %s",have_spiffs?"existing SPIFFS":"no mounted SPIFFS");
+    if(err!=ESP_OK)halt_on_error("RGB DMA preallocation",err);
+    memory_checkpoint("AFTER_RGB");
 
     err=mira_display_init();
-    if (err!=ESP_OK) halt_on_error("RGB, GT911 and LVGL init",err);
-    ESP_LOGI(TAG,"OFFLINE_UI_STAGE: display initialized");
-
+    if(err!=ESP_OK)halt_on_error("display / GT911 / LVGL init",err);
     err=esp_lv_adapter_start();
-    if (err!=ESP_OK) halt_on_error("LVGL adapter start",err);
-    ESP_LOGI(TAG,"OFFLINE_UI_STAGE: LVGL started");
+    if(err!=ESP_OK)halt_on_error("LVGL adapter",err);
+    memory_checkpoint("AFTER_LVGL");
 
     err=esp_lv_adapter_lock(-1);
-    if (err!=ESP_OK) halt_on_error("LVGL lock",err);
-    mira_full_ui_create(mira_display_lvgl()); // Real config from saved miralvgl.json.
-    install_offline_indicator();
-    lv_timer_create(ui_tick, 10, NULL);
-    lv_timer_create(heartbeat, 500, NULL);
+    if(err!=ESP_OK)halt_on_error("LVGL lock",err);
+    mira_splash_show(mira_display_lvgl());
+    mira_splash_set_progress(20);
     esp_lv_adapter_unlock();
-    ESP_LOGI(TAG, "OFFLINE_UI_READY: Mira rendered, starting DIAGNOSTIC AP only");
-    // The panel, LVGL and touchscreen have now been initialized successfully.
-    // Keep all Wi-Fi and HTTP callbacks outside the LVGL task and never call
-    // the original Mira network/recovery, Jeedom, MQTT or camera startup.
-    // Failure here must NOT restart the display or erase any configuration.
+
+    // AP and HTTP must reserve their internal memory before the heavy UI tree.
+    // Keep the proven min-RX/TX Wi-Fi setup, and don't enable production services.
+    progress(30);
+    memory_checkpoint("BEFORE_WIFI");
     const esp_err_t net_err=mira_net_diag_start();
-    if(net_err!=ESP_OK)
-        ESP_LOGE(TAG,"MIRA7_NET_DIAG_FAILED: %s; display remains alive",esp_err_to_name(net_err));
+    memory_checkpoint("AFTER_WIFI");
+    if(net_err==ESP_OK){
+        ESP_LOGI(TAG,"STAGED_NET_READY: AP + HTTP listening");
+        progress(55);
+    }else{
+        ESP_LOGE(TAG,"STAGED_NET_FAILED: %s; continuing with offline Mira UI",
+                 esp_err_to_name(net_err));
+        progress(45);
+    }
+
+    // Existing SPIFFS only. A missing filesystem is not formatted.
+    const bool have_spiffs=mira_full_storage_mount_existing_only();
+    ESP_LOGI(TAG,"STAGED_STORAGE: %s",have_spiffs?"mounted":"unavailable (preserved)");
+    progress(65);
+
+    // Build all Mira widgets after network allocations, under the LVGL lock.
+    memory_checkpoint("BEFORE_UI");
+    err=esp_lv_adapter_lock(-1);
+    if(err!=ESP_OK)halt_on_error("Mira UI lock",err);
+    mira_full_ui_create(mira_display_lvgl());
+    lv_timer_create(ui_tick,10,NULL);
+    mira_splash_set_progress(100);
+    esp_lv_adapter_unlock();
+    memory_checkpoint("AFTER_UI");
+
+    // Give the last 100% frame a brief opportunity to render before removal.
+    vTaskDelay(pdMS_TO_TICKS(180));
+    if(esp_lv_adapter_lock(-1)==ESP_OK){
+        mira_splash_hide();
+        esp_lv_adapter_unlock();
+    }
+    ESP_LOGI(TAG,"STAGED_UI_READY: widgets=%" PRIu32 ", wifi=%s, splash freed",
+             mira_full_widget_count(),net_err==ESP_OK?"OK":"FAILED");
+    memory_checkpoint("FINAL");
 }
