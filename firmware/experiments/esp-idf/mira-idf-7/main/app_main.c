@@ -20,6 +20,7 @@
 #include "mira_jeedom.h"
 #include "mira_mqtt.h"
 #include "mira_splash.h"
+#include "mira_lvgl_psram_malloc.h"
 
 static const char *TAG="mira7-full";
 static void checkpoint(const char *stage){
@@ -48,6 +49,10 @@ void app_main(void){
     esp_err_t err=nvs_flash_init();
     if(err!=ESP_OK)halt_boot("NVS (no erase)",err);
     checkpoint("START");
+    // Force the linker to pull the custom LVGL memory backend from libmain.a
+    // before resolving references from liblvgl.a.
+    ESP_LOGI(TAG,"LVGL PSRAM custom backend linked: largest=%u",
+             (unsigned)mira_lvgl_psram_largest());
     err=mira_display_preallocate_rgb();
     if(err!=ESP_OK)halt_boot("RGB DMA",err);
     checkpoint("RGB_RESERVED");
