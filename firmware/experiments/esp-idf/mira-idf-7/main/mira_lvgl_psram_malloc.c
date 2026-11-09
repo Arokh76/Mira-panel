@@ -78,3 +78,8 @@ lv_result_t lv_mem_test_core(void)
 {
     return LV_RESULT_OK;
 }
+
+size_t mira_lvgl_psram_largest(void)
+{
+    return heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+}
