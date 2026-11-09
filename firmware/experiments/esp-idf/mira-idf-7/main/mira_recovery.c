@@ -35,6 +35,8 @@
 #include "freertos/task.h"
 
 static const char *TAG = "mira-idf-ota";
+static const char *volatile boot_stage="not_started";
+const char *mira_recovery_last_stage(void){return boot_stage;}
 static volatile int pending_shadow_request = -1;
 static bool clock_sntp_started;
 static bool clock_sntp_initialized;
@@ -1026,6 +1028,7 @@ static void configure_beta_ap_profile(void){
 }
 
 esp_err_t mira_recovery_init(void) {
+    boot_stage="nvs";
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         // Never erase NVS: contains user Mira/Jeedom settings.
@@ -1033,10 +1036,14 @@ esp_err_t mira_recovery_init(void) {
         return err;
     }
     ESP_RETURN_ON_ERROR(err, TAG, "NVS");
+    boot_stage="netif";
     ESP_RETURN_ON_ERROR(esp_netif_init(), TAG, "netif");
+    boot_stage="event_loop";
     ESP_RETURN_ON_ERROR(esp_event_loop_create_default(), TAG, "event loop");
+    boot_stage="ap_netif";
     ap_netif=esp_netif_create_default_wifi_ap();
     if(!ap_netif)return ESP_ERR_NO_MEM;
+    boot_stage="sta_netif";
     sta_netif=esp_netif_create_default_wifi_sta();
     if(!sta_netif)return ESP_ERR_NO_MEM;
     // France / Europe-Paris local time, including automatic summer-time changes.
@@ -1046,7 +1053,9 @@ esp_err_t mira_recovery_init(void) {
     // On WT32, configTzTime() is called ONLY once the Wi-Fi is connected.
     // Initialize ESP-NETIF SNTP in recovery_ap_supervisor after STA_GOT_IP.
     wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
+    boot_stage="wifi_init";
     ESP_RETURN_ON_ERROR(esp_wifi_init(&init), TAG, "wifi init");
+    boot_stage="wifi_storage";
     ESP_RETURN_ON_ERROR(esp_wifi_set_storage(WIFI_STORAGE_FLASH), TAG, "wifi storage");
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_event_handler_register(IP_EVENT,IP_EVENT_STA_GOT_IP,wifi_status_event,NULL));
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_event_handler_register(WIFI_EVENT,WIFI_EVENT_STA_DISCONNECTED,wifi_status_event,NULL));
@@ -1061,9 +1070,12 @@ esp_err_t mira_recovery_init(void) {
             .pmf_cfg = {.required = false},
         }
     };
+    boot_stage="wifi_mode";
     ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_APSTA), TAG, "wifi mode");
+    boot_stage="ap_config";
     ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_AP, &ap), TAG, "wifi config");
     configure_beta_ap_profile();
+    boot_stage="wifi_start";
     ESP_RETURN_ON_ERROR(esp_wifi_start(), TAG, "wifi start");
     // Only the unconfigured setup AP needs a DNS wildcard. On a configured
     // display, skipping this 4KB task preserves internal DRAM for MQTT/Jeedom.
@@ -1174,6 +1186,7 @@ esp_err_t mira_recovery_init(void) {
     ESP_LOGI(TAG, "HTTP URI capacity=%u, registered routes=9",
              (unsigned)conf.max_uri_handlers);
     httpd_handle_t httpd = NULL;
+    boot_stage="httpd_start";
     ESP_RETURN_ON_ERROR(httpd_start(&httpd, &conf), TAG, "HTTP start");
     httpd_uri_t root = {.uri="/", .method=HTTP_GET, .handler=index_get};
     httpd_uri_t status = {.uri="/status", .method=HTTP_GET, .handler=full_status_get};
@@ -1189,6 +1202,7 @@ esp_err_t mira_recovery_init(void) {
     httpd_uri_t clock_get={.uri="/mira/clock/status",.method=HTTP_GET,.handler=clock_status_get};
     httpd_uri_t wifi_get={.uri="/mira/wifi",.method=HTTP_GET,.handler=wifi_info_get};
     httpd_uri_t wifi_post={.uri="/mira/wifi",.method=HTTP_POST,.handler=wifi_profile_post};
+    boot_stage="routes";
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &root), TAG, "HTTP root");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &perf), TAG, "HTTP perf");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &status), TAG, "HTTP status");
@@ -1197,6 +1211,7 @@ esp_err_t mira_recovery_init(void) {
         // No OTA on an open first-run AP before the local password is chosen.
         ESP_RETURN_ON_ERROR(mira_beta_setup_register_minimal(httpd),TAG,"Mira setup wizard");
         ESP_RETURN_ON_ERROR(mira_beta_setup_register_captive(httpd),TAG,"Mira captive portal");
+        boot_stage="setup_ready";
         ESP_LOGI(TAG,"MIRA_SETUP_READY: Mira Panel AP, http://192.168.4.1");
         return ESP_OK;
     }
@@ -1219,6 +1234,7 @@ esp_err_t mira_recovery_init(void) {
     // Catch Android/iOS/Windows captive-portal probe paths only after all
     // explicit Jeedom/API/OTA handlers have been registered.
     ESP_ERROR_CHECK_WITHOUT_ABORT(mira_beta_setup_register_captive(httpd));
+    boot_stage="full_ready";
     ESP_LOGI(TAG, "Mira 0.7.37 first-run AP SSID Mira Panel (open until setup); http://192.168.4.1");
     return ESP_OK;
 }
