@@ -130,7 +130,7 @@ void app_main(void){
         ui_config_info.st_size>2;
     if(!has_ui_config){
         if(esp_lv_adapter_lock(-1)==ESP_OK){
-            mira_splash_set_message("Reseau pret - aucun widget\\nImporte les tuiles, puis redemarre");
+            mira_splash_set_message("Reseau pret - aucun widget\nImporte les tuiles, puis redemarre");
             esp_lv_adapter_unlock();
         }
         ESP_LOGW(TAG,"MIRA_NO_WIDGETS_IDLE: saved Wi-Fi OK, no tile JSON; Jeedom/MQTT/UI deferred");
