@@ -274,13 +274,15 @@ static esp_err_t full_status_get(httpd_req_t *req){
        "\"rgb_refreshes\":%" PRIu32 ",\"gt911_ready\":%s,"
        "\"widgets\":%" PRIu32 ",\"setup_required\":%s,"
        "\"dma_internal_free\":%u,\"dma_internal_largest_block\":%u,"
-       "\"psram_free\":%u,\"http_mode\":\"%s\",\"http_stack\":%u}",
+       "\"psram_free\":%u,\"http_mode\":\"%s\",\"http_stack\":%u,"
+       "\"jeedom_passive_ready\":%s}",
        d.frames,d.touch_ready?"true":"false",
        mira_full_widget_count(),mira_beta_setup_unconfigured()?"true":"false",
        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA),
        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA),
        (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
-       http_recovery_only?"RECOVERY":"FULL",(unsigned)http_stack_configured);
+       http_recovery_only?"RECOVERY":"FULL",(unsigned)http_stack_configured,
+       (mira_full_passive_ready()&&mira_jeedom_passive_ready())?"true":"false");
     if(n<0||(size_t)n>=sizeof(out))return httpd_resp_send_500(req);
     httpd_resp_set_type(req,"application/json");
     httpd_resp_set_hdr(req,"Cache-Control","no-store");
