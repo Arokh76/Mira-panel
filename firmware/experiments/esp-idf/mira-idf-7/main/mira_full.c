@@ -3925,6 +3925,46 @@ bool mira_full_storage_prepare(void){
     else ESP_LOGI(TAG,"%s",blank?"Fresh Mira SPIFFS ready":"Existing Mira SPIFFS mounted");
     return spiffs_ready;
 }
+// Lightweight HTTP Jeedom passive states: allocate only latest-value slots
+// and the /get cache, both in PSRAM. No internal state/cover FIFO, no camera,
+// no album-art task, no MQTT and no outbound HTTP action worker.
+bool mira_full_passive_init(void){
+    if(pending_states&&state_cache&&pending_states_lock&&state_cache_lock)return true;
+    mira_state_update_t *new_pending=heap_caps_calloc(
+        MIRA_PENDING_STATE_SLOTS,sizeof(*new_pending),
+        MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    mira_state_update_t *new_cache=heap_caps_calloc(
+        MIRA_STATE_CACHE_LIMIT,sizeof(*new_cache),
+        MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!new_pending||!new_cache){
+        heap_caps_free(new_pending);
+        heap_caps_free(new_cache);
+        ESP_LOGE(TAG,"JEEDOM_PASSIVE_NO_PSRAM: pending/cache alloc failed");
+        return false;
+    }
+    SemaphoreHandle_t new_pending_lock=xSemaphoreCreateMutex();
+    SemaphoreHandle_t new_cache_lock=xSemaphoreCreateMutex();
+    if(!new_pending_lock||!new_cache_lock){
+        if(new_pending_lock)vSemaphoreDelete(new_pending_lock);
+        if(new_cache_lock)vSemaphoreDelete(new_cache_lock);
+        heap_caps_free(new_pending);
+        heap_caps_free(new_cache);
+        ESP_LOGE(TAG,"JEEDOM_PASSIVE_NO_INTERNAL: mutex alloc failed");
+        return false;
+    }
+    pending_states=new_pending;
+    state_cache=new_cache;
+    pending_states_lock=new_pending_lock;
+    state_cache_lock=new_cache_lock;
+    ESP_LOGI(TAG,"JEEDOM_PASSIVE_PSRAM_READY: %u state slots, %u cached values, internal_largest=%u",
+        (unsigned)MIRA_PENDING_STATE_SLOTS,(unsigned)MIRA_STATE_CACHE_LIMIT,
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+    return true;
+}
+bool mira_full_passive_ready(void){
+    return pending_states&&state_cache&&pending_states_lock&&state_cache_lock;
+}
+
 bool mira_full_storage_init(void){
     // PSRAM last-value slots coalesce bursts; halve the internal FIFO footprint.
     if(!state_queue)state_queue=xQueueCreate(12,sizeof(mira_state_update_t));
