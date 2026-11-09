@@ -4016,10 +4016,16 @@ static esp_err_t import_post(httpd_req_t *req){
         remove(tmp);
         return httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Erreur écriture JSON"),ESP_FAIL;
     }
-    reload_pending=true;
-    ESP_LOGW(TAG,"Mira JSON importé (%u octets), rafraîchissement LVGL demandé",(unsigned)len);
+    // In the memory-conserving initial state there is no dashboard LVGL
+    // timer yet. Report the required restart instead of promising a reload.
+    const bool dashboard_running=(screen!=NULL);
+    if(dashboard_running)reload_pending=true;
+    ESP_LOGI(TAG,"Mira JSON imported (%u bytes); dashboard_started=%u",
+             (unsigned)len,dashboard_running?1u:0u);
     httpd_resp_set_type(req,"text/plain; charset=utf-8");
-    return httpd_resp_sendstr(req,"Mira JSON importé. Pages mises à jour sur l'écran.");
+    return httpd_resp_sendstr(req,dashboard_running?
+        "Configuration Mira importee. Mise a jour de l'ecran demandee.":
+        "Configuration Mira importee. Redemarrez l'ecran pour activer Jeedom et les tuiles.");
 }
 
 /* HTTP-safe input, e.g. POST /mira/state {"name":"Salon","value":"22.5"}.
