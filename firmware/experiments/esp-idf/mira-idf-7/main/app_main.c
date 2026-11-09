@@ -95,6 +95,15 @@ void app_main(void){
     }
     ESP_LOGI(TAG,"FULL_NET_READY: native Mira AP/STA + HTTP setup");
     progress(60);
+    if(mira_recovery_web_fallback()){
+        if(esp_lv_adapter_lock(-1)==ESP_OK){
+            mira_splash_set_message("Mode secours HTTP : /status\\n192.168.4.1");
+            esp_lv_adapter_unlock();
+        }
+        ESP_LOGW(TAG,"MIRA_HTTP_RESCUE: no widgets/services until full server memory is available");
+        checkpoint("HTTP_RESCUE_IDLE");
+        return;
+    }
 
     const bool setup=mira_beta_setup_unconfigured();
     ESP_LOGI(TAG,"FULL_SETUP_MODE: %s",setup?"FIRST_INSTALL":"CONFIGURED");
