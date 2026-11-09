@@ -75,12 +75,40 @@ void app_main(void){
     checkpoint("BEFORE_NETWORK");
     const esp_err_t net=mira_recovery_init();
     checkpoint("AFTER_NETWORK");
-    if(net!=ESP_OK)ESP_LOGE(TAG,"FULL_NET_FAILED: %s",esp_err_to_name(net));
-    else ESP_LOGI(TAG,"FULL_NET_READY: native Mira AP/STA + HTTP setup");
-    progress(net==ESP_OK?60:50);
+    if(net!=ESP_OK){
+        ESP_LOGE(TAG,"FULL_NET_FAILED: %s (0x%x)",
+                 esp_err_to_name(net),(unsigned)net);
+        progress(50);
+        // Failure used to continue creating the complete Mira UI and
+        // could panic/reboot while internal DMA RAM was exhausted.
+        // Do NOT start a second Wi-Fi stack or erase user configuration.
+        if(esp_lv_adapter_lock(-1)==ESP_OK){
+            char msg[96];
+            snprintf(msg,sizeof(msg),"Reseau : %s (0x%x)",esp_err_to_name(net),(unsigned)net);
+            mira_splash_set_message(msg);
+            esp_lv_adapter_unlock();
+        }
+        checkpoint("NETWORK_FAILED_HALT");
+        ESP_LOGE(TAG,"NETWORK_FAILED_HALT: stopped before widgets, no reset requested");
+        for(;;)vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+    ESP_LOGI(TAG,"FULL_NET_READY: native Mira AP/STA + HTTP setup");
+    progress(60);
 
     const bool setup=mira_beta_setup_unconfigured();
     ESP_LOGI(TAG,"FULL_SETUP_MODE: %s",setup?"FIRST_INSTALL":"CONFIGURED");
+    if(setup){
+        // First installation needs ONLY the Wi-Fi/key web wizard; the 800x480
+        // dashboard can be built after the user saves credentials and reboots.
+        // LVGL label is tiny; no widgets, queues, camera/Jeedom workers allocated.
+        if(esp_lv_adapter_lock(-1)==ESP_OK){
+            mira_splash_set_message("Configuration : Mira Panel\nhttp://192.168.4.1");
+            esp_lv_adapter_unlock();
+        }
+        ESP_LOGI(TAG,"FIRST_SETUP_READY: waiting for key + Wi-Fi, no dashboard allocation");
+        checkpoint("FIRST_SETUP_IDLE");
+        return; // app_main task may terminate; LVGL/HTTP tasks remain running
+    }
     if(!setup){
         checkpoint("BEFORE_SERVICES");
         if(!mira_full_storage_init())ESP_LOGW(TAG,"SPIFFS still unavailable for widgets");
@@ -91,8 +119,6 @@ void app_main(void){
             if(mqtt!=ESP_OK)ESP_LOGW(TAG,"MQTT service unavailable: %s",esp_err_to_name(mqtt));
         }
         checkpoint("AFTER_SERVICES");
-    }else{
-        ESP_LOGI(TAG,"FIRST_INSTALL: delaying Jeedom, MQTT, album and camera workers until configured");
     }
 
     checkpoint("BEFORE_UI");
