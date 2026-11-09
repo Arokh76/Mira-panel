@@ -2,6 +2,7 @@
 // Keep validated RGB/CH422G/GT911 parameters and stage3 lowmem Wi-Fi settings.
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <inttypes.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
