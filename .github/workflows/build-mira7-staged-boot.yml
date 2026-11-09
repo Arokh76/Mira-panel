@@ -1,0 +1,91 @@
+name: DIAGNOSTIC - Mira 7 staged boot and WT32 splash
+on:
+  push:
+    branches:
+      - test/waveshare7-staged-boot
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout staged boot diagnostic
+        uses: actions/checkout@v4
+      - name: Checkout pinned LVGL 9.6.0
+        uses: actions/checkout@v4
+        with:
+          repository: lvgl/lvgl
+          ref: v9.6.0
+          path: firmware/experiments/esp-idf/mira-idf-7/components/lvgl
+          submodules: false
+      - name: Check offline display and preservation
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=firmware/experiments/esp-idf/mira-idf-7
+          grep -Fq 'STAGED_UI_READY:' "$ROOT/main/app_main.c"
+          grep -Fq 'NET_DIAG_READY:' "$ROOT/main/mira_net_diag.c"
+          grep -Fq 'mira_net_diag_start()' "$ROOT/main/app_main.c"
+          grep -Fq 'Mira Panel TEST' "$ROOT/main/mira_net_diag.c"
+          grep -Fq 'CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y' "$ROOT/sdkconfig.defaults"
+          grep -Fq 'CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=4' "$ROOT/sdkconfig.defaults"
+          grep -Fq 'CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=4' "$ROOT/sdkconfig.defaults"
+          grep -Fq 'BEFORE_WIFI_INIT:' "$ROOT/main/mira_net_diag.c"
+          grep -Fq 'mira_net_diag.c' "$ROOT/main/CMakeLists.txt"
+          grep -Fq 'mira_full_ui_create(mira_display_lvgl())' "$ROOT/main/app_main.c"
+          grep -Fq 'mira_splash_show(mira_display_lvgl())' "$ROOT/main/app_main.c"
+          grep -Fq 'mira_splash.c' "$ROOT/main/CMakeLists.txt"
+          python3 - <<'PY'
+          from pathlib import Path
+          main=Path('firmware/experiments/esp-idf/mira-idf-7/main/app_main.c').read_text()
+          assert main.index('mira_splash_show(mira_display_lvgl())') < main.index('mira_net_diag_start()') < main.index('mira_full_ui_create(mira_display_lvgl())')
+          PY
+          grep -Fq 'mira_full_storage_mount_existing_only()' "$ROOT/main/app_main.c"
+          grep -Fq '.format_if_mount_failed=false' "$ROOT/main/mira_full.c"
+          grep -Fq '#define LCD_BOUNCE_BUFFER_LINES 10' "$ROOT/main/mira_display.c"
+          grep -Fq '#define LCD_BOUNCE_BUFFER_PIXELS (WIDTH * LCD_BOUNCE_BUFFER_LINES)' "$ROOT/main/mira_display.c"
+          grep -Fq '#define LCD_PCLK_HZ (16 * 1000 * 1000)' "$ROOT/main/mira_display.c"
+          ! grep -Eq 'mira_recovery_init|mira_mqtt_init|mira_jeedom_action_init|mira_camera_init|mira_full_storage_init\(' "$ROOT/main/app_main.c"
+          ! grep -Eq 'nvs_flash_erase|esp_vfs_spiffs_format|esp_wifi_init' "$ROOT/main/app_main.c"
+          ! grep -Eq 'mira_full_storage_init|esp_wifi_set_mode\(WIFI_MODE_STA\)' "$ROOT/main/mira_net_diag.c"
+      - name: Native ESP-IDF 5.5.6 build
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.6
+          target: esp32s3
+          path: firmware/experiments/esp-idf/mira-idf-7
+          command: idf.py build
+      - name: Package safe, partition-addressed USB flashing files
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=firmware/experiments/esp-idf/mira-idf-7/build
+          mkdir -p mira7_staged_boot
+          cp "$ROOT/bootloader/bootloader.bin" mira7_staged_boot/BOOTLOADER_0x0.bin
+          cp "$ROOT/partition_table/partition-table.bin" mira7_staged_boot/PARTITIONS_0x8000.bin
+          cp "$ROOT/mira_idf_7std.bin" mira7_staged_boot/MIRA7_STAGED_BOOT_APP_0x10000.bin
+          python3 - <<'PY'
+          from pathlib import Path
+          out=Path("mira7_staged_boot")
+          (out/"MIRA7_OTADATA_VIERGE_0xE000.bin").write_bytes(b"\xff"*0x2000)
+          PY
+          cat > mira7_staged_boot/ADRESSES_FLASH.txt <<'EOF'
+          Important: NE PAS utiliser d'image FACTORY fusionnee a 0x0.
+          Elle ecraserait potentiellement NVS et le selecteur OTA dans les trous 0xff.
+          Pour une carte qui possede deja notre bootloader et cette table :
+          MIRA7_STAGED_BOOT_APP_0x10000.bin       -> 0x10000
+          MIRA7_OTADATA_VIERGE_0xE000.bin        -> 0xE000
+          Cocher ces DEUX fichiers dans ESP Flash Download Tool.
+          Ne pas cocher Full Chip Erase. Puis appuyer sur RESET apres FINISH.
+          La remise a 0xff du selecteur OTA fait demarrer app0, pas app1.
+          BOOTLOADER_0x0.bin et PARTITIONS_0x8000.bin : disponibles seulement
+          en secours ; ne pas les reflasher inutilement.
+          EOF
+      - name: Upload safe partition-addressed flash files
+        uses: actions/upload-artifact@v4
+        with:
+          name: MIRA7_STAGED_BOOT_FLASH_SANS_EFFACEMENT
+          path: mira7_staged_boot/
+          retention-days: 14
+          if-no-files-found: error
