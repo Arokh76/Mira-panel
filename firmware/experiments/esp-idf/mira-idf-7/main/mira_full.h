@@ -5,6 +5,7 @@
 #include "lvgl.h"
 #include "esp_http_server.h"
 
+bool mira_full_storage_prepare(void); // mount/format only if blank, no queues
 bool mira_full_storage_init(void);
 // Hardware-only offline UI test: mount existing SPIFFS; never format user data.
 bool mira_full_storage_mount_existing_only(void);

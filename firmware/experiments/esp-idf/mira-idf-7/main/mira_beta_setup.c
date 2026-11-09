@@ -416,6 +416,16 @@ esp_err_t mira_beta_setup_register_captive(httpd_handle_t server){
     };
     return httpd_register_uri_handler(server,&fallback);
 }
+esp_err_t mira_beta_setup_register_minimal(httpd_handle_t server){
+    const httpd_uri_t scan={.uri="/mira/wifi/scan",.method=HTTP_GET,.handler=wifi_scan_get};
+    const httpd_uri_t load={.uri="/load",.method=HTTP_GET,.handler=load_get};
+    const httpd_uri_t save={.uri="/save",.method=HTTP_POST,.handler=save_post};
+    esp_err_t err=httpd_register_uri_handler(server,&scan);
+    if(err!=ESP_OK)return err;
+    err=httpd_register_uri_handler(server,&load);
+    if(err!=ESP_OK)return err;
+    return httpd_register_uri_handler(server,&save);
+}
 esp_err_t mira_beta_setup_register(httpd_handle_t server){
     const httpd_uri_t scan={.uri="/mira/wifi/scan",.method=HTTP_GET,.handler=wifi_scan_get};
     esp_err_t err=httpd_register_uri_handler(server,&scan);

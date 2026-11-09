@@ -517,7 +517,10 @@ bool mira_camera_fetch_url(const char *url,mira_camera_frame_t *out){
     return fetch_snapshot(url,out);
 }
 bool mira_camera_start(const char *widget_name) {
-    if(!lock)return false;
+    if(!lock && mira_camera_init()!=ESP_OK){
+        ESP_LOGW(TAG,"Deferred camera worker allocation failed");
+        return false;
+    }
     char url[CAM_MAX_URL+1]={0};
     const bool available=load_url(widget_name,url,sizeof(url));
     xSemaphoreTake(lock,portMAX_DELAY);

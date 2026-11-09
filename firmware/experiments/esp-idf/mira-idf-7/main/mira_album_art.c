@@ -67,19 +67,22 @@ static void cover_worker(void *unused){
         if(!success)ESP_LOGW(TAG,"Media cover unavailable (no stale frame shown as current)");
     }
 }
+static bool worker_started;
 esp_err_t mira_album_art_init(void){
     if(art_lock)return ESP_OK;
     art_lock=xSemaphoreCreateMutex();
-    if(!art_lock)return ESP_ERR_NO_MEM;
-    if(xTaskCreate(cover_worker,"mira_album_art",6656,NULL,3,NULL)!=pdPASS){
-        vSemaphoreDelete(art_lock);
-        art_lock=NULL;
-        return ESP_ERR_NO_MEM;
-    }
-    return ESP_OK;
+    return art_lock?ESP_OK:ESP_ERR_NO_MEM;
 }
 bool mira_album_art_request(uint8_t widget_index,const char *url){
-    if(!art_lock||!cover_url(url))return false;
+    if(!cover_url(url))return false;
+    if(!art_lock&&mira_album_art_init()!=ESP_OK)return false;
+    if(!worker_started){
+        if(xTaskCreate(cover_worker,"mira_album_art",6656,NULL,3,NULL)!=pdPASS){
+            ESP_LOGW(TAG,"Deferred JPEG cover worker allocation failed");
+            return false;
+        }
+        worker_started=true;
+    }
     xSemaphoreTake(art_lock,portMAX_DELAY);
     // Repeated metadata deliveries never restart a JPEG download.
     if(art_enabled&&art_index==widget_index&&!strcmp(requested,url)){

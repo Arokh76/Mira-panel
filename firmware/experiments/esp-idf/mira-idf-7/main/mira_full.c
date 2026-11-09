@@ -3897,8 +3897,26 @@ static bool spiffs_partition_is_blank(void){
     free(block);
     return empty;
 }
+// Mount existing data without starting state workers or erasing nonblank partitions.
+static bool filesystem_mount_attempted=false;
+bool mira_full_storage_prepare(void){
+    if(filesystem_mount_attempted)return spiffs_ready;
+    filesystem_mount_attempted=true;
+    const bool blank=spiffs_partition_is_blank();
+    const esp_vfs_spiffs_conf_t cfg={
+        .base_path="/spiffs",.partition_label="spiffs",
+        .max_files=4,.format_if_mount_failed=blank
+    };
+    if(blank)ESP_LOGW(TAG,"Blank SPIFFS: initializing empty filesystem for first setup");
+    const esp_err_t err=esp_vfs_spiffs_register(&cfg);
+    spiffs_ready=(err==ESP_OK);
+    if(!spiffs_ready)ESP_LOGW(TAG,"SPIFFS unavailable (%s); nonblank data not formatted",esp_err_to_name(err));
+    else ESP_LOGI(TAG,blank?"Fresh Mira SPIFFS ready":"Existing Mira SPIFFS mounted");
+    return spiffs_ready;
+}
 bool mira_full_storage_init(void){
-    if(!state_queue)state_queue=xQueueCreate(24,sizeof(mira_state_update_t));
+    // PSRAM last-value slots coalesce bursts; halve the internal FIFO footprint.
+    if(!state_queue)state_queue=xQueueCreate(12,sizeof(mira_state_update_t));
     if(!pending_states_lock)pending_states_lock=xSemaphoreCreateMutex();
     if(!pending_states)
         pending_states=heap_caps_calloc(MIRA_PENDING_STATE_SLOTS,
@@ -3926,20 +3944,7 @@ bool mira_full_storage_init(void){
                             MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(!display_command_queue&&!pending_display_commands)
         ESP_LOGE(TAG,"Display command queue allocation failed");
-    const bool blank=spiffs_partition_is_blank();
-    const esp_vfs_spiffs_conf_t cfg={
-        .base_path="/spiffs",.partition_label="spiffs",
-        .max_files=4,.format_if_mount_failed=blank
-    };
-    if(blank)ESP_LOGW(TAG,"Fresh flash: blank SPIFFS detected; initializing empty filesystem");
-    esp_err_t err=esp_vfs_spiffs_register(&cfg);
-    spiffs_ready=(err==ESP_OK);
-    if(!spiffs_ready)
-        ESP_LOGW(TAG,"SPIFFS mount failed (%s); existing data left unchanged, import disabled",
-                 esp_err_to_name(err));
-    else if(blank)ESP_LOGI(TAG,"Fresh Mira SPIFFS ready for JSON import");
-    else ESP_LOGI(TAG,"Existing Mira SPIFFS mounted without formatting");
-    return spiffs_ready;
+    return mira_full_storage_prepare();
 }
 // The native beta home page owns the normal URL, not this experiment screen.
 static esp_err_t page_get(httpd_req_t *req){

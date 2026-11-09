@@ -1044,9 +1044,9 @@ esp_err_t mira_recovery_init(void) {
     configure_beta_ap_profile();
     ESP_RETURN_ON_ERROR(esp_wifi_start(), TAG, "wifi start");
     ESP_ERROR_CHECK_WITHOUT_ABORT(mira_beta_captive_dns_start());
-    ESP_LOGI(TAG,"Startup stack available after DNS: %u bytes",
-             (unsigned)uxTaskGetStackHighWaterMark(NULL));
-    if(xTaskCreate(recovery_ap_supervisor,"mira_ap_guard",3072,NULL,3,NULL)!=pdPASS)
+    // No persistent AP supervisor needed before the user saves Wi-Fi credentials.
+    if(!mira_beta_setup_unconfigured() &&
+       xTaskCreate(recovery_ap_supervisor,"mira_ap_guard",3072,NULL,3,NULL)!=pdPASS)
         ESP_LOGW(TAG,"Recovery AP supervisor unavailable; AP remains enabled");
     wifi_config_t saved_sta={0};
     bool have_sta=esp_wifi_get_config(WIFI_IF_STA,&saved_sta)==ESP_OK&&saved_sta.sta.ssid[0];
@@ -1137,11 +1137,12 @@ esp_err_t mira_recovery_init(void) {
     // 9 routes are registered below; ESP-IDF defaults to 8 URI handlers.
     // Exceeding that limit used to abort app_main() before LCD init, causing
     // a black screen + Wi-Fi reboot loop (ESP_ERR_HTTPD_HANDLERS_FULL).
-    conf.max_uri_handlers = 96;
+    const bool setup_only=mira_beta_setup_unconfigured();
+    conf.max_uri_handlers = setup_only?12:96;
     conf.uri_match_fn = httpd_uri_match_wildcard;
     // Beta HTML templates, JSON status pages and multipart OTA need deeper
     // handler call chains than the initial diagnostic web server.
-    conf.stack_size = 10240;
+    conf.stack_size = setup_only?8192:10240;
     conf.recv_wait_timeout = 15;
     ESP_LOGI(TAG, "HTTP URI capacity=%u, registered routes=9",
              (unsigned)conf.max_uri_handlers);
@@ -1162,6 +1163,14 @@ esp_err_t mira_recovery_init(void) {
     httpd_uri_t wifi_post={.uri="/mira/wifi",.method=HTTP_POST,.handler=wifi_profile_post};
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &root), TAG, "HTTP root");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &perf), TAG, "HTTP perf");
+    if(setup_only){
+        // 7 routes: original key/Wi-Fi wizard, captive fallback and OTA recovery.
+        ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd,&ota),TAG,"HTTP OTA");
+        ESP_RETURN_ON_ERROR(mira_beta_setup_register_minimal(httpd),TAG,"Mira setup wizard");
+        ESP_RETURN_ON_ERROR(mira_beta_setup_register_captive(httpd),TAG,"Mira captive portal");
+        ESP_LOGI(TAG,"MIRA_SETUP_READY: Mira Panel AP, http://192.168.4.1");
+        return ESP_OK;
+    }
     register_optional_route(httpd,&debug);
     // Prioritize OTA recovery: register it before experimental routes.
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &ota), TAG, "HTTP OTA");
