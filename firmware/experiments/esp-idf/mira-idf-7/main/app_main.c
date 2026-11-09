@@ -97,7 +97,7 @@ void app_main(void){
     progress(60);
     if(mira_recovery_web_fallback()){
         if(esp_lv_adapter_lock(-1)==ESP_OK){
-            mira_splash_set_message("Mode secours HTTP : /status\\n192.168.4.1");
+            mira_splash_set_message("Mode secours HTTP : /status\n192.168.4.1");
             esp_lv_adapter_unlock();
         }
         ESP_LOGW(TAG,"MIRA_HTTP_RESCUE: no widgets/services until full server memory is available");
