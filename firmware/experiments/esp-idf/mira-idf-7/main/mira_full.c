@@ -3911,7 +3911,7 @@ bool mira_full_storage_prepare(void){
     const esp_err_t err=esp_vfs_spiffs_register(&cfg);
     spiffs_ready=(err==ESP_OK);
     if(!spiffs_ready)ESP_LOGW(TAG,"SPIFFS unavailable (%s); nonblank data not formatted",esp_err_to_name(err));
-    else ESP_LOGI(TAG,blank?"Fresh Mira SPIFFS ready":"Existing Mira SPIFFS mounted");
+    else ESP_LOGI(TAG,"%s",blank?"Fresh Mira SPIFFS ready":"Existing Mira SPIFFS mounted");
     return spiffs_ready;
 }
 bool mira_full_storage_init(void){
