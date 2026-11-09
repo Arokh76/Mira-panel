@@ -25,6 +25,7 @@
 #include <time.h>
 #include "esp_event.h"
 #include "esp_http_server.h"
+#include "esp_heap_caps.h"
 #include "esp_ota_ops.h"
 #include "esp_log.h"
 #include "esp_check.h"
@@ -248,6 +249,27 @@ static esp_err_t perf_get(httpd_req_t *req) {
       current_scroll_rebuild_us, current_cache_state, current_cache_count);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, text);
+}
+// Consistent with Stage 3 /status: a tiny, read-only runtime memory endpoint.
+static esp_err_t full_status_get(httpd_req_t *req){
+    mira_display_stats_t d={0};
+    mira_display_stats(&d);
+    char out[384];
+    int n=snprintf(out,sizeof(out),
+       "{\"stage\":4,\"ssid\":\"Mira Panel\","
+       "\"rgb_refreshes\":%" PRIu32 ",\"gt911_ready\":%s,"
+       "\"widgets\":%" PRIu32 ",\"setup_required\":%s,"
+       "\"dma_internal_free\":%u,\"dma_internal_largest_block\":%u,"
+       "\"psram_free\":%u}\\n",
+       d.frames,d.touch_ready?"true":"false",
+       mira_full_widget_count(),mira_beta_setup_unconfigured()?"true":"false",
+       (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA),
+       (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA),
+       (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    if(n<0||(size_t)n>=sizeof(out))return httpd_resp_send_500(req);
+    httpd_resp_set_type(req,"application/json");
+    httpd_resp_set_hdr(req,"Cache-Control","no-store");
+    return httpd_resp_send(req,out,n);
 }
 static esp_err_t update_post(httpd_req_t *req) {
     // Original beta browser POST /update?send=ID, /update?send_range, etc.
@@ -1043,7 +1065,10 @@ esp_err_t mira_recovery_init(void) {
     ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_AP, &ap), TAG, "wifi config");
     configure_beta_ap_profile();
     ESP_RETURN_ON_ERROR(esp_wifi_start(), TAG, "wifi start");
-    ESP_ERROR_CHECK_WITHOUT_ABORT(mira_beta_captive_dns_start());
+    // Only the unconfigured setup AP needs a DNS wildcard. On a configured
+    // display, skipping this 4KB task preserves internal DRAM for MQTT/Jeedom.
+    if(mira_beta_setup_unconfigured())
+        ESP_ERROR_CHECK_WITHOUT_ABORT(mira_beta_captive_dns_start());
     // No persistent AP supervisor needed before the user saves Wi-Fi credentials.
     if(!mira_beta_setup_unconfigured() &&
        xTaskCreate(recovery_ap_supervisor,"mira_ap_guard",3072,NULL,3,NULL)!=pdPASS)
@@ -1149,6 +1174,7 @@ esp_err_t mira_recovery_init(void) {
     httpd_handle_t httpd = NULL;
     ESP_RETURN_ON_ERROR(httpd_start(&httpd, &conf), TAG, "HTTP start");
     httpd_uri_t root = {.uri="/", .method=HTTP_GET, .handler=index_get};
+    httpd_uri_t status = {.uri="/status", .method=HTTP_GET, .handler=full_status_get};
     httpd_uri_t debug = {.uri="/recovery", .method=HTTP_GET, .handler=recovery_debug_get};
     httpd_uri_t perf = {.uri="/perf", .method=HTTP_GET, .handler=perf_get};
     httpd_uri_t scroll_classic = {.uri="/scroll/classic", .method=HTTP_GET, .handler=scroll_classic_get};
@@ -1163,9 +1189,10 @@ esp_err_t mira_recovery_init(void) {
     httpd_uri_t wifi_post={.uri="/mira/wifi",.method=HTTP_POST,.handler=wifi_profile_post};
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &root), TAG, "HTTP root");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &perf), TAG, "HTTP perf");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &status), TAG, "HTTP status");
     if(setup_only){
-        // 7 routes: original key/Wi-Fi wizard, captive fallback and OTA recovery.
-        ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd,&ota),TAG,"HTTP OTA");
+        // Original key/Wi-Fi wizard, captive fallback, status and perf.
+        // No OTA on an open first-run AP before the local password is chosen.
         ESP_RETURN_ON_ERROR(mira_beta_setup_register_minimal(httpd),TAG,"Mira setup wizard");
         ESP_RETURN_ON_ERROR(mira_beta_setup_register_captive(httpd),TAG,"Mira captive portal");
         ESP_LOGI(TAG,"MIRA_SETUP_READY: Mira Panel AP, http://192.168.4.1");
