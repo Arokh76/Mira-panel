@@ -19,12 +19,11 @@ jobs:
           ref: v9.6.0
           path: firmware/experiments/esp-idf/mira-idf-7/components/lvgl
           submodules: false
-      - name: Verify full provisioning is wired without erasing preserved data
+      - name: Verify UI-only diagnostics preserve network, storage and GPIO
         shell: bash
         run: |
           set -euo pipefail
           ROOT=firmware/experiments/esp-idf/mira-idf-7
-          grep -Fq 'FULL_UI_READY' "$ROOT/main/app_main.c"
           grep -Fq 'NETWORK_FAILED_HALT' "$ROOT/main/app_main.c"
           grep -Fq 'FIRST_SETUP_READY' "$ROOT/main/app_main.c"
           grep -Fq 'mira_splash_set_message' "$ROOT/main/mira_splash.c"
@@ -35,7 +34,6 @@ jobs:
           grep -Fq 'MIRA_NO_WIDGETS_IDLE' "$ROOT/main/app_main.c"
           grep -Fq 'MIRA_WIDGET_CONFIG_FOUND' "$ROOT/main/app_main.c"
           grep -Fq 'stat("/spiffs/miralvgl.json"' "$ROOT/main/app_main.c"
-          grep -Fq 'BEFORE_JEEDOM' "$ROOT/main/app_main.c"
           grep -Fq 'CLOCK_UI_ONLY_NO_SERVICES' "$ROOT/main/app_main.c"
           grep -Fq 'MIRA_UI_CREATION_BEGIN' "$ROOT/main/app_main.c"
           grep -Fq 'CLOCK_UI_PHASE 7:' "$ROOT/main/mira_full.c"
@@ -43,9 +41,6 @@ jobs:
           ! grep -Eq 'mira_mqtt_init\\(' "$ROOT/main/app_main.c"
           grep -Fq 'mira_recovery_init()' "$ROOT/main/app_main.c"
           grep -Fq 'mira_full_storage_prepare()' "$ROOT/main/app_main.c"
-          grep -Fq 'mira_full_storage_init()' "$ROOT/main/app_main.c"
-          grep -Fq 'mira_mqtt_init()' "$ROOT/main/app_main.c"
-          grep -Fq 'mira_jeedom_action_init()' "$ROOT/main/app_main.c"
           grep -Fq 'mira_beta_setup_register_minimal(httpd)' "$ROOT/main/mira_recovery.c"
           grep -Fq 'MIRA_SETUP_READY' "$ROOT/main/mira_recovery.c"
           grep -Fq 'CONFIG_SPIRAM_XIP_FROM_PSRAM=y' "$ROOT/sdkconfig.defaults"
