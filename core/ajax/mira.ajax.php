@@ -360,6 +360,29 @@ try {
             @session_write_close();
         }
         $host = $parts['host'];
+        // Abort fast if the panel is missing: never keep a Jeedom PHP worker
+        // busy in the 12s POST + 17s reboot-verification loop for an offline WT32.
+        // A panel that *was* online is still allowed to reboot during /programui.
+        $probe=curl_init('http://'.$host.'/getindex?key='.rawurlencode($key));
+        curl_setopt_array($probe,array(
+            CURLOPT_RETURNTRANSFER=>true,
+            CURLOPT_CONNECTTIMEOUT_MS=>350,
+            CURLOPT_TIMEOUT_MS=>1500,
+            CURLOPT_NOSIGNAL=>true,
+            CURLOPT_FOLLOWLOCATION=>false
+        ));
+        $probeBody=curl_exec($probe);
+        $probeErr=curl_errno($probe);
+        $probeCode=(int)curl_getinfo($probe,CURLINFO_HTTP_CODE);
+        curl_close($probe);
+        if ($probeBody===false || $probeCode===0) {
+            log::add('mira','debug','[ProgramUI] Ecran indisponible '.$host.
+                ' (sonde cURL '.$probeErr.') : abandon immédiat, aucun POST');
+            throw new Exception('Mira : écran hors ligne ou en démarrage. Réessayer lorsqu’il est disponible.');
+        }
+        if ($probeCode!==200) {
+            throw new Exception('Mira : écran non prêt (HTTP '.$probeCode.'). Aucun POST envoyé.');
+        }
         // 12 s maximum pour l'accuse-reception, suivi si besoin d'une
         // verification en lecture seule. Aucun nouvel envoi n'est effectue.
         log::add('mira', 'debug', '[ProgramUI] Envoi vers ' . $host .
@@ -427,8 +450,8 @@ try {
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $url);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT_MS, 350);
+        curl_setopt($ch, CURLOPT_TIMEOUT_MS, 1500);
         $result = curl_exec($ch);
         if (curl_errno($ch)) {
         }
