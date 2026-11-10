@@ -2754,8 +2754,13 @@ static void jeedom_action_worker(void *unused) {
             continue;
         }
         prefer_latest=!prefer_latest;
-        if(!strcmp(action.type,"__sync"))sync_jeedom_bindings();
-        else if(!strcmp(action.type,"__generic"))send_generic_action(&action);
+        if(!strcmp(action.type,"__sync")){
+            sync_jeedom_bindings();
+            // ESP-IDF reports the minimum remaining stack in bytes.
+            // Keep this in serial logs to validate the 24 KiB margin.
+            ESP_LOGI(TAG,"JEEDOM_HTTP_STACK_MIN_FREE=%u bytes",
+                     (unsigned)uxTaskGetStackHighWaterMark(NULL));
+        }else if(!strcmp(action.type,"__generic"))send_generic_action(&action);
         else send_jeedom_action(&action);
     }
 }
@@ -2965,9 +2970,11 @@ esp_err_t mira_jeedom_action_init(void) {
         action_queue=NULL;
         return ESP_ERR_NO_MEM;
     }
-    // ESP-IDF 5.5.6 WithCaps keeps TCB internal and places the 7168B
-    // HTTP worker stack in octal PSRAM. No blocking HTTP on LVGL.
-    if(xTaskCreateWithCaps(jeedom_action_worker,"mira_jeedom_http",7168,
+    // Jeedom index validation + HTTP + cJSON + NVS can nest deeply on
+    // initial synchronization. 7168 bytes overflowed reliably on boot
+    // (2026-11-10 serial logs); give the worker 24 KiB of octal PSRAM.
+    // WithCaps keeps the TCB internal. No blocking HTTP on LVGL.
+    if(xTaskCreateWithCaps(jeedom_action_worker,"mira_jeedom_http",24576,
                            NULL,3,&action_worker_handle,
                            MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)!=pdPASS) {
         heap_caps_free(last_value_actions);
