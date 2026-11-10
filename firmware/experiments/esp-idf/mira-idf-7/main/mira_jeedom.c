@@ -28,6 +28,7 @@
 #include "esp_crt_bundle.h"
 #include "esp_system.h"
 #include "esp_wifi.h"
+#include "esp_netif.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
@@ -2448,6 +2449,15 @@ static esp_err_t save_remote_mapping(nvs_handle_t nvs,int local,int remote,uint3
 /* Expose a sanitized mapping diagnostic for the Jeedom "unknown Mira ID"
  * error. Do not guess a replacement ID or disable the plugin validation. */
 static volatile int last_binding_sync_http;
+// The HTTP init action must not run while STA is still associating or
+// before DHCP/static-IP provisioning has completed. AP IP is not sufficient.
+static bool jeedom_sta_has_ip(void){
+    esp_netif_t *sta=esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    esp_netif_ip_info_t ip={0};
+    wifi_ap_record_t connected_ap={0};
+    return sta&&esp_netif_get_ip_info(sta,&ip)==ESP_OK&&ip.ip.addr!=0&&
+           esp_wifi_sta_get_ap_info(&connected_ap)==ESP_OK;
+}
 static void sync_jeedom_bindings(void){
     nvs_handle_t cfg;
     if(nvs_open("mira_idf_jeed",NVS_READONLY,&cfg)!=ESP_OK)return;
@@ -2546,9 +2556,10 @@ static void sync_jeedom_bindings(void){
         if(jeedom_state_replay_pending){
             // Unlike ?value=json (index-only), invoking the saved beta init
             // action restores real Jeedom infos and toggles via passive HTTP.
-            // Clear BEFORE the request: init_cmd may queue another __sync
-            // while rebuilding its mappings. Never create a request loop.
-            jeedom_state_replay_pending=false;
+            // Keep replay pending until the Jeedom init request is
+            // acknowledged. A failed/early HTTP call must be retried.
+            // The init event only asks Jeedom to replay passive states:
+            // it must never emit an On/Off action to the lamps.
             char restore_uri[1100];
             int n=snprintf(restore_uri,sizeof(restore_uri),
                 "%s/core/api/jeeApi.php?plugin=mira&type=event&apikey=%s&id=%s",
@@ -2570,11 +2581,13 @@ static void sync_jeedom_bindings(void){
                     char *reply=ack.buf;
                     while(*reply&&isspace((unsigned char)*reply))reply++;
                     if(result==ESP_OK&&status==200&&!ack.overflow&&
-                       !strcmp(reply,init))
-                        ESP_LOGI(TAG,"Jeedom switch states replayed after boot/programming");
-                    else
+                       !strcmp(reply,init)){
+                        jeedom_state_replay_pending=false;
+                        ESP_LOGI(TAG,"JEEDOM_BOOT_REPLAY_ACK: init accepted; passive states requested");
+                    }else{
                         ESP_LOGW(TAG,"Jeedom boot state replay not acknowledged (HTTP %d, %s)",
                             status,esp_err_to_name(result));
+                    }
                 }else ESP_LOGW(TAG,"Jeedom boot state replay client unavailable");
             }
         }
@@ -2755,7 +2768,28 @@ static void jeedom_action_worker(void *unused) {
         }
         prefer_latest=!prefer_latest;
         if(!strcmp(action.type,"__sync")){
-            sync_jeedom_bindings();
+            if(jeedom_mode_enabled&&jeedom_state_replay_pending){
+                // On cold boot, the Wi-Fi connection and STA IP may not
+                // exist yet. Retry the read-only Jeedom index + init handshake
+                // from this PSRAM worker; never block LVGL or HTTP handlers.
+                const unsigned max_attempts=10;
+                for(unsigned attempt=1;
+                    attempt<=max_attempts&&jeedom_state_replay_pending;
+                    ++attempt){
+                    if(jeedom_sta_has_ip()){
+                        ESP_LOGI(TAG,"JEEDOM_BOOT_REPLAY_TRY=%u/%u",
+                                 attempt,max_attempts);
+                        sync_jeedom_bindings();
+                    }else{
+                        ESP_LOGI(TAG,"JEEDOM_BOOT_REPLAY_WAIT_IP=%u/%u",
+                                 attempt,max_attempts);
+                    }
+                    if(jeedom_state_replay_pending&&attempt<max_attempts)
+                        vTaskDelay(pdMS_TO_TICKS(3000));
+                }
+                if(jeedom_state_replay_pending)
+                    ESP_LOGW(TAG,"JEEDOM_BOOT_REPLAY_PENDING: retry on next Jeedom sync");
+            }else sync_jeedom_bindings();
             // ESP-IDF reports the minimum remaining stack in bytes.
             // Keep this in serial logs to validate the 24 KiB margin.
             ESP_LOGI(TAG,"JEEDOM_HTTP_STACK_MIN_FREE=%u bytes",
