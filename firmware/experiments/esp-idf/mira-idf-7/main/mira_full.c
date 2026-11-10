@@ -2755,7 +2755,7 @@ static void build_config(void){
         char cached[160]={0};
         if(!mira_full_cached_state(w->name,cached,sizeof(cached)))continue;
         mira_state_update_t replay={0};
-        snprintf(replay.name,sizeof(replay.name),"%s",w->name);
+        snprintf(replay.name,sizeof(replay.name),"%.95s",w->name);
         snprintf(replay.value,sizeof(replay.value),"%s",cached);
         apply_state_on_lvgl_task(&replay);
     }
