@@ -2167,9 +2167,7 @@ class miraCmd extends cmd {
             $id=(int)$unused->getConfiguration('commande',-1);
             if ($id<1) continue;
             $url='http://'.$ip.'/updatenr?key='.rawurlencode($key).'&info='.$id.'&value=';
-            $ch=curl_init($url);
-            curl_setopt_array($ch,array(CURLOPT_RETURNTRANSFER=>true,CURLOPT_CONNECTTIMEOUT=>1,CURLOPT_TIMEOUT=>2));
-            curl_exec($ch); curl_close($ch);
+            $eq->panelHttpGet($url);
           }
         }
       }
@@ -2191,21 +2189,11 @@ class miraCmd extends cmd {
             $ip = trim((string)$eq->getConfiguration('adresseip'));
             $pass = (string)$eq->getConfiguration('password');
             if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) && $pass !== '') {
-              $ch = curl_init('http://' . $ip . '/camera/config');
-              curl_setopt_array($ch, array(
-                CURLOPT_POST => true,
-                CURLOPT_POSTFIELDS => http_build_query(array(
-                  'key' => $pass, 'name' => $widgetName, 'url' => $url)),
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_CONNECTTIMEOUT => 2,
-                CURLOPT_TIMEOUT => 4,
-              ));
-              $result = curl_exec($ch);
-              $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-              curl_close($ch);
-              if ($result === false || $status !== 200 || trim((string)$result) !== 'OK') {
-                log::add('mira','warning','[CAMERA] URL non transmise a '.$widgetName .
-                         ' (HTTP '.$status.', firmware camera beta 0.7.17 requis)');
+              $result=$eq->panelHttpRequest('http://'.$ip.'/camera/config','POST',
+                http_build_query(array('key'=>$pass,'name'=>$widgetName,'url'=>$url)));
+              if ($result===false || trim((string)$result)!=='OK') {
+                log::add('mira','debug','[CAMERA] URL non transmise à '.$widgetName.
+                  ' (écran indisponible ou réponse invalide)');
               }
             }
           }
@@ -2346,11 +2334,7 @@ class miraCmd extends cmd {
             $url='http://'.$eqLogic->getConfiguration('adresseip').
               '/updatenr?key='.rawurlencode((string)$eqLogic->getConfiguration('password')).
               '&info='.(int)$cmd.'&value=--';
-            $ch=curl_init($url);
-            curl_setopt_array($ch,array(CURLOPT_RETURNTRANSFER=>true,
-              CURLOPT_CONNECTTIMEOUT=>1,CURLOPT_TIMEOUT=>2));
-            curl_exec($ch);
-            curl_close($ch);
+            $eqLogic->panelHttpGet($url);
             return null;
           }
           if (preg_match('/__(solar|home|grid|battery|soc|soc2|soc3)$/D',(string)$nom)) {
@@ -2364,10 +2348,7 @@ class miraCmd extends cmd {
             $url = 'http://'.$eqLogic->getConfiguration('adresseip').
                    '/updatenr?key='.rawurlencode($eqLogic->getConfiguration('password')).
                    '&info='.(int)$cmd.'&value='.rawurlencode($display);
-            $ch = curl_init($url);
-            curl_setopt_array($ch,array(CURLOPT_RETURNTRANSFER=>true,
-                   CURLOPT_CONNECTTIMEOUT=>2,CURLOPT_TIMEOUT=>4));
-            curl_exec($ch); curl_close($ch);
+            $eqLogic->panelHttpGet($url);
             // The Mira cached value is also rounded; source is unchanged.
             return $formattedResult;
           }
@@ -2467,21 +2448,14 @@ class miraCmd extends cmd {
                  '&value=' . rawurlencode($optionValue);
           // Use HTTP directly; do not execute the Jeedom select/action command.
           // This is state feedback only, not a physical heating command.
-          $ch = curl_init();
-          curl_setopt($ch, CURLOPT_URL, $url);
-          curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-          curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
-          curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-          $output = curl_exec($ch);
-          $errno = curl_errno($ch);
-          curl_close($ch);
-          if ($errno || $output === false || trim((string)$output) === 'Erreur' || trim((string)$output) === '') {
-            log::add('mira', 'warning', $eqLogic->getName() . ': LIST STATE non synchronisé : ' .
-                     $listName . ' = ' . $selected . ' (' . $paramName . ')');
-            return 'Erreur';
+          $output=$eqLogic->panelHttpGet($url);
+          if ($output===false || trim((string)$output)==='Erreur' ||
+              trim((string)$output)==='') {
+            log::add('mira','debug','[PASSIVE] LIST STATE non synchronisé : '.$listName);
+            // The Jeedom Info value is valid even when the display is absent.
+            return $result;
           }
-          log::add('mira', 'debug', $eqLogic->getName() . ': LIST STATE ' .
-                   $listName . ' = ' . $selected . ' -> ID ' . $output);
+          log::add('mira','debug','[PASSIVE] LIST STATE '.$listName.' -> '.$output);
           // Preserve Jeedom info value semantics (label remains a label,
           // not the screen-specific numeric command ID returned by /listvalue).
           return $result;
@@ -2500,17 +2474,9 @@ class miraCmd extends cmd {
           $url='http://'.$eqLogic->getConfiguration('adresseip').
             '/updatenr?key='.rawurlencode((string)$eqLogic->getConfiguration('password')).
             '&range='.$cmd.'&value='.rawurlencode((string)$result);
-          $ch=curl_init($url);
-          curl_setopt_array($ch,array(CURLOPT_RETURNTRANSFER=>true,
-            CURLOPT_CONNECTTIMEOUT=>1,CURLOPT_TIMEOUT=>3));
-          $out=curl_exec($ch);
-          $status=(int)curl_getinfo($ch,CURLINFO_HTTP_CODE);
-          curl_close($ch);
-          if ($out===false || $status!==200 || trim((string)$out)==='Erreur') {
-            log::add('mira','warning','[PASSIVE] Consigne/curseur non synchronisé : '.
-              $nom.' (HTTP '.$status.')');
-            return null;
-          }
+          $out=$eqLogic->panelHttpGet($url);
+          if ($out===false || trim((string)$out)==='Erreur')
+            log::add('mira','debug','[PASSIVE] Consigne/curseur non synchronisé : '.$nom);
           return $result;
         
         }else if ($this->getConfiguration('calcul') != ''&& $this->getConfiguration('type') == 'color'){
@@ -2532,17 +2498,9 @@ class miraCmd extends cmd {
           $url='http://'.$eqLogic->getConfiguration('adresseip').
             '/updatenr?key='.rawurlencode((string)$eqLogic->getConfiguration('password')).
             '&color='.$id.'&r='.$r.'&g='.$g.'&b='.$b;
-          $ch=curl_init($url);
-          curl_setopt_array($ch,array(CURLOPT_RETURNTRANSFER=>true,
-            CURLOPT_CONNECTTIMEOUT=>1,CURLOPT_TIMEOUT=>3));
-          $out=curl_exec($ch);
-          $status=(int)curl_getinfo($ch,CURLINFO_HTTP_CODE);
-          curl_close($ch);
-          if ($out===false || $status!==200 || trim((string)$out)!=='OK') {
-            log::add('mira','warning','[PASSIVE] Couleur non synchronisee : '.
-              $nom.' (HTTP '.$status.')');
-            return null;
-          }
+          $out=$eqLogic->panelHttpGet($url);
+          if ($out===false || trim((string)$out)!=='OK')
+            log::add('mira','debug','[PASSIVE] Couleur non synchronisée : '.$nom);
           return '#'.$hex;
         }
         
