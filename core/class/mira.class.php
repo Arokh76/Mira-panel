@@ -958,7 +958,10 @@ class mira extends eqLogic {
   	foreach (eqLogic::byType('mira', true) as $eqLogic) {
       if ($eqLogic->getConfiguration('ping') == "1"){
         try {
-          $exec_string = 'sudo ping -c 1 -w 1 ' . $eqLogic->getConfiguration('adresseip') ;
+          $host=trim((string)$eqLogic->getConfiguration('adresseip',''));
+          if (!preg_match('/^[A-Za-z0-9.\-]+$/D',$host)) continue;
+          // Non-interactive sudo and a one-second deadline; no password prompt.
+          $exec_string='sudo -n ping -c 1 -w 1 '.escapeshellarg($host).' 2>/dev/null';
           exec($exec_string, $output, $return);
           $output = array_values(array_filter($output));
           $latency = "-1";
@@ -2353,7 +2356,7 @@ class miraCmd extends cmd {
             return $formattedResult;
           }
           $url = 'http://'. $eqLogic->getConfiguration('adresseip') . '/updatenr?key=' . $eqLogic->getConfiguration('password') . '&info=' . $cmd .'&value='.$result; 
-          log::add('mira', 'debug', $eqLogic->getName().': INFO: info: ' . $nom .": ".$url);
+          log::add('mira','debug',$eqLogic->getName().': INFO: '.$nom);
           $output=$eqLogic->panelHttpGet($url);          	
           return $result;            
         
@@ -2366,7 +2369,7 @@ class miraCmd extends cmd {
           }else{
             $url = 'http://'. $eqLogic->getConfiguration('adresseip') . '/updatenr?key=' . $eqLogic->getConfiguration('password') . '&toggle=' . $id_1;           
           }
-          log::add('mira', 'debug', $eqLogic->getName().': INFO: toogle: ' . $nom .": ".$url);
+          log::add('mira','debug',$eqLogic->getName().': INFO toggle: '.$nom);
           $output=$eqLogic->panelHttpGet($url);          	
           return $result;
           
@@ -2764,14 +2767,14 @@ class miraCmd extends cmd {
               	$state = $this->getConfiguration('state');
         		$parent = $this->getConfiguration('parent');              
                 $url = 'http://'. $eqLogic->getConfiguration('adresseip') . '/updatenr?key=' . $eqLogic->getConfiguration('password') . '&toggle=' . $cmd;
-                log::add('mira', 'debug', $eqLogic->getName().": ACTION: toogle: ".$nom.": " . $url);
+                log::add('mira','debug',$eqLogic->getName().': ACTION toggle: '.$nom);
               	$miraDeferredUrl=$url;                             
                 $eqLogic->checkAndUpdateCmd($parent, $state);
               	if ($this->getConfiguration('calcul') != ''){
                 	$result = jeedom::evaluateExpression($this->getConfiguration('calcul'));
                 	cmd::byString($result)->execCmd(null, $cache=0);
               	}
-              	log::add('mira', 'debug', $eqLogic->getName().": ACTION: retour: " . $url);
+              	log::add('mira','debug',$eqLogic->getName().': ACTION retour: '.$nom);
               	$eqLogic->panelHttpGet($miraDeferredUrl);
                 break;
               
@@ -2788,7 +2791,7 @@ class miraCmd extends cmd {
           			$options_action = array('slider'=>$_options['slider']);
 					cmd::byString($result)->execCmd($options_action, $cache=0);
               	}
-              	log::add('mira', 'debug', $url);
+              	log::add('mira','debug','[HTTP] notification d’écran effectuée si disponible');
         		$eqLogic->panelHttpGet($miraDeferredUrl);
                 break;
               
@@ -2816,7 +2819,7 @@ class miraCmd extends cmd {
                     $options_action = array('select'=>$selected);
                     cmd::byString($result)->execCmd($options_action, $cache=0);
                 }
-              	log::add('mira', 'debug', $url);
+              	log::add('mira','debug','[HTTP] notification d’écran effectuée si disponible');
         		$eqLogic->panelHttpGet($miraDeferredUrl);
                 break;
               
@@ -2828,7 +2831,7 @@ class miraCmd extends cmd {
                 	$result = jeedom::evaluateExpression($this->getConfiguration('calcul'));
                 	cmd::byString($result)->execCmd(null, $cache=0);
               	}
-              	log::add('mira', 'debug', $url);
+              	log::add('mira','debug','[HTTP] notification d’écran effectuée si disponible');
         		$eqLogic->panelHttpGet($miraDeferredUrl);
                 break;
               
@@ -2844,7 +2847,7 @@ class miraCmd extends cmd {
                 	$options_action = array('color'=>$_options['color']);
 					cmd::byString($result)->execCmd($options_action, $cache=0);
               	}
-              log::add('mira', 'debug', $url);
+              log::add('mira','debug','[HTTP] notification d’écran effectuée si disponible');
         		$eqLogic->panelHttpGet($miraDeferredUrl);
                 break;
               	              
