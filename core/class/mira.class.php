@@ -19,6 +19,49 @@
 require_once dirname(__FILE__) . '/../../../../core/php/core.inc.php';
 
 class mira extends eqLogic {
+  /**
+   * A missing panel must not block Jeedom's MQTT and mapped actions.
+   * Per-panel 20-second circuit breaker; normal calls never exceed 1.5s.
+   */
+  public function panelHttpRequest($url, $method='GET', $postFields=null, $extraOptions=array()) {
+    $until=(int)$this->getCache('mira_panel_offline_until',0);
+    if ($until>time()) return false;
+    $ch=curl_init($url);
+    if ($ch===false) return false;
+    $opts=array(
+      CURLOPT_RETURNTRANSFER=>true,
+      CURLOPT_CONNECTTIMEOUT_MS=>350,
+      CURLOPT_TIMEOUT_MS=>1500,
+      CURLOPT_NOSIGNAL=>true,
+      CURLOPT_FOLLOWLOCATION=>false
+    );
+    if ($method==='POST') {
+      $opts[CURLOPT_POST]=true;
+      $opts[CURLOPT_POSTFIELDS]=$postFields;
+    }
+    foreach ((array)$extraOptions as $key=>$value) $opts[$key]=$value;
+    curl_setopt_array($ch,$opts);
+    $body=curl_exec($ch);
+    $errno=curl_errno($ch);
+    $status=(int)curl_getinfo($ch,CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if ($body===false || $status===0) {
+      if ($until<=time()) {
+        $this->setCache('mira_panel_offline_until',time()+20);
+        log::add('mira','debug','[HTTP][OFFLINE] '.$this->getName().
+          ' : écran indisponible ; prochain essai dans 20 s (cURL '.$errno.')');
+      }
+      return false;
+    }
+    if ($status!==200) return false;
+    $this->setCache('mira_panel_offline_until',0);
+    return $body;
+  }
+
+  public function panelHttpGet($url) {
+    return $this->panelHttpRequest($url);
+  }
+
 
   /**
    * Jeedom owns the menu shortcuts. This POST changes only the nav favorites;
@@ -53,21 +96,11 @@ class mira extends eqLogic {
     }
 
     $payload = json_encode(array('favorites' => $favorites));
-    $ch = curl_init('http://' . $ip . '/navfavorites');
-    curl_setopt($ch, CURLOPT_POST, true);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query(array('key' => $password, 'json' => $payload)));
-    curl_setopt($ch, CURLOPT_HTTPHEADER, array('Content-Type: application/x-www-form-urlencoded'));
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 4);
-    $raw = curl_exec($ch);
-    $errno = curl_errno($ch);
-    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-    if ($errno || $code !== 200 || trim((string)$raw) !== 'OK') {
-      throw new Exception('Mira favoris : écran non synchronisé (HTTP ' . $code .
-        '). Vérifier le firmware 0.7.2 et utiliser « Réenvoyer les favoris ».');
-    }
+    $raw=$this->panelHttpRequest('http://'.$ip.'/navfavorites','POST',
+      http_build_query(array('key'=>$password,'json'=>$payload)),
+      array(CURLOPT_HTTPHEADER=>array('Content-Type: application/x-www-form-urlencoded')));
+    if ($raw===false || trim((string)$raw)!=='OK')
+      throw new Exception('Mira favoris : écran indisponible ou réponse invalide.');
     log::add('mira', 'debug', '[Navigation] favoris synchronisés sur ' . $this->getName());
     return true;
   }
@@ -82,17 +115,10 @@ class mira extends eqLogic {
       if ((string)$this->getConfiguration('nav_show' . $page, '1') === '1')
         $mask |= (1 << $page);
     }
-    $ch = curl_init('http://' . $ip . '/navpages');
-    curl_setopt_array($ch, array(CURLOPT_POST => true,
-        CURLOPT_POSTFIELDS => http_build_query(array('key'=>$pass,'mask'=>$mask)),
-        CURLOPT_RETURNTRANSFER => true, CURLOPT_CONNECTTIMEOUT => 2,
-        CURLOPT_TIMEOUT => 4));
-    $out = curl_exec($ch);
-    $status = (int)curl_getinfo($ch,CURLINFO_HTTP_CODE);
-    curl_close($ch);
-    if ($out === false || $status !== 200 || trim((string)$out) !== 'OK') {
-      log::add('mira','warning','[NAV] Visibilité des pages non transmise : ' . $status
-          . ' (firmware 0.7.24 beta requis)');
+    $out=$this->panelHttpRequest('http://'.$ip.'/navpages','POST',
+      http_build_query(array('key'=>$pass,'mask'=>$mask)));
+    if ($out===false || trim((string)$out)!=='OK') {
+      log::add('mira','debug','[NAV] Visibilité des pages non transmise (écran indisponible)');
       return false;
     }
     return true;
@@ -529,21 +555,8 @@ class mira extends eqLogic {
 
     $url='http://'.$ip.'/updatenr?key='.rawurlencode($key).
         '&info='.$index.'&value='.rawurlencode((string)$value);
-    $ch=curl_init($url);
-    curl_setopt_array($ch,array(CURLOPT_RETURNTRANSFER=>true,
-      CURLOPT_CONNECTTIMEOUT_MS=>500,CURLOPT_TIMEOUT_MS=>1500,
-      CURLOPT_NOSIGNAL=>true));
-    $startedAt=microtime(true);
-    $out=curl_exec($ch);
-    $status=(int)curl_getinfo($ch,CURLINFO_HTTP_CODE);
-    $error=$out===false ? curl_error($ch) : '';
-    curl_close($ch);
-    $duration=(int)round((microtime(true)-$startedAt)*1000);
-    if ($out===false || $status!==200) {
-      log::add('mira','debug','[MEDIA][HTTP] '.$cmd->getLogicalId().
-        ' : HTTP '.$status.' en '.$duration.' ms '.$error);
-      return false;
-    }
+    $out=$mira->panelHttpGet($url);
+    if ($out===false) return false;
     $cmd->setCache(array('mira_media_http_value'=>(string)$value,
       'mira_media_http_at'=>microtime(true)));
     log::add('mira','debug','[MEDIA][HTTP] '.$cmd->getLogicalId().
@@ -839,16 +852,9 @@ class mira extends eqLogic {
         $toggleId=(int)$stateCmd->getConfiguration($on?'id_1':'id_0',0);
         if ($toggleId<1) continue;
         $url='http://'.$ip.'/sync/toggle?key='.rawurlencode($key).'&id='.$toggleId;
-        $ch=curl_init($url);
-        curl_setopt_array($ch,array(CURLOPT_RETURNTRANSFER=>true,
-          CURLOPT_CONNECTTIMEOUT_MS=>500,CURLOPT_TIMEOUT_MS=>1500,
-          CURLOPT_NOSIGNAL=>true));
-        $out=curl_exec($ch);
-        $status=(int)curl_getinfo($ch,CURLINFO_HTTP_CODE);
-        curl_close($ch);
-        if ($out!==false && $status===200) ++$sent;
+        if ($this->panelHttpGet($url)!==false) ++$sent;
         else log::add('mira','debug','[BOOT][TOGGLE] Etat non synchronise : '.
-                      $stateCmd->getLogicalId().' (HTTP '.$status.')');
+                      $stateCmd->getLogicalId().' (écran indisponible)');
       } catch (Throwable $e) {
         log::add('mira','warning','[BOOT][TOGGLE] '.$stateCmd->getLogicalId().' : '.$e->getMessage());
       }
@@ -905,17 +911,9 @@ class mira extends eqLogic {
     $ip = trim((string)$this->getConfiguration('adresseip'));
     $pass = (string)$this->getConfiguration('password');
     if (!filter_var($ip,FILTER_VALIDATE_IP,FILTER_FLAG_IPV4) || $pass === '') return 0;
-    $ch = curl_init('http://' . $ip . '/gpio/state');
-    curl_setopt_array($ch,array(CURLOPT_RETURNTRANSFER=>true,
-      CURLOPT_CONNECTTIMEOUT=>2,CURLOPT_TIMEOUT=>4,
-      CURLOPT_HTTPAUTH=>CURLAUTH_BASIC,CURLOPT_USERPWD=>'admin:'.$pass));
-    $response = curl_exec($ch);
-    $code = (int)curl_getinfo($ch,CURLINFO_HTTP_CODE);
-    curl_close($ch);
-    if ($response === false || $code !== 200) {
-      log::add('mira','debug','[GPIO] Retour d etat inaccessible sur '.$this->getName().' (HTTP '.$code.')');
-      return 0;
-    }
+    $response=$this->panelHttpRequest('http://'.$ip.'/gpio/state','GET',null,
+      array(CURLOPT_HTTPAUTH=>CURLAUTH_BASIC,CURLOPT_USERPWD=>'admin:'.$pass));
+    if ($response===false) return 0;
     $data = json_decode($response,true);
     if (!is_array($data) || !isset($data['pins']) || !is_array($data['pins'])) return 0;
     $pins = array();
@@ -1946,79 +1944,39 @@ class mira extends eqLogic {
   
   public function Reboot_Module() {    
     $url = 'http://'.$this->getConfiguration('adresseip').'/reboot?key='.$this->getConfiguration('password');
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, $url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-    $result = curl_exec($ch);
-    if (curl_errno($ch)) {
-        return "Erreur";
-    }
-    curl_close($ch);    
+    $result=$this->panelHttpGet($url);
+    if ($result===false) return "Erreur";    
     log::add(__CLASS__, 'debug', 'Redémarrage du module: ' . $result);
-    return $module;
+    return $result;
   }
   
   
   public function SendJeedomIDOrder($value) {
     $url = 'http://'.$this->getConfiguration('adresseip').'/sendjeedomorderid?key='.$this->getConfiguration('password').'&value='.$value;
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, $url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-    $result = curl_exec($ch);
-    if (curl_errno($ch)) {
-        return "Erreur";		
-    }
-    curl_close($ch);
+    $result=$this->panelHttpGet($url);
+    if ($result===false) return "Erreur";
     return $result;    
   }
   
   /*public function SetJeedomId($param,$value) {
     $url = 'http://'.$this->getConfiguration('adresseip').'/setjeedomid?key='.$this->getConfiguration('password').'&id='.$param.'&value='.$value;
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, $url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-    $result = curl_exec($ch);
-    if (curl_errno($ch)) {
-        return "Erreur";		
-    }
-    curl_close($ch);
+    $result=$this->panelHttpGet($url);
+    if ($result===false) return "Erreur";
     return $result;    
   }
   
   public function SetJeedomToggleId($param,$value0, $value1) {
     $url = 'http://'.$this->getConfiguration('adresseip').'/setjeedomtoggleid?key='.$this->getConfiguration('password').'&id='.$param.'&value0='.$value0.'&value1='.$value1;
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, $url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-    $result = curl_exec($ch);
-    if (curl_errno($ch)) {
-        return "Erreur";		  
-    }
-    curl_close($ch);
+    $result=$this->panelHttpGet($url);
+    if ($result===false) return "Erreur";
     return $result;    
   }*/
   
   
   public function UpdateListParam($param,$value) {
     $url = 'http://'.$this->getConfiguration('adresseip').'/updatelistparam?key='.$this->getConfiguration('password').'&param='.$param.'&value='.$value;
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, $url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-    $result = curl_exec($ch);
-    if (curl_errno($ch)) {
-        return "Erreur";		
-    }
-    curl_close($ch);
+    $result=$this->panelHttpGet($url);
+    if ($result===false) return "Erreur";
     return $result;    
   }
   
@@ -2026,123 +1984,58 @@ class mira extends eqLogic {
   
   public function SaveListParam() {
     $url = 'http://'.$this->getConfiguration('adresseip').'/savelistparam?key='.$this->getConfiguration('password');
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, $url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-    $result = curl_exec($ch);
-    if (curl_errno($ch)) {
-        return "Erreur";		
-    }
-    curl_close($ch);
+    $result=$this->panelHttpGet($url);
+    if ($result===false) return "Erreur";
     return $result;    
   }
   
   public function AddListParam($param,$value) {
     $url = 'http://'.$this->getConfiguration('adresseip').'/addlistparam?key='.$this->getConfiguration('password').'&param='.$param.'&value='.$value.'&type=hidden-text';
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, $url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-    $result = curl_exec($ch);
-    if (curl_errno($ch)) {
-        return "Erreur";
-    }
-    curl_close($ch);
+    $result=$this->panelHttpGet($url);
+    if ($result===false) return "Erreur";
     return $result;    
   }
   
   public function AddListParamCrypted($param,$value) {
     $url = 'http://'.$this->getConfiguration('adresseip').'/addlistparam?key='.$this->getConfiguration('password').'&param='.$param.'&value='.$value.'&type=crypted-text';
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, $url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-    $result = curl_exec($ch);
-    if (curl_errno($ch)) {
-        return "Erreur";
-    }
-    curl_close($ch);
+    $result=$this->panelHttpGet($url);
+    if ($result===false) return "Erreur";
     return $result;    
   }
   
   public function AddListParamBool($param,$value) {
     $url = 'http://'.$this->getConfiguration('adresseip').'/addlistparam?key='.$this->getConfiguration('password').'&param='.$param.'&value='.$value.'&type=toggle';
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, $url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-    $result = curl_exec($ch);
-    if (curl_errno($ch)) {
-        return "Erreur";
-    }
-    curl_close($ch);
+    $result=$this->panelHttpGet($url);
+    if ($result===false) return "Erreur";
     return $result;    
   }
   
   public function CreateListParam() {
     $url = 'http://'.$this->getConfiguration('adresseip').'/createlistparam?key='.$this->getConfiguration('password');
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, $url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-    $result = curl_exec($ch);
-    if (curl_errno($ch)) {
-        return "Erreur";		
-    }
-    curl_close($ch);
+    $result=$this->panelHttpGet($url);
+    if ($result===false) return "Erreur";
     return $result;    
   }
   
   public function GetParam($param) {
     $url = 'http://'.$this->getConfiguration('adresseip').'/getparam?key='.$this->getConfiguration('password').'&value='.$param;
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, $url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-    $result = curl_exec($ch);
-    if (curl_errno($ch)) {
-        return "Erreur";
-    }
-    curl_close($ch);
+    $result=$this->panelHttpGet($url);
+    if ($result===false) return "Erreur";
     return $result;    
   }
    
   
   public function GetModule() {    
     $url = 'http://'.$this->getConfiguration('adresseip').'/getmodule?key='.$this->getConfiguration('password');
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, $url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-    $result = curl_exec($ch);
-    if (curl_errno($ch)) {
-        return "Erreur";
-    }
-    curl_close($ch);
+    $result=$this->panelHttpGet($url);
+    if ($result===false) return "Erreur";
     return $result; 
   }
   
   public function GetIndex($brut = false) {
     $url = 'http://'.$this->getConfiguration('adresseip').'/getindex?key='.$this->getConfiguration('password');
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, $url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-    $result = curl_exec($ch);
-    if (curl_errno($ch)) {
-        curl_close($ch);
-        return "Erreur";
-    }
-    curl_close($ch);
+    $result=$this->panelHttpGet($url);
+    if ($result===false) return "Erreur";
 
     if ($result === false || trim((string)$result) === '') return "Erreur";
     $jsonData = json_decode($result, true);
@@ -2157,16 +2050,8 @@ class mira extends eqLogic {
   
   public function AddListLvgl($type,$name,$loc,$min,$max,$value,$unit) {
     $url = 'http://'.$this->getConfiguration('adresseip').'/setjeedomid?key='.$this->getConfiguration('password').'&type='.$type.'&name='.$name.'&loc='.$loc.'&min='.$min.'&max='.$max.'&value='.$value.'&unit='.$unit;
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, $url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 5);
-    $result = curl_exec($ch);
-    if (curl_errno($ch)) {
-        return "Erreur";		
-    }
-    curl_close($ch);
+    $result=$this->panelHttpGet($url);
+    if ($result===false) return "Erreur";
     return $result;    
   }  
   
@@ -2258,18 +2143,12 @@ class miraCmd extends cmd {
     $ip = trim((string)$eq->getConfiguration('adresseip'));
     $pass = (string)$eq->getConfiguration('password');
     if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) || $pass === '') return false;
-    $ch = curl_init('http://' . $ip . $route . ($method === 'GET' ? '?' . http_build_query($params) : ''));
-    curl_setopt_array($ch, array(CURLOPT_RETURNTRANSFER => true, CURLOPT_CONNECTTIMEOUT => 2,
-      CURLOPT_TIMEOUT => 4, CURLOPT_HTTPAUTH => CURLAUTH_BASIC, CURLOPT_USERPWD => 'admin:' . $pass));
-    if ($method === 'POST') {
-      curl_setopt($ch, CURLOPT_POST, true);
-      curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($params));
-      curl_setopt($ch, CURLOPT_HTTPHEADER, array('X-Mira-GPIO: 1'));
-    }
-    $out = curl_exec($ch);
-    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-    return ($out !== false && $code === 200) ? $out : false;
+    return $eq->panelHttpRequest(
+      'http://'.$ip.$route.($method==='GET'?'?'.http_build_query($params):''),
+      $method, $method==='POST'?http_build_query($params):null,
+      array(CURLOPT_HTTPAUTH=>CURLAUTH_BASIC,
+            CURLOPT_USERPWD=>'admin:'.$pass,
+            CURLOPT_HTTPHEADER=>array('X-Mira-GPIO: 1')));
   }
   public function postSave() {
     // The SOC master row owns the 1..3 battery selector. Clear unused
@@ -2494,8 +2373,7 @@ class miraCmd extends cmd {
           }
           $url = 'http://'. $eqLogic->getConfiguration('adresseip') . '/updatenr?key=' . $eqLogic->getConfiguration('password') . '&info=' . $cmd .'&value='.$result; 
           log::add('mira', 'debug', $eqLogic->getName().': INFO: info: ' . $nom .": ".$url);
-          $req = 'curl -i -XGET "'.$url.'" ';
-          $output = shell_exec($req);          	
+          $output=$eqLogic->panelHttpGet($url);          	
           return $result;            
         
         }else if ($this->getConfiguration('calcul') != '' && $this->getConfiguration('type') == 'toggle'){
@@ -2508,8 +2386,7 @@ class miraCmd extends cmd {
             $url = 'http://'. $eqLogic->getConfiguration('adresseip') . '/updatenr?key=' . $eqLogic->getConfiguration('password') . '&toggle=' . $id_1;           
           }
           log::add('mira', 'debug', $eqLogic->getName().': INFO: toogle: ' . $nom .": ".$url);
-          $req = 'curl -i -XGET "'.$url.'" ';
-          $output = shell_exec($req);          	
+          $output=$eqLogic->panelHttpGet($url);          	
           return $result;
           
         }else if ($this->getConfiguration('calcul') != '' && $this->getConfiguration('type') == 'list') {
@@ -2930,24 +2807,22 @@ class miraCmd extends cmd {
         		$parent = $this->getConfiguration('parent');              
                 $url = 'http://'. $eqLogic->getConfiguration('adresseip') . '/updatenr?key=' . $eqLogic->getConfiguration('password') . '&toggle=' . $cmd;
                 log::add('mira', 'debug', $eqLogic->getName().": ACTION: toogle: ".$nom.": " . $url);
-              	$req = 'curl -i -XGET "'.$url.'" ';
-                
-              $output = shell_exec($req);                             
+              	$miraDeferredUrl=$url;                             
                 $eqLogic->checkAndUpdateCmd($parent, $state);
               	if ($this->getConfiguration('calcul') != ''){
                 	$result = jeedom::evaluateExpression($this->getConfiguration('calcul'));
                 	cmd::byString($result)->execCmd(null, $cache=0);
               	}
               	log::add('mira', 'debug', $eqLogic->getName().": ACTION: retour: " . $url);
-              	break;
+              	$eqLogic->panelHttpGet($miraDeferredUrl);
+                break;
               
             }else if ($type == 'range'){
               	$parent = $this->getConfiguration('parent');
               	$value = $this->getConfiguration('value');
               	$url = 'http://'. $eqLogic->getConfiguration('adresseip') . '/updatenr?key=' . $eqLogic->getConfiguration('password') . '&range=' . $cmd .'&value='.$_options['slider'];              
               	$url = str_replace(' ', '%20', $url);
-                $req = 'curl -i -XGET "'.$url.'" ';
-                $output = shell_exec($req);
+                $miraDeferredUrl=$url;
                 $eqLogic->checkAndUpdateCmd($parent, $_options['slider']);
               	if ($this->getConfiguration('calcul') != ''){
                 	$result = jeedom::evaluateExpression($this->getConfiguration('calcul'));
@@ -2956,15 +2831,15 @@ class miraCmd extends cmd {
 					cmd::byString($result)->execCmd($options_action, $cache=0);
               	}
               	log::add('mira', 'debug', $url);
-        		break;
+        		$eqLogic->panelHttpGet($miraDeferredUrl);
+                break;
               
             }else if ($type == 'list'){
                 $parent = $this->getConfiguration('parent'); 
                 $list = $this->getConfiguration('list'); 
                 $url = 'http://'. $eqLogic->getConfiguration('adresseip') . '/updatenr?key=' . $eqLogic->getConfiguration('password') . '&list=' . $list .'&value='.$_options['select'];
                 $url = str_replace(' ', '%20', $url);
-                $req = 'curl -i -XGET "'.$url.'" ';
-                $output = shell_exec($req);
+                $miraDeferredUrl=$url;
               	$eqLogic->checkAndUpdateCmd($parent,$_options['select']);
               
                 /* Mapping 100 % dynamique : les options viennent de listValue
@@ -2984,27 +2859,27 @@ class miraCmd extends cmd {
                     cmd::byString($result)->execCmd($options_action, $cache=0);
                 }
               	log::add('mira', 'debug', $url);
-        		break;
+        		$eqLogic->panelHttpGet($miraDeferredUrl);
+                break;
               
             }else if ($type == 'button'){
               	$url = 'http://'. $eqLogic->getConfiguration('adresseip') . '/updatenr?key=' . $eqLogic->getConfiguration('password') . '&button=' . $cmd;
                 $url = str_replace(' ', '%20', $url);
-                $req = 'curl -i -XGET "'.$url.'" ';
-                $output = shell_exec($req);
+                $miraDeferredUrl=$url;
               	if ($this->getConfiguration('calcul') != ''){
                 	$result = jeedom::evaluateExpression($this->getConfiguration('calcul'));
                 	cmd::byString($result)->execCmd(null, $cache=0);
               	}
               	log::add('mira', 'debug', $url);
-        		break;
+        		$eqLogic->panelHttpGet($miraDeferredUrl);
+                break;
               
             }else if ($type == 'color'){              
               	$parent = $this->getConfiguration('parent');
               	list($r, $g, $b) = sscanf($_options['color'], "#%02x%02x%02x");              	
               	$url = 'http://'. $eqLogic->getConfiguration('adresseip') . '/updatenr?key=' . $eqLogic->getConfiguration('password') . '&color=' . $cmd . '&r='.$r.'&g='.$g.'&b='.$b;
                 $url = str_replace(' ', '%20', $url);
-                $req = 'curl -i -XGET "'.$url.'" ';
-                $output = shell_exec($req);
+                $miraDeferredUrl=$url;
               	$eqLogic->checkAndUpdateCmd($parent, $_options['color']);
                 if ($this->getConfiguration('calcul') != ''){
                 	$result = jeedom::evaluateExpression($this->getConfiguration('calcul'));
@@ -3012,16 +2887,17 @@ class miraCmd extends cmd {
 					cmd::byString($result)->execCmd($options_action, $cache=0);
               	}
               log::add('mira', 'debug', $url);
-        		break;
+        		$eqLogic->panelHttpGet($miraDeferredUrl);
+                break;
               	              
             }else if ($type == 'reboot'){ 
               
               	$url = 'http://'.$eqLogic->getConfiguration('adresseip').'/reboot?key='.$eqLogic->getConfiguration('password');
-                $req = 'curl -i -XGET "'.$url.'" ';
-                $output = shell_exec($req);
+                $miraDeferredUrl=$url;
                 log::add(__CLASS__, 'debug', 'Redémarrage du module: ' . $result);
               	
-              	break;           
+              	$eqLogic->panelHttpGet($miraDeferredUrl);
+                break;           
             }
         
     }
