@@ -177,10 +177,19 @@ void app_main(void){
     const bool passive_cache=mira_full_passive_init();
     const esp_err_t passive_event=passive_cache?mira_jeedom_passive_init():ESP_ERR_NO_MEM;
     checkpoint("JEEDOM_PASSIVE_AFTER");
-    if(passive_cache&&passive_event==ESP_OK)
-        ESP_LOGI(TAG,"MIRA_JEEDOM_PASSIVE_READY: UI %u widgets; HTTP info and SSE active, actions OFF, MQTT OFF",
+    if(passive_cache&&passive_event==ESP_OK){
+        ESP_LOGI(TAG,"MIRA_JEEDOM_PASSIVE_READY: UI %u widgets; HTTP info and SSE active",
             (unsigned)mira_full_widget_count());
-    else ESP_LOGW(TAG,"MIRA_JEEDOM_PASSIVE_DISABLED: UI remains usable; init=%d event=%s",
-                  passive_cache?1:0,esp_err_to_name(passive_event));
+        // Do not start MQTT in this A/B, honor later optional UI enablement.
+        // Any outbound init failure leaves the stable LVGL/passive UI running.
+        checkpoint("JEEDOM_ACTIONS_BEFORE");
+        const esp_err_t action_err=mira_jeedom_action_init();
+        checkpoint("JEEDOM_ACTIONS_AFTER");
+        if(action_err==ESP_OK)
+            ESP_LOGI(TAG,"MIRA_JEEDOM_ACTIONS_READY: Jeedom mode is controlled by UI/NVS; MQTT deferred");
+        else ESP_LOGE(TAG,"MIRA_JEEDOM_ACTIONS_DISABLED: %s; passive UI remains active",
+                      esp_err_to_name(action_err));
+    }else ESP_LOGW(TAG,"MIRA_JEEDOM_PASSIVE_DISABLED: UI remains usable; init=%d event=%s",
+                   passive_cache?1:0,esp_err_to_name(passive_event));
     checkpoint("FINAL");
 }
