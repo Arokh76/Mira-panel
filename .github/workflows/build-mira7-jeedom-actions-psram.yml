@@ -80,37 +80,25 @@ jobs:
           target: esp32s3
           path: firmware/experiments/esp-idf/mira-idf-7
           command: idf.py build
-      - name: Package safe, partition-addressed USB flashing files
+      - name: Package one application-only browser OTA firmware
         shell: bash
         run: |
           set -euo pipefail
           ROOT=firmware/experiments/esp-idf/mira-idf-7/build
-          mkdir -p mira7_jeedom_actions
-          cp "$ROOT/bootloader/bootloader.bin" mira7_jeedom_actions/BOOTLOADER_0x0.bin
-          cp "$ROOT/partition_table/partition-table.bin" mira7_jeedom_actions/PARTITIONS_0x8000.bin
-          cp "$ROOT/mira_idf_7std.bin" mira7_jeedom_actions/MIRA7_JEEDOM_ACTIONS_APP_0x10000.bin
+          mkdir -p mira7_ota
+          cp "$ROOT/mira_idf_7std.bin" mira7_ota/MIRA7_ETATS_COULEURS_OTA.bin
           python3 - <<'PY'
           from pathlib import Path
-          out=Path("mira7_jeedom_actions")
-          (out/"MIRA7_OTADATA_VIERGE_0xE000.bin").write_bytes(b"\xff"*0x2000)
+          path=Path("mira7_ota/MIRA7_ETATS_COULEURS_OTA.bin")
+          data=path.read_bytes()
+          assert len(data)>65536 and len(data)<=0x300000, "OTA image exceeds app slot"
+          assert data[0]==0xE9, "Not an ESP app image"
+          print("OTA only:",len(data),"bytes; no bootloader, NVS or SPIFFS")
           PY
-          cat > mira7_jeedom_actions/ADRESSES_FLASH.txt <<'EOF'
-          Important: NE PAS utiliser d'image FACTORY fusionnee a 0x0.
-          Elle ecraserait potentiellement NVS et le selecteur OTA dans les trous 0xff.
-          Pour une carte qui possede deja notre bootloader et cette table :
-          MIRA7_JEEDOM_ACTIONS_APP_0x10000.bin       -> 0x10000
-          MIRA7_OTADATA_VIERGE_0xE000.bin        -> 0xE000
-          Pour une carte deja sur app0, flasher SEULEMENT le fichier APP 0x10000.
-          OTADATA vierge (0xE000) : seulement si la selection app0 a change.
-          Ne pas cocher Full Chip Erase. Puis appuyer sur RESET apres FINISH.
-          La remise a 0xff du selecteur OTA fait demarrer app0, pas app1.
-          BOOTLOADER_0x0.bin et PARTITIONS_0x8000.bin : disponibles seulement
-          en secours ; ne pas les reflasher inutilement.
-          EOF
-      - name: Upload safe partition-addressed flash files
+      - name: Upload single browser OTA file
         uses: actions/upload-artifact@v4
         with:
-          name: MIRA7_JEEDOM_ACTIONS_FLASH_SANS_EFFACEMENT
-          path: mira7_jeedom_actions/
+          name: MIRA7_ETATS_COULEURS_OTA
+          path: mira7_ota/MIRA7_ETATS_COULEURS_OTA.bin
           retention-days: 14
           if-no-files-found: error

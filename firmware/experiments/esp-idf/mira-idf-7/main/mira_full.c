@@ -2662,6 +2662,7 @@ static void apply_free_layout(const cJSON *config,mira_widget_t *widget){
     lv_obj_set_size(widget->card,(lv_coord_t)width,(lv_coord_t)height);
     no_scroll(widget->card);
 }
+static void apply_state_on_lvgl_task(const mira_state_update_t *msg);
 static void build_config(void){
     // Validate the new programming before deleting live LVGL objects.
     // A damaged/incomplete SPIFFS read must not blank a running panel.
@@ -2745,6 +2746,19 @@ static void build_config(void){
     }
     widget_count=(uint32_t)widget_n;
     cJSON_Delete(root);
+    // A configuration change rebuilds LVGL widgets. Reapply only passive
+    // observations already received, never dispatch Jeedom/MQTT actions.
+    for(uint8_t i=0;i<widget_n;i++){
+        const mira_widget_t *w=&widgets[i];
+        if(strcmp(w->type,"toggle")&&strcmp(w->type,"range")&&
+           strcmp(w->type,"color"))continue;
+        char cached[160]={0};
+        if(!mira_full_cached_state(w->name,cached,sizeof(cached)))continue;
+        mira_state_update_t replay={0};
+        snprintf(replay.name,sizeof(replay.name),"%s",w->name);
+        snprintf(replay.value,sizeof(replay.value),"%s",cached);
+        apply_state_on_lvgl_task(&replay);
+    }
     if(!count)empty_notice("Aucun widget programmé : importer la configuration Jeedom");
     ESP_LOGI(TAG,"Mira JSON chargé, widgets=%u, heap PSRAM libre=%u",
              widget_n,(unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));

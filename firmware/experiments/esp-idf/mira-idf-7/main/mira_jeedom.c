@@ -92,6 +92,9 @@ static bool mira_other_transport(const char *name,const char *type,
 
 // Request async synchronization after Jeedom changes its command table.
 static void request_binding_sync(void);
+// Restore state after a fresh boot or LVGL reprogramming, exactly once per
+// programming generation. The legacy init command is read-only.
+static volatile bool jeedom_state_replay_pending=true;
 static uint32_t ui_config_hash(const char *s);
 
 // URL/form decoding is deliberately bounded, including malformed percent escapes.
@@ -1414,6 +1417,7 @@ static esp_err_t beta_lvgl_save(httpd_req_t *req){
     cJSON_Delete(beta_lvgl_stage);beta_lvgl_stage=NULL;
     beta_lvgl_dirty=false;
     mira_full_request_reload(); // always reload within the LVGL task
+    jeedom_state_replay_pending=true;
     request_binding_sync();      // command IDs from Jeedom may have changed
     return beta_lvgl_respond(req,
             !strncmp(req->uri,"/screensave",11)?"Liste sauvegardée!":"OK");
@@ -1479,6 +1483,7 @@ static esp_err_t programui(httpd_req_t *req) {
     }
     cJSON_Delete(beta_lvgl_stage);beta_lvgl_stage=NULL;beta_lvgl_dirty=false;
     mira_full_request_reload();
+    jeedom_state_replay_pending=true;
     request_binding_sync(); // get fresh Jeedom IDs; ignore stale index until plugin re-synchronizes
     ESP_LOGI(TAG,"Programmation Jeedom enregistree (%u octets), UI reload en file",(unsigned)len);
     httpd_resp_set_type(req,"text/plain");
@@ -2218,10 +2223,11 @@ static int resolve_local_action(cJSON *index,const mira_action_msg_t *msg,
                 valid=sscanf(msg->value,"%u,%u,%u %c",&r,&g,&b,&extra)==3;
             }
             if(!valid||r>255u||g>255u||b>255u)return -1;
-            /* The Jeedom plugin's value is three RGB channels. MQTT
-             * continues to receive the Arduino-native #RRGGBB string.
+            /* The beta Jeedom action expects #RRGGBB, just like WT32.
+             * Do not turn a color into a comma-separated RGB triplet.
+             * The subsequent URL encoder escapes '#' as %23.
              */
-            snprintf(value,value_size,"%u,%u,%u",r,g,b);
+            snprintf(value,value_size,"#%02X%02X%02X",r,g,b);
             return jint(item,"id",-1);
         }
         if(!strcmp(msg->type,"button")&&!strcmp(kind,"button")&&!strcmp(name,msg->name))
@@ -2535,8 +2541,44 @@ static void sync_jeedom_bindings(void){
     nvs_close(map);
     cJSON_Delete(local);
     cJSON_Delete(remote);
-    if(err==ESP_OK)ESP_LOGI(TAG,"Jeedom full index synchronized: %d bounded command IDs",bound);
-    else ESP_LOGE(TAG,"Jeedom mapping validation/storage incomplete: %s",
+    if(err==ESP_OK){
+        ESP_LOGI(TAG,"Jeedom full index synchronized: %d bounded command IDs",bound);
+        if(jeedom_state_replay_pending){
+            // Unlike ?value=json (index-only), invoking the saved beta init
+            // action restores real Jeedom infos and toggles via passive HTTP.
+            // Clear BEFORE the request: init_cmd may queue another __sync
+            // while rebuilding its mappings. Never create a request loop.
+            jeedom_state_replay_pending=false;
+            char restore_uri[1100];
+            int n=snprintf(restore_uri,sizeof(restore_uri),
+                "%s/core/api/jeeApi.php?plugin=mira&type=event&apikey=%s&id=%s",
+                base,token,init);
+            if(n>0&&n<(int)sizeof(restore_uri)){
+                mira_jeedom_ack_t ack={0};
+                esp_http_client_config_t restore_http={
+                    .url=restore_uri,.timeout_ms=18000,
+                    .disable_auto_redirect=true,
+                    .event_handler=capture_jeedom_ack,.user_data=&ack
+                };
+                esp_http_client_handle_t client=esp_http_client_init(&restore_http);
+                if(client){
+                    esp_err_t result=esp_http_client_perform(client);
+                    int status=esp_http_client_get_status_code(client);
+                    esp_http_client_cleanup(client);
+                    while(ack.len&&isspace((unsigned char)ack.buf[ack.len-1]))
+                        ack.buf[--ack.len]=0;
+                    char *reply=ack.buf;
+                    while(*reply&&isspace((unsigned char)*reply))reply++;
+                    if(result==ESP_OK&&status==200&&!ack.overflow&&
+                       !strcmp(reply,init))
+                        ESP_LOGI(TAG,"Jeedom switch states replayed after boot/programming");
+                    else
+                        ESP_LOGW(TAG,"Jeedom boot state replay not acknowledged (HTTP %d, %s)",
+                            status,esp_err_to_name(result));
+                }else ESP_LOGW(TAG,"Jeedom boot state replay client unavailable");
+            }
+        }
+    }else ESP_LOGE(TAG,"Jeedom mapping validation/storage incomplete: %s",
                   esp_err_to_name(err));
 }
 
