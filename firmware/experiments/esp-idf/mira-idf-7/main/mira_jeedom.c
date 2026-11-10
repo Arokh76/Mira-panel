@@ -3,6 +3,7 @@
 // Reads/writes the existing LVGL JSON without erasing or formatting SPIFFS.
 // Incoming state updates are PASSIVE, never forwarded to MQTT or an actuator.
 #include "mira_jeedom.h"
+#include "freertos/idf_additions.h" // PSRAM task/queue memory-capability APIs
 #include "mira_full.h"
 #include "mira_camera.h"
 #include "mira_setup_access.h"
@@ -2905,27 +2906,45 @@ esp_err_t mira_jeedom_action_init(void) {
             jeedom_mode_enabled=strcmp(active,"0")!=0;
         nvs_close(settings);
     }
-    action_queue=xQueueCreate(12,sizeof(mira_action_msg_t));
-    if(!action_queue)return ESP_ERR_NO_MEM;
+    // External RAM for queue messages: RGB+Wi-Fi leaves a 6.9KB largest
+    // internal block and the old ~3.4KB queue plus 7168B worker stack
+    // exhausted it. Keep all action data in PSRAM.
+    action_queue=xQueueCreateWithCaps(12,sizeof(mira_action_msg_t),
+                                      MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!action_queue){
+        ESP_LOGE(TAG,"JEEDOM_ACTION_QUEUE_PSRAM_NO_MEM");
+        return ESP_ERR_NO_MEM;
+    }
     last_value_actions=heap_caps_calloc(MIRA_LAST_VALUE_SLOTS,
                       sizeof(*last_value_actions),
                       MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(!last_value_actions){
-        vQueueDelete(action_queue);
+        vQueueDeleteWithCaps(action_queue);
         action_queue=NULL;
         return ESP_ERR_NO_MEM;
     }
-    if(xTaskCreate(jeedom_action_worker,"mira_jeedom_http",7168,NULL,3,
-                   &action_worker_handle)!=pdPASS) {
+    // ESP-IDF 5.5.6 WithCaps keeps TCB internal and places the 7168B
+    // HTTP worker stack in octal PSRAM. No blocking HTTP on LVGL.
+    if(xTaskCreateWithCaps(jeedom_action_worker,"mira_jeedom_http",7168,
+                           NULL,3,&action_worker_handle,
+                           MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)!=pdPASS) {
         heap_caps_free(last_value_actions);
         last_value_actions=NULL;
-        vQueueDelete(action_queue);
+        vQueueDeleteWithCaps(action_queue);
         action_queue=NULL;
+        ESP_LOGE(TAG,"JEEDOM_ACTION_STACK_PSRAM_NO_MEM");
         return ESP_ERR_NO_MEM;
     }
-    ESP_LOGI(TAG,"Jeedom HTTP event worker ready (no event during passive state updates)");
-    request_binding_sync(); // survives reboot; no actions emitted during binding
+    ESP_LOGI(TAG,"JEEDOM_ACTIONS_PSRAM_READY: mode=%s dma_free=%u dma_largest=%u psram=%u",
+        jeedom_mode_enabled?"JEEDOM":"GENERIC",
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    request_binding_sync(); // read-only ID map fetch; never an actuator command
     return ESP_OK;
+}
+bool mira_jeedom_action_ready(void){
+    return action_queue!=NULL&&last_value_actions!=NULL&&action_worker_handle!=NULL;
 }
 
 
