@@ -23,9 +23,12 @@ class mira extends eqLogic {
    * A missing panel must not block Jeedom's MQTT and mapped actions.
    * Per-panel 20-second circuit breaker; normal calls never exceed 1.5s.
    */
-  public function panelHttpRequest($url, $method='GET', $postFields=null, $extraOptions=array()) {
+  public function panelHttpRequest($url, $method='GET', $postFields=null, $extraOptions=array(), $diagnostic='') {
     $until=(int)$this->getCache('mira_panel_offline_until',0);
-    if ($until>time()) return false;
+    if ($until>time()) {
+      if ($diagnostic!=='') log::add('mira','warning',$diagnostic.' : protection HTTP active, nouvel essai dans 20 s maximum');
+      return false;
+    }
     $ch=curl_init($url);
     if ($ch===false) return false;
     $opts=array(
@@ -51,9 +54,15 @@ class mira extends eqLogic {
         log::add('mira','debug','[HTTP][OFFLINE] '.$this->getName().
           ' : écran indisponible ; prochain essai dans 20 s (cURL '.$errno.')');
       }
+      if ($diagnostic!=='') log::add('mira','warning',$diagnostic.
+        ' : echec HTTP '.$status.' / cURL '.$errno);
       return false;
     }
-    if ($status!==200) return false;
+    if ($status!==200) {
+      if ($diagnostic!=='') log::add('mira','warning',$diagnostic.
+        ' : echec HTTP '.$status.' / cURL '.$errno);
+      return false;
+    }
     $this->setCache('mira_panel_offline_until',0);
     return $body;
   }
@@ -2146,55 +2155,27 @@ class miraCmd extends cmd {
     $ip = trim((string)$eq->getConfiguration('adresseip'));
     $pass = (string)$eq->getConfiguration('password');
     if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) || $pass === '') return false;
-    // A multi-action mapping is an explicit configuration write. It must not
-    // be silently skipped by the shared 20-second offline circuit breaker.
-    // Keep a 350 ms connection limit when unplugged, but allow up to 4 s
-    // for a connected WT32 to save its configuration after a reset.
-    if ($route === '/gpio/multi/config' && $method === 'POST') {
-      $widget = isset($params['name']) ? (string)$params['name'] : '?';
-      $pin = isset($params['gpio']) ? (int)$params['gpio'] : 0;
-      $ch = curl_init('http://'.$ip.$route);
-      if ($ch === false) {
-        log::add('mira','warning','[MULTI][HTTP] '.$widget.' GPIO'.$pin.' : initialisation HTTP impossible');
-        return false;
-      }
-      curl_setopt_array($ch,array(
-        CURLOPT_POST=>true,
-        CURLOPT_POSTFIELDS=>http_build_query($params),
-        CURLOPT_RETURNTRANSFER=>true,
-        CURLOPT_CONNECTTIMEOUT_MS=>350,
-        CURLOPT_TIMEOUT_MS=>4000,
-        CURLOPT_NOSIGNAL=>true,
-        CURLOPT_FOLLOWLOCATION=>false,
-        CURLOPT_HTTPAUTH=>CURLAUTH_BASIC,
-        CURLOPT_USERPWD=>'admin:'.$pass,
-        CURLOPT_HTTPHEADER=>array('X-Mira-GPIO: 1')
-      ));
-      $response = curl_exec($ch);
-      $errno = curl_errno($ch);
-      $status = (int)curl_getinfo($ch,CURLINFO_HTTP_CODE);
-      curl_close($ch);
-      if ($response === false || $status !== 200) {
-        log::add('mira','warning','[MULTI][HTTP] '.$widget.' GPIO'.$pin.
-          ' : echec HTTP '.$status.' / cURL '.$errno);
-        return false;
-      }
-      // HTTP 200 proves transport success, not that the firmware persisted it.
-      if (in_array(strtolower(trim((string)$response)),array('erreur','error','ko'),true)) {
-        log::add('mira','warning','[MULTI][HTTP] '.$widget.' GPIO'.$pin.
-          ' : firmware a refuse la configuration (HTTP 200)');
-        return false;
-      }
-      log::add('mira','debug','[MULTI][OK] '.$widget.' GPIO'.$pin.
-        ' : configuration transmise (HTTP 200)');
-      return $response;
-    }
-    return $eq->panelHttpRequest(
+    // Reuse the global offline circuit breaker to protect Jeedom/MQTT.
+    // Preserve precise diagnostics without bypassing the protection.
+    $isMulti=($route==='/gpio/multi/config' && $method==='POST');
+    $widget=$isMulti ? (string)($params['name'] ?? '?') : '';
+    $pin=$isMulti ? (int)($params['gpio'] ?? 0) : 0;
+    $context=$isMulti ? '[MULTI][HTTP] '.$widget.' GPIO'.$pin : '';
+    $response=$eq->panelHttpRequest(
       'http://'.$ip.$route.($method==='GET'?'?'.http_build_query($params):''),
       $method, $method==='POST'?http_build_query($params):null,
       array(CURLOPT_HTTPAUTH=>CURLAUTH_BASIC,
             CURLOPT_USERPWD=>'admin:'.$pass,
-            CURLOPT_HTTPHEADER=>array('X-Mira-GPIO: 1')));
+            CURLOPT_HTTPHEADER=>array('X-Mira-GPIO: 1')),
+      $context);
+    if (!$isMulti || $response===false) return $response;
+    if (trim((string)$response)!=='OK') {
+      log::add('mira','warning',$context.' : reponse inattendue du firmware (HTTP 200)');
+      return false;
+    }
+    log::add('mira','debug','[MULTI][OK] '.$widget.' GPIO'.$pin.
+      ' : configuration transmise (HTTP 200)');
+    return $response;
   }
   public function postSave() {
     // The SOC master row owns the 1..3 battery selector. Clear unused
