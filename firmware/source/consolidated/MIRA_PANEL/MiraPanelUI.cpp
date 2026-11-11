@@ -1245,6 +1245,8 @@ void MiraPanelUI::buildFromMiraJson() {
   }
 
   for (JsonObject obj : arr) registerAndCreate(obj);
+  // The indexes are freshly generated; restore stable Jeedom command IDs now.
+  _server.RestoreActionBindingsForLvgl();
   // Applies to the entire freshly programmed LVGL tree, including nested
   // button content, sliders and thermostats, on WT32 AND Waveshare.
   // This is repeated after hot reprogramming by buildFromMiraJson().
