@@ -48,6 +48,8 @@ public:
   // Reconstruction WT32: remet a zero uniquement la table des actions dynamiques
   // afin de reconstruire l'interface LVGL sans redemarrer le module.
   void ResetActionsForLvgl();
+  // Reapply persisted Jeedom IDs after the LVGL widget table is rebuilt.
+  void RestoreActionBindingsForLvgl();
   bool WT32HasAction(const String& name);
   bool WT32ExecuteAction(const String& name);
   bool WT32HasToggle(const String& name);
