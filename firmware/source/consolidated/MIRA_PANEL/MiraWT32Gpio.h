@@ -330,6 +330,31 @@ static bool multiReset() {
   Serial.println("[MIRA][GPIO] Liaisons multi-actions effacees (NVS miramulti)");
   return true;
 }
+// Release ALL Jeedom-to-GPIO associations, not only multi-action inputs.
+// Output pin modes, levels, inversion and boot policy remain untouched.
+static bool resetLinks() {
+  Preferences p;
+  if (!p.begin("miralinks", false)) return false;
+  const bool ok = p.clear();
+  p.end();
+  if (!ok) return false;
+  for (uint8_t i=0; i<LINK_COUNT; ++i) {
+    linkName[i] = "";
+    linkPin[i] = 0;
+    linkKind[i] = 0;
+  }
+  Serial.println("[MIRA][GPIO] Liaisons commandes GPIO effacees (NVS miralinks)");
+  return true;
+}
+static bool resetAssociations() {
+  // Different NVS namespaces; attempt both even when one fails, so a retry
+  // can finish clearing stale mappings without touching electrical settings.
+  const bool multiOk = multiReset();
+  const bool linksOk = resetLinks();
+  if (multiOk && linksOk)
+    Serial.println("[MIRA][GPIO] Toutes les associations GPIO liberees");
+  return multiOk && linksOk;
+}
 static bool multiConfigure(String name, int gpio, bool visible, bool& needsReload) {
   needsReload=false;
   name.trim();
