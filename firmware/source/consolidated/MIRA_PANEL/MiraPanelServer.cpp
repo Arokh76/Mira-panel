@@ -78,6 +78,13 @@ static int miraMultiLastActionId = -1;
 static int miraMultiLastJeedomId = 0;
 static bool miraMultiLastHttpSubmitted = false;
 static uint32_t miraMultiLastDetectedAt = 0;
+static uint32_t miraQueueSubmitted = 0;
+static uint32_t miraQueueRejected = 0;
+static uint32_t miraQueueBusy = 0;
+static uint32_t miraQueueAcknowledged = 0;
+static uint32_t miraQueueExpired = 0;
+static uint32_t miraQueueDroppedFull = 0;
+static uint32_t miraQueueBlockedSince = 0;
 
 bool SetupModuleDone = false;
 String MiraRuntimeVersion = "";
@@ -785,6 +792,20 @@ void MiraPanelServer::ServeurStation() {
     dispatch["last_http_submit_ok"] = miraMultiLastHttpSubmitted;
     dispatch["last_detect_age_ms"] = miraMultiDetected ?
       (int32_t)(millis() - miraMultiLastDetectedAt) : -1;
+    JsonObject queue = result.createNestedObject("queue");
+    uint8_t depth = 0;
+    for (uint8_t i = 0; i < QUEUE_CAPACITY; ++i)
+      if (eQueud[i].id >= 0) ++depth;
+    queue["depth"] = depth;
+    queue["capacity"] = QUEUE_CAPACITY;
+    queue["head_waiting_http"] = eQueud[0].id >= 0 && eQueud[0].send;
+    queue["head_attempts"] = eQueud[0].id >= 0 ? eQueud[0].test : 0;
+    queue["submitted"] = miraQueueSubmitted;
+    queue["rejected"] = miraQueueRejected;
+    queue["busy"] = miraQueueBusy;
+    queue["acknowledged"] = miraQueueAcknowledged;
+    queue["expired"] = miraQueueExpired;
+    queue["dropped_full"] = miraQueueDroppedFull;
     String body;
     serializeJson(result, body);
     AsyncWebServerResponse* response =
@@ -3606,7 +3627,6 @@ void MiraPanelServer::WT32PollMultiButtons() {
   miraMultiLastDetectedAt = millis();
   miraMultiLastActionId = -1;
   miraMultiLastJeedomId = 0;
-  miraMultiLastHttpSubmitted = false;
   const String logicalName=String(prefixes[kind])+name;
   JsonArray actions=SPIFFS_Config_Actions["actions"];
   for (JsonObject action : actions) {
@@ -5754,27 +5774,21 @@ int MiraPanelServer::IndexGetEvent() {
       if (Action != ACTION_UPDATE && Action != -1 && JEEDOM_mira && AUTO_REFRESH) {
         JeedomCmd(Action);
       }
-      if (JEEDOM_mira) {
-        SendQueud();
-      }
+      // Consume the HTTP acknowledgement BEFORE a retry and remove exactly
+      // one command: repeated button clicks may legitimately share one ID.
       if (ReponseAsync != "null" && JEEDOM_mira) {
-        for (int i = 0; i < 5; i++) {
-          if (eQueud[i].cmd == ReponseAsync) {
-            if (_Debug) Serial.print(F("[MIRA][QUEUE] Retrait : "));
-            if (_Debug) Serial.println(eQueud[i].cmd);
-            eQueud[i].id = -1;
-            eQueud[i].cmd = "";
-            eQueud[i].value = "";
-            eQueud[i].send = false;
-            eQueud[i].test = 0;
-            ReorderQueued();
-          }
-        }
-
-
-
+        String acknowledgedId = ReponseAsync;
         ReponseAsync = "null";
+        acknowledgedId.trim();
+        if (eQueud[0].id >= 0 && eQueud[0].send &&
+            eQueud[0].cmd == acknowledgedId) {
+          if (_Debug) Serial.printf("[MIRA][QUEUE] ACK cmd=%s\n",
+                                    eQueud[0].cmd.c_str());
+          ++miraQueueAcknowledged;
+          AdvanceQueuedHead();
+        }
       }
+      if (JEEDOM_mira) SendQueud();
     }
     RSTHandler();
 
