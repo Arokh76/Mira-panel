@@ -5,6 +5,10 @@
 
 String ReponseAsync = "null";
 
+// The Waveshare transport is synchronous; it cannot have an active
+// AsyncHTTPRequest occupying the connection.
+bool miraAsyncHTTPBusy() { return false; }
+
 bool miraAsyncHTTPGet(char *URL, bool GET = true) {
   if (!URL || !URL[0]) return false;
 
@@ -36,6 +40,11 @@ bool miraAsyncHTTPGet(char *URL, bool GET = true) {
 AsyncHTTPRequest request;
 String ReponseAsync = "null";
 
+bool miraAsyncHTTPBusy() {
+  const int state = request.readyState();
+  return state != readyStateUnsent && state != readyStateDone;
+}
+
 void ReadRequest(void *optParm, AsyncHTTPRequest *request, int readyState) {
   (void)optParm;
 
@@ -61,8 +70,7 @@ bool miraAsyncHTTPGet(char *URL, bool GET = true) {
     else requestOpenResult = request.open("POST", URL);
     if (requestOpenResult) {
       // Only send() if open() returns true, or crash
-      request.send();
-      return true;
+      return request.send();
     } else {
       Serial.println(F("[MIRA][HTTP] Envoi impossible, mauvais requête async"));
       return false;
