@@ -1,4 +1,4 @@
-name: Build Mira Panel 0.7.42 - WT32 Nextion Arduino
+name: Build Mira Panel 0.7.43 - WT32 Nextion Arduino
 
 on:
   workflow_dispatch:
@@ -25,7 +25,7 @@ jobs:
       - name: Test release manifest generation
         run: python3 -m unittest discover -s tests -p 'test_publish_multi.py' -v
 
-      - name: Use committed consolidated 0.7.42 source snapshot
+      - name: Use committed consolidated 0.7.43 source snapshot
         shell: bash
         run: |
           set -euo pipefail
@@ -36,12 +36,15 @@ jobs:
           rm -rf firmware/source/work
           mkdir -p firmware/source/work/MIRA_PANEL
           cp -a firmware/source/consolidated/MIRA_PANEL/. firmware/source/work/MIRA_PANEL/
-          grep -q '"0.7.42"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
+          grep -q '"0.7.43"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
           # RAZ and manual release clear input AND output mappings, never
           # GPIO electrical configuration or unrelated NVS namespaces.
           grep -Fq 'lastReadFailed=false' firmware/source/work/MIRA_PANEL/HTML/HTML_GPIO.h
           grep -Fq 'server.on("/actions/bindings"' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
           grep -Fq 'server.on("/gpio/multi/status"' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
+          grep -Fq 'miraSaveActionBindings(' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
+          grep -Fq 'RestoreActionBindingsForLvgl();' firmware/source/work/MIRA_PANEL/MiraPanelUI.cpp
+          grep -Fq 'Reponse Jeedom invalide : table precedente conservee' firmware/source/work/MIRA_PANEL/SPIFFS_Process.h
           grep -Fq 'multiDiagnostics(JsonObject out)' firmware/source/work/MIRA_PANEL/MiraWT32Gpio.h
           grep -Fq 'multiPollCalls' firmware/source/work/MIRA_PANEL/MiraWT32Gpio.h
           grep -Fq 'Diagnostic des boutons GPIO (lecture seule)' firmware/source/work/MIRA_PANEL/HTML/HTML_GPIO.h
@@ -188,7 +191,7 @@ jobs:
           arduino-cli lib install "JPEGDEC@1.8.2"
           arduino-cli lib install "AsyncHTTPRequest_Generic@1.13.0"
 
-      - name: Build WT32-SC01 Plus 0.7.42 firmware
+      - name: Build WT32-SC01 Plus 0.7.43 firmware
         shell: bash
         run: |
           set -euo pipefail
@@ -201,15 +204,15 @@ jobs:
           rm -rf build-wt32 && mkdir build-wt32
           arduino-cli compile             --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,CPUFreq=240,FlashMode=qio,FlashSize=8M,PartitionScheme=default_8MB,PSRAM=enabled,UploadMode=default,USBMode=hwcdc"             --output-dir build-wt32             firmware/source/work/MIRA_PANEL
           test -s build-wt32/MIRA_PANEL.ino.bin
-          strings build-wt32/MIRA_PANEL.ino.bin | grep -Fxq '0.7.42'
+          strings build-wt32/MIRA_PANEL.ino.bin | grep -Fxq '0.7.43'
           strings build-wt32/MIRA_PANEL.ino.bin | grep -Fq 'WT32-SC01 Plus'
 
-      - name: Package WT32-SC01 Plus 0.7.42 OTA preview
+      - name: Package WT32-SC01 Plus 0.7.43 OTA preview
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p package-wt32
-          cp build-wt32/MIRA_PANEL.ino.bin package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.42.bin
+          cp build-wt32/MIRA_PANEL.ino.bin package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.43.bin
           # WT32 USB factory image uses the existing 8 MB partition table.
           test -s build-wt32/MIRA_PANEL.ino.bootloader.bin
           test -s build-wt32/MIRA_PANEL.ino.partitions.bin
@@ -217,34 +220,34 @@ jobs:
           test -s "$BOOTAPP"
           python3 -m pip install --quiet esptool
           python3 -m esptool --chip esp32s3 merge-bin \
-            -o package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.42_FACTORY.bin \
+            -o package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.43_FACTORY.bin \
             --flash-mode dio --flash-freq 80m --flash-size 8MB \
             0x0000 build-wt32/MIRA_PANEL.ino.bootloader.bin \
             0x8000 build-wt32/MIRA_PANEL.ino.partitions.bin \
             0xE000 "$BOOTAPP" \
-            0x10000 package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.42.bin
-          test -s package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.42_FACTORY.bin
+            0x10000 package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.43.bin
+          test -s package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.43_FACTORY.bin
           cat > package-wt32/README.txt <<'EOF'
-          Mira Panel 0.7.42 - WT32-SC01 Plus ESP32-S3 / 8 MB FLASH
-          OTA application firmware: Mira_Panel_WT32_SC01_Plus_0.7.42.bin
+          Mira Panel 0.7.43 - WT32-SC01 Plus ESP32-S3 / 8 MB FLASH
+          OTA application firmware: Mira_Panel_WT32_SC01_Plus_0.7.43.bin
           Compiled using Arduino-ESP32 2.0.17, LVGL 8.3.11.
           WARNING: WT32-specific firmware. Never flash to Waveshare 4.3C.
           This is a preview for hardware testing, not a stable release.
-          USB factory firmware: Mira_Panel_WT32_SC01_Plus_0.7.42_FACTORY.bin
+          USB factory firmware: Mira_Panel_WT32_SC01_Plus_0.7.43_FACTORY.bin
           EOF
-          test -s package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.42.bin
-          strings package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.42.bin | grep -Fxq '0.7.42'
-          sha256sum package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.42.bin
+          test -s package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.43.bin
+          strings package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.43.bin | grep -Fxq '0.7.43'
+          sha256sum package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.43.bin
 
       - name: Upload WT32-SC01 Plus preview
         uses: actions/upload-artifact@v4
         with:
-          name: Mira_Panel_WT32_SC01_Plus_0.7.42_preview
+          name: Mira_Panel_WT32_SC01_Plus_0.7.43_preview
           path: package-wt32/
           if-no-files-found: error
           retention-days: 14
 
-      - name: Build Open Nextion Genius 2.8 (experimental hardware, same 0.7.42)
+      - name: Build Open Nextion Genius 2.8 (experimental hardware, same 0.7.43)
         shell: bash
         run: |
           set -euo pipefail
@@ -257,7 +260,7 @@ jobs:
           cp firmware/source/consolidated/MIRA_PANEL/MiraPartitions16MB.csv build-nextion-src/MIRA_PANEL/partitions.csv
           cp build-nextion-src/MIRA_PANEL/lv_conf.h "$HOME/Arduino/libraries/lv_conf.h"
           test -s build-nextion-src/MIRA_PANEL/MiraNextion28Display.h
-          grep -Fq '"0.7.42"' build-nextion-src/MIRA_PANEL/MIRA_PANEL.ino
+          grep -Fq '"0.7.43"' build-nextion-src/MIRA_PANEL/MIRA_PANEL.ino
           arduino-cli compile \
             --fqbn "esp32:esp32:esp32s3:CDCOnBoot=default,CPUFreq=240,FlashMode=dio,FlashSize=16M,PartitionScheme=default_8MB,PSRAM=opi,UploadMode=default,USBMode=hwcdc" \
             --build-property "compiler.cpp.extra_flags=-DMIRA_TARGET_NEXTION_28=1" \
@@ -265,29 +268,29 @@ jobs:
             --output-dir build-nextion \
             build-nextion-src/MIRA_PANEL
           test -s build-nextion/MIRA_PANEL.ino.bin
-          strings build-nextion/MIRA_PANEL.ino.bin | grep -Fxq '0.7.42'
+          strings build-nextion/MIRA_PANEL.ino.bin | grep -Fxq '0.7.43'
           strings build-nextion/MIRA_PANEL.ino.bin | grep -Fq 'OPEN-NEXTION-GENIUS-2.8'
           PART_TOOL="$(find "$HOME/.arduino15/packages/esp32" -name gen_esp32part.py -type f | head -n1)"
           python3 "$PART_TOOL" build-nextion/MIRA_PANEL.ino.partitions.bin >/tmp/nextion-parts.csv
           grep -q 'ota_0' /tmp/nextion-parts.csv
           grep -q 'ota_1' /tmp/nextion-parts.csv
-          cp build-nextion/MIRA_PANEL.ino.bin package-nextion/Mira_Panel_Nextion_2.8_0.7.42.bin
+          cp build-nextion/MIRA_PANEL.ino.bin package-nextion/Mira_Panel_Nextion_2.8_0.7.43.bin
           BOOTAPP="$(find "$HOME/.arduino15/packages/esp32" -name boot_app0.bin -type f | head -n1)"
           python3 -m pip install --quiet esptool
           python3 -m esptool --chip esp32s3 merge-bin \
-            -o package-nextion/Mira_Panel_Nextion_2.8_0.7.42_FACTORY.bin \
+            -o package-nextion/Mira_Panel_Nextion_2.8_0.7.43_FACTORY.bin \
             --flash-mode dio --flash-freq 40m --flash-size 16MB \
             0x0000 build-nextion/MIRA_PANEL.ino.bootloader.bin \
             0x8000 build-nextion/MIRA_PANEL.ino.partitions.bin \
             0xE000 "$BOOTAPP" \
-            0x10000 package-nextion/Mira_Panel_Nextion_2.8_0.7.42.bin
-          test -s package-nextion/Mira_Panel_Nextion_2.8_0.7.42_FACTORY.bin
+            0x10000 package-nextion/Mira_Panel_Nextion_2.8_0.7.43.bin
+          test -s package-nextion/Mira_Panel_Nextion_2.8_0.7.43_FACTORY.bin
           sha256sum package-nextion/*.bin
 
       - name: Upload Nextion 2.8 build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Mira_Panel_Nextion_2.8_0.7.42_preview
+          name: Mira_Panel_Nextion_2.8_0.7.43_preview
           path: package-nextion/
           retention-days: 14
           if-no-files-found: error
@@ -297,18 +300,18 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/mira-release-check/inputs/wt32 /tmp/mira-release-check/inputs/nextion
-          cp package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.42*.bin /tmp/mira-release-check/inputs/wt32/
-          cp package-nextion/Mira_Panel_Nextion_2.8_0.7.42*.bin /tmp/mira-release-check/inputs/nextion/
+          cp package-wt32/Mira_Panel_WT32_SC01_Plus_0.7.43*.bin /tmp/mira-release-check/inputs/wt32/
+          cp package-nextion/Mira_Panel_Nextion_2.8_0.7.43*.bin /tmp/mira-release-check/inputs/nextion/
           python3 firmware/scripts/publish_multi.py \
             --inputs /tmp/mira-release-check/inputs \
             --repo /tmp/mira-release-check/output \
-            --version 0.7.42
+            --version 0.7.43
           python3 - <<'PY'
           from pathlib import Path
           import json
           p = Path('/tmp/mira-release-check/output/firmware/targets.json')
           data = json.loads(p.read_text())
-          assert data['version'] == '0.7.42'
+          assert data['version'] == '0.7.43'
           assert set(data['targets']) == {'wt32-sc01-plus', 'onx2432g028'}
           # The old untyped OTA feed must stay pinned for older Waveshare.
           # The release generator deliberately does not write it.
