@@ -51,6 +51,7 @@ restent inchanges. Les commandes GPIO locales ne seront plus liees jusqu'a
 leur nouvel enregistrement dans Jeedom.</p>
 <button type="button" id="resetAssociations">Liberer les associations</button>
 <p class="small" id="resetAssociationsStatus" role="status"></p>
+<p class="small"><a href="/gpio/multi/status" target="_blank" rel="noopener">Diagnostic des boutons GPIO (lecture seule)</a></p>
 </section>
 <p class="small">Modes, inversion et politique de démarrage enregistrés en mémoire. L'état ON/OFF n'est
 mémorisé que pour les sorties réglées sur « Restaurer le dernier état ».
