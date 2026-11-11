@@ -203,15 +203,17 @@ private:
   void SendQueud();
   void ReorderQueued();
 
+  // Keep bursts of GPIO gestures while one HTTP request is in flight.
+  static constexpr uint8_t QUEUE_CAPACITY = 16;
   struct Queued {
     int id = -1;
     String cmd;
     String value;
-    bool send;
-    byte test;
+    bool send = false; // submitted, awaiting an HTTP acknowledgement
+    byte test = 0;    // total HTTP submission attempts (never reset on retry)
   };
 
-  Queued eQueud[5];
+  Queued eQueud[QUEUE_CAPACITY];
 };
 
 
