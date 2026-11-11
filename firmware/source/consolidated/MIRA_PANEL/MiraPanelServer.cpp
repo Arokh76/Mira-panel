@@ -5812,67 +5812,99 @@ int MiraPanelServer::IndexGetEvent() {
 }
 
 
+void MiraPanelServer::AdvanceQueuedHead() {
+  eQueud[0].id = -1;
+  eQueud[0].cmd = "";
+  eQueud[0].value = "";
+  eQueud[0].send = false;
+  eQueud[0].test = 0;
+  Queued_Moment_Memorise = 0;
+  miraQueueBlockedSince = 0;
+  ReorderQueued();
+}
+
 void MiraPanelServer::SendQueud() {
-  if (eQueud[0].id != -1 && !eQueud[0].send) {
-
-    if (eQueud[0].cmd != "" && eQueud[0].value == "") {
-
-      String URL = JEEDOM_IP + "/core/api/jeeApi.php?plugin=mira&type=event&apikey=" + JEEDOM_Key_mira + "&id=" + eQueud[0].cmd;
-      if (_Debug) Serial.print(F("[MIRA] Envoi de l'action Jeedom: "));
-      if (_Debug) Serial.println(eQueud[0].cmd);
-      //HTTPGet(URL);
-      int Length_URL = URL.length();
-      Length_URL++;
-      char Buf[Length_URL];
-      URL.toCharArray(Buf, Length_URL);
-      const bool submitted = miraAsyncHTTPGet(Buf);
-      if (eQueud[0].id == miraMultiLastActionId) {
-        ++miraMultiSendAttempts;
-        miraMultiLastHttpSubmitted=submitted;
-        if(_Debug) Serial.printf("[MIRA][MULTI][SEND] cmd=%s submitted=%d\n",
-                                 eQueud[0].cmd.c_str(),submitted ? 1 : 0);
-      }
-
-    } else if (eQueud[0].cmd != "" && eQueud[0].value != "") {
-      String URL = JEEDOM_IP + "/core/api/jeeApi.php?plugin=mira&type=event&apikey=" + JEEDOM_Key_mira + "&id=" + eQueud[0].cmd + "&value=" + eQueud[0].value;
-      if (_Debug) Serial.print(F("[MIRA] Envoi de l'info Jeedom: "));
-      if (_Debug) Serial.print(eQueud[0].cmd);
-      if (_Debug) Serial.print(F(" : "));
-      if (_Debug) Serial.println(eQueud[0].value);
-      //HTTPGet(URL);
-      int Length_URL = URL.length();
-      Length_URL++;
-      char Buf[Length_URL];
-      URL.toCharArray(Buf, Length_URL);
-      miraAsyncHTTPGet(Buf);
-    }
-    eQueud[0].send = true;
-    eQueud[0].test = 1;
+  if (eQueud[0].id < 0) {
+    Queued_Moment_Memorise = 0;
+    miraQueueBlockedSince = 0;
+    return;
   }
 
-  if (Queued_Moment_Memorise != 0 && millis() - Queued_Moment_Memorise > 3000) {
-    if (eQueud[0].send) eQueud[0].send = false;
-    if (eQueud[0].test < 3) {
-      Queued_Moment_Memorise = millis();
-      eQueud[0].test++;
-    } else {
-      Queued_Moment_Memorise = 0;
-      eQueud[0].id = -1;
-      eQueud[0].cmd = "";
-      eQueud[0].value = "";
-      eQueud[0].send = false;
-      eQueud[0].test = 0;
-      ReorderQueued();
+  Queued& head = eQueud[0];
+  const uint32_t now = millis();
+  const uint32_t elapsed = (uint32_t)(now - Queued_Moment_Memorise);
+
+  // After a successful submission, allow 3 seconds for Jeedom to ACK.
+  // The HTTP-attempt counter is never reset when retrying.
+  if (head.send) {
+    if (elapsed < 3000UL) return;
+    head.send = false;
+    if (head.test >= 3) {
+      ++miraQueueExpired;
+      Serial.printf("[MIRA][QUEUE][TIMEOUT] cmd=%s attempts=%u\n",
+                    head.cmd.c_str(), unsigned(head.test));
+      AdvanceQueuedHead();
+      return;
+    }
+  } else if (head.test > 0) {
+    // A refused submission is not "sent": back off before trying again.
+    if (elapsed < 1000UL) return;
+    if (head.test >= 3) {
+      ++miraQueueExpired;
+      Serial.printf("[MIRA][QUEUE][REJECT] cmd=%s attempts=%u\n",
+                    head.cmd.c_str(), unsigned(head.test));
+      AdvanceQueuedHead();
+      return;
     }
   }
+
+  // The existing shared HTTP client may be handling init or refresh.
+  // Do not count a busy transport as an HTTP attempt.
+  if (miraAsyncHTTPBusy()) {
+    ++miraQueueBusy;
+    if (!miraQueueBlockedSince) miraQueueBlockedSince = now;
+    if ((uint32_t)(now - miraQueueBlockedSince) >= 15000UL) {
+      ++miraQueueExpired;
+      Serial.printf("[MIRA][QUEUE][BUSY] transport unavailable cmd=%s\n",
+                    head.cmd.c_str());
+      AdvanceQueuedHead();
+    }
+    return;
+  }
+  miraQueueBlockedSince = 0;
+
+  if (head.cmd.isEmpty()) {
+    ++miraQueueExpired;
+    Serial.println("[MIRA][QUEUE] Empty command discarded");
+    AdvanceQueuedHead();
+    return;
+  }
+
+  String url = JEEDOM_IP +
+      "/core/api/jeeApi.php?plugin=mira&type=event&apikey=" +
+      JEEDOM_Key_mira + "&id=" + head.cmd;
+  if (head.value.length()) url += "&value=" + head.value;
+  // Never log the full URL; it contains the Jeedom API key.
+  const bool submitted = miraAsyncHTTPGet(const_cast<char*>(url.c_str()));
+  ++head.test;
+  Queued_Moment_Memorise = now;
+  head.send = submitted; // a failed open/send must never be marked as sent
+  ++miraMultiSendAttempts;
+  miraMultiLastHttpSubmitted = submitted;
+  if (submitted) ++miraQueueSubmitted;
+  else ++miraQueueRejected;
+
+  if (_Debug) Serial.printf("[MIRA][QUEUE][HTTP] cmd=%s accepted=%u try=%u\n",
+                            head.cmd.c_str(), submitted ? 1U : 0U,
+                            unsigned(head.test));
 }
 
 void MiraPanelServer::ReorderQueued() {
 
-  for (int i = 0; i < 5; i++) {
+  for (int i = 0; i < QUEUE_CAPACITY; i++) {
     bool Trouve = false;
     if (eQueud[i].id == -1) {
-      for (int j = i; j < 5 && !Trouve; j++) {
+      for (int j = i + 1; j < QUEUE_CAPACITY && !Trouve; j++) {
         if (eQueud[j].id != -1) {
           eQueud[i].id = eQueud[j].id;
           eQueud[i].cmd = eQueud[j].cmd;
@@ -5926,20 +5958,25 @@ void MiraPanelServer::JeedomCmd(int ID) {
     }
 
     if (Jeedom_ID != "") {
-
-      for (int i = 0; i < 5; i++) {
-        if (eQueud[i].id == -1) {
-          eQueud[i].id = ID;
-          eQueud[i].cmd = Jeedom_ID;
-          eQueud[i].value = Jeedom_Value;
-          eQueud[i].send = false;
-          eQueud[i].test = 0;
-          if (ID == miraMultiLastActionId) ++miraMultiQueued;
-
-          if (_Debug) Serial.println(eQueud[i].cmd);
-          Queued_Moment_Memorise = millis();
-          break;
-        }
+      bool enqueued = false;
+      for (int i = 0; i < QUEUE_CAPACITY; i++) {
+        if (eQueud[i].id != -1) continue;
+        eQueud[i].id = ID;
+        eQueud[i].cmd = Jeedom_ID;
+        eQueud[i].value = Jeedom_Value;
+        eQueud[i].send = false;
+        eQueud[i].test = 0;
+        if (ID == miraMultiLastActionId) ++miraMultiQueued;
+        if (_Debug) Serial.printf("[MIRA][QUEUE] Enqueued cmd=%s\n",
+                                  eQueud[i].cmd.c_str());
+        // A later click must NOT restart the pending head's retry timer.
+        enqueued = true;
+        break;
+      }
+      if (!enqueued) {
+        ++miraQueueDroppedFull;
+        Serial.printf("[MIRA][QUEUE][FULL] Drop cmd=%s\n",
+                      Jeedom_ID.c_str());
       }
     }
 
