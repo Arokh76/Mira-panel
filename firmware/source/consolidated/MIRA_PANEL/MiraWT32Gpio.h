@@ -303,6 +303,33 @@ static void multiLoad() {
   }
   p.end();
 }
+// Clear only the stored multi-action widget->input reservations. Preserve the
+// physical GPIO modes, local output links, Wi-Fi credentials and display data.
+// This also clears RAM immediately: no restart or full factory reset needed.
+static bool multiReset() {
+  Preferences p;
+  if (!p.begin("miramulti", false)) return false;
+  const bool ok=p.clear();
+  p.end();
+  if (!ok) return false;
+  for (uint8_t i=0; i<MULTI_COUNT; ++i) {
+    multiName[i]="";
+    multiPin[i]=0;
+    multiVisible[i]=false;
+    multiStarted[i]=false;
+    multiRawDown[i]=false;
+    multiStableDown[i]=false;
+    multiLongDone[i]=false;
+    multiClickCount[i]=0;
+    multiRawChanged[i]=0;
+    multiPressStarted[i]=0;
+    multiReleaseAt[i]=0;
+  }
+  multiPendingSlot=-1;
+  multiPendingKind=0;
+  Serial.println("[MIRA][GPIO] Liaisons multi-actions effacees (NVS miramulti)");
+  return true;
+}
 static bool multiConfigure(String name, int gpio, bool visible, bool& needsReload) {
   needsReload=false;
   name.trim();
