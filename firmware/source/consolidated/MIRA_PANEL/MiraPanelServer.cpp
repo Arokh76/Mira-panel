@@ -3614,17 +3614,17 @@ void MiraPanelServer::WT32PollMultiButtons() {
       miraMultiLastJeedomId=action["jeedom"] | 0;
       ++miraMultiMapped;
       IndexSetEvent(id);
-      if(_Debug) Serial.printf("[MIRA][MULTI][MATCH] %s: id=%d jeedom=%d\\n",
+      if(_Debug) Serial.printf("[MIRA][MULTI][MATCH] %s: id=%d jeedom=%d\n",
                                logicalName.c_str(),id,miraMultiLastJeedomId);
     } else {
       ++miraMultiUnmapped;
-      Serial.printf("[MIRA][MULTI][ERROR] Invalid action ID: %s\\n",
+      Serial.printf("[MIRA][MULTI][ERROR] Invalid action ID: %s\n",
                     logicalName.c_str());
     }
     return;
   }
   ++miraMultiUnmapped;
-  Serial.printf("[MIRA][MULTI][ERROR] Commande introuvable: %s\\n",
+  Serial.printf("[MIRA][MULTI][ERROR] Commande introuvable: %s\n",
                 logicalName.c_str());
 #endif
 }
@@ -5735,7 +5735,7 @@ void MiraPanelServer::SendQueud() {
       if (eQueud[0].id == miraMultiLastActionId) {
         ++miraMultiSendAttempts;
         miraMultiLastHttpSubmitted=submitted;
-        if(_Debug) Serial.printf("[MIRA][MULTI][SEND] cmd=%s submitted=%d\\n",
+        if(_Debug) Serial.printf("[MIRA][MULTI][SEND] cmd=%s submitted=%d\n",
                                  eQueud[0].cmd.c_str(),submitted ? 1 : 0);
       }
 
