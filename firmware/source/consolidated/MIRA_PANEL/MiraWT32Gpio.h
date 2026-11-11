@@ -278,6 +278,48 @@ static uint32_t multiPressStarted[MULTI_COUNT] = {0};
 static uint32_t multiReleaseAt[MULTI_COUNT] = {0};
 static int multiPendingSlot = -1;
 static uint8_t multiPendingKind = 0; // 0=single,1=double,2=triple,3=long
+// Read-only diagnostic counters: no GPIO writes or Jeedom actions.
+static uint32_t multiPollCalls = 0;
+static uint32_t multiLastPollAt = 0;
+static uint32_t multiRawEdges[MULTI_COUNT] = {0};
+static uint32_t multiStableEdges[MULTI_COUNT] = {0};
+static uint32_t multiGestures[MULTI_COUNT] = {0};
+static uint32_t multiLastGestureAt[MULTI_COUNT] = {0};
+static uint8_t multiLastGestureKind[MULTI_COUNT] = {0};
+static bool multiEmit(uint8_t slot, uint8_t gesture, String& name, uint8_t& kind) {
+  if (slot >= MULTI_COUNT || !multiPin[slot] || !multiName[slot].length()) return false;
+  name = multiName[slot];
+  kind = gesture;
+  ++multiGestures[slot];
+  multiLastGestureAt[slot] = millis();
+  multiLastGestureKind[slot] = gesture;
+  Serial.printf("[MIRA][MULTI][DETECT] GPIO%u geste %u (%s)\\n",
+                unsigned(multiPin[slot]), unsigned(gesture), name.c_str());
+  return true;
+}
+static void multiDiagnostics(JsonObject out) {
+  out["poll_calls"] = multiPollCalls;
+  out["poll_age_ms"] = multiPollCalls ? (uint32_t)(millis() - multiLastPollAt) : -1;
+  JsonArray arr = out.createNestedArray("buttons");
+  for (uint8_t i=0; i<MULTI_COUNT; ++i) {
+    if (!multiName[i].length()) continue;
+    JsonObject p = arr.createNestedObject();
+    p["name"] = multiName[i];
+    p["gpio"] = multiPin[i];
+    p["visible"] = multiVisible[i];
+    p["started"] = multiStarted[i];
+    p["raw_down"] = multiRawDown[i];
+    p["stable_down"] = multiStableDown[i];
+    p["physical_down"] = multiPin[i] ? (digitalRead(multiPin[i]) == LOW) : false;
+    p["raw_edges"] = multiRawEdges[i];
+    p["stable_edges"] = multiStableEdges[i];
+    p["pending_clicks"] = multiClickCount[i];
+    p["gestures"] = multiGestures[i];
+    p["last_gesture_kind"] = multiGestures[i] ? (int)multiLastGestureKind[i] : -1;
+    p["last_gesture_age_ms"] = multiGestures[i] ?
+      (int32_t)(millis() - multiLastGestureAt[i]) : -1;
+  }
+}
 
 static int findMulti(const String& name) {
   for (int i=0;i<MULTI_COUNT;i++) if (multiName[i].length() && multiName[i]==name) return i;
@@ -324,6 +366,11 @@ static bool multiReset() {
     multiRawChanged[i]=0;
     multiPressStarted[i]=0;
     multiReleaseAt[i]=0;
+    multiRawEdges[i]=0;
+    multiStableEdges[i]=0;
+    multiGestures[i]=0;
+    multiLastGestureAt[i]=0;
+    multiLastGestureKind[i]=0;
   }
   multiPendingSlot=-1;
   multiPendingKind=0;
@@ -399,12 +446,14 @@ static bool multiConfigure(String name, int gpio, bool visible, bool& needsReloa
 
 static bool multiPoll(String& name, uint8_t& kind) {
   const uint32_t now=millis();
+  ++multiPollCalls;
+  multiLastPollAt=now;
   // Consume a pending event, never send it from a web callback.
   if (multiPendingSlot >= 0) {
     const int slot=multiPendingSlot;
     multiPendingSlot=-1;
     if (multiPin[slot] && multiName[slot].length()) {
-      name=multiName[slot]; kind=multiPendingKind; return true;
+      return multiEmit((uint8_t)slot, multiPendingKind, name, kind);
     }
   }
   for(uint8_t i=0;i<MULTI_COUNT;i++) {
@@ -426,9 +475,11 @@ static bool multiPoll(String& name, uint8_t& kind) {
     if (down != multiRawDown[i]) {
       multiRawDown[i]=down;
       multiRawChanged[i]=now;
+      ++multiRawEdges[i];
     }
     if (down != multiStableDown[i] && now-multiRawChanged[i]>=35) {
       multiStableDown[i]=down;
+      ++multiStableEdges[i];
       if (down) { multiPressStarted[i]=now; multiLongDone[i]=false; }
       else {
         if (!multiLongDone[i]) {
@@ -441,13 +492,13 @@ static bool multiPoll(String& name, uint8_t& kind) {
         now-multiPressStarted[i]>=900) {
       multiLongDone[i]=true;
       multiClickCount[i]=0; // never trigger a short click after long hold
-      name=multiName[i];kind=3;return true;
+      return multiEmit(i, 3, name, kind);
     }
     if (!multiStableDown[i] && multiClickCount[i] &&
         now-multiReleaseAt[i]>=370) {
       kind=multiClickCount[i]-1; // 0,1,2
       multiClickCount[i]=0;
-      name=multiName[i];return true;
+      return multiEmit(i, kind, name, kind);
     }
   }
   return false;
