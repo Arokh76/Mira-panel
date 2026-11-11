@@ -202,6 +202,7 @@ private:
 
   void SendQueud();
   void ReorderQueued();
+  void AdvanceQueuedHead();
 
   // Keep bursts of GPIO gestures while one HTTP request is in flight.
   static constexpr uint8_t QUEUE_CAPACITY = 16;
