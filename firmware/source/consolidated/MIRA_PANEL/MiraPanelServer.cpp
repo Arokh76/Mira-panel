@@ -772,7 +772,7 @@ void MiraPanelServer::ServeurStation() {
     response->addHeader("Cache-Control", "no-store");
     request->send(response);
   });
-  server.on("/gpio/multi/status", HTTP_GET, [miraGpioAuthorize](AsyncWebServerRequest* request) {
+  server.on("/gpio/multi/status", HTTP_GET, [miraGpioAuthorize, this](AsyncWebServerRequest* request) {
     if (!miraGpioAuthorize(request)) return;
     StaticJsonDocument<4096> result;
     result["wifi_connected"] = (WiFi.status() == WL_CONNECTED);
