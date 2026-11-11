@@ -667,6 +667,23 @@ void MiraPanelServer::ServeurStation() {
     request->send(200,"text/plain","OK");
   });
 
+  // Generic release of all Jeedom/GPIO associations. Do not change
+  // electrical modes, output levels, Wi-Fi, other NVS or widget programming.
+  server.on("/gpio/associations/reset", HTTP_POST, [miraGpioAuthorize](AsyncWebServerRequest* request) {
+    if (!miraGpioAuthorize(request)) return;
+    if (!request->hasHeader("X-Mira-GPIO") ||
+        !request->hasParam("confirm", true) ||
+        request->getParam("confirm", true)->value() != "1") {
+      request->send(400, "text/plain", "Confirmation manquante"); return;
+    }
+    if (!MiraWT32GPIO::resetAssociations()) {
+      request->send(503, "text/plain", "Liberation des associations NVS incomplete"); return;
+    }
+    // Visibility depends on multi-action maps; rebuild only the UI.
+    paramEvent = MIRA_SAVE_LIST_LVGL;
+    request->send(200, "text/plain", "OK");
+  });
+
   // Explicit, authenticated recovery for stale NVS reservations after a reset.
   // Never change GPIO direction or other local output bindings.
   server.on("/gpio/multi/reset", HTTP_POST, [miraGpioAuthorize](AsyncWebServerRequest* request) {
@@ -2372,10 +2389,10 @@ void MiraPanelServer::ServeurStation() {
         }
       } else if (String(p->value().c_str()) == "rstparams") {
 #if !defined(MIRA_TARGET_WAVESHARE_43C) && !defined(MIRA_TARGET_NEXTION_28)
-        // Resetting panel settings must also release stale multi-action NVS pins.
+        // Resetting panel settings releases stale input and output associations.
         // Do not erase physical GPIO modes or unrelated NVS namespaces.
-        if (!MiraWT32GPIO::multiReset()) {
-          request->send(503,"text/plain","Effacement multi-actions NVS impossible");
+        if (!MiraWT32GPIO::resetAssociations()) {
+          request->send(503,"text/plain","Effacement associations GPIO NVS impossible");
           return;
         }
 #endif
@@ -2395,8 +2412,8 @@ void MiraPanelServer::ServeurStation() {
         }
       } else if (String(p->value().c_str()) == "rstall") {
 #if !defined(MIRA_TARGET_WAVESHARE_43C) && !defined(MIRA_TARGET_NEXTION_28)
-        if (!MiraWT32GPIO::multiReset()) {
-          request->send(503,"text/plain","Effacement multi-actions NVS impossible");
+        if (!MiraWT32GPIO::resetAssociations()) {
+          request->send(503,"text/plain","Effacement associations GPIO NVS impossible");
           return;
         }
 #endif
