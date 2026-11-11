@@ -91,12 +91,40 @@ String GetHttp(String URL) {
 }
 
 void OrderIdJeedom(String ID) {
-   String URL = JEEDOM_IP + "/core/api/jeeApi.php?plugin=mira&type=event&apikey=" + JEEDOM_Key_mira + "&id=" + ID + "&value=json";
-  String Get = GetHttp(URL);
-  if (_Debug == true) Serial.print(F("[MIRA][FS] Récupération du fichier JSON de Jeedom: "));
-  if (_Debug == true) Serial.println(Get);
-  deserializeJson(SPIFFS_Config_Actions, Get);
-
+  String URL = JEEDOM_IP + "/core/api/jeeApi.php?plugin=mira&type=event&apikey=" + JEEDOM_Key_mira + "&id=" + ID + "&value=json";
+  String response = GetHttp(URL);
+  DynamicJsonDocument incoming(16384);
+  const DeserializationError err = deserializeJson(incoming, response);
+  if (err || !incoming["actions"].is<JsonArray>()) {
+    // NEVER deserialize an HTTP error or empty response into the live table.
+    // It would erase all indexed Jeedom commands, even after a good OTA.
+    Serial.println("[MIRA][BIND] Reponse Jeedom invalide : table precedente conservee");
+    return;
+  }
+  JsonArray current = SPIFFS_Config_Actions["actions"].as<JsonArray>();
+  JsonArray next = incoming["actions"].as<JsonArray>();
+  // Prefer mappings already received via the authenticated /actions/bindings.
+  // Preserve by logical name+type even when screen transport IDs are reordered.
+  for (JsonObject action : next) {
+    const String name=action["nom"] | "";
+    const String type=action["type"] | "";
+    for (JsonObject previous : current) {
+      if (previous["nom"].as<String>()!=name ||
+          previous["type"].as<String>()!=type) continue;
+      const char* fields[]={"jeedom","jeedom0","jeedom1"};
+      for (const char* field : fields) {
+        if (action[field].as<int>() < 1 && previous[field].as<int>() > 0)
+          action[field]=previous[field].as<int>();
+      }
+      break;
+    }
+  }
+  if (incoming.overflowed()) {
+    Serial.println("[MIRA][BIND] JSON Jeedom trop grand : table conservee");
+    return;
+  }
+  SPIFFS_Config_Actions.set(incoming);
+  if (_Debug) Serial.println("[MIRA][BIND] Table commandes Jeedom valide recue");
 }
 
 void SetJeedomId(String ID, String Value) {
