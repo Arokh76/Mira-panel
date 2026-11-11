@@ -1674,7 +1674,21 @@ class mira extends eqLogic {
             $mira_init = mira::GetParam('Jeedom_Init_Cmd');
             log::add(__CLASS__, 'debug', 'Init cmd paramétré: '.$mira_init);
           
-            $adresseip = network::getNetworkAccess();
+            // The WT32 uses AsyncHTTPRequest_Generic (plain HTTP only) to
+            // call Jeedom. Prefer Jeedom's configured LAN HTTP URL instead of
+            // an external HTTPS DNS that cannot be opened by this transport.
+            $adresseip = trim((string)network::getNetworkAccess());
+            $lanUrl = trim((string)network::getNetworkAccess('internal'));
+            $lanHost = parse_url($lanUrl, PHP_URL_HOST);
+            if (stripos($lanUrl,'http://') === 0 &&
+                is_string($lanHost) && $lanHost !== '' &&
+                !in_array(strtolower($lanHost),array('localhost','127.0.0.1','0.0.0.0'),true)) {
+              $adresseip = $lanUrl;
+              log::add('mira','debug','[MULTI][NETWORK] URL Jeedom locale HTTP utilisee pour le WT32');
+            } else if (stripos($adresseip,'https://') === 0) {
+              log::add('mira','warning',
+                '[MULTI][NETWORK] Adresse Jeedom HTTPS : configurer un acces interne HTTP joignable du WT32 pour les evenements');
+            }
           	$cleapi = jeedom::getApiKey();
             $cleapi_mira = jeedom::getApiKey('mira');
             $idrefresh = $refresh->getId(); 
