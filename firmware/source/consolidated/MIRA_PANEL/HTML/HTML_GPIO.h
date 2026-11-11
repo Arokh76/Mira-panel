@@ -36,12 +36,21 @@ button:disabled{opacity:.45;cursor:default}
 <a href="/load?nav=system">Système</a><a class="active" href="/load?nav=gpio">GPIO</a></nav>
 </div></header>
 <main><h1>GPIO · WT32-SC01 Plus</h1>
-<p class="intro">Pilotage local des 6 broches du connecteur EXT. Aucune liaison avec Jeedom.</p>
+<p class="intro">Pilotage local des 6 broches du connecteur EXT. Les associations multi-actions sont configurees depuis Jeedom.</p>
 <div class="notice"><b>Attention :</b> signaux 3,3 V uniquement, jamais de 230 V ni de relais direct.
 Les sorties redémarrent à OFF par défaut. Tu peux choisir un autre comportement ci-dessous.
 Un redémarrage entraîne toujours une phase où le niveau électrique n'est pas garanti : prévois
 un rappel externe adapté. Ne choisis jamais ON ou Restaurer pour une charge dangereuse.</div>
 <p id="message" role="status"></p><div class="grid" id="pins"></div>
+<section class="card" style="margin-top:18px">
+<h2>Boutons multi-actions Jeedom</h2>
+<p class="small">En cas de conflit HTTP 409 apres une RAZ, efface uniquement les anciennes
+associations boutons / GPIO. Les modes des broches, les sorties, les parametres
+reseau et les widgets ne sont pas modifies. Il faudra ensuite sauvegarder
+l'equipement Mira dans Jeedom pour retransmettre ses associations.</p>
+<button type="button" id="resetMulti">Liberer les associations multi-actions</button>
+<p class="small" id="resetMultiStatus" role="status"></p>
+</section>
 <p class="small">Modes, inversion et politique de démarrage enregistrés en mémoire. L'état ON/OFF n'est
 mémorisé que pour les sorties réglées sur « Restaurer le dernier état ».
 Actualisation automatique des entrées toutes les 2 secondes.</p></main>
@@ -54,6 +63,20 @@ const boots=[["off","Toujours OFF (défaut)"],["restore","Restaurer le dernier �
 const root=document.getElementById('pins'),msg=document.getElementById('message');
 let busy=false,ready=false;
 function message(s,bad){msg.textContent=s;msg.style.color=bad?'#a33c3c':'#1e7051';}
+const resetMultiButton=document.getElementById('resetMulti');
+const resetMultiStatus=document.getElementById('resetMultiStatus');
+resetMultiButton.addEventListener('click',async function(){
+  if(busy || !confirm('Effacer les anciennes associations des boutons multi-actions ? Les modes des GPIO restent inchanges. Il faudra ensuite sauvegarder le panneau dans Jeedom.'))return;
+  busy=true;resetMultiButton.disabled=true;
+  try {
+    await api('/gpio/multi/reset',{confirm:'1'});
+    resetMultiStatus.textContent='Associations liberees. Sauvegarder le panneau dans Jeedom.';
+    message('Associations multi-actions effacees.');
+  } catch(e) {
+    resetMultiStatus.textContent='Erreur : '+e.message;
+    message('Reinitialisation multi-actions impossible : '+e.message,true);
+  } finally {busy=false;resetMultiButton.disabled=false;}
+});
 async function api(url,body){
   const options={credentials:'same-origin',cache:'no-store'};
   if(body){options.method='POST';options.headers={'Content-Type':'application/x-www-form-urlencoded',
