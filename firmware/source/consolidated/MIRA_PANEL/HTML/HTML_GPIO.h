@@ -61,7 +61,7 @@ const modes=[["off","Désactivé"],["input","Entrée"],["pullup","Entrée + pull
 const boots=[["off","Toujours OFF (défaut)"],["restore","Restaurer le dernier état"],
 ["on","Toujours ON"]];
 const root=document.getElementById('pins'),msg=document.getElementById('message');
-let busy=false,ready=false;
+let busy=false,ready=false,reading=false,lastReadFailed=false;
 function message(s,bad){msg.textContent=s;msg.style.color=bad?'#a33c3c':'#1e7051';}
 const resetMultiButton=document.getElementById('resetMulti');
 const resetMultiStatus=document.getElementById('resetMultiStatus');
@@ -144,13 +144,21 @@ function paint(p){
   if(handler)handler(p.mode,p.boot||'off');
 }
 async function refresh(){
-  if(busy && ready)return;
+  // Avoid concurrent status requests when the web server is briefly busy.
+  if(reading || (busy && ready))return;
+  reading=true;
   try{
     const r=await api('/gpio/state');const data=await r.json();
+    if(!data || !Array.isArray(data.pins))throw new Error('Reponse GPIO invalide');
     if(!ready){data.pins.forEach(build);ready=true;}
     data.pins.forEach(paint);
-    if(!msg.textContent)message('GPIO disponibles.');
-  }catch(e){message('Lecture GPIO impossible : '+e.message,true);}
+    // Clear a previous transient "Failed to fetch" after a successful read.
+    if(lastReadFailed || !msg.textContent)message('GPIO disponibles.');
+    lastReadFailed=false;
+  }catch(e){
+    lastReadFailed=true;
+    message('Lecture GPIO impossible : '+e.message,true);
+  }finally{reading=false;}
 }
 refresh();setInterval(refresh,2000);
 })();
