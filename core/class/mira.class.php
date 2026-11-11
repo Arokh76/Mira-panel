@@ -1697,12 +1697,12 @@ class mira extends eqLogic {
 
               if ($mira_key == "Null" || $mira_key == "Erreur"){
                 $result = mira::AddListParamCrypted('Jeedom_Key',$cleapi);
-                log::add(__CLASS__, 'debug', 'Ajout du paramètre Jeedom_Key crypté: '.$cleapi.' : '.$result);
+                log::add(__CLASS__, 'debug', 'Ajout du paramètre Jeedom_Key crypté'.' : '.$result);
               }
               
               if ($mira_key_mira == "Null" || $mira_key == "Erreur"){
                 $result = mira::AddListParamCrypted('Jeedom_Key_mira',$cleapi_mira);
-                log::add(__CLASS__, 'debug', 'Ajout du paramètre Jeedom_Key_mira crypté: '.$cleapi_mira.' : '.$result);
+                log::add(__CLASS__, 'debug', 'Ajout du paramètre Jeedom_Key_mira crypté'.' : '.$result);
               }
 
               if ($mira_refresh == "Null" || $mira_refresh == "Erreur"){
@@ -1730,12 +1730,12 @@ class mira extends eqLogic {
               if ($cleapi != $mira_key){
                 $update++;
                 $result = mira::UpdateListParam('Jeedom_Key',$cleapi);
-                log::add(__CLASS__, 'debug', 'Modification du paramètre Jeedom_Key crypté: '.$cleapi.' : '.$result);
+                log::add(__CLASS__, 'debug', 'Modification du paramètre Jeedom_Key crypté'.' : '.$result);
               }
               if ($cleapi_mira != $mira_key_mira){
                 $update++;
                 $result = mira::UpdateListParam('Jeedom_Key_mira',$cleapi_mira);
-                log::add(__CLASS__, 'debug', 'Modification du paramètre Jeedom_Key_mira crypté: '.$cleapi_mira.' : '.$result);
+                log::add(__CLASS__, 'debug', 'Modification du paramètre Jeedom_Key_mira crypté'.' : '.$result);
               }
               if ($idrefresh != $mira_refresh){				
                 $update++;
