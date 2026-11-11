@@ -4,3 +4,6 @@ idf_component_register(
   REQUIRES lvgl esp_lcd esp_timer esp_driver_i2c esp_wifi esp_netif esp_event
            esp_http_server esp_http_client app_update nvs_flash spiffs json mqtt mbedtls esp-tls
 )
+# This project is exclusively for Waveshare 7 STD: expose the correct profile
+# to /displayinfo and any other 7-inch conditional firmware code.
+target_compile_definitions(${COMPONENT_LIB} PRIVATE MIRA_PANEL_7_INCH=1)
