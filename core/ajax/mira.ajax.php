@@ -363,7 +363,9 @@ try {
         // Abort fast if the panel is missing: never keep a Jeedom PHP worker
         // busy in the 12s POST + 17s reboot-verification loop for an offline WT32.
         // A panel that *was* online is still allowed to reboot during /programui.
-        $probe=curl_init('http://'.$host.'/getindex?key='.rawurlencode($key));
+        // /getindex returns 404 on a factory-new screen with no UI saved yet.
+        // /testmodule checks HTTP readiness and the Mira key without requiring widgets.
+        $probe=curl_init('http://'.$host.'/testmodule?key='.rawurlencode($key));
         curl_setopt_array($probe,array(
             CURLOPT_RETURNTRANSFER=>true,
             CURLOPT_CONNECTTIMEOUT_MS=>350,
