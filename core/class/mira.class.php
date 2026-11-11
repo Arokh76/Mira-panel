@@ -1964,10 +1964,54 @@ class mira extends eqLogic {
   
   
   public function SendJeedomIDOrder($value) {
-    $url = 'http://'.$this->getConfiguration('adresseip').'/sendjeedomorderid?key='.$this->getConfiguration('password').'&value='.$value;
+    // Modern WT32: push the already prepared Jeedom IDs directly to the panel.
+    // Avoid the reverse WT32 -> Jeedom HTTP(S) fetch, which can fail silently
+    // and leave every GPIO gesture with an empty "jeedom" command mapping.
+    $init=$this->getCmd(null,'init_cmd');
+    if (is_object($init)) {
+      $saved=json_decode((string)$init->getConfiguration('json',''),true);
+      if (is_array($saved) && isset($saved['actions']) && is_array($saved['actions'])) {
+        $bindings=array();
+        foreach ($saved['actions'] as $entry) {
+          if (!is_array($entry) || empty($entry['nom']) || empty($entry['type'])) continue;
+          $binding=array('nom'=>(string)$entry['nom'],'type'=>(string)$entry['type']);
+          foreach (array('id','id0','id1','jeedom','jeedom0','jeedom1') as $field)
+            if (isset($entry[$field]) && is_numeric($entry[$field]) && (int)$entry[$field]>0)
+              $binding[$field]=(int)$entry[$field];
+          if (isset($binding['jeedom']) ||
+              (isset($binding['jeedom0']) && isset($binding['jeedom1'])))
+            $bindings[]=$binding;
+        }
+        if (count($bindings)) {
+          $ip=(string)$this->getConfiguration('adresseip');
+          $password=(string)$this->getConfiguration('password');
+          $payload=json_encode(array('actions'=>$bindings),JSON_UNESCAPED_UNICODE);
+          if (filter_var($ip,FILTER_VALIDATE_IP,FILTER_FLAG_IPV4) &&
+              $password!=='' && $payload!==false) {
+            $result=$this->panelHttpRequest('http://'.$ip.'/actions/bindings','POST',
+              http_build_query(array('json'=>$payload)),
+              array(CURLOPT_USERPWD=>'admin:'.$password,
+                CURLOPT_HTTPAUTH=>CURLAUTH_BASIC,
+                CURLOPT_HTTPHEADER=>array('Content-Type: application/x-www-form-urlencoded',
+                                           'X-Mira-Bindings: 1')),
+              '[BIND][HTTP]');
+            if ($result!==false && trim((string)$result)==='OK') {
+              log::add('mira','debug','[BIND][OK] '.
+                count($bindings).' commande(s) transmises directement au WT32');
+              return 'OK';
+            }
+            log::add('mira','debug',
+              '[BIND] Envoi direct non confirme, tentative de compatibilite ancienne version');
+          }
+        }
+      }
+    }
+    // Compatibility with older panels that do not support /actions/bindings.
+    $url='http://'.$this->getConfiguration('adresseip').
+      '/sendjeedomorderid?key='.$this->getConfiguration('password').'&value='.$value;
     $result=$this->panelHttpGet($url);
     if ($result===false) return "Erreur";
-    return $result;    
+    return $result;
   }
   
   /*public function SetJeedomId($param,$value) {
