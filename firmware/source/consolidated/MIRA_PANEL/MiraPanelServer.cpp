@@ -67,6 +67,18 @@ DNSServer dnsServer;
 //Json Action
 int Action = -1;
 
+// Read-only trace for WT32 multi-action end-to-end diagnostics.
+// Never expose credentials or issue commands from the diagnostics endpoint.
+static uint32_t miraMultiDetected = 0;
+static uint32_t miraMultiMapped = 0;
+static uint32_t miraMultiUnmapped = 0;
+static uint32_t miraMultiQueued = 0;
+static uint32_t miraMultiSendAttempts = 0;
+static int miraMultiLastActionId = -1;
+static int miraMultiLastJeedomId = 0;
+static bool miraMultiLastHttpSubmitted = false;
+static uint32_t miraMultiLastDetectedAt = 0;
+
 bool SetupModuleDone = false;
 String MiraRuntimeVersion = "";
 String UpdateURL = "";
@@ -746,6 +758,33 @@ void MiraPanelServer::ServeurStation() {
     if (!miraGpioAuthorize(request)) return;
     AsyncWebServerResponse* response =
         request->beginResponse(200, "application/json", MiraWT32GPIO::stateJson());
+    response->addHeader("Cache-Control", "no-store");
+    request->send(response);
+  });
+  server.on("/gpio/multi/status", HTTP_GET, [miraGpioAuthorize](AsyncWebServerRequest* request) {
+    if (!miraGpioAuthorize(request)) return;
+    StaticJsonDocument<4096> result;
+    result["wifi_connected"] = (WiFi.status() == WL_CONNECTED);
+    result["jeedom_enabled"] = JEEDOM_mira;
+    result["jeedom_initialized"] = Init_Jeedom;
+    result["auto_refresh"] = AUTO_REFRESH;
+    JsonObject input = result.createNestedObject("gpio");
+    MiraWT32GPIO::multiDiagnostics(input);
+    JsonObject dispatch = result.createNestedObject("dispatch");
+    dispatch["detected"] = miraMultiDetected;
+    dispatch["mapped"] = miraMultiMapped;
+    dispatch["unmapped"] = miraMultiUnmapped;
+    dispatch["queued"] = miraMultiQueued;
+    dispatch["http_attempts"] = miraMultiSendAttempts;
+    dispatch["last_action_id"] = miraMultiLastActionId;
+    dispatch["last_jeedom_id"] = miraMultiLastJeedomId;
+    dispatch["last_http_submit_ok"] = miraMultiLastHttpSubmitted;
+    dispatch["last_detect_age_ms"] = miraMultiDetected ?
+      (int32_t)(millis() - miraMultiLastDetectedAt) : -1;
+    String body;
+    serializeJson(result, body);
+    AsyncWebServerResponse* response =
+      request->beginResponse(200, "application/json", body);
     response->addHeader("Cache-Control", "no-store");
     request->send(response);
   });
@@ -3559,6 +3598,11 @@ void MiraPanelServer::WT32PollMultiButtons() {
   if (!MiraWT32GPIO::multiPoll(name,kind)) return;
   const char* prefixes[]={"Multi_Clic_","Multi_Double_","Multi_Triple_","Multi_Long_"};
   if(kind>=4) return;
+  ++miraMultiDetected;
+  miraMultiLastDetectedAt = millis();
+  miraMultiLastActionId = -1;
+  miraMultiLastJeedomId = 0;
+  miraMultiLastHttpSubmitted = false;
   const String logicalName=String(prefixes[kind])+name;
   JsonArray actions=SPIFFS_Config_Actions["actions"];
   for (JsonObject action : actions) {
@@ -3566,11 +3610,22 @@ void MiraPanelServer::WT32PollMultiButtons() {
        action["nom"].as<String>()!=logicalName) continue;
     const int id=action["id"] | -1;
     if(id>=0) {
+      miraMultiLastActionId=id;
+      miraMultiLastJeedomId=action["jeedom"] | 0;
+      ++miraMultiMapped;
       IndexSetEvent(id);
-      if(_Debug) Serial.println("[MIRA][MULTI] "+logicalName);
+      if(_Debug) Serial.printf("[MIRA][MULTI][MATCH] %s: id=%d jeedom=%d\\n",
+                               logicalName.c_str(),id,miraMultiLastJeedomId);
+    } else {
+      ++miraMultiUnmapped;
+      Serial.printf("[MIRA][MULTI][ERROR] Invalid action ID: %s\\n",
+                    logicalName.c_str());
     }
     return;
   }
+  ++miraMultiUnmapped;
+  Serial.printf("[MIRA][MULTI][ERROR] Commande introuvable: %s\\n",
+                logicalName.c_str());
 #endif
 }
 
@@ -5676,10 +5731,13 @@ void MiraPanelServer::SendQueud() {
       Length_URL++;
       char Buf[Length_URL];
       URL.toCharArray(Buf, Length_URL);
-      miraAsyncHTTPGet(Buf);
-
-
-
+      const bool submitted = miraAsyncHTTPGet(Buf);
+      if (eQueud[0].id == miraMultiLastActionId) {
+        ++miraMultiSendAttempts;
+        miraMultiLastHttpSubmitted=submitted;
+        if(_Debug) Serial.printf("[MIRA][MULTI][SEND] cmd=%s submitted=%d\\n",
+                                 eQueud[0].cmd.c_str(),submitted ? 1 : 0);
+      }
 
     } else if (eQueud[0].cmd != "" && eQueud[0].value != "") {
       String URL = JEEDOM_IP + "/core/api/jeeApi.php?plugin=mira&type=event&apikey=" + JEEDOM_Key_mira + "&id=" + eQueud[0].cmd + "&value=" + eQueud[0].value;
@@ -5782,6 +5840,7 @@ void MiraPanelServer::JeedomCmd(int ID) {
           eQueud[i].value = Jeedom_Value;
           eQueud[i].send = false;
           eQueud[i].test = 0;
+          if (ID == miraMultiLastActionId) ++miraMultiQueued;
 
           if (_Debug) Serial.println(eQueud[i].cmd);
           Queued_Moment_Memorise = millis();
