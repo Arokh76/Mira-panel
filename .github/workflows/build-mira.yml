@@ -37,17 +37,19 @@ jobs:
           mkdir -p firmware/source/work/MIRA_PANEL
           cp -a firmware/source/consolidated/MIRA_PANEL/. firmware/source/work/MIRA_PANEL/
           grep -q '"0.7.41"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
-          # Regression: a web RAZ clears stale multi-action NVS reservations,
-          # while the recovery button never clears GPIO modes or MQTT settings.
+          # RAZ and manual release clear input AND output mappings, never
+          # GPIO electrical configuration or unrelated NVS namespaces.
           grep -Fq 'lastReadFailed=false' firmware/source/work/MIRA_PANEL/HTML/HTML_GPIO.h
           grep -Fq 'server.on("/actions/bindings"' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
           grep -Fq 'server.on("/gpio/associations/reset"' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
-          grep -Fq 'resetAssociations()' firmware/source/work/MIRA_PANEL/MiraWT32Gpio.h
+          grep -Fq 'static bool resetAssociations()' firmware/source/work/MIRA_PANEL/MiraWT32Gpio.h
+          grep -Fq 'static bool resetLinks()' firmware/source/work/MIRA_PANEL/MiraWT32Gpio.h
+          grep -Fq 'MiraWT32GPIO::resetAssociations()' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
           grep -Fq 'Liberer les associations</button>' firmware/source/work/MIRA_PANEL/HTML/HTML_GPIO.h
+          grep -Fq 'id="resetAssociations"' firmware/source/work/MIRA_PANEL/HTML/HTML_GPIO.h
+          # Compatibility for earlier WT32 clients using the old scoped route.
           grep -Fq 'static bool multiReset()' firmware/source/work/MIRA_PANEL/MiraWT32Gpio.h
           grep -Fq 'server.on("/gpio/multi/reset", HTTP_POST' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
-          grep -Fq "MiraWT32GPIO::multiReset()" firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
-          grep -Fq "id=\"resetMulti\"" firmware/source/work/MIRA_PANEL/HTML/HTML_GPIO.h
           # Keep the physically validated WT32 beta fixes in the normal build:
           # JSON action values, optional Rose theme and compact Mira boot logo.
           grep -Fq 'miraCompactActionValues()' firmware/source/work/MIRA_PANEL/MiraPanelServer.cpp
