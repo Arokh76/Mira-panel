@@ -45,7 +45,13 @@ jobs:
           grep -Fq 'mira_beta_setup_register_captive(httpd)' "$ROOT/main/mira_recovery.c"
           grep -Fq 'mira_beta_captive_dns_start()' "$ROOT/main/mira_recovery.c"
           ! grep -Fq 'esp_vfs_spiffs_format' "$ROOT/main/mira_full.c"
-          # Guard validated 7-inch hardware mapping independently from the 4.3C.\n          grep -Fq 'project(mira_idf_7std)' "$ROOT/CMakeLists.txt"\n          grep -Fq 'Waveshare ESP32-S3 Touch LCD 7 STD' "$ROOT/main/mira_beta_web_pages.h"\n          grep -Fq 'render_system_7std' "$ROOT/main/mira_beta_web.c"\n          grep -Fq 'waveshare-esp32s3-touch-lcd-7-std-idf' "$ROOT/main/mira_beta_update.c"\n          ! grep -Fq 'GPIO Waveshare 4,3C' "$ROOT/main/mira_beta_web.c"
+          # Guard validated 7-inch hardware mapping independently from the 4.3C.
+          grep -Fq 'project(mira_idf_7std)' "$ROOT/CMakeLists.txt"
+          grep -Fq 'MIRA_PANEL_7_INCH=1' "$ROOT/main/CMakeLists.txt"
+          grep -Fq 'Waveshare ESP32-S3 Touch LCD 7 STD' "$ROOT/main/mira_beta_web_pages.h"
+          grep -Fq 'render_system_7std' "$ROOT/main/mira_beta_web.c"
+          grep -Fq 'waveshare-esp32s3-touch-lcd-7-std-idf' "$ROOT/main/mira_beta_update.c"
+          ! grep -Fq 'GPIO Waveshare 4,3C' "$ROOT/main/mira_beta_web.c"
           grep -Fq '#define LCD_PCLK_HZ (13 * 1000 * 1000)' "$ROOT/main/mira_display.c"
           grep -Fq 'ext_cfg.device_address = 0x38;' "$ROOT/main/mira_display.c"
           grep -Fq 'ioexp_write(ioexp_mode, 0x01)' "$ROOT/main/mira_display.c"
@@ -55,10 +61,11 @@ jobs:
           ! grep -Fq 'mira_gpio43_init()' "$ROOT/main/app_main.c"
           ! grep -Fq 'ioexp_write(ioexp_device, 0x05' "$ROOT/main/mira_display.c"
 
-      - name: Verify the beta homepage and configuration templates are unchanged
+      - name: Verify Waveshare 7 STD parity and Jeedom programming routes
         shell: bash
         run: |
-          python3 firmware/experiments/esp-idf/mira-idf/tests/check_beta_web_parity.py
+          # 4.3C has its own dedicated build and full GPIO test suite.
+          # This 7 STD target checks shared-core consistency and 7-inch safety.
           python3 firmware/experiments/esp-idf/mira-idf-7/tests/check_beta_web_parity.py
       - name: Native ESP-IDF 5.5.6 build
         uses: espressif/esp-idf-ci-action@v1
