@@ -293,7 +293,7 @@ static bool multiEmit(uint8_t slot, uint8_t gesture, String& name, uint8_t& kind
   ++multiGestures[slot];
   multiLastGestureAt[slot] = millis();
   multiLastGestureKind[slot] = gesture;
-  Serial.printf("[MIRA][MULTI][DETECT] GPIO%u geste %u (%s)\\n",
+  Serial.printf("[MIRA][MULTI][DETECT] GPIO%u geste %u (%s)\n",
                 unsigned(multiPin[slot]), unsigned(gesture), name.c_str());
   return true;
 }
