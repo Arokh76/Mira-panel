@@ -1663,10 +1663,10 @@ class mira extends eqLogic {
             log::add(__CLASS__, 'debug', 'Adresse IP paramétrée: '.$mira_adresseip);
           
           	$mira_key = mira::GetParam('Jeedom_Key');
-          	log::add(__CLASS__, 'debug', 'Clé Jeedom décryptée: '.$mira_key);
+             // Sensitive API key intentionally not logged.
           
           	$mira_key_mira = mira::GetParam('Jeedom_Key_mira');
-          	log::add(__CLASS__, 'debug', 'Clé mira décryptée: '.$mira_key_mira);
+             // Sensitive API key intentionally not logged.
           
             $mira_refresh = mira::GetParam('Jeedom_Refresh');
             log::add(__CLASS__, 'debug', 'Refresh paramétré: '.$mira_refresh);
