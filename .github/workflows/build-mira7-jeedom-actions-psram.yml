@@ -47,6 +47,14 @@ jobs:
           grep -Fq 'jeedom_passive_ready' "$ROOT/main/mira_recovery.c"
           grep -Fq 'CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y' "$ROOT/sdkconfig.defaults"
           grep -Fq 'xTaskCreateWithCaps(jeedom_action_worker' "$ROOT/main/mira_jeedom.c"
+          grep -Fq 'MIRA_PANEL_7_INCH=1' "$ROOT/main/CMakeLists.txt"
+          grep -Fq '#ifdef MIRA_PANEL_7_INCH' "$ROOT/main/mira_jeedom.c"
+          grep -Fq 'waveshare-esp32s3-touch-lcd-7' "$ROOT/main/mira_jeedom.c"
+          grep -Fq '.uri="/testmodule",.method=HTTP_GET,.handler=testmodule' "$ROOT/main/mira_jeedom.c"
+          grep -Fq '.uri="/programui",.method=HTTP_POST,.handler=programui' "$ROOT/main/mira_jeedom.c"
+          grep -Fq 'JEEDOM_BOOT_REPLAY_ACK' "$ROOT/main/mira_jeedom.c"
+          grep -Fq 'JEEDOM_HTTP_STACK_MIN_FREE' "$ROOT/main/mira_jeedom.c"
+          grep -Fq 'xTaskCreateWithCaps(jeedom_action_worker,"mira_jeedom_http",24576,' "$ROOT/main/mira_jeedom.c"
           grep -Fq 'xQueueCreateWithCaps(12,sizeof(mira_action_msg_t)' "$ROOT/main/mira_jeedom.c"
           grep -Fq 'MIRA_JEEDOM_ACTIONS_READY' "$ROOT/main/app_main.c"
           grep -Fq 'jeedom_actions_ready' "$ROOT/main/mira_recovery.c"
@@ -80,25 +88,46 @@ jobs:
           target: esp32s3
           path: firmware/experiments/esp-idf/mira-idf-7
           command: idf.py build
-      - name: Package one application-only browser OTA firmware
+      - name: Package both corrected OTA and matched factory USB 0x0000
         shell: bash
         run: |
           set -euo pipefail
           ROOT=firmware/experiments/esp-idf/mira-idf-7/build
-          mkdir -p mira7_ota
-          cp "$ROOT/mira_idf_7std.bin" mira7_ota/MIRA7_ETATS_COULEURS_OTA.bin
+          OUT=mira7_release
+          mkdir -p "$OUT"
+          cp "$ROOT/mira_idf_7std.bin" "$OUT/MIRA7_ETATS_COULEURS_BOOT_RESYNC_HTTP24K_7STD_FIX_OTA.bin"
           python3 - <<'PY'
           from pathlib import Path
-          path=Path("mira7_ota/MIRA7_ETATS_COULEURS_OTA.bin")
-          data=path.read_bytes()
-          assert len(data)>65536 and len(data)<=0x300000, "OTA image exceeds app slot"
-          assert data[0]==0xE9, "Not an ESP app image"
-          print("OTA only:",len(data),"bytes; no bootloader, NVS or SPIFFS")
+          import hashlib
+          root=Path("firmware/experiments/esp-idf/mira-idf-7/build")
+          out=Path("mira7_release")
+          app=(out/"MIRA7_ETATS_COULEURS_BOOT_RESYNC_HTTP24K_7STD_FIX_OTA.bin").read_bytes()
+          assert len(app)>65536 and len(app)<=0x300000, "OTA image exceeds app slot"
+          assert app[0]==0xE9, "Invalid ESP32-S3 app image"
+          parts=[
+              (0x0000,root/"bootloader/bootloader.bin",0x8000),
+              (0x8000,root/"partition_table/partition-table.bin",0x10000),
+              (0x10000,root/"mira_idf_7std.bin",0x310000),
+          ]
+          image=bytearray()
+          for offset,path,limit in parts:
+              blob=path.read_bytes()
+              assert len(blob)>0 and offset+len(blob)<=limit, (path,len(blob))
+              if len(image)<offset: image.extend(b'\xff'*(offset-len(image)))
+              assert len(image)==offset
+              image.extend(blob)
+          assert image[0]==0xE9 and image[0x10000:]==app
+          # The blank NVS and OTA-data regions are intentional in a factory image.
+          assert all(v==0xff for v in image[0x9000:0x10000])
+          dest=out/"MIRA7_ETATS_COULEURS_BOOT_RESYNC_HTTP24K_7STD_FIX_FACTORY_USB_0x0000.bin"
+          dest.write_bytes(image)
+          for path in (out/"MIRA7_ETATS_COULEURS_BOOT_RESYNC_HTTP24K_7STD_FIX_OTA.bin",dest):
+              print(path.name,len(path.read_bytes()),hashlib.sha256(path.read_bytes()).hexdigest())
           PY
-      - name: Upload single browser OTA file
+      - name: Upload matched 7 STD OTA and factory files
         uses: actions/upload-artifact@v4
         with:
-          name: MIRA7_ETATS_COULEURS_OTA
-          path: mira7_ota/MIRA7_ETATS_COULEURS_OTA.bin
+          name: MIRA7_ETATS_COULEURS_BOOT_RESYNC_HTTP24K_7STD_FIX
+          path: mira7_release/
           retention-days: 14
           if-no-files-found: error
