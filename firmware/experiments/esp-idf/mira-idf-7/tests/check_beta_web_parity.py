@@ -71,6 +71,17 @@ assert 'if(!strcmp(nav,"gpio"))return html_err(req,HTTPD_404_NOT_FOUND' in web
 assert 'GPIO Waveshare 4,3C</a>' not in web
 assert "static esp_err_t beta_43c_gpio_page(" not in web
 assert "project(mira_idf_7std)" in project
+# The display profile must be compiled for the 7-inch target, not default 4.3C.
+component = (main / "CMakeLists.txt").read_text(encoding="utf-8")
+jeedom = (main / "mira_jeedom.c").read_text(encoding="utf-8")
+assert 'target_compile_definitions(${COMPONENT_LIB} PRIVATE MIRA_PANEL_7_INCH=1)' in component
+assert '#ifdef MIRA_PANEL_7_INCH' in jeedom
+assert 'waveshare-esp32s3-touch-lcd-7' in jeedom
+# Fresh installs have no saved index; Jeedom must be able to test readiness
+# and send the very first UI configuration independently of /getindex.
+assert '.uri="/testmodule",.method=HTTP_GET,.handler=testmodule' in jeedom
+assert '.uri="/programui",.method=HTTP_POST,.handler=programui' in jeedom
+assert 'Configuration Mira absente' in jeedom
 assert 'strcmp(candidate.project_name,"mira_idf_7std")!=0' in ota
 assert 'strcmp(candidate.project_name,"mira_idf_7std")!=0' in update
 assert "waveshare-esp32s3-touch-lcd-7-std-idf" in update
