@@ -574,6 +574,76 @@ void MiraPanelServer::ServeurStation() {
     return true;
   };
 
+  // Jeedom pushes action bindings locally. The WT32 no longer depends on an
+  // outbound HTTP(S) fetch to Jeedom just to attach command IDs to actions.
+  // This operation only writes the "jeedom" mapping; never executes an action.
+  server.on("/actions/bindings", HTTP_POST, [miraGpioAuthorize](AsyncWebServerRequest* request) {
+    if (!miraGpioAuthorize(request)) return;
+    if (!request->hasHeader("X-Mira-Bindings") ||
+        !request->hasParam("json", true)) {
+      request->send(400, "text/plain", "Associations absentes"); return;
+    }
+    const String payload = request->getParam("json", true)->value();
+    if (payload.isEmpty() || payload.length() > 10000) {
+      request->send(413, "text/plain", "Associations trop grandes"); return;
+    }
+    DynamicJsonDocument incoming(12288);
+    const DeserializationError err = deserializeJson(incoming, payload);
+    if (err || !incoming["actions"].is<JsonArray>()) {
+      request->send(400, "text/plain", "JSON associations invalide"); return;
+    }
+    JsonArray updates = incoming["actions"].as<JsonArray>();
+    if (updates.size() == 0 || updates.size() > 256) {
+      request->send(400, "text/plain", "Nombre associations invalide"); return;
+    }
+    // Stage the whole action table: a malformed/oversized update must never
+    // corrupt the transport IDs or leave partially mapped commands.
+    DynamicJsonDocument staged(16384);
+    staged.set(SPIFFS_Config_Actions);
+    if (staged.overflowed() || !staged["actions"].is<JsonArray>()) {
+      request->send(503, "text/plain", "Table actions indisponible"); return;
+    }
+    JsonArray current = staged["actions"].as<JsonArray>();
+    unsigned mapped = 0;
+    for (JsonObject incomingAction : updates) {
+      const String name = incomingAction["nom"] | "";
+      const String type = incomingAction["type"] | "";
+      if (name.isEmpty() || type.isEmpty()) continue;
+      for (JsonObject existing : current) {
+        if (existing["nom"].as<String>() != name ||
+            existing["type"].as<String>() != type) continue;
+        const bool sameId = (type == "toggle")
+          ? (existing["id0"].as<int>() == incomingAction["id0"].as<int>() &&
+             existing["id1"].as<int>() == incomingAction["id1"].as<int>())
+          : (existing["id"].as<int>() > 0 &&
+             existing["id"].as<int>() == incomingAction["id"].as<int>());
+        if (!sameId) continue;
+        bool changed = false;
+        const char* fields[] = {"jeedom", "jeedom0", "jeedom1"};
+        for (const char* field : fields) {
+          const int target = incomingAction[field].as<int>();
+          if (target < 1) continue;
+          existing[field] = target;
+          changed = true;
+        }
+        if (changed) ++mapped;
+        break;
+      }
+    }
+    if (!mapped) {
+      request->send(409, "text/plain", "Aucun ID Jeedom correspondant"); return;
+    }
+    if (staged.overflowed()) {
+      request->send(413, "text/plain", "Table actions pleine"); return;
+    }
+    SPIFFS_Config_Actions.set(staged);
+    if (SPIFFS_Config_Actions.overflowed()) {
+      request->send(503, "text/plain", "Memoire associations insuffisante"); return;
+    }
+    if (_Debug) Serial.printf("[MIRA][BIND] %u commandes Jeedom associees localement\\n", mapped);
+    request->send(200, "text/plain", "OK");
+  });
+
   server.on("/gpio/multi/config", HTTP_POST, [miraGpioAuthorize](AsyncWebServerRequest* request) {
     if(!miraGpioAuthorize(request))return;
     if(!request->hasHeader("X-Mira-GPIO") ||
