@@ -83,6 +83,7 @@ bool SetupModuleDone = false;
 String MiraRuntimeVersion = "";
 String UpdateURL = "";
 
+static bool miraSaveActionBindings(JsonArrayConst source);
 static const char* MIRA_GITHUB_VERSION_URL = "https://raw.githubusercontent.com/Arokh76/Mira-panel/firmware-beta/firmware/targets.json";
 static const char* MIRA_GITHUB_BIN_URL = "https://raw.githubusercontent.com/Arokh76/Mira-panel/main/firmware/Mira_Panel.bin";
 
@@ -647,6 +648,9 @@ void MiraPanelServer::ServeurStation() {
     }
     if (staged.overflowed()) {
       request->send(413, "text/plain", "Table actions pleine"); return;
+    }
+    if (!miraSaveActionBindings(staged["actions"].as<JsonArrayConst>())) {
+      request->send(503, "text/plain", "Sauvegarde associations Jeedom impossible"); return;
     }
     SPIFFS_Config_Actions.set(staged);
     if (SPIFFS_Config_Actions.overflowed()) {
@@ -3647,6 +3651,82 @@ String MiraPanelServer::GetJsonLvgl() {
   String Retour_Json = "";
   serializeJsonPretty(mira_Json_LVGL, Retour_Json);
   return Retour_Json;
+}
+
+// The LVGL action table is rebuilt at boot and on hot reprogramming.
+// Keep Jeedom command IDs separately, keyed by stable logical name and type,
+// so the transport IDs may be renumbered without losing Jeedom routing.
+static const char* MIRA_ACTION_BINDINGS_FILE = "/mira_bindings.json";
+static bool miraSaveActionBindings(JsonArrayConst source) {
+  DynamicJsonDocument snapshot(12288);
+  JsonArray entries = snapshot.createNestedArray("actions");
+  for (JsonObjectConst action : source) {
+    const String name = action["nom"] | "";
+    const String type = action["type"] | "";
+    if (!name.length() || !type.length()) continue;
+    const int id = action["jeedom"] | 0;
+    const int id0 = action["jeedom0"] | 0;
+    const int id1 = action["jeedom1"] | 0;
+    if (id <= 0 && (id0 <= 0 || id1 <= 0)) continue;
+    JsonObject entry = entries.createNestedObject();
+    entry["nom"] = name;
+    entry["type"] = type;
+    if (id > 0) entry["jeedom"] = id;
+    if (id0 > 0) entry["jeedom0"] = id0;
+    if (id1 > 0) entry["jeedom1"] = id1;
+  }
+  if (snapshot.overflowed() || entries.size() == 0) return false;
+  const char* tempPath = "/mira_bindings.tmp";
+  File tmp = SPIFFS.open(tempPath, "w");
+  if (!tmp) return false;
+  const size_t written = serializeJson(snapshot, tmp);
+  tmp.close();
+  if (!written || written < measureJson(snapshot)) {
+    SPIFFS.remove(tempPath);
+    return false;
+  }
+  SPIFFS.remove(MIRA_ACTION_BINDINGS_FILE);
+  if (!SPIFFS.rename(tempPath, MIRA_ACTION_BINDINGS_FILE)) {
+    SPIFFS.remove(tempPath);
+    return false;
+  }
+  if (_Debug)
+    Serial.printf("[MIRA][BIND] %u associations sauvegardees hors table LVGL\\n",
+                  unsigned(entries.size()));
+  return true;
+}
+
+void MiraPanelServer::RestoreActionBindingsForLvgl() {
+  File f = SPIFFS.open(MIRA_ACTION_BINDINGS_FILE, "r");
+  if (!f) return; // First boot: Jeedom will push the initial associations.
+  if (f.size() == 0 || f.size() > 11000) { f.close(); return; }
+  DynamicJsonDocument snapshot(12288);
+  const DeserializationError err = deserializeJson(snapshot, f);
+  f.close();
+  if (err || !snapshot["actions"].is<JsonArray>()) return;
+  JsonArray live = SPIFFS_Config_Actions["actions"].as<JsonArray>();
+  unsigned restored = 0;
+  for (JsonObject action : live) {
+    const String name = action["nom"] | "";
+    const String type = action["type"] | "";
+    if (!name.length() || !type.length()) continue;
+    for (JsonObject saved : snapshot["actions"].as<JsonArray>()) {
+      if (saved["nom"].as<String>() != name ||
+          saved["type"].as<String>() != type) continue;
+      // Never overwrite a fresher binding pushed by Jeedom concurrently.
+      const char* fields[] = {"jeedom", "jeedom0", "jeedom1"};
+      bool applied = false;
+      for (const char* field : fields) {
+        if (action[field].as<int>() > 0) continue;
+        const int value = saved[field] | 0;
+        if (value > 0) { action[field] = value; applied = true; }
+      }
+      if (applied) ++restored;
+      break;
+    }
+  }
+  if (_Debug) Serial.printf("[MIRA][BIND] %u associations restaurees apres reconstruction LVGL\\n",
+                            restored);
 }
 
 void MiraPanelServer::ResetActionsForLvgl() {
