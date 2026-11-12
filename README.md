@@ -1,5 +1,18 @@
 # Mira Panel — firmware-beta
 
+**Point d'entrée obligatoire : [VERSION_ACTIVE.md](VERSION_ACTIVE.md).**
+
+| Matériel | Sources de travail | Binaire de référence |
+| --- | --- | --- |
+| WT32 (Arduino) | [Arduino/MIRA_PANEL/](Arduino/MIRA_PANEL/) | `Mira_Panel_WT32_SC01_Plus_0.7.44.bin` |
+| Waveshare 7 pouces (ESP-IDF) | [esp-idf/](esp-idf/) | `MIRA7_ETATS_COULEURS_BOOT_RESYNC_HTTP24K_OTA.bin` |
+
+**Important :** les binaires exacts 0.7.44/24K sont encore conservés dans la bibliothèque de fichiers ChatGPT. Leurs SHA-256 et leur statut sont documentés dans `VERSION_ACTIVE.md`. Ne pas substituer un autre binaire ni reprendre les anciens dossiers expérimentaux.
+
+---
+
+# Mira Panel — firmware-beta
+
 ## Firmwares Arduino maintenus
 
 - **WT32-SC01 Plus** : base 0.7.37, avec les derniers correctifs bêta validés (stockage des valeurs JSON, thème Rose optionnel et logo Mira compact).
