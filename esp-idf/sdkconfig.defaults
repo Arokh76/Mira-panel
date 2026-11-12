@@ -1,0 +1,97 @@
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+# Regression: app_main -> recovery Wi-Fi + captive DNS + HTTP registration.
+# Stock main stack is too small for this startup call chain on ESP-IDF 5.5.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+CONFIG_SPIRAM=y
+# HTTPS cameras: validate peer chain; never disable server certificate checks.
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_MBEDTLS_DEFAULT_CERTIFICATE_BUNDLE=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_BOOT_INIT=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
+CONFIG_FREERTOS_HZ=1000
+# ESP32-S3: Jeedom HTTP worker stack lives in PSRAM; reserve DMA internal.
+CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+# Hardware-only Waveshare 7 STD validation: restore the vendor cache/PSRAM profile.
+# Keep this isolated from the production 4.3C/7STD projects.
+CONFIG_SPIRAM_MEMTEST=n
+CONFIG_SPIRAM_RODATA=y
+CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
+CONFIG_ESP32S3_DATA_CACHE_64KB=y
+CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
+# Match Waveshare ESP-IDF 09_lvgl_v9_demo LVGL 9 runtime/cache profile.
+CONFIG_LV_OS_FREERTOS=y
+CONFIG_LV_MEMCPY_MEMSET_STD=y
+CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM=y
+CONFIG_LV_OBJ_STYLE_CACHE=y
+CONFIG_LV_DRAW_SW_DRAW_UNIT_CNT=2
+CONFIG_LV_COLOR_DEPTH_16=y
+CONFIG_LV_DEF_REFR_PERIOD=15
+# Preserve firmware-beta's GET /addlistlvgl query with styles/free layout.
+CONFIG_HTTPD_MAX_URI_LEN=2048
+CONFIG_LV_USE_CLIB_STRING=y
+# Place LVGL's many small objects in 8MB octal PSRAM, not internal DMA RAM.
+# Before this change, with only a 138B clock tile JSON, internal largest was
+# 1600..1920 bytes and LVGL aborted during build_config().
+# Preserve standard malloc preference and the 32KB reserved internal pool
+# for Wi-Fi, HTTP and DMA; override ONLY the LVGL allocator backend.
+CONFIG_LV_USE_CUSTOM_MALLOC=y
+CONFIG_LV_USE_CLIB_SPRINTF=y
+CONFIG_LV_FONT_MONTSERRAT_20=y
+
+CONFIG_LV_USE_SNAPSHOT=y
+
+CONFIG_LV_FONT_MONTSERRAT_12=y
+CONFIG_LV_FONT_MONTSERRAT_14=y
+CONFIG_LV_FONT_MONTSERRAT_16=y
+CONFIG_LV_FONT_MONTSERRAT_28=y
+CONFIG_LV_FONT_MONTSERRAT_40=y
+CONFIG_LV_FONT_MONTSERRAT_48=y
+
+# esp_jpeg: software decoder required for RGB565 native LVGL buffers on ESP32-S3.
+# Some ESP32 ROM JPEG decoders have fixed RGB888 output; never use it here.
+CONFIG_JD_USE_ROM=n
+CONFIG_JD_FORMAT_RGB565=y
+CONFIG_JD_USE_SCALE=y
+# Accept JPEG camera snapshots missing Huffman tables (common embedded cameras).
+CONFIG_JD_DEFAULT_HUFFMAN=y
+
+# Match WT32's two configured NTP servers: pool.ntp.org + time.nist.gov.
+CONFIG_LWIP_SNTP_MAX_SERVERS=2
+# Experimental 7-inch RGB stability test: PSRAM XIP reduces flash/PSRAM bus
+# contention during widget/configuration writes, avoiding DMA underflow.
+# Do NOT restart DMA automatically on every VSYNC: it can cause visible jitter.
+# Hardware timings (13 MHz, CH422G, GT911) and LVGL double buffers unchanged.
+CONFIG_SPIRAM_XIP_FROM_PSRAM=y
+# Hardware-only A/B: these cache settings are now the official Waveshare defaults.
+CONFIG_LCD_RGB_RESTART_IN_VSYNC=n
+
+# Stage 3 Wi-Fi low-memory A/B: LCD RGB DMA is now confirmed working.
+# For the temporary open AP + small HTTP page, we do not need full-throughput
+# Wi-Fi defaults. Prior logs: Wi-Fi started with only 22KB DMA/internal free
+# and failed esp_wifi_init with esf_buf_setup_static / ESP_ERR_NO_MEM.
+# Prefer external PSRAM for Wi-Fi/LwIP buffers that support it. Hardware RX/TX
+# DMA buffers must still reside in internal RAM, hence small static pools.
+# Espressif "minimum memory" profile: 4 RX, 4 TX, AMPDU disabled.
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=4
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER=y
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER=n
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=4
+CONFIG_ESP_WIFI_CACHE_TX_BUFFER_NUM=4
+CONFIG_ESP_WIFI_AMPDU_RX_ENABLED=n
+CONFIG_ESP_WIFI_AMPDU_TX_ENABLED=n
+CONFIG_ESP_WIFI_RX_MGMT_BUF_NUM_DEF=2
+CONFIG_ESP_WIFI_IRAM_OPT=n
+CONFIG_ESP_WIFI_RX_IRAM_OPT=n
