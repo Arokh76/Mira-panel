@@ -238,7 +238,10 @@ static esp_err_t save_post(httpd_req_t *req){
     }
     body[got]=0;
     if(!strcmp(config,"key")){
-        if(has_wifi_station()){
+        // A unit may retain its saved STA profile while the Mira key is missing.
+        // Permit key recovery through the local setup AP without resetting Wi-Fi.
+        const bool wifi_already_configured=has_wifi_station();
+        if(wifi_already_configured&&has_local_key()){
             httpd_resp_send_err(req,HTTPD_403_FORBIDDEN,"Configuration initiale deja terminee");
             return ESP_FAIL;
         }
@@ -263,6 +266,19 @@ static esp_err_t save_post(httpd_req_t *req){
             httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,
                                 "Sauvegarde de la cle Mira impossible");
             return ESP_FAIL;
+        }
+        if(wifi_already_configured){
+            // Boot entered FIRST_SETUP_IDLE; saved Wi-Fi and widgets are intact.
+            // A reboot resumes the normal UI; do not send the user to a Wi-Fi
+            // form which deliberately refuses to overwrite configured STA.
+            ESP_LOGI(TAG,"Mira key restored; existing Wi-Fi and UI preserved (restart to resume)");
+            return serve_page(req,
+                "<!doctype html><html lang='fr'><meta charset='utf-8'>"
+                "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+                "<title>Mira Panel - cle restauree</title>"
+                "<h2>Cle Mira enregistree</h2>"
+                "<p>Le Wi-Fi et les widgets existants ont ete conserves.</p>"
+                "<p>Redemarre l'ecran pour reprendre Mira Panel.</p></html>");
         }
         ESP_LOGI(TAG,"Mira beta setup step 1/2: local screen key saved");
         /* Match firmware-beta's MiraPanelServer.cpp first-run /save

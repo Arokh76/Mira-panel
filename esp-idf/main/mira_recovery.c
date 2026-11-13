@@ -702,7 +702,11 @@ static void recovery_ap_supervisor(void *arg){
                          esp_err_to_name(err),(long long)time(NULL));
             }
         }
-        const bool want_ap=beta_ap_persistent||!station_connected;
+        // Keep the local setup AP available when the Mira key is missing,
+        // even if STA Wi-Fi is still connected. Otherwise the key wizard can
+        // appear but cannot be reached, leaving the device stuck in setup.
+        const bool want_ap=beta_ap_persistent||!station_connected||
+                           mira_beta_setup_unconfigured();
         if(want_ap==recovery_ap_active)continue;
         esp_err_t err=esp_wifi_set_mode(want_ap?WIFI_MODE_APSTA:WIFI_MODE_STA);
         if(err==ESP_OK){
