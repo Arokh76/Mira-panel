@@ -8,9 +8,9 @@ from pathlib import Path
 import json
 import re
 
-root = Path(__file__).resolve().parents[5]
-src = root / "firmware/source/consolidated/MIRA_PANEL/HTML"
-idf = root / "firmware/experiments/esp-idf/mira-idf/main"
+root = Path(__file__).resolve().parents[2]
+src = root / "Arduino/MIRA_PANEL/HTML"
+idf = root / "esp-idf-4.3C/main"
 native = (idf / "mira_beta_web_pages.h").read_text(encoding="utf-8")
 handlers = (idf / "mira_beta_web.c").read_text(encoding="utf-8")
 jeedom = (idf / "mira_jeedom.c").read_text(encoding="utf-8")
@@ -260,7 +260,7 @@ assert 'if(i<state_cache_count &&' in full
 assert 'state_queue_dropped' in jeedom and 'state_cache_evictions' in jeedom
 print("PASS Dimitri-inspired passive state cache diagnostics")
 # Visual parity with MiraPanelUI 0.7.37 (Waveshare 4.3C).
-beta_ui = (root / "firmware/source/consolidated/MIRA_PANEL/MiraPanelUI.cpp").read_text(encoding="utf-8")
+beta_ui = (root / "Arduino/MIRA_PANEL/MiraPanelUI.cpp").read_text(encoding="utf-8")
 for color in ("0x071421", "0x071A28", "0x090D12", "0x0E2032",
               "0x103047", "0x141B22", "0x173149", "0x17445D",
               "0x202A33", "0x17354B", "0x2B6882", "0x33414C",
@@ -474,7 +474,7 @@ assert legacy_widget_types==native_widget_types, (
     sorted(legacy_widget_types-native_widget_types),
     sorted(native_widget_types-legacy_widget_types)
 )
-legacy_mqtt=(root / "firmware/source/consolidated/MIRA_PANEL/MiraMqtt.cpp").read_text(encoding="utf-8")
+legacy_mqtt=(root / "Arduino/MIRA_PANEL/MiraMqtt.cpp").read_text(encoding="utf-8")
 legacy_display_keys=set(re.findall(r'publishDisplayState\("([^"]+)"',legacy_mqtt))
 native_names_block=mqtt.split('static const char *const names[]={',1)[1].split('};',1)[0]
 native_display_keys=set(re.findall(r'"([^"]+)"',native_names_block))
@@ -486,8 +486,8 @@ assert legacy_display_keys==native_display_keys, (
 print("PASS source-derived parity: all beta LVGL widget types and MQTT Display topics")
 
 # Derive the exact original metadata from IndexAddButton/IndexAddInfo/List.
-legacy_server=(root/"firmware/source/consolidated/MIRA_PANEL/MiraPanelServer.cpp").read_text(encoding="utf-8")
-legacy_header=(root/"firmware/source/consolidated/MIRA_PANEL/MiraPanelServer.h").read_text(encoding="utf-8")
+legacy_server=(root/"Arduino/MIRA_PANEL/MiraPanelServer.cpp").read_text(encoding="utf-8")
+legacy_header=(root/"Arduino/MIRA_PANEL/MiraPanelServer.h").read_text(encoding="utf-8")
 assert 'int IndexAddButton(String Name, bool Return_Line = true)' in legacy_header
 assert 'int IndexAddInfo(String Name, String Unit = "", String Size = "60")' in legacy_header
 assert 'cJSON_AddStringToObject(entry,"size","60");' in jeedom
@@ -577,7 +577,7 @@ print("PASS native OTA auto/manual target isolation, authenticated trigger and S
 # AsyncWebServer route to the registered esp_http_server routes. The 4.3C
 # has native isolated DI/DO bindings, so GPIO routes must remain present
 # too, not dropped as if the hardware had no I/O.
-beta_server=(root/"firmware/source/consolidated/MIRA_PANEL/MiraPanelServer.cpp").read_text(encoding="utf-8")
+beta_server=(root/"Arduino/MIRA_PANEL/MiraPanelServer.cpp").read_text(encoding="utf-8")
 native_sources={
     p.name:p.read_text(encoding="utf-8")
     for p in idf.glob("*.c")
@@ -648,9 +648,9 @@ print("PASS IDF OTA install and version check share exact target/hash policy")
 
 # In-depth behavioral parity contracts from the *actual Arduino source*.
 # These are not merely route/widget-count checks.
-beta_ui_header=(root/"firmware/source/consolidated/MIRA_PANEL/MiraPanelUI.h").read_text(encoding="utf-8")
-beta_ui_impl=(root/"firmware/source/consolidated/MIRA_PANEL/MiraPanelUI.cpp").read_text(encoding="utf-8")
-beta_server_impl=(root/"firmware/source/consolidated/MIRA_PANEL/MiraPanelServer.cpp").read_text(encoding="utf-8")
+beta_ui_header=(root/"Arduino/MIRA_PANEL/MiraPanelUI.h").read_text(encoding="utf-8")
+beta_ui_impl=(root/"Arduino/MIRA_PANEL/MiraPanelUI.cpp").read_text(encoding="utf-8")
+beta_server_impl=(root/"Arduino/MIRA_PANEL/MiraPanelServer.cpp").read_text(encoding="utf-8")
 assert "MAX_BINDINGS = 40" in beta_ui_header
 assert "#define MAX_WIDGETS 40" in full
 assert "if(count>40)valid=false;" in jeedom
@@ -717,7 +717,7 @@ assert 'clean_screen_name(screen_name,sizeof(screen_name));' in mqtt
 print("PASS beta color HEX, thermostat half-degree, 23:00/07:00 and MQTT screen-name formats")
 
 
-legacy_mqtt_h=(root/"firmware/source/consolidated/MIRA_PANEL/MiraMqtt.h").read_text(encoding="utf-8")
+legacy_mqtt_h=(root/"Arduino/MIRA_PANEL/MiraMqtt.h").read_text(encoding="utf-8")
 assert 'KEEPALIVE_S = 20;' in legacy_mqtt_h
 assert '.session.keepalive=20,' in mqtt
 print("PASS beta MQTT 20-second broker keepalive")
@@ -832,7 +832,7 @@ print("PASS live beta brightness feedback with deferred NVS persistence")
 # extension may display the tile ONLY if its own configuration opts in.
 assert 'MIRA_TARGET_WAVESHARE_43C' in beta_server_impl
 assert 'if(!strcmp(type,"multiaction")&&!mira_gpio43_multi_visible(w->name))' in full
-assert 'bool mira_gpio43_multi_visible(const char *name)' in (root/"firmware/experiments/esp-idf/mira-idf/main/mira_gpio43.c").read_text(encoding="utf-8")
+assert 'bool mira_gpio43_multi_visible(const char *name)' in (root/"esp-idf-4.3C/main/mira_gpio43.c").read_text(encoding="utf-8")
 print("PASS Waveshare multi-action card hidden by default; EXIO visibility is opt-in")
 
 # Beta sleep settings have an explicit On/Off switch, independently of
@@ -1158,8 +1158,8 @@ print('PASS beta Web Wi-Fi setup validates NVS directory and allocates profiles 
 # The legacy cipher is initialized with the historical 16-byte key in
 # MiraPanelServer::Init(), NOT with Cipher's constructor default. Verify
 # both sides before trusting the NVS migration path.
-legacy_spiffs=(root/'firmware/source/consolidated/MIRA_PANEL/SPIFFS_Process.h').read_text(encoding='utf-8')
-legacy_server=(root/'firmware/source/consolidated/MIRA_PANEL/MiraPanelServer.cpp').read_text(encoding='utf-8')
+legacy_spiffs=(root/'Arduino/MIRA_PANEL/SPIFFS_Process.h').read_text(encoding='utf-8')
+legacy_server=(root/'Arduino/MIRA_PANEL/MiraPanelServer.cpp').read_text(encoding='utf-8')
 legacy_cipher=(idf/'mira_legacy_cipher.c').read_text(encoding='utf-8')
 assert 'char* key = "C1W0CleCipherMMn";' in legacy_spiffs
 assert 'cipher->setKey(key);' in legacy_server
@@ -1193,13 +1193,13 @@ assert 'dns_main' in recovery and 'dns_backup' in recovery
 assert 'gateway' in recovery and 'last_ntp_start_error' in recovery
 assert 'IP_EVENT_STA_GOT_IP' in recovery
 assert '/mira/clock/status' in recovery
-config=(root/'firmware/experiments/esp-idf/mira-idf/sdkconfig.defaults').read_text(encoding='utf-8')
+config=(root/'esp-idf-4.3C/sdkconfig.defaults').read_text(encoding='utf-8')
 assert 'CONFIG_LWIP_SNTP_MAX_SERVERS=2' in config
 assert 'CET-1CEST,M3.5.0,M10.5.0/3' in recovery
 assert '2,ESP_SNTP_SERVER_LIST("pool.ntp.org","time.nist.gov")' in recovery
 assert 'clock_last_attempt_tick' in recovery
 assert 'time(NULL)<1700000000' in recovery
-arduino_ui=(root/'firmware/source/consolidated/MIRA_PANEL/MiraPanelUI.cpp').read_text(encoding='utf-8')
+arduino_ui=(root/'Arduino/MIRA_PANEL/MiraPanelUI.cpp').read_text(encoding='utf-8')
 assert 'configTzTime("CET-1CEST,M3.5.0,M10.5.0/3", "pool.ntp.org", "time.nist.gov")' in arduino_ui
 assert 'if (millis() - _lastClockUpdate < 1000) return;' in arduino_ui
 assert 'if(ms-last_clock_ms>=1000u)' in full
@@ -1252,7 +1252,7 @@ print('PASS Jeedom Init Cmd diagnostic retains strict command ID validation')
 # behavior (exact 120px Waveshare font, time + date + first temperature INFO).
 # The comparison explicitly excludes the home 96px clock font.
 standby_font=(idf/'mira_sleep_120.c').read_text(encoding='utf-8')
-arduino_font=(root/'firmware/source/consolidated/MIRA_PANEL/mira_sleep_montserrat_120.cpp').read_text(encoding='utf-8')
+arduino_font=(root/'Arduino/MIRA_PANEL/mira_sleep_montserrat_120.cpp').read_text(encoding='utf-8')
 def standby_bitmap(source):
     return source.split('static const uint8_t glyph_bitmap[] = {',1)[1].split('};',1)[0].strip()
 assert standby_bitmap(standby_font)==standby_bitmap(arduino_font)
