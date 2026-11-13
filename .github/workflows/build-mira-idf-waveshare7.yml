@@ -1,108 +1,112 @@
-name: BETA Mira - IDF 5.5.6 + LVGL 9.6 Waveshare 7 STD
+name: BETA Mira 7 ESP-IDF — build de développement
 on:
+  push:
+    branches:
+      - firmware-beta
+    paths:
+      - '.github/workflows/build-mira-idf-waveshare7.yml'
+      - 'esp-idf/**'
   workflow_dispatch:
   pull_request:
     branches: [firmware-beta]
     paths:
       - '.github/workflows/build-mira-idf-waveshare7.yml'
-      - 'firmware/experiments/esp-idf/mira-idf-7/**'
-  push:
-    branches: [firmware-beta]
-    paths:
-      - '.github/workflows/build-mira-idf-waveshare7.yml'
-      - 'firmware/experiments/esp-idf/mira-idf-7/**'
+      - 'esp-idf/**'
 permissions:
   contents: read
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Mira port
+      - name: Checkout staged boot diagnostic
         uses: actions/checkout@v4
-      - name: Checkout pinned LVGL v9.6.0
+      - name: Checkout pinned LVGL 9.6.0
         uses: actions/checkout@v4
         with:
           repository: lvgl/lvgl
           ref: v9.6.0
-          path: firmware/experiments/esp-idf/mira-idf-7/components/lvgl
+          path: esp-idf/components/lvgl
           submodules: false
-      - name: Verify Mira real-data safety and hardware profile
+      - name: Verify UI-only diagnostics preserve network, storage and GPIO
         shell: bash
         run: |
           set -euo pipefail
-          ROOT=firmware/experiments/esp-idf/mira-idf-7
-          grep -Fq '#define LVGL_VERSION_MAJOR 9' "$ROOT/components/lvgl/include/lvgl/lv_version.h"
-          grep -Fq 'mira_full_ui_create' "$ROOT/main/app_main.c"
-          grep -Fq '/spiffs/miralvgl.json' "$ROOT/main/mira_full.c"
-          grep -Fq 'format_if_mount_failed=blank' "$ROOT/main/mira_full.c"
-          grep -Fq 'static bool spiffs_partition_is_blank' "$ROOT/main/mira_full.c"
-          grep -Fq 'esp_partition_read(p,offset,block,n)' "$ROOT/main/mira_full.c"
-          grep -Fq 'mira_jeedom_register_http(httpd);' "$ROOT/main/mira_recovery.c"
-          grep -Fq 'ESP_ERROR_CHECK(mira_recovery_init())' "$ROOT/main/app_main.c"
-          grep -Fq '0x610000, 0x9E0000' "$ROOT/partitions.csv"
-          grep -Fq '0x310000, 0x300000' "$ROOT/partitions.csv"
-          grep -Fq 'conf.max_uri_handlers = 96;' "$ROOT/main/mira_recovery.c"
-          grep -Fq 'mira_beta_setup_register_captive(httpd)' "$ROOT/main/mira_recovery.c"
-          grep -Fq 'mira_beta_captive_dns_start()' "$ROOT/main/mira_recovery.c"
-          ! grep -Fq 'esp_vfs_spiffs_format' "$ROOT/main/mira_full.c"
-          # Guard validated 7-inch hardware mapping independently from the 4.3C.
-          grep -Fq 'project(mira_idf_7std)' "$ROOT/CMakeLists.txt"
-          grep -Fq 'MIRA_PANEL_7_INCH=1' "$ROOT/main/CMakeLists.txt"
-          grep -Fq 'Waveshare ESP32-S3 Touch LCD 7 STD' "$ROOT/main/mira_beta_web_pages.h"
-          grep -Fq 'render_system_7std' "$ROOT/main/mira_beta_web.c"
-          grep -Fq 'waveshare-esp32s3-touch-lcd-7-std-idf' "$ROOT/main/mira_beta_update.c"
-          ! grep -Fq 'GPIO Waveshare 4,3C' "$ROOT/main/mira_beta_web.c"
-          grep -Fq '#define LCD_PCLK_HZ (13 * 1000 * 1000)' "$ROOT/main/mira_display.c"
-          grep -Fq 'ext_cfg.device_address = 0x38;' "$ROOT/main/mira_display.c"
-          grep -Fq 'ioexp_write(ioexp_mode, 0x01)' "$ROOT/main/mira_display.c"
-          grep -Fq '7 STD 13MHz RGB + CH422G + GT911' "$ROOT/main/app_main.c"
-          grep -Fq 'i2c_reg_read(0x814f, xy, sizeof(xy))' "$ROOT/main/mira_display.c"
-          grep -Fq 'ESP_ERR_NOT_SUPPORTED' "$ROOT/main/mira_gpio43.c"
-          ! grep -Fq 'mira_gpio43_init()' "$ROOT/main/app_main.c"
-          ! grep -Fq 'ioexp_write(ioexp_device, 0x05' "$ROOT/main/mira_display.c"
-
-      - name: Verify Waveshare 7 STD parity and Jeedom programming routes
-        shell: bash
-        run: |
-          # 4.3C has its own dedicated build and full GPIO test suite.
-          # This 7 STD target checks shared-core consistency and 7-inch safety.
-          python3 firmware/experiments/esp-idf/mira-idf-7/tests/check_beta_web_parity.py
+          ROOT=esp-idf
+          grep -Fq 'NETWORK_FAILED_HALT' "$ROOT/main/app_main.c"
+          grep -Fq 'FIRST_SETUP_READY' "$ROOT/main/app_main.c"
+          grep -Fq 'mira_splash_set_message' "$ROOT/main/mira_splash.c"
+          grep -Fq 'conf.stack_size = setup_only?6144:7168' "$ROOT/main/mira_recovery.c"
+          grep -Fq 'HTTPD_RESCUE_READY' "$ROOT/main/mira_recovery.c"
+          grep -Fq 'HTTPD_PREFLIGHT' "$ROOT/main/mira_recovery.c"
+          grep -Fq 'mira_recovery_web_fallback()' "$ROOT/main/app_main.c"
+          grep -Fq 'MIRA_NO_WIDGETS_IDLE' "$ROOT/main/app_main.c"
+          grep -Fq 'MIRA_WIDGET_CONFIG_FOUND' "$ROOT/main/app_main.c"
+          grep -Fq 'stat("/spiffs/miralvgl.json"' "$ROOT/main/app_main.c"
+          grep -Fq 'CLOCK_UI_ONLY_NO_SERVICES' "$ROOT/main/app_main.c"
+          grep -Fq 'MIRA_UI_CREATION_BEGIN' "$ROOT/main/app_main.c"
+          grep -Fq 'CLOCK_UI_PHASE 7:' "$ROOT/main/mira_full.c"
+          grep -Fq 'CONFIG_LV_USE_CUSTOM_MALLOC=y' "$ROOT/sdkconfig.defaults"
+          grep -Fq 'lv_malloc_core(size_t bytes)' "$ROOT/main/mira_lvgl_psram_malloc.c"
+          grep -Fq 'MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT' "$ROOT/main/mira_lvgl_psram_malloc.c"
+          grep -Fq 'mira_lvgl_psram_malloc.c' "$ROOT/main/CMakeLists.txt"
+          grep -Fq 'JEEDOM_PASSIVE_PSRAM_READY' "$ROOT/main/mira_full.c"
+          grep -Fq 'JEEDOM_PASSIVE_HTTP_READY' "$ROOT/main/mira_jeedom.c"
+          grep -Fq 'MIRA_JEEDOM_PASSIVE_READY' "$ROOT/main/app_main.c"
+          grep -Fq 'jeedom_passive_ready' "$ROOT/main/mira_recovery.c"
+          grep -Fq 'CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y' "$ROOT/sdkconfig.defaults"
+          grep -Fq 'xTaskCreateWithCaps(jeedom_action_worker' "$ROOT/main/mira_jeedom.c"
+          grep -Fq 'xQueueCreateWithCaps(12,sizeof(mira_action_msg_t)' "$ROOT/main/mira_jeedom.c"
+          grep -Fq 'MIRA_JEEDOM_ACTIONS_READY' "$ROOT/main/app_main.c"
+          grep -Fq 'jeedom_actions_ready' "$ROOT/main/mira_recovery.c"
+          ! grep -Eq '[[:space:]]mira_mqtt_init\\(' "$ROOT/main/app_main.c"
+          ! grep -Eq '[[:space:]]mira_jeedom_action_init\\(' "$ROOT/main/app_main.c"
+          ! grep -Eq '[[:space:]]mira_mqtt_init\\(' "$ROOT/main/app_main.c"
+          grep -Fq 'CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384' "$ROOT/sdkconfig.defaults"
+          ! grep -Eq 'mira_jeedom_action_init\\(' "$ROOT/main/app_main.c"
+          ! grep -Eq 'mira_mqtt_init\\(' "$ROOT/main/app_main.c"
+          grep -Fq 'mira_recovery_init()' "$ROOT/main/app_main.c"
+          grep -Fq 'mira_full_storage_prepare()' "$ROOT/main/app_main.c"
+          grep -Fq 'mira_beta_setup_register_minimal(httpd)' "$ROOT/main/mira_recovery.c"
+          grep -Fq 'MIRA_SETUP_READY' "$ROOT/main/mira_recovery.c"
+          grep -Fq 'CONFIG_SPIRAM_XIP_FROM_PSRAM=y' "$ROOT/sdkconfig.defaults"
+          grep -Fq 'CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y' "$ROOT/sdkconfig.defaults"
+          grep -Fq '#define LCD_BOUNCE_BUFFER_PIXELS (WIDTH * LCD_BOUNCE_BUFFER_LINES)' "$ROOT/main/mira_display.c"
+          grep -Fq '#define LCD_PCLK_HZ (16 * 1000 * 1000)' "$ROOT/main/mira_display.c"
+          grep -Fq 'const bool blank=spiffs_partition_is_blank();' "$ROOT/main/mira_full.c"
+          grep -Fq '.format_if_mount_failed=blank' "$ROOT/main/mira_full.c"
+          ! grep -Eq 'mira_net_diag_start|mira_camera_init\\(' "$ROOT/main/app_main.c"
+          ! grep -Eq 'nvs_flash_erase|esp_vfs_spiffs_format' "$ROOT/main/app_main.c"
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('esp-idf/main/app_main.c').read_text()
+          assert p.index('mira_display_preallocate_rgb()') < p.index('mira_display_init()') < p.index('mira_recovery_init()') < p.index('mira_full_ui_create(mira_display_lvgl())')
+          PY
       - name: Native ESP-IDF 5.5.6 build
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v5.5.6
           target: esp32s3
-          path: firmware/experiments/esp-idf/mira-idf-7
+          path: esp-idf
           command: idf.py build
-      - name: Pack factory USB at 0x0 and OTA application separately
+      - name: Package one application-only browser OTA firmware
         shell: bash
         run: |
           set -euo pipefail
-          ROOT=firmware/experiments/esp-idf/mira-idf-7/build
-          mkdir -p mira_idf_release
-          cp "$ROOT/mira_idf_7std.bin" mira_idf_release/Mira_LVGL96_7_STD_UI_OTA.bin
-          export ROOT
+          ROOT=esp-idf/build
+          mkdir -p mira7_ota
+          cp "$ROOT/mira_idf_7std.bin" mira7_ota/MIRA7_IDF_DEV_OTA.bin
           python3 - <<'PY'
-          import os
           from pathlib import Path
-          p=Path(os.environ['ROOT'])
-          parts=[(0,p/'bootloader/bootloader.bin'),(0x8000,p/'partition_table/partition-table.bin'),(0x10000,p/'mira_idf_7std.bin')]
-          out=bytearray()
-          for off,path in parts:
-              data=path.read_bytes()
-              assert len(data)>0
-              limit=0x8000 if off==0 else 0x10000 if off==0x8000 else 0x310000
-              assert off+len(data)<=limit
-              if len(out)<off:out.extend(b'\xff'*(off-len(out)))
-              out.extend(data)
-          Path('mira_idf_release/Mira_LVGL96_7_STD_UI_FACTORY_USB_0x0.bin').write_bytes(out)
-          print('Factory bytes',len(out))
+          path=Path("mira7_ota/MIRA7_IDF_DEV_OTA.bin")
+          data=path.read_bytes()
+          assert len(data)>65536 and len(data)<=0x300000, "OTA image exceeds app slot"
+          assert data[0]==0xE9, "Not an ESP app image"
+          print("OTA only:",len(data),"bytes; no bootloader, NVS or SPIFFS")
           PY
-          test $(stat -c '%s' mira_idf_release/Mira_LVGL96_7_STD_UI_OTA.bin) -lt 3145728
-      - name: Upload build (hardware validation still required)
+      - name: Upload development OTA (not the frozen HTTP24K reference)
         uses: actions/upload-artifact@v4
         with:
-          name: MIRA_IDF_BETA_7_STD_FACTORY_OTA
-          path: mira_idf_release/
-          retention-days: 14
+          name: MIRA7_IDF_DEV_OTA
+          path: mira7_ota/MIRA7_IDF_DEV_OTA.bin
+          retention-days: 30
           if-no-files-found: error

@@ -10,6 +10,7 @@ on:
       - '.github/workflows/build-mira.yml'
       - 'firmware/scripts/publish_multi.py'
       - 'firmware/source/**'
+      - 'Arduino/**'
       - 'tests/test_publish_multi.py'
 
 permissions:
@@ -29,13 +30,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -s firmware/source/consolidated/MIRA_PANEL/MIRA_PANEL.ino
-          test ! -e firmware/source/consolidated/MIRA_PANEL/Waveshare43CDisplay.h
-          test -s firmware/source/consolidated/MIRA_PANEL/mira_home_montserrat_96.cpp
-          test -s firmware/source/consolidated/MIRA_PANEL/mira_sleep_montserrat_120.cpp
+          test -s Arduino/MIRA_PANEL/MIRA_PANEL.ino
+          test ! -e Arduino/MIRA_PANEL/Waveshare43CDisplay.h
+          test -s Arduino/MIRA_PANEL/mira_home_montserrat_96.cpp
+          test -s Arduino/MIRA_PANEL/mira_sleep_montserrat_120.cpp
           rm -rf firmware/source/work
           mkdir -p firmware/source/work/MIRA_PANEL
-          cp -a firmware/source/consolidated/MIRA_PANEL/. firmware/source/work/MIRA_PANEL/
+          cp -a Arduino/MIRA_PANEL/. firmware/source/work/MIRA_PANEL/
           grep -q '"0.7.44"' firmware/source/work/MIRA_PANEL/MIRA_PANEL.ino
           # RAZ and manual release clear input AND output mappings, never
           # GPIO electrical configuration or unrelated NVS namespaces.
@@ -264,8 +265,8 @@ jobs:
           arduino-cli lib install "Adafruit PCF8574"
           rm -rf build-nextion-src build-nextion package-nextion
           mkdir -p build-nextion-src/MIRA_PANEL build-nextion package-nextion
-          cp -a firmware/source/consolidated/MIRA_PANEL/. build-nextion-src/MIRA_PANEL/
-          cp firmware/source/consolidated/MIRA_PANEL/MiraPartitions16MB.csv build-nextion-src/MIRA_PANEL/partitions.csv
+          cp -a Arduino/MIRA_PANEL/. build-nextion-src/MIRA_PANEL/
+          cp Arduino/MIRA_PANEL/MiraPartitions16MB.csv build-nextion-src/MIRA_PANEL/partitions.csv
           cp build-nextion-src/MIRA_PANEL/lv_conf.h "$HOME/Arduino/libraries/lv_conf.h"
           test -s build-nextion-src/MIRA_PANEL/MiraNextion28Display.h
           grep -Fq '"0.7.44"' build-nextion-src/MIRA_PANEL/MIRA_PANEL.ino
