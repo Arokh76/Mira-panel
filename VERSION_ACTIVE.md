@@ -73,3 +73,9 @@
 - `/status` ajoute `setup_runtime_configured`, `auth_read_failures` et `auth_last_read_error` pour diagnostiquer les retours 503 sans exposer de secret.
 - Les protections AP de `/save` et `/update`, les fichiers NVS/SPIFFS, les partitions OTA, les workers Jeedom et les widgets ne sont pas modifiés. Aucun effacement automatique.
 - **Tests à effectuer avant installation :** compilation CI, vrai test avec identifiants corrects/incorrects, vérification de `/status` en longue durée, test du mode secours depuis l'AP, conservation des 9 widgets de Dimitri et de son mode IP manuel.
+
+## 13 novembre 2026 — Parité de clé d'authentification WT32 → ESP-IDF
+
+Le WT32 chargeait /reseau.json au démarrage et conservait la clé locale déchiffrée dans Uncrypt_Pass en RAM. Cette version de développement charge de même la clé NVS **une fois avant de démarrer Wi-Fi et HTTP**, puis authentifie exclusivement depuis la RAM. Les modifications explicites de clé (AP, assistant, API Jeedom, import ancien format) mettent à jour la copie RAM **après un nvs_commit réussi**. Le contrôle NVS de /status reste diagnostique, sans rediriger l'interface. Nouveau champ /status : auth_cached (booléen uniquement).
+
+Un écran réellement dépourvu de clé **au redémarrage** conserve la procédure initiale via AP Mira ; la connexion domestique ne donne pas le droit de réinitialiser la clé. Aucune écriture/effacement NVS ou SPIFFS automatique. Pas de changement Jeedom, widgets, IP ni partition OTA. Tester l'OTA sur un écran avant de l'envoyer à Dimitri ; garder le binaire opérationnel du run 43506935788.

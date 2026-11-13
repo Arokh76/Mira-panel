@@ -276,7 +276,7 @@ static esp_err_t full_status_get(httpd_req_t *req){
     uint32_t auth_read_failures=0;
     esp_err_t auth_last_error=ESP_OK;
     mira_beta_web_auth_diagnostic(&auth_read_failures,&auth_last_error);
-    char out[512];
+    char out[640];
     int n=snprintf(out,sizeof(out),
        "{\"stage\":4,\"ssid\":\"Mira Panel\","
        "\"rgb_refreshes\":%" PRIu32 ",\"gt911_ready\":%s,"
@@ -284,16 +284,20 @@ static esp_err_t full_status_get(httpd_req_t *req){
        "\"setup_key_saved\":%s,\"setup_wifi_saved\":%s,"
        "\"setup_key_read_err\":%d,\"setup_wifi_read_err\":%d,"
        "\"setup_runtime_configured\":%s,\"auth_read_failures\":%" PRIu32 ","
+       "\"auth_cached\":%s,"
        "\"auth_last_read_error\":%d,"
        "\"dma_internal_free\":%u,\"dma_internal_largest_block\":%u,"
        "\"psram_free\":%u,\"http_mode\":\"%s\",\"http_stack\":%u,"
        "\"jeedom_passive_ready\":%s,\"jeedom_actions_ready\":%s,\"jeedom_mode_enabled\":%s}",
        d.frames,d.touch_ready?"true":"false",
-       mira_full_widget_count(),(!key_saved||!wifi_saved)?"true":"false",
+       mira_full_widget_count(),
+       (!mira_beta_setup_runtime_configured()&&
+        (!mira_beta_web_auth_key_present()||!wifi_saved))?"true":"false",
        key_saved?"true":"false",wifi_saved?"true":"false",
        (int)key_read_err,(int)wifi_read_err,
        mira_beta_setup_runtime_configured()?"true":"false",
-       auth_read_failures,(int)auth_last_error,
+       auth_read_failures,mira_beta_web_auth_key_present()?"true":"false",
+       (int)auth_last_error,
        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA),
        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA),
        (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
@@ -1024,6 +1028,7 @@ esp_err_t mira_recovery_save_beta_ap(const char *password,const char *ip,bool ac
         err=nvs_set_str(nv,"jeedom_key",password);
         if(err==ESP_OK)err=nvs_commit(nv);
         nvs_close(nv);
+        if(err==ESP_OK)mira_beta_web_auth_key_set(password);
     }
     return err;
 }
@@ -1038,11 +1043,12 @@ static void configure_beta_ap_profile(void){
         nvs_close(nv);
     }
     beta_ap_persistent=active!=0;
-    n=sizeof(password);
-    if(nvs_open("mira_idf_auth",NVS_READONLY,&nv)==ESP_OK){
-        (void)nvs_get_str(nv,"jeedom_key",password,&n);
-        nvs_close(nv);
-    }
+    // Use the same RAM key that authenticates the web UI.
+    char boot_key[97]={0};
+    if(mira_beta_web_auth_key_copy(boot_key,sizeof(boot_key))&&
+       strlen(boot_key)<sizeof(password))
+        memcpy(password,boot_key,strlen(boot_key)+1);
+    memset(boot_key,0,sizeof(boot_key));
     if(strlen(password)>=8&&strlen(password)<=63){
         wifi_config_t ap={0};
         snprintf((char*)ap.ap.ssid,sizeof(ap.ap.ssid),"%s","Mira Panel");
@@ -1079,6 +1085,8 @@ esp_err_t mira_recovery_init(void) {
         return err;
     }
     ESP_RETURN_ON_ERROR(err, TAG, "NVS");
+    // Like WT32's SPIFFS_ChargementConfigurationReseau, read once at boot.
+    mira_beta_web_auth_key_init();
     boot_stage="netif";
     ESP_RETURN_ON_ERROR(esp_netif_init(), TAG, "netif");
     boot_stage="event_loop";

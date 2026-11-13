@@ -90,6 +90,17 @@ jobs:
           assert 'mira_beta_setup_mark_configured_runtime();' in net
           assert 'consecutive_setup_failures>=3u' in net
           assert 'setup_runtime_configured' in net and 'auth_read_failures' in net
+          assert 'mira_beta_web_auth_key_init();' in net
+          auth=web[web.index('bool mira_beta_web_authorized(httpd_req_t *req)'):web.index('static int hexval(')]
+          assert 'nvs_open(' not in auth and 'nvs_get_str(' not in auth
+          assert 'mira_beta_web_auth_key_copy(key,sizeof(key))' in auth
+          assert 'return mira_beta_web_auth_key_present();' in setup
+          assert 'mira_beta_web_auth_key_set(key);' in setup
+          assert 'mira_beta_web_auth_key_set(password);' in net
+          assert 'auth_cached' in net
+          jeed=Path('esp-idf/main/mira_jeedom.c').read_text()
+          assert 'mira_beta_web_auth_key_set(key->valuestring);' in jeed
+          assert 'mira_beta_web_auth_key_set(plaintext);' in jeed
           PY
       - name: Native ESP-IDF 5.5.6 build
         uses: espressif/esp-idf-ci-action@v1

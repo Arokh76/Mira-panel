@@ -37,39 +37,74 @@
 static const char *TAG="mira-beta-web";
 static uint32_t network_action_nonce;
 static int64_t network_nonce_time;
-// Session-only counters to tell an unreadable NVS key from a bad password.
+// WT32 parity: read authentication key once at boot, keep in RAM throughout
+// the session; never conflate transient NVS diagnostics with a lost key.
+static portMUX_TYPE auth_key_mux=portMUX_INITIALIZER_UNLOCKED;
+static char auth_session_key[97];
 static uint32_t auth_key_read_failures;
 static int auth_key_last_read_error;
 void mira_beta_web_auth_diagnostic(uint32_t *failures,esp_err_t *last_error){
     if(failures)*failures=__atomic_load_n(&auth_key_read_failures,__ATOMIC_RELAXED);
     if(last_error)*last_error=(esp_err_t)__atomic_load_n(&auth_key_last_read_error,__ATOMIC_RELAXED);
 }
-
+bool mira_beta_web_auth_key_copy(char *dest,size_t capacity){
+    if(!dest||!capacity)return false;
+    portENTER_CRITICAL(&auth_key_mux);
+    const size_t size=strnlen(auth_session_key,sizeof(auth_session_key));
+    const bool ready=size>0&&size<capacity;
+    if(ready)memcpy(dest,auth_session_key,size+1);
+    portEXIT_CRITICAL(&auth_key_mux);
+    if(!ready)dest[0]=0;
+    return ready;
+}
+bool mira_beta_web_auth_key_present(void){
+    portENTER_CRITICAL(&auth_key_mux);
+    const bool ready=auth_session_key[0]!=0;
+    portEXIT_CRITICAL(&auth_key_mux);
+    return ready;
+}
+void mira_beta_web_auth_key_set(const char *committed_key){
+    if(!committed_key)return;
+    const size_t n=strnlen(committed_key,sizeof(auth_session_key));
+    if(!n||n>=sizeof(auth_session_key))return;
+    portENTER_CRITICAL(&auth_key_mux);
+    memset(auth_session_key,0,sizeof(auth_session_key));
+    memcpy(auth_session_key,committed_key,n);
+    portEXIT_CRITICAL(&auth_key_mux);
+}
+void mira_beta_web_auth_key_init(void){
+    // Runs after nvs_flash_init but before Wi-Fi and HTTP setup.
+    char saved[sizeof(auth_session_key)]={0};
+    size_t length=sizeof(saved);
+    nvs_handle_t nv;
+    esp_err_t err=nvs_open("mira_idf_auth",NVS_READONLY,&nv);
+    if(err==ESP_OK){
+        err=nvs_get_str(nv,"jeedom_key",saved,&length);
+        nvs_close(nv);
+    }
+    if(err==ESP_OK){
+        if(saved[0])mira_beta_web_auth_key_set(saved);
+        else err=ESP_ERR_INVALID_STATE;
+    }
+    memset(saved,0,sizeof(saved));
+    __atomic_store_n(&auth_key_last_read_error,(int)err,__ATOMIC_RELAXED);
+    if(err!=ESP_OK&&err!=ESP_ERR_NVS_NOT_FOUND){
+        __atomic_add_fetch(&auth_key_read_failures,1u,__ATOMIC_RELAXED);
+        ESP_LOGW(TAG,"Mira key unavailable on boot: %s",esp_err_to_name(err));
+    }
+}
 static esp_err_t html_err(httpd_req_t *req,httpd_err_code_t code,const char *msg){
     return httpd_resp_send_err(req,code,msg);
 }
 bool mira_beta_web_authorized(httpd_req_t *req){
-    nvs_handle_t nv;
     char key[97]={0};
-    size_t key_len=sizeof(key);
-    esp_err_t key_error=nvs_open("mira_idf_auth",NVS_READONLY,&nv);
-    if(key_error==ESP_OK){
-        key_error=nvs_get_str(nv,"jeedom_key",key,&key_len);
-        nvs_close(nv);
-    }
-    // Do NOT send a Basic challenge if the *server* cannot read its key:
-    // a 401 would loop the browser's password dialog indefinitely.
-    // No access is granted and the key is never cached or logged.
-    if(key_error!=ESP_OK||!key[0]){
-        if(key_error==ESP_OK)key_error=ESP_ERR_INVALID_STATE;
-        __atomic_add_fetch(&auth_key_read_failures,1u,__ATOMIC_RELAXED);
-        __atomic_store_n(&auth_key_last_read_error,(int)key_error,__ATOMIC_RELAXED);
-        memset(key,0,sizeof(key));
+    // No NVS operation here: mirror WT32's Uncrypt_Pass RAM authentication.
+    if(!mira_beta_web_auth_key_copy(key,sizeof(key))){
         httpd_resp_set_status(req,"503 Service Unavailable");
         httpd_resp_set_hdr(req,"Cache-Control","no-store");
         httpd_resp_set_hdr(req,"Retry-After","5");
         httpd_resp_set_type(req,"text/plain; charset=utf-8");
-        httpd_resp_sendstr(req,"Cle Mira temporairement indisponible; verifier /status");
+        httpd_resp_sendstr(req,"Cle Mira indisponible; recuperation locale via AP");
         return false;
     }
     size_t len=httpd_req_get_hdr_value_len(req,"Authorization");

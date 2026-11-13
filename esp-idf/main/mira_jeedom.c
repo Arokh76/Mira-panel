@@ -1596,6 +1596,7 @@ static esp_err_t provision_key(httpd_req_t *req) {
         if(err==ESP_OK)err=nvs_commit(nvs);
         nvs_close(nvs);
     }
+    if(err==ESP_OK)mira_beta_web_auth_key_set(key->valuestring);
     cJSON_Delete(json);
     if(err!=ESP_OK){httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"NVS indisponible");return ESP_FAIL;}
     ESP_LOGI(TAG,"Cle API Jeedom provisionnee sans journaliser sa valeur");
@@ -2827,8 +2828,10 @@ static void import_legacy_screen_key(void){
             size_t existing=0;
             if(nvs_get_str(nv,"jeedom_key",NULL,&existing)==ESP_ERR_NVS_NOT_FOUND &&
                nvs_set_str(nv,"jeedom_key",plaintext)==ESP_OK &&
-               nvs_commit(nv)==ESP_OK)
+               nvs_commit(nv)==ESP_OK){
+                mira_beta_web_auth_key_set(plaintext);
                 ESP_LOGI(TAG,"Legacy Mira screen authentication imported");
+            }
             nvs_close(nv);
         }
     }

@@ -34,12 +34,8 @@ bool mira_beta_setup_runtime_configured(void){
     return __atomic_load_n(&configured_runtime,__ATOMIC_ACQUIRE);
 }
 static bool has_local_key(void){
-    nvs_handle_t nv;
-    if(nvs_open("mira_idf_auth",NVS_READONLY,&nv)!=ESP_OK)return false;
-    size_t len=0;
-    const esp_err_t err=nvs_get_str(nv,"jeedom_key",NULL,&len);
-    nvs_close(nv);
-    return err==ESP_OK&&len>1;
+    // WT32 behavior: initial key presence comes from the RAM session state.
+    return mira_beta_web_auth_key_present();
 }
 static bool has_wifi_station(void){
     wifi_config_t sta={0};
@@ -291,6 +287,7 @@ static esp_err_t save_post(httpd_req_t *req){
             if(err==ESP_OK)err=nvs_commit(nv);
             nvs_close(nv);
         }
+        if(err==ESP_OK)mira_beta_web_auth_key_set(key);
         memset(key,0,sizeof(key));
         memset(confirm,0,sizeof(confirm));
         if(err!=ESP_OK){
