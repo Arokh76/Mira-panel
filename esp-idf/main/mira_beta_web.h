@@ -1,6 +1,7 @@
 #pragma once
 #include "esp_http_server.h"
 #include <stdbool.h>
+#include <stdint.h>
 // HTTP pages and form posts from firmware-beta/HTML, implemented natively for ESP-IDF.
 // No Arduino web server, no replacement UI.
 esp_err_t mira_beta_web_load(httpd_req_t *req);
@@ -12,6 +13,8 @@ esp_err_t mira_beta_web_display_save(httpd_req_t *req);
 
 // Shared by beta System OTA and pages; enforces the original admin password.
 bool mira_beta_web_authorized(httpd_req_t *req);
+// Diagnostic only: aggregate failed NVS key reads, never expose key material.
+void mira_beta_web_auth_diagnostic(uint32_t *failures,esp_err_t *last_error);
 
 // Serve exact beta HTML_Index page with real Jeedom command controls.
 esp_err_t mira_beta_web_home(httpd_req_t *req);

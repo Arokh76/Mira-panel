@@ -273,6 +273,9 @@ static esp_err_t full_status_get(httpd_req_t *req){
     mira_beta_setup_diagnostic(&key_saved,&wifi_saved,&key_read_err,&wifi_read_err);
     // All setup fields are sampled together; avoid treating a transient
     // Wi-Fi/NVS read failure as proof that persistent data was erased.
+    uint32_t auth_read_failures=0;
+    esp_err_t auth_last_error=ESP_OK;
+    mira_beta_web_auth_diagnostic(&auth_read_failures,&auth_last_error);
     char out[512];
     int n=snprintf(out,sizeof(out),
        "{\"stage\":4,\"ssid\":\"Mira Panel\","
@@ -280,6 +283,8 @@ static esp_err_t full_status_get(httpd_req_t *req){
        "\"widgets\":%" PRIu32 ",\"setup_required\":%s,"
        "\"setup_key_saved\":%s,\"setup_wifi_saved\":%s,"
        "\"setup_key_read_err\":%d,\"setup_wifi_read_err\":%d,"
+       "\"setup_runtime_configured\":%s,\"auth_read_failures\":%" PRIu32 ","
+       "\"auth_last_read_error\":%d,"
        "\"dma_internal_free\":%u,\"dma_internal_largest_block\":%u,"
        "\"psram_free\":%u,\"http_mode\":\"%s\",\"http_stack\":%u,"
        "\"jeedom_passive_ready\":%s,\"jeedom_actions_ready\":%s,\"jeedom_mode_enabled\":%s}",
@@ -287,6 +292,8 @@ static esp_err_t full_status_get(httpd_req_t *req){
        mira_full_widget_count(),(!key_saved||!wifi_saved)?"true":"false",
        key_saved?"true":"false",wifi_saved?"true":"false",
        (int)key_read_err,(int)wifi_read_err,
+       mira_beta_setup_runtime_configured()?"true":"false",
+       auth_read_failures,(int)auth_last_error,
        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA),
        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA),
        (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
@@ -682,6 +689,7 @@ static volatile bool beta_ap_persistent;
 static esp_netif_t *ap_netif;
 static void recovery_ap_supervisor(void *arg){
     (void)arg;
+    unsigned consecutive_setup_failures=0;
     for(;;){
         vTaskDelay(pdMS_TO_TICKS(3000));
         // Match validated Arduino: configure/start SNTP AFTER Wi-Fi has IP,
@@ -714,8 +722,13 @@ static void recovery_ap_supervisor(void *arg){
         // Keep the local setup AP available when the Mira key is missing,
         // even if STA Wi-Fi is still connected. Otherwise the key wizard can
         // appear but cannot be reached, leaving the device stuck in setup.
+        // Debounce configuration read errors: avoid toggling AP/STA mode
+        // after a single transient NVS or Wi-Fi config read failure.
+        if(mira_beta_setup_unconfigured()){
+            if(consecutive_setup_failures<3u)consecutive_setup_failures++;
+        }else consecutive_setup_failures=0;
         const bool want_ap=beta_ap_persistent||!station_connected||
-                           mira_beta_setup_unconfigured();
+                           consecutive_setup_failures>=3u;
         if(want_ap==recovery_ap_active)continue;
         esp_err_t err=esp_wifi_set_mode(want_ap?WIFI_MODE_APSTA:WIFI_MODE_STA);
         if(err==ESP_OK){
@@ -1284,6 +1297,9 @@ esp_err_t mira_recovery_init(void) {
         ESP_LOGI(TAG,"MIRA_SETUP_READY: Mira Panel AP, http://192.168.4.1");
         return ESP_OK;
     }
+    // Only a boot-configured unit may latch the full authenticated mode.
+    // A later NVS read failure must never reopen the unprotected wizard.
+    mira_beta_setup_mark_configured_runtime();
     register_optional_route(httpd,&debug);
     // Prioritize OTA recovery: register it before experimental routes.
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &ota), TAG, "HTTP OTA");

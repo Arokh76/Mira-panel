@@ -24,6 +24,15 @@
 #include "freertos/task.h"
 
 static const char *TAG="mira-beta-setup";
+// Once the full authenticated server has started, a transient NVS read
+// must not turn a configured panel back into the unauthenticated wizard.
+static bool configured_runtime;
+void mira_beta_setup_mark_configured_runtime(void){
+    __atomic_store_n(&configured_runtime,true,__ATOMIC_RELEASE);
+}
+bool mira_beta_setup_runtime_configured(void){
+    return __atomic_load_n(&configured_runtime,__ATOMIC_ACQUIRE);
+}
 static bool has_local_key(void){
     nvs_handle_t nv;
     if(nvs_open("mira_idf_auth",NVS_READONLY,&nv)!=ESP_OK)return false;
@@ -113,6 +122,9 @@ bool mira_beta_setup_unconfigured(void){
     return !has_local_key()||!has_wifi_station();
 }
 bool mira_beta_setup_root(httpd_req_t *req){
+    // Read failures during normal operation are NOT a first installation.
+    // The regular home page still requires Mira HTTP Basic authentication.
+    if(mira_beta_setup_runtime_configured())return false;
     if(!has_local_key()){
         (void)serve_page(req,mira_beta_key_page);
         return true;
@@ -178,13 +190,14 @@ static bool first_run_ap_access(httpd_req_t *req){
     return mira_setup_require_ap(req);
 }
 static esp_err_t wifi_scan_get(httpd_req_t *req){
-    if(mira_beta_setup_unconfigured()){
+    if(!mira_beta_setup_runtime_configured()&&mira_beta_setup_unconfigured()){
         if(!first_run_ap_access(req))return ESP_FAIL;
     }else if(!mira_beta_web_authorized(req))return ESP_FAIL;
     return mira_beta_web_wifi_scan_get(req);
 }
 static esp_err_t load_get(httpd_req_t *req){
-    if(!mira_beta_setup_unconfigured())return mira_beta_web_load(req);
+    if(mira_beta_setup_runtime_configured()||!mira_beta_setup_unconfigured())
+        return mira_beta_web_load(req);
     if(!first_run_ap_access(req))return ESP_FAIL;
     char query[96],nav[24];
     if(httpd_req_get_url_query_str(req,query,sizeof(query))!=ESP_OK||
@@ -231,7 +244,8 @@ static esp_err_t load_get(httpd_req_t *req){
     return ESP_FAIL;
 }
 static esp_err_t save_post(httpd_req_t *req){
-    if(!mira_beta_setup_unconfigured())return mira_beta_web_save(req);
+    if(mira_beta_setup_runtime_configured()||!mira_beta_setup_unconfigured())
+        return mira_beta_web_save(req);
     if(!first_run_ap_access(req))return ESP_FAIL;
     char query[64],config[12];
     if(httpd_req_get_url_query_str(req,query,sizeof(query))!=ESP_OK||
@@ -434,7 +448,8 @@ static esp_err_t save_post(httpd_req_t *req){
     return ESP_FAIL;
 }
 static esp_err_t captive_probe(httpd_req_t *req){
-    if(mira_setup_ap_client(req)&&mira_beta_setup_unconfigured()){
+    if(!mira_beta_setup_runtime_configured()&&
+       mira_setup_ap_client(req)&&mira_beta_setup_unconfigured()){
         httpd_resp_set_status(req,"302 Found");
         httpd_resp_set_hdr(req,"Location","http://192.168.4.1/");
         return httpd_resp_sendstr(req,"");

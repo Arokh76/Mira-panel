@@ -37,6 +37,13 @@
 static const char *TAG="mira-beta-web";
 static uint32_t network_action_nonce;
 static int64_t network_nonce_time;
+// Session-only counters to tell an unreadable NVS key from a bad password.
+static uint32_t auth_key_read_failures;
+static int auth_key_last_read_error;
+void mira_beta_web_auth_diagnostic(uint32_t *failures,esp_err_t *last_error){
+    if(failures)*failures=__atomic_load_n(&auth_key_read_failures,__ATOMIC_RELAXED);
+    if(last_error)*last_error=(esp_err_t)__atomic_load_n(&auth_key_last_read_error,__ATOMIC_RELAXED);
+}
 
 static esp_err_t html_err(httpd_req_t *req,httpd_err_code_t code,const char *msg){
     return httpd_resp_send_err(req,code,msg);
@@ -45,15 +52,30 @@ bool mira_beta_web_authorized(httpd_req_t *req){
     nvs_handle_t nv;
     char key[97]={0};
     size_t key_len=sizeof(key);
-    bool have=false;
-    if(nvs_open("mira_idf_auth",NVS_READONLY,&nv)==ESP_OK){
-        have=nvs_get_str(nv,"jeedom_key",key,&key_len)==ESP_OK&&key[0]!=0;
+    esp_err_t key_error=nvs_open("mira_idf_auth",NVS_READONLY,&nv);
+    if(key_error==ESP_OK){
+        key_error=nvs_get_str(nv,"jeedom_key",key,&key_len);
         nvs_close(nv);
+    }
+    // Do NOT send a Basic challenge if the *server* cannot read its key:
+    // a 401 would loop the browser's password dialog indefinitely.
+    // No access is granted and the key is never cached or logged.
+    if(key_error!=ESP_OK||!key[0]){
+        if(key_error==ESP_OK)key_error=ESP_ERR_INVALID_STATE;
+        __atomic_add_fetch(&auth_key_read_failures,1u,__ATOMIC_RELAXED);
+        __atomic_store_n(&auth_key_last_read_error,(int)key_error,__ATOMIC_RELAXED);
+        memset(key,0,sizeof(key));
+        httpd_resp_set_status(req,"503 Service Unavailable");
+        httpd_resp_set_hdr(req,"Cache-Control","no-store");
+        httpd_resp_set_hdr(req,"Retry-After","5");
+        httpd_resp_set_type(req,"text/plain; charset=utf-8");
+        httpd_resp_sendstr(req,"Cle Mira temporairement indisponible; verifier /status");
+        return false;
     }
     size_t len=httpd_req_get_hdr_value_len(req,"Authorization");
     char header[280]={0};
     bool match=false;
-    if(have&&len>6&&len<sizeof(header) &&
+    if(len>6&&len<sizeof(header) &&
        httpd_req_get_hdr_value_str(req,"Authorization",header,sizeof(header))==ESP_OK &&
        !strncmp(header,"Basic ",6)){
         unsigned char raw[200]={0};

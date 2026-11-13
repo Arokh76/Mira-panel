@@ -60,3 +60,16 @@
 - **Contexte matériel** : un écran affichait `setup_required=true` malgré `widgets=9` et `jeedom_actions_ready=true`. Comme le boot initial ne lance pas les widgets si la configuration manque, il faut distinguer une lecture Wi-Fi transitoirement impossible d'une clé NVS réellement absente. Aucun diagnostic de perte de NVS n'est encore prouvé.
 - Le champ `ssid: "Mira Panel"` du vieux JSON `/status` est une chaîne fixe, **pas** le SSID Wi-Fi actuellement connecté.
 - Même si la compilation réussit, **ne pas remplacer le binaire HTTP24K de référence ni diffuser sans validation matérielle**. Pour comparer, recueillir deux appels `/status` sans redémarrage et les logs série lors du redémarrage, sans effacer la flash.
+
+## Stabilisation de l'administration 7" — correctif suivant, non installé (13 novembre 2026)
+
+**Référence terrain inchangée :** la version OTA compilée au commit `76a6ceac8a3f3b99f40a9c2a9452870d1bc4d101`, workflow réussi [43506935788](https://github.com/Arokh76/Mira-panel/actions/runs/43506935788), a affiché chez Dimitri `setup_required=false`, `setup_key_saved=true`, `setup_wifi_saved=true`, les deux erreurs à 0, 9 widgets, et Jeedom actif. Cela ne constitue **pas** une validation de stabilité longue durée. Ce binaire ne doit pas être remplacé automatiquement.
+
+**Correctif de développement supplémentaire :**
+
+- Une session qui **a démarré configurée** garde la page d'administration authentifiée : une lecture NVS transitoirement impossible ne ramène plus la racine `/` vers « Créer la clé locale ». Une première installation conserve son parcours de création de clé + Wi-Fi.
+- Lorsque la clé serveur ne peut pas être lue, la vérification HTTP Basic renvoie **503** sans challenge `WWW-Authenticate` à la place d'un 401 répétitif. Aucune connexion n'est autorisée et aucune clé n'est mise en cache. Une clé disponible avec un mauvais mot de passe renvoie toujours 401.
+- Trois lectures de configuration négatives consécutives (sondage du superviseur toutes les 3 s) sont nécessaires avant d'activer l'AP de récupération **si le Wi-Fi STA est encore connecté**. Une perte Wi-Fi réactive toujours immédiatement l'AP au cycle suivant.
+- `/status` ajoute `setup_runtime_configured`, `auth_read_failures` et `auth_last_read_error` pour diagnostiquer les retours 503 sans exposer de secret.
+- Les protections AP de `/save` et `/update`, les fichiers NVS/SPIFFS, les partitions OTA, les workers Jeedom et les widgets ne sont pas modifiés. Aucun effacement automatique.
+- **Tests à effectuer avant installation :** compilation CI, vrai test avec identifiants corrects/incorrects, vérification de `/status` en longue durée, test du mode secours depuis l'AP, conservation des 9 widgets de Dimitri et de son mode IP manuel.
