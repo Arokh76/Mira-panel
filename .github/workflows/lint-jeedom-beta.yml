@@ -1,7 +1,7 @@
 name: Mira Jeedom beta - PHP and JS validation
 on:
   push:
-    branches: [jeedom-beta]
+    branches: [beta]
     paths:
       - "core/**"
       - "desktop/**"
@@ -9,7 +9,7 @@ on:
       - "tests/**"
       - ".github/workflows/lint-jeedom-beta.yml"
   pull_request:
-    branches: [jeedom-beta]
+    branches: [beta]
     paths:
       - "core/**"
       - "desktop/**"
