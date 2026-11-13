@@ -19,4 +19,4 @@ Les anciens doublons Arduino et ESP-IDF 7 pouces ont été supprimés après vé
 
 - **Waveshare ESP-IDF 4,3C (à conserver)** : `esp-idf-4.3C/`, source et binaires propres, distinct du 7 pouces.
 
-Le développement du plugin Jeedom a sa propre branche `jeedom-beta`, issue du renommage de l'ancienne `beta` ; voir [BRANCHES_ET_ROLES.md](BRANCHES_ET_ROLES.md). La branche Git `stable` n'a pas été modifiée par ce renommage.
+Le développement du plugin Jeedom se fait sur **`beta`**. Le renommage temporaire en `jeedom-beta` a été annulé, car Jeedom utilise le nom `beta` ; voir [BRANCHES_ET_ROLES.md](BRANCHES_ET_ROLES.md). La branche Git `stable` n'a pas été modifiée par ce renommage.

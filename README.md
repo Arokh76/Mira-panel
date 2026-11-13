@@ -31,9 +31,9 @@ Les anciennes copies des sources WT32 et 7 pouces dans `firmware/source/consolid
 
 Le dépôt public `main`, les branches stables et les sauvegardes ne sont pas modifiés par ce classement.
 
-Le nettoyage des branches temporaires a été validé : **58 → 9 branches**, avec **50 tags d'archive** `archive/mira-precleanup-20261113/*` pour préserver tous les anciens commits. Les workflows ponctuels sont conservés sous `.github/archive/workflows/`. Les huit anciennes branches `backup/`, `archive/` et `cleanup-mira-0638-stable` ont été archivées en tags avant suppression.
+Le nettoyage des branches temporaires a été validé : **58 → 9 branches**, avec les sauvegardes Git conservées en tags `archive/mira-precleanup-20261113/*` pour préserver tous les anciens commits. Les workflows ponctuels sont conservés sous `.github/archive/workflows/`. Les huit anciennes branches `backup/`, `archive/` et `cleanup-mira-0638-stable` ont été archivées en tags avant suppression.
 
 ### Waveshare 4,3C — projet ESP-IDF conservé
 
 Sources et binaires dédiés dans [`esp-idf-4.3C/`](esp-idf-4.3C/), séparés du dossier `esp-idf/` du 7 pouces. Les sources correspondent au dernier build 4,3C retrouvé le 6 novembre 2026. Son workflow est [`.github/workflows/build-mira-idf-waveshare43c.yml`](.github/workflows/build-mira-idf-waveshare43c.yml). Ce projet est conservé pour reprise ultérieure, sans interférer avec le 7 pouces.
-\n### Rôle des branches\n\nVoir [**BRANCHES_ET_ROLES.md**](BRANCHES_ET_ROLES.md) pour distinguer le firmware, le plugin Jeedom et les versions publiées.\n
+\n### Rôle des branches\n\nVoir [**BRANCHES_ET_ROLES.md**](BRANCHES_ET_ROLES.md) pour distinguer les firmwares (`firmware-beta`), le plugin Jeedom (**`beta`**, branche requise par Jeedom) et les versions publiées.\n

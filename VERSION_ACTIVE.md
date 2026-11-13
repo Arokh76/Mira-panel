@@ -34,7 +34,7 @@
 ## Réorganisation vérifiée le 13 novembre 2026
 
 - Les deux builds canoniques WT32 et 7" ont réussi après suppression des doublons.
-- Les nettoyages ont conservé les anciens historiques dans 50 tags Git (dont 2 pour le renommage Jeedom) ; 9 branches restent. La bêta du plugin est `jeedom-beta`, la bêta des écrans `firmware-beta`.
+- Les nettoyages ont conservé les anciens historiques dans 50 tags Git (dont 2 pour le renommage Jeedom) ; 9 branches restent. La bêta du plugin est à nouveau **`beta`** (nom nécessaire pour les installations Jeedom), la bêta des écrans reste `firmware-beta`.
 - Le code 4,3 pouces est conservé dans `esp-idf-4.3C/` avec son propre workflow actif `.github/workflows/build-mira-idf-waveshare43c.yml`.
 - Les workflows ponctuels d'importation binaire et de nettoyage sont conservés dans `.github/archive/workflows/` pour audit, non exécutés automatiquement.
 
