@@ -36,6 +36,23 @@ static bool has_wifi_station(void){
     wifi_config_t sta={0};
     return esp_wifi_get_config(WIFI_IF_STA,&sta)==ESP_OK&&sta.sta.ssid[0]!=0;
 }
+void mira_beta_setup_diagnostic(bool *key_saved, bool *wifi_saved,
+                                esp_err_t *key_read_err, esp_err_t *wifi_read_err){
+    // Read-only: report *presence*, never expose Wi-Fi credentials or Mira key.
+    nvs_handle_t nv;
+    size_t len=0;
+    esp_err_t key_error=nvs_open("mira_idf_auth",NVS_READONLY,&nv);
+    if(key_error==ESP_OK){
+        key_error=nvs_get_str(nv,"jeedom_key",NULL,&len);
+        nvs_close(nv);
+    }
+    wifi_config_t sta={0};
+    const esp_err_t wifi_error=esp_wifi_get_config(WIFI_IF_STA,&sta);
+    if(key_saved)*key_saved=key_error==ESP_OK&&len>1;
+    if(wifi_saved)*wifi_saved=wifi_error==ESP_OK&&sta.sta.ssid[0]!=0;
+    if(key_read_err)*key_read_err=key_error;
+    if(wifi_read_err)*wifi_read_err=wifi_error;
+}
 static esp_err_t serve_page(httpd_req_t *req,const char *page){
     httpd_resp_set_type(req,"text/html; charset=utf-8");
     return httpd_resp_sendstr(req,page);

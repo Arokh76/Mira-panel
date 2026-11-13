@@ -268,16 +268,25 @@ static esp_err_t web_rescue_page_get(httpd_req_t *req){
 static esp_err_t full_status_get(httpd_req_t *req){
     mira_display_stats_t d={0};
     mira_display_stats(&d);
-    char out[384];
+    bool key_saved=false,wifi_saved=false;
+    esp_err_t key_read_err=ESP_OK,wifi_read_err=ESP_OK;
+    mira_beta_setup_diagnostic(&key_saved,&wifi_saved,&key_read_err,&wifi_read_err);
+    // All setup fields are sampled together; avoid treating a transient
+    // Wi-Fi/NVS read failure as proof that persistent data was erased.
+    char out[512];
     int n=snprintf(out,sizeof(out),
        "{\"stage\":4,\"ssid\":\"Mira Panel\","
        "\"rgb_refreshes\":%" PRIu32 ",\"gt911_ready\":%s,"
        "\"widgets\":%" PRIu32 ",\"setup_required\":%s,"
+       "\"setup_key_saved\":%s,\"setup_wifi_saved\":%s,"
+       "\"setup_key_read_err\":%d,\"setup_wifi_read_err\":%d,"
        "\"dma_internal_free\":%u,\"dma_internal_largest_block\":%u,"
        "\"psram_free\":%u,\"http_mode\":\"%s\",\"http_stack\":%u,"
        "\"jeedom_passive_ready\":%s,\"jeedom_actions_ready\":%s,\"jeedom_mode_enabled\":%s}",
        d.frames,d.touch_ready?"true":"false",
-       mira_full_widget_count(),mira_beta_setup_unconfigured()?"true":"false",
+       mira_full_widget_count(),(!key_saved||!wifi_saved)?"true":"false",
+       key_saved?"true":"false",wifi_saved?"true":"false",
+       (int)key_read_err,(int)wifi_read_err,
        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA),
        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA),
        (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
