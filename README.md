@@ -2,6 +2,8 @@
 
 **Trois projets préservés, chacun avec ses propres sources et binaires de référence.**
 
+**Les anciens manifestes `firmware/targets.json` et `firmware/version.json` ne désignent pas les builds bêta :** voir [`firmware/README_BETA_COMPATIBILITY.md`](firmware/README_BETA_COMPATIBILITY.md).
+
 | Cible | Sources à modifier | Dernier binaire OTA archivé |
 | --- | --- | --- |
 | **WT32-SC01 Plus — Arduino** | [`Arduino/MIRA_PANEL/`](Arduino/MIRA_PANEL/) | [`Arduino/bin/Mira_Panel_WT32_SC01_Plus_0.7.44.bin`](Arduino/bin/Mira_Panel_WT32_SC01_Plus_0.7.44.bin) |
