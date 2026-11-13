@@ -10,7 +10,7 @@
 - **Workflow à utiliser** : [`.github/workflows/build-mira.yml`](.github/workflows/build-mira.yml). Il lit les sources `Arduino/MIRA_PANEL/`, sans remplacer les binaires figés.
 
 ## Waveshare 7" STD : ESP-IDF BOOT_RESYNC_HTTP24K
-- **Sources compilées vérifiées** : [`esp-idf/`](esp-idf/). Les **64 fichiers du projet** (dont `main/CMakeLists.txt`) sont identiques au commit de compilation **`fe6867f5d6ef09d9fe96d0de04181942020c790d`**, après copie vers le nouveau chemin.
+- **Sources exactes du binaire HTTP24K archivé** : commit de compilation **`fe6867f5d6ef09d9fe96d0de04181942020c790d`** (64 fichiers, y compris `main/CMakeLists.txt`). Le dossier [`esp-idf/`](esp-idf/) était sa copie fidèle lors de la réorganisation, **mais il sert depuis de source de développement et peut évoluer**. Ne pas prétendre que le binaire figé a été compilé depuis les dernières modifications de ce dossier.
 - **Compilation originale validée** : [GitHub Actions 42899018718](https://github.com/Arokh76/Mira-panel/actions/runs/42899018718), le 10 novembre 2026.
 - **OTA officiel** : [`esp-idf/bin/MIRA7_ETATS_COULEURS_BOOT_RESYNC_HTTP24K_OTA.bin`](esp-idf/bin/MIRA7_ETATS_COULEURS_BOOT_RESYNC_HTTP24K_OTA.bin). SHA-256 : `698d1f3a7cc7960215366cbfea84ee06a19f27929e0208b9776f9541aa2b1326`, taille 2 184 752 octets.
 - **FACTORY USB 0x0000** associée : conservée dans la bibliothèque de fichiers ChatGPT, SHA-256 `9d773419d17903b5f5801ecd7961c9564fc466ec6da2547666bd14a63bdcc614`. Elle **n'est pas** encore dans ce GitHub. Ne pas substituer une image usine d'une autre compilation.
@@ -43,3 +43,12 @@
 - Sources d'application/configuration conservées dans [`esp-idf-4.3C/`](esp-idf-4.3C/), issues du commit `2a9811cb885698401ee0652f2033e156d122f599` (seul le test de parité a été adapté aux chemins et à la référence Arduino historique).
 - Compilations OTA et FACTORY d'origine : [run GitHub Actions 42285250664](https://github.com/Arokh76/Mira-panel/actions/runs/42285250664), le 6/11/2026 ; fichiers **présents** dans [`esp-idf-4.3C/bin/`](esp-idf-4.3C/bin/), SHA-256 dans le README de ce répertoire.
 - **Ce projet ne doit pas être supprimé** même si le développement courant porte sur le 7 pouces.
+
+## Correctif de développement du 7 pouces — 13 novembre 2026
+
+- Commit du **premier correctif post-réorganisation** : `7dc44006503071c68a93acc48a501dabb54418e4`.
+- Dans `esp-idf/main/mira_beta_setup.c` : en première installation, la **clé Mira manquante peut être reconfigurée depuis l'AP local même si un profil Wi-Fi STA existait déjà**. Lorsque ce profil est présent, le formulaire confirme la clé et demande de redémarrer, sans imposer de ressaisir ou effacer le Wi-Fi.
+- Dans `esp-idf/main/mira_recovery.c` : l'AP local de configuration reste accessible tant que la configuration est incomplète, même lorsque la station Wi-Fi a déjà une IP.
+- **Aucune suppression NVS/SPIFFS, aucun changement Jeedom/MQTT, ni de partitionnement** dans ce correctif. Le binaire de référence `esp-idf/bin/MIRA7_ETATS_COULEURS_BOOT_RESYNC_HTTP24K_OTA.bin` reste inchangé.
+- Le correctif produit **un binaire de développement distinct** via `.github/workflows/build-mira-idf-waveshare7.yml` : `MIRA7_IDF_DEV_OTA.bin`, à tester sur l'écran. Une compilation ne constitue pas une validation physique.
+- Limite : cette correction vise **la récupération de clé**, et n'explique pas à elle seule les redémarrages causés éventuellement par la mémoire/PSRAM ou la création des widgets.
