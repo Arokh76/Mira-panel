@@ -26,7 +26,7 @@
 6. Toute correction du 7 pouces doit être validée en compilation puis sur écran avant d'être considérée stable ; des redémarrages ont été rapportés chez Dimitri.
 
 ## Historique et nettoyage
-- Ancien chemin Arduino : `firmware/source/consolidated/MIRA_PANEL/` — copie historique à retirer lorsque les builds du nouveau chemin sont validés.
-- Ancien chemin ESP-IDF 7" : `firmware/experiments/esp-idf/mira-idf-7/` — copie historique à retirer après validation.
+- Ancien chemin Arduino : `firmware/source/consolidated/MIRA_PANEL/` — **ancien doublon supprimé le 13/11/2026 après compilations réussies**.
+- Ancien chemin ESP-IDF 7" : `firmware/experiments/esp-idf/mira-idf-7/` — **ancien doublon supprimé le 13/11/2026 après compilations réussies**.
 - Le projet ESP-IDF 4,3" séparé (`firmware/experiments/esp-idf/mira-idf/`) n'est **pas** la source du 7" et reste conservé pour éviter d'effacer ce travail.
 - Les anciennes branches ne constituent pas des bases de développement : leur suppression doit préserver leurs commits utiles.

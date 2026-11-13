@@ -12,4 +12,4 @@
 
 Voir [VERSION_ACTIVE.md](VERSION_ACTIVE.md) pour les empreintes, règles de flash et chemins de build.
 
-Les autres chemins sont historiques. Les anciens chemins encore utilisés par des workflows restent en place jusqu'à validation des nouveaux builds.
+Les anciens doublons Arduino et ESP-IDF 7 pouces ont été supprimés après vérification des compilations de leurs nouveaux chemins. Le projet ESP-IDF 4,3 pouces, distinct, est encore conservé historiquement dans `firmware/experiments/esp-idf/mira-idf/`. Les anciennes branches sont répertoriées dans `BRANCHES_AVANT_NETTOYAGE_20261113.md`.
