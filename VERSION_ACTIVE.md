@@ -52,3 +52,11 @@
 - **Aucune suppression NVS/SPIFFS, aucun changement Jeedom/MQTT, ni de partitionnement** dans ce correctif. Le binaire de référence `esp-idf/bin/MIRA7_ETATS_COULEURS_BOOT_RESYNC_HTTP24K_OTA.bin` reste inchangé.
 - Le correctif produit **un binaire de développement distinct** via `.github/workflows/build-mira-idf-waveshare7.yml` : `MIRA7_IDF_DEV_OTA.bin`, à tester sur l'écran. Une compilation ne constitue pas une validation physique.
 - Limite : cette correction vise **la récupération de clé**, et n'explique pas à elle seule les redémarrages causés éventuellement par la mémoire/PSRAM ou la création des widgets.
+
+## Diagnostic `/status` pour distinguer la cause de `setup_required` (13 novembre 2026)
+
+- Nouveau commit de développement : `76a6ceac8a3f3b99f40a9c2a9452870d1bc4d101`.
+- Une lecture unique des états ajoute `setup_key_saved`, `setup_wifi_saved`, `setup_key_read_err` et `setup_wifi_read_err` au JSON de `/status`. Les erreurs sont les codes numériques ESP-IDF / NVS (0 signifie succès). Aucune donnée d'identification ni secret n'est affiché.
+- **Contexte matériel** : un écran affichait `setup_required=true` malgré `widgets=9` et `jeedom_actions_ready=true`. Comme le boot initial ne lance pas les widgets si la configuration manque, il faut distinguer une lecture Wi-Fi transitoirement impossible d'une clé NVS réellement absente. Aucun diagnostic de perte de NVS n'est encore prouvé.
+- Le champ `ssid: "Mira Panel"` du vieux JSON `/status` est une chaîne fixe, **pas** le SSID Wi-Fi actuellement connecté.
+- Même si la compilation réussit, **ne pas remplacer le binaire HTTP24K de référence ni diffuser sans validation matérielle**. Pour comparer, recueillir deux appels `/status` sans redémarrage et les logs série lors du redémarrage, sans effacer la flash.
