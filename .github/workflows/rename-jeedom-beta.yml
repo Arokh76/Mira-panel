@@ -1,0 +1,61 @@
+name: Mira - renommer beta Jeedom sans perdre l'historique
+on:
+  push:
+    branches: [firmware-beta]
+    paths:
+      - '.github/workflows/rename-jeedom-beta.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  rename:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout complet
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Vérifier, préserver, transférer et supprimer l'ancien nom
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_old=5f1a0846d8ec2bb866641159a249115116725689
+          expected_new=658f7992a0091230ac800f452c2158880c080c5a
+          git fetch --no-tags origin '+refs/heads/*:refs/remotes/origin/*'
+          old_actual="$(git ls-remote --heads origin refs/heads/jeedom-beta | cut -f1)"
+          new_actual="$(git ls-remote --heads origin refs/heads/beta | cut -f1)"
+          test "$old_actual" = "$expected_old" || { echo "jeedom-beta a évolué: refus"; exit 2; }
+          test "$new_actual" = "$expected_new" || { echo "beta a évolué: refus"; exit 3; }
+          git merge-base --is-ancestor "$expected_old" "$expected_new" || { echo "Historique non descendant"; exit 4; }
+          tags=(
+            "archive/jeedom-beta-historique-20261113"
+            "archive/jeedom-beta-source-beta-20261113"
+          )
+          shas=("$expected_old" "$expected_new")
+          for i in 0 1; do
+            tag="${tags[$i]}"
+            sha="${shas[$i]}"
+            if git show-ref --verify --quiet "refs/tags/$tag"; then
+              test "$(git rev-parse "refs/tags/$tag")" = "$sha" || exit 5
+            else
+              git tag "$tag" "$sha"
+            fi
+          done
+          git push origin "refs/tags/${tags[0]}" "refs/tags/${tags[1]}"
+          for i in 0 1; do
+            actual="$(git ls-remote origin "refs/tags/${tags[$i]}" | cut -f1)"
+            test "$actual" = "${shas[$i]}" || { echo "Tag non vérifié: ${tags[$i]}"; exit 6; }
+          done
+
+          echo "Les deux versions sont archivées. Avancer jeedom-beta en fast-forward."
+          git push origin "$expected_new:refs/heads/jeedom-beta"
+          actual="$(git ls-remote --heads origin refs/heads/jeedom-beta | cut -f1)"
+          test "$actual" = "$expected_new" || { echo "Échec de mise à jour jeedom-beta"; exit 7; }
+
+          # Ne supprimer l'ancien nom qu'après vérification du nouveau.
+          git push origin --delete beta
+          test -z "$(git ls-remote --heads origin refs/heads/beta)"
+          echo "Renommage terminé. Le plugin est maintenant dans jeedom-beta."
