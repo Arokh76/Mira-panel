@@ -40,6 +40,6 @@
 
 ## Waveshare 4,3C ESP-IDF — projet conservé
 
-- Sources exactes (54 fichiers) dans [`esp-idf-4.3C/`](esp-idf-4.3C/), identiques au commit `2a9811cb885698401ee0652f2033e156d122f599`.
-- Compilations OTA et FACTORY d'origine : [run GitHub Actions 42285250664](https://github.com/Arokh76/Mira-panel/actions/runs/42285250664), le 6/11/2026 ; fichiers attendus dans [`esp-idf-4.3C/bin/`](esp-idf-4.3C/bin/), SHA-256 dans le README de ce répertoire.
+- Sources d'application/configuration conservées dans [`esp-idf-4.3C/`](esp-idf-4.3C/), issues du commit `2a9811cb885698401ee0652f2033e156d122f599` (seul le test de parité a été adapté aux chemins et à la référence Arduino historique).
+- Compilations OTA et FACTORY d'origine : [run GitHub Actions 42285250664](https://github.com/Arokh76/Mira-panel/actions/runs/42285250664), le 6/11/2026 ; fichiers **présents** dans [`esp-idf-4.3C/bin/`](esp-idf-4.3C/bin/), SHA-256 dans le README de ce répertoire.
 - **Ce projet ne doit pas être supprimé** même si le développement courant porte sur le 7 pouces.
