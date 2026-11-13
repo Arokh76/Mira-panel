@@ -1,0 +1,94 @@
+name: Mira beta - archiver et retirer les anciennes branches temporaires
+on:
+  workflow_dispatch:
+  push:
+    branches: [firmware-beta]
+    paths:
+      - '.github/workflows/archive-mira-old-branches.yml'
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout complet pour préserver les historiques
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Vérifier les deux builds depuis les dossiers officiels
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for run_id in 43496763947 43496763796; do
+            gh run watch "$run_id" --repo "$GITHUB_REPOSITORY" --exit-status --interval 15
+            conclusion=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" --jq '.conclusion')
+            test "$conclusion" = success
+          done
+
+      - name: Vérifier la présence et les empreintes des firmwares archivés
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s  %s\n' \
+            698d1f3a7cc7960215366cbfea84ee06a19f27929e0208b9776f9541aa2b1326 esp-idf/bin/MIRA7_ETATS_COULEURS_BOOT_RESYNC_HTTP24K_OTA.bin \
+            60eef0eac915d72b027b4aa86dad5a345700f07cecae9e5a49f9219a1ff1c4b7 Arduino/bin/Mira_Panel_WT32_SC01_Plus_0.7.44.bin \
+            | sha256sum --check
+          test -f esp-idf/main/mira_jeedom.c
+          test -f Arduino/MIRA_PANEL/MIRA_PANEL.ino
+          test ! -d firmware/source/consolidated/MIRA_PANEL
+          test ! -d firmware/experiments/esp-idf/mira-idf-7
+
+      - name: Préserver les 40 commits comme tags et retirer les branches
+        shell: bash
+        run: |
+          set -euo pipefail
+          file=.github/branches-pre-cleanup-20261113.tsv
+          test -s "$file"
+          git fetch --no-tags origin '+refs/heads/*:refs/remotes/origin/*'
+          declare -a refs=()
+          declare -a branches=()
+          declare -a expected_shas=()
+          while IFS=$'\t' read -r sha name; do
+            [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || exit 2
+            case "$name" in
+              experiment/*|test/*|cleanup/*|mira-0638-rgb12mhz-diag) ;;
+              *) echo "Refus de nettoyer une branche non temporaire: $name"; exit 2 ;;
+            esac
+            actual="$(git ls-remote --heads origin "refs/heads/$name" | cut -f1)"
+            if [ "$actual" != "$sha" ]; then
+              echo "Branche modifiée ou absente: $name (attendue: $sha ; réelle: $actual)"
+              exit 3
+            fi
+            tag="archive/mira-precleanup-20261113/$name"
+            if git show-ref --verify --quiet "refs/tags/$tag"; then
+              test "$(git rev-parse "refs/tags/$tag")" = "$sha"
+            else
+              git tag "$tag" "$sha"
+            fi
+            refs+=("refs/tags/$tag")
+            branches+=("$name")
+            expected_shas+=("$sha")
+          done < "$file"
+          test "${#branches[@]}" -eq 40
+
+          echo "Enregistrement de 40 tags d'archive (aucune suppression avant contrôle)"
+          git push origin "${refs[@]}"
+
+          for i in "${!branches[@]}"; do
+            tag="archive/mira-precleanup-20261113/${branches[$i]}"
+            got="$(git ls-remote origin "refs/tags/$tag" | cut -f1)"
+            test "$got" = "${expected_shas[$i]}" || { echo "Archive non vérifiée: $tag"; exit 4; }
+          done
+
+          echo "40 tags vérifiés. Suppression uniquement des branches temporaires listées."
+          git push origin --delete "${branches[@]}"
+          for name in "${branches[@]}"; do
+            test -z "$(git ls-remote --heads origin "refs/heads/$name")"
+          done
+          echo "Nettoyage terminé : 40 branches archivées puis supprimées."
