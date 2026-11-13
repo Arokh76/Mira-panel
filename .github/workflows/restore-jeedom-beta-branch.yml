@@ -1,0 +1,47 @@
+name: Mira - terminer le retour de Jeedom vers beta
+on:
+  push:
+    branches: [firmware-beta]
+    paths:
+      - '.github/workflows/restore-jeedom-beta-branch.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout complet
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Archiver l'ancien nom et vérifier beta avant suppression
+        shell: bash
+        run: |
+          set -euo pipefail
+          old_sha=658f7992a0091230ac800f452c2158880c080c5a
+          new_sha=dd0762954099c5aea385fedb6f1114e5d9c99b7e
+          old_actual=$(git ls-remote --heads origin refs/heads/jeedom-beta | cut -f1)
+          new_actual=$(git ls-remote --heads origin refs/heads/beta | cut -f1)
+          test "$old_actual" = "$old_sha" || { echo "La branche jeedom-beta a changé, refus de supprimer"; exit 2; }
+          test "$new_actual" = "$new_sha" || { echo "La branche beta a changé, refus de supprimer"; exit 3; }
+          git fetch --no-tags origin '+refs/heads/*:refs/remotes/origin/*'
+          git merge-base --is-ancestor "$old_sha" "$new_sha" || { echo "La beta n'inclut pas l'historique jeedom-beta"; exit 4; }
+
+          tag=archive/jeedom-beta-avant-retour-beta-20261113
+          if git show-ref --verify --quiet "refs/tags/$tag"; then
+            test "$(git rev-parse "refs/tags/$tag")" = "$old_sha" || exit 5
+          else
+            git tag "$tag" "$old_sha"
+          fi
+          git push origin "refs/tags/$tag"
+          remote_tag=$(git ls-remote origin "refs/tags/$tag" | cut -f1)
+          test "$remote_tag" = "$old_sha" || { echo "Tag non vérifié, rien n'est supprimé"; exit 6; }
+
+          echo "beta existe avec le dernier plugin et l'ancien historique est archivé"
+          git push origin --delete jeedom-beta
+          test -z "$(git ls-remote --heads origin refs/heads/jeedom-beta)"
+          test "$(git ls-remote --heads origin refs/heads/beta | cut -f1)" = "$new_sha"
+          echo "Restauration du nom beta validée"
