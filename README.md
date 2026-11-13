@@ -31,7 +31,7 @@ Les anciennes copies des sources WT32 et 7 pouces dans `firmware/source/consolid
 
 Le dépôt public `main`, les branches stables et les sauvegardes ne sont pas modifiés par ce classement.
 
-Le nettoyage des branches temporaires a été validé : **58 → 10 branches**, avec **48 tags d'archive** `archive/mira-precleanup-20261113/*` pour préserver tous les anciens commits. Les workflows ponctuels sont conservés sous `.github/archive/workflows/`. Les huit anciennes branches `backup/`, `archive/` et `cleanup-mira-0638-stable` ont été archivées en tags avant suppression.
+Le nettoyage des branches temporaires a été validé : **58 → 9 branches**, avec **50 tags d'archive** `archive/mira-precleanup-20261113/*` pour préserver tous les anciens commits. Les workflows ponctuels sont conservés sous `.github/archive/workflows/`. Les huit anciennes branches `backup/`, `archive/` et `cleanup-mira-0638-stable` ont été archivées en tags avant suppression.
 
 ### Waveshare 4,3C — projet ESP-IDF conservé
 

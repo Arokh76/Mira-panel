@@ -15,6 +15,8 @@ Voir [VERSION_ACTIVE.md](VERSION_ACTIVE.md) pour les empreintes, règles de flas
 
 Les anciens doublons Arduino et ESP-IDF 7 pouces ont été supprimés après vérification des compilations de leurs nouveaux chemins. Le projet ESP-IDF 4,3 pouces, distinct, est encore conservé historiquement dans `esp-idf-4.3C/`. Les anciennes branches sont répertoriées dans `BRANCHES_AVANT_NETTOYAGE_20261113.md`.
 
-**Nettoyage terminé :** 58 → 10 branches ; 48 tags d'archive préservent les anciens essais. Les trois workflows actifs de firmware de cette branche compilent WT32, Waveshare 7" et Waveshare 4,3C. Les workflows ponctuels d'archivage ont été déplacés dans `.github/archive/workflows/`.
+**Nettoyage terminé :** 58 → 9 branches ; 50 tags d'archive préservent les anciens essais. Les trois workflows actifs de firmware de cette branche compilent WT32, Waveshare 7" et Waveshare 4,3C. Les workflows ponctuels d'archivage ont été déplacés dans `.github/archive/workflows/`.
 
 - **Waveshare ESP-IDF 4,3C (à conserver)** : `esp-idf-4.3C/`, source et binaires propres, distinct du 7 pouces.
+
+Le développement du plugin Jeedom a sa propre branche `jeedom-beta`, issue du renommage de l'ancienne `beta` ; voir [BRANCHES_ET_ROLES.md](BRANCHES_ET_ROLES.md). La branche Git `stable` n'a pas été modifiée par ce renommage.

@@ -1,22 +1,36 @@
-# Rôles des branches Mira Panel (vérifié le 13 novembre 2026)
+# Rôle des branches Mira Panel — réorganisation du 13 novembre 2026
 
-**Ne jamais confondre le firmware des écrans avec le plugin Jeedom.** Ces projets sont rangés dans un même dépôt GitHub, mais les branches ont des contenus différents.
+**Développement firmware : `firmware-beta`. Développement du plugin Jeedom : `jeedom-beta`.**
 
-| Branche | Contenu | Usage |
+| Branche | Contenu réel | À utiliser pour |
 | --- | --- | --- |
-| `firmware-beta` | Code et binaires Arduino WT32, ESP-IDF 7 pouces et ESP-IDF 4,3C | **Développement des écrans** ; commencer dans [VERSION_ACTIVE.md](VERSION_ACTIVE.md) |
-| `beta` | **Plugin Jeedom** uniquement, code PHP/JS/CSS, tests ; `plugin_info/info.json` version `1.2.28-beta.29` au 13/11 | Développement / vérification du plugin Jeedom |
-| `jeedom-beta` | Ancienne branche du **plugin Jeedom**, `plugin_info/info.json` version `1.2.26-dev`, datée du 20/10 | Historique conservé, **pas** la bêta actuelle du firmware |
-| `stable` | Plugin Jeedom version `1.2.29` | Version stable du plugin |
-| `main` | Firmware Arduino **0.7.37** publié, installateur Web, distributions et anciens manifestes | Publication publique / compatibilité des versions installées ; ne pas modifier pour tester Mira 7 pouces |
-| `release/*` | Snapshots de versions firmware et plugin publiées | Retours arrière / historique de publication |
+| [`firmware-beta`](https://github.com/Arokh76/Mira-panel/tree/firmware-beta) | Arduino WT32 et ESP-IDF Waveshare 7" et 4,3C, sources et binaires de référence | **Firmware des écrans** — lire [VERSION_ACTIVE.md](VERSION_ACTIVE.md) |
+| [`jeedom-beta`](https://github.com/Arokh76/Mira-panel/tree/jeedom-beta) | **Plugin Jeedom actuel en développement**, ancien contenu intégral de `beta`, version déclarée `1.2.28-beta.29` | **Développement du plugin Jeedom** |
+| [`stable`](https://github.com/Arokh76/Mira-panel/tree/stable) | Branche Git du plugin Jeedom, version déclarée `1.2.29` | Référence Git « stable » ; **pas une preuve de publication dans le Market Jeedom** |
+| [`main`](https://github.com/Arokh76/Mira-panel/tree/main) | Firmware Arduino 0.7.37 publié sur GitHub, fichiers installateur et manifestes OTA historiques | Distribution publique ; ne pas modifier lors du développement du 7" |
+| `release/*` | Snapshots de versions firmware ou plugin | Historique / retour arrière |
 
-La branche `firmware-beta` contient aussi `jeedom/source/mira.zip` pour la publication/intégration, mais **le développement du plugin en tant que tel se fait sur `beta`**.
+## Pourquoi `stable` affiche 1.2.29 alors que la bêta affiche 1.2.28-beta.29
 
-## Nettoyage du 13 novembre 2026
+Le 30 octobre 2026, la [pull request #85](https://github.com/Arokh76/Mira-panel/pull/85) a fusionné dans `stable` un changement explicitement intitulé « Mira Panel 1.2.29 stable — bêta validée ». Il s'agit d'un **changement de branche Git**, et non d'une confirmation de diffusion dans le Market Jeedom. Le dépôt GitHub ne présentait **aucune GitHub Release** lors du contrôle du 13 novembre 2026.
 
-Le dépôt est passé de **58 à 10 branches**. Les 48 anciennes branches d'essais/sauvegardes restent accessibles sous forme de tags, créés et vérifiés avant suppression :
-- `archive/mira-precleanup-20261113/*` (40 tags) ;
-- `archive/mira-final-20261113/*` (8 tags).
+Le développement de la bêta a continué après ce commit sur une autre lignée et sa version déclarée est restée `1.2.28-beta.29`. Comparer les numéros seuls ne suffit donc pas à classer la fraîcheur ou la complétude du code. **Ne pas promouvoir de version vers `stable` sans décision explicite.**
 
-Les commits et fichiers restent accessibles via leur tag Git ou leur SHA. Voir [BRANCHES_AVANT_NETTOYAGE_20261113.md](BRANCHES_AVANT_NETTOYAGE_20261113.md) et [BRANCHES_FINALES_ARCHIVEES_20261113.md](BRANCHES_FINALES_ARCHIVEES_20261113.md).
+## Renommage de la branche bêta Jeedom — 13 novembre 2026
+
+- `jeedom-beta` historique (version `1.2.26-dev`, commit `5f1a0846d8ec2bb866641159a249115116725689`) archivée au tag `archive/jeedom-beta-historique-20261113`.
+- Le contenu intégral de l'ancienne branche `beta` (commit `658f7992a0091230ac800f452c2158880c080c5a`) est devenu le nouvel état de `jeedom-beta`, par **avance de branche sans écrasement d'historique** ; archive `archive/jeedom-beta-source-beta-20261113`.
+- La branche nommée `beta` a été supprimée **seulement après vérification** que `jeedom-beta` contenait son commit exact.
+- Le workflow `.github/workflows/lint-jeedom-beta.yml` suit désormais `jeedom-beta` pour les push et pull requests.
+- Le code de `stable` et de `main` n'a pas été modifié durant cette opération.
+
+## Nettoyage GitHub
+
+De **58 branches à 9 branches**, en préservant les anciens historiques sous **50 tags Git** créés :
+- `archive/mira-precleanup-20261113/*` : 40 tags d'essais historiques ;
+- `archive/mira-final-20261113/*` : 8 tags de sauvegardes/nettoyage ;
+- `archive/jeedom-beta-historique-20261113` et `archive/jeedom-beta-source-beta-20261113` : 2 tags du renommage Jeedom.
+
+Le dépôt `firmware-beta` contient également `jeedom/source/mira.zip` pour les usages historiques d'intégration, mais **la source de développement du plugin est `jeedom-beta`**.
+
+Voir [BRANCHES_AVANT_NETTOYAGE_20261113.md](BRANCHES_AVANT_NETTOYAGE_20261113.md) et [BRANCHES_FINALES_ARCHIVEES_20261113.md](BRANCHES_FINALES_ARCHIVEES_20261113.md) pour la traçabilité des branches archivées.
