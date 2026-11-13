@@ -1,0 +1,63 @@
+name: Mira - archiver les 8 dernières branches temporaires
+on:
+  push:
+    branches: [firmware-beta]
+    paths:
+      - '.github/workflows/archive-final-mira-branches.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout complet
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Créer et vérifier 8 tags avant suppression des 8 branches
+        shell: bash
+        run: |
+          set -euo pipefail
+          file=".github/archive/branches-final-20261113.tsv"
+          test -s "$file"
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*'
+          declare -a names=()
+          declare -a shas=()
+          declare -a tagrefs=()
+          while IFS=$'\t' read -r sha name; do
+            [[ "$sha" =~ ^[a-f0-9]{40}$ ]] || { echo "SHA non valide"; exit 2; }
+            case "$name" in
+              backup/*|archive/mira-preclean-20261101|cleanup-mira-0638-stable) ;;
+              *) echo "Refus de supprimer une branche non autorisée: $name"; exit 3 ;;
+            esac
+            actual=$(git ls-remote --heads origin "refs/heads/$name" | cut -f1)
+            test "$actual" = "$sha" || { echo "Branche modifiée ou absente: $name ($actual vs $sha)"; exit 4; }
+            tag="archive/mira-final-20261113/$name"
+            if git show-ref --verify --quiet "refs/tags/$tag"; then
+              test "$(git rev-parse "refs/tags/$tag")" = "$sha" || exit 5
+            else
+              git tag "$tag" "$sha"
+            fi
+            names+=("$name")
+            shas+=("$sha")
+            tagrefs+=("refs/tags/$tag")
+          done < "$file"
+          test "${#names[@]}" -eq 8 || { echo "Attendu 8 branches, trouvé ${#names[@]}"; exit 6; }
+
+          # Ne rien supprimer tant que les huit tags ne sont pas publiés ET vérifiés.
+          git push origin "${tagrefs[@]}"
+          for i in "${!names[@]}"; do
+            tag="archive/mira-final-20261113/${names[$i]}"
+            actual=$(git ls-remote origin "refs/tags/$tag" | cut -f1)
+            test "$actual" = "${shas[$i]}" || { echo "Tag absent ou mauvais SHA: $tag"; exit 7; }
+          done
+          echo "Les 8 tags ont été vérifiés, suppression des seules 8 branches listées."
+          git push origin --delete "${names[@]}"
+          for name in "${names[@]}"; do
+            test -z "$(git ls-remote --heads origin "refs/heads/$name")" || { echo "La branche existe toujours: $name"; exit 8; }
+          done
+          echo "Nettoyage de 8 branches terminé ; historique préservé sous forme de tags."
