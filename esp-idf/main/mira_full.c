@@ -3278,6 +3278,15 @@ static void mira_media_display_text(const char *src,char *out,size_t cap){
     }
     out[used]=0;
 }
+// The LVGL allocator already lives in PSRAM. Avoid allocating/freeing
+// label text, invalidating draw areas or reallocating glyph layout when a
+// frequent Jeedom/energy/media value has not actually changed.
+// Call only from the LVGL task, never from an HTTP/MQTT callback.
+static void mira_label_set_text_if_changed(lv_obj_t *obj,const char *value){
+    if(!obj||!value)return;
+    const char *current=lv_label_get_text(obj);
+    if(!current||strcmp(current,value)!=0)lv_label_set_text(obj,value);
+}
 static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
     // Weather is an internal read-only input of the clock widget.
     // Do not issue an action or require a separately configured weather tile.
@@ -3309,7 +3318,7 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                             char volume_text[24]="-- %";
                             if(*msg->value&&end&&!*end&&vol>=0&&vol<=100)
                                 snprintf(volume_text,sizeof(volume_text),"%ld %%",vol);
-                            lv_label_set_text(w->fields[n],volume_text);
+                            mira_label_set_text_if_changed(w->fields[n],volume_text);
                         }else if(media&&n==3){
                             const bool playing=!strcasecmp(msg->value,"playing")||
                                                !strcasecmp(msg->value,"lecture")||
@@ -3326,14 +3335,14 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                                               !strcasecmp(msg->value,"off")||
                                               !strcmp(msg->value,"0")||
                                               !strcasecmp(msg->value,"false");
-                            lv_label_set_text(w->fields[n],playing?"En lecture":
+                            mira_label_set_text_if_changed(w->fields[n],playing?"En lecture":
                                               paused?"En pause":"État non disponible");
                         }else if(media&&n<=2){
                             char shown[256];
                             mira_media_display_text(msg->value,shown,sizeof(shown));
-                            lv_label_set_text(w->fields[n],shown);
+                            mira_label_set_text_if_changed(w->fields[n],shown);
                         }else if(n!=6||!media)
-                            lv_label_set_text(w->fields[n],
+                            mira_label_set_text_if_changed(w->fields[n],
                                               !media&&!*msg->value?"--":msg->value);
                         if(!media&&n>=4&&n<=6){
                             // Beta only displays battery gauges for values
@@ -3397,7 +3406,7 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                                 if(playing||paused){
                                     w->media_is_playing=playing;
                                     if(w->media_play_caption)
-                                        lv_label_set_text(w->media_play_caption,playing?LV_SYMBOL_PAUSE:LV_SYMBOL_PLAY);
+                                        mira_label_set_text_if_changed(w->media_play_caption,playing?LV_SYMBOL_PAUSE:LV_SYMBOL_PLAY);
                                 }
                             }else if(n==7) {
                                 snprintf(w->media_active_device,sizeof(w->media_active_device),"%.95s",msg->value);
@@ -3412,7 +3421,7 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                                 lv_dropdown_set_options(w->media_device_dropdown,options);
                                 lv_dropdown_set_selected(w->media_device_dropdown,0);
                                 media_select_active_device(w);
-                                lv_label_set_text(w->fields[n],"Liste actualisée");
+                                mira_label_set_text_if_changed(w->fields[n],"Liste actualisée");
                             }
                             suppress_events=false;
                         }
@@ -3431,7 +3440,7 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
             if(!strcmp(temp_name,msg->name)&&w->thermostat_temperature){
                 char text[185];
                 snprintf(text,sizeof(text),"%.150s °C",msg->value);
-                lv_label_set_text(w->thermostat_temperature,text);
+                mira_label_set_text_if_changed(w->thermostat_temperature,text);
                 continue; // This is information, never a setpoint command.
             }
             if(!strcmp(mode_name,msg->name)&&w->thermostat_mode){
@@ -3450,7 +3459,7 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                         selected_text=selected_option;
                     }
                 }
-                lv_label_set_text(w->thermostat_mode,selected_text);
+                mira_label_set_text_if_changed(w->thermostat_mode,selected_text);
                 if(w->thermostat_mode_select){
                     const char *opts=lv_dropdown_get_options(w->thermostat_mode_select);
                     if(opts){
@@ -3528,7 +3537,7 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
             if(w->value_label){
                 char text[48];
                 snprintf(text,sizeof(text),"%.1f°",half*0.5f);
-                lv_label_set_text(w->value_label,text);
+                mira_label_set_text_if_changed(w->value_label,text);
             }
             continue;
         }
@@ -3554,7 +3563,7 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                          w->value,
                          (w->unit[0]&&strncmp(w->unit,"°",2))?" ":"",
                          w->unit);
-                lv_label_set_text(w->value_label,caption);
+                mira_label_set_text_if_changed(w->value_label,caption);
             }
             continue;
         }
@@ -3644,7 +3653,7 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                 if(localtime_r(&epoch,&tmv))
                     snprintf(seen,sizeof(seen),"MAJ %02d:%02d",tmv.tm_hour,tmv.tm_min);
             }
-            lv_label_set_text(w->info_status,seen);
+            mira_label_set_text_if_changed(w->info_status,seen);
         }
         if(w->value_label){
             char display[200];
@@ -3652,7 +3661,7 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
             else snprintf(display,sizeof(display),"%s",msg->value);
             const char *shown=lv_label_get_text(w->value_label);
             if(!shown||strcmp(shown,display)){
-                lv_label_set_text(w->value_label,display);
+                mira_label_set_text_if_changed(w->value_label,display);
                 if(!strcmp(w->type,"info")){
                     if(w->info_icon)mira_fit_icon_info_value(w);
                     else mira_fit_info_value(w->value_label,w->card);
@@ -3874,7 +3883,7 @@ void mira_full_ui_tick(void){
                 else snprintf(status,sizeof(status),"MIRA PANEL\nWi-Fi déconnecté\nMode %s",
                               current_night_period()?"nuit":"jour");
             }
-            lv_label_set_text(clock_status_text,status);
+            mira_label_set_text_if_changed(clock_status_text,status);
         }
     }
 }
@@ -3970,9 +3979,13 @@ bool mira_full_passive_init(void){
     state_cache=new_cache;
     pending_states_lock=new_pending_lock;
     state_cache_lock=new_cache_lock;
-    ESP_LOGI(TAG,"JEEDOM_PASSIVE_PSRAM_READY: %u state slots, %u cached values, internal_largest=%u",
+    ESP_LOGI(TAG,"JEEDOM_PASSIVE_PSRAM_READY: %u slots, %u cache, internal_free=%u largest=%u dma_free=%u dma_largest=%u psram_free=%u",
         (unsigned)MIRA_PENDING_STATE_SLOTS,(unsigned)MIRA_STATE_CACHE_LIMIT,
-        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
     return true;
 }
 bool mira_full_passive_ready(void){
@@ -3980,15 +3993,19 @@ bool mira_full_passive_ready(void){
 }
 
 bool mira_full_storage_init(void){
-    // PSRAM last-value slots coalesce bursts; halve the internal FIFO footprint.
-    if(!state_queue)state_queue=xQueueCreate(12,sizeof(mira_state_update_t));
+    // Optional full-services path: keep the three fallback FIFOs in PSRAM.
+    // The current Mira 7 passive boot does NOT invoke this function; its
+    // state cache and pending slots already live in PSRAM. No DMA changes.
+    if(!state_queue)state_queue=xQueueCreateWithCaps(12,sizeof(mira_state_update_t),
+            MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(!pending_states_lock)pending_states_lock=xSemaphoreCreateMutex();
     if(!pending_states)
         pending_states=heap_caps_calloc(MIRA_PENDING_STATE_SLOTS,
                           sizeof(*pending_states),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(!pending_states||!pending_states_lock)
         ESP_LOGW(TAG,"PSRAM passive-state coalescing unavailable; using bounded FIFO");
-    if(!cover_update_queue)cover_update_queue=xQueueCreate(2,sizeof(mira_cover_update_t));
+    if(!cover_update_queue)cover_update_queue=xQueueCreateWithCaps(2,sizeof(mira_cover_update_t),
+            MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(!pending_covers_lock)pending_covers_lock=xSemaphoreCreateMutex();
     if(!pending_covers)
         pending_covers=heap_caps_calloc(MIRA_COVER_SLOTS,
@@ -4001,7 +4018,8 @@ bool mira_full_storage_init(void){
     if(!state_cache||!state_cache_lock)ESP_LOGW(TAG,"Passive state cache unavailable; HTTP /get will return Null");
     if(mira_album_art_init()!=ESP_OK)
         ESP_LOGW(TAG,"Album cover worker unavailable; other media controls still work");
-    if(!display_command_queue)display_command_queue=xQueueCreate(12,sizeof(mira_display_command_t));
+    if(!display_command_queue)display_command_queue=xQueueCreateWithCaps(12,sizeof(mira_display_command_t),
+            MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(!pending_display_lock)pending_display_lock=xSemaphoreCreateMutex();
     if(!pending_display_commands)
         pending_display_commands=heap_caps_calloc(MIRA_DISPLAY_COMMAND_SLOTS,
