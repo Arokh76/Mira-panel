@@ -11,3 +11,5 @@ La compilation de développement : `.github/workflows/build-mira-idf-waveshare7.
 Le code préserve la pile de 24 KiB du travailleur HTTP Jeedom. **Ne pas modifier le comportement d'Arduino pendant l'adaptation mémoire/API.** Les plantages chez Dimitri restent à analyser séparément.
 
 Référence centrale : [VERSION_ACTIVE.md](../VERSION_ACTIVE.md).
+
+Le 13 novembre 2026, les anciens doublons sous `firmware/experiments/esp-idf/mira-idf-7/` ont été retirés de `firmware-beta` après succès des builds utilisant le chemin officiel. L'historique Git du commit d'origine reste disponible.
