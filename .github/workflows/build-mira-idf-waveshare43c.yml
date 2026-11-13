@@ -19,6 +19,11 @@ jobs:
     steps:
       - name: Checkout Mira port
         uses: actions/checkout@v4
+      - name: Checkout pinned Arduino baseline for 4.3C parity tests
+        uses: actions/checkout@v4
+        with:
+          ref: 2a9811cb885698401ee0652f2033e156d122f599
+          path: mira43_arduino_reference
       - name: Checkout pinned LVGL v9.6.0
         uses: actions/checkout@v4
         with:
