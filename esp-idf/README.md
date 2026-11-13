@@ -1,21 +1,13 @@
-# Mira Panel — Waveshare 7 STD (ESP-IDF beta, premier jet)
+# Mira Panel — Waveshare 7" STD, ESP-IDF 5.5.6
 
-Source logique : `firmware-beta/firmware/experiments/esp-idf/mira-idf` (portage 4.3C avec les corrections réseau/DNS/NTP, Jeedom/MQTT, widgets et veille).
-Pilote panneau : branche d'essais `experiment/mira-idf-full-ui-7`, issue du profil `experiment/mira-idf-waveshare7-pclk13-stable`.
+**Source officielle du portage 7 pouces : ce répertoire** (`CMakeLists.txt`, `main/`, `sdkconfig.defaults`, `partitions.csv`).
 
-## Paramètres matériels repris
+Ces 64 fichiers source correspondent à la compilation du binaire `MIRA7_ETATS_COULEURS_BOOT_RESYNC_HTTP24K_OTA.bin`, commit `fe6867f5d6ef09d9fe96d0de04181942020c790d` du 10/11/2026.
 
-- Waveshare ESP32-S3 Touch LCD 7 standard, RGB565 800 × 480, 2 framebuffers PSRAM, pas de bounce buffer.
-- PCLK **13 MHz**, synchronisation H/V 4/8/8, broches RGB du pilote 7 précédemment testé.
-- Expandeur **CH422G** : mode 0x24, données 0x38, séquence alimentation/réinitialisation LCD validée.
-- GT911 I2C 0x5D / 0x14 : initialisation via EXIO1 + GPIO4 ; lecture du premier contact depuis 0x814F.
-- **Aucune commande du CH32 du 4.3C n'est envoyée** ; l'API des entrées/sorties isolées du 4.3C renvoie NOT_SUPPORTED.
-- PWM de rétroéclairage 7 pouces **non validé** : l'API luminosité ne pilote pas de PWM sur cette cible. Ne pas considérer le curseur comme une commande matérielle effective.
+**Dernier binaire de référence :** [`bin/MIRA7_ETATS_COULEURS_BOOT_RESYNC_HTTP24K_OTA.bin`](bin/MIRA7_ETATS_COULEURS_BOOT_RESYNC_HTTP24K_OTA.bin). SHA-256 : `698d1f3a7cc7960215366cbfea84ee06a19f27929e0208b9776f9541aa2b1326`.
 
-## Construction et essais
+La compilation de développement : `.github/workflows/build-mira-idf-waveshare7.yml`. Ses nouveaux résultats sont nommés `MIRA7_IDF_DEV_OTA.bin`, sans remplacer la référence.
 
-La compilation dédiée est `.github/workflows/build-mira-idf-waveshare7.yml`. Elle publie deux images clairement identifiées 7 STD : `Mira_LVGL96_7_STD_UI_OTA.bin` et `Mira_LVGL96_7_STD_UI_FACTORY_USB_0x0.bin`.
+Le code préserve la pile de 24 KiB du travailleur HTTP Jeedom. **Ne pas modifier le comportement d'Arduino pendant l'adaptation mémoire/API.** Les plantages chez Dimitri restent à analyser séparément.
 
-**Premier jet expérimental**. Vérifier sur appareil réel : démarrage, alimentation LCD/CH422G, RGB sans dérive, tactile, date/heure NTP (y compris IP fixe automatique), widgets Jeedom/MQTT, veille, mémoire et OTA. Le rendu tactile 7 pouces et la luminosité ne sont pas considérés comme validés par la compilation seule.
-
-La branche `firmware-beta` conserve le projet 4.3C inchangé dans `mira-idf/` et le firmware Arduino WT32 inchangé.
+Référence centrale : [VERSION_ACTIVE.md](../VERSION_ACTIVE.md).

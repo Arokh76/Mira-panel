@@ -1,9 +1,11 @@
-# Mira Panel — Arduino (WT32-SC01 Plus)
+# Mira Panel — WT32 Arduino 0.7.44
 
-Sources : `Arduino/MIRA_PANEL/`, copie sans modification du snapshot `firmware-beta` (commit `16c4f4f64f4211c204231eee0274c2c392eda8d6`).
+**Source officielle :** [`MIRA_PANEL/`](MIRA_PANEL/). Ces 62 fichiers sont identiques à ceux du commit compilé `dacb114deefcc9495ab781161449def50e288b8e`.
 
-Binaire courant 0.7.44 : le fichier `Mira_Panel_WT32_SC01_Plus_0.7.44.bin` (SHA-256 `60eef0eac915d72b027b4aa86dad5a345700f07cecae9e5a49f9219a1ff1c4b7`) existe dans la bibliothèque de fichiers ChatGPT, mais n'a pas été ajouté au dépôt lors de cette consolidation. Ne pas utiliser l'archive 0.7.37 comme si elle correspondait aux sources 0.7.44.
+**Binaires vérifiés :** `bin/Mira_Panel_WT32_SC01_Plus_0.7.44.bin` (OTA) et `bin/Mira_Panel_WT32_SC01_Plus_0.7.44_FACTORY.bin` (USB). Provenance : [run GitHub Actions 43027107986](https://github.com/Arokh76/Mira-panel/actions/runs/43027107986).
 
-`bin/archives/0.7.37/` contient les deux binaires d'archive 0.7.37 existant déjà dans GitHub (OTA / FACTORY), **uniquement** pour retour arrière. Ne jamais envoyer un binaire FACTORY par la page OTA.
+Les anciens `bin/archives/0.7.37/` sont des archives, pas la version actuelle.
 
-La copie des sources dans ce nouveau dossier est une opération de classement, pas une nouvelle build validée.
+Le workflow `.github/workflows/build-mira.yml` compile depuis ce dossier. Tout changement de logique doit être explicite ; ne pas altérer le fonctionnement stable du WT32 pour modifier le 7 pouces.
+
+Référence centrale : [VERSION_ACTIVE.md](../VERSION_ACTIVE.md).

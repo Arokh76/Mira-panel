@@ -1,8 +1,12 @@
-# Binaires Waveshare 7 pouces STD
+# Binaires Waveshare 7" STD
 
-Dernier binaire à placer ici, **inchangé** :
+**Dernier OTA de référence en dépôt :** [`MIRA7_ETATS_COULEURS_BOOT_RESYNC_HTTP24K_OTA.bin`](MIRA7_ETATS_COULEURS_BOOT_RESYNC_HTTP24K_OTA.bin)
 
-- `MIRA7_ETATS_COULEURS_BOOT_RESYNC_HTTP24K_OTA.bin` — SHA256 `698d1f3a7cc7960215366cbfea84ee06a19f27929e0208b9776f9541aa2b1326`
-- `MIRA7_ETATS_COULEURS_BOOT_RESYNC_HTTP24K_FACTORY_USB_0x0000.bin` — SHA256 `9d773419d17903b5f5801ecd7961c9564fc466ec6da2547666bd14a63bdcc614`
+- Taille : 2 184 752 octets
+- SHA-256 : `698d1f3a7cc7960215366cbfea84ee06a19f27929e0208b9776f9541aa2b1326`
+- GitHub Actions : [run 42899018718](https://github.com/Arokh76/Mira-panel/actions/runs/42899018718)
+- Sources : `../` au commit exact `fe6867f5d6ef09d9fe96d0de04181942020c790d`, recopiées à l'identique
 
-Les fichiers ci-dessus sont dans la bibliothèque ChatGPT, **pas encore dans ce dossier GitHub**. Ne pas les remplacer par une autre version sous le même nom.
+L'image FACTORY USB 0x0000 associée n'est pas encore archivée dans ce dossier. Ne pas substituer la Factory de la version de développement.
+
+Les futures OTA de test doivent avoir un nom distinct. 

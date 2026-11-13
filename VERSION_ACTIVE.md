@@ -1,30 +1,32 @@
-# VERSION ACTIVE — Mira Panel (branche firmware-beta)
+# Versions officielles de développement — Mira Panel firmware-beta
 
-**LIRE CE FICHIER AVANT CHAQUE MODIFICATION.** Les chemins ci-dessous sont les références de travail, pas les dossiers historiques `firmware/experiments/`.
+**Lire ce fichier avant toute modification du firmware.** Les seuls chemins de travail officiels sont `Arduino/MIRA_PANEL/` pour WT32 et `esp-idf/` pour Waveshare 7 STD.
 
-## WT32-SC01 Plus — Arduino
-- **Sources à modifier** : [`Arduino/MIRA_PANEL/`](Arduino/MIRA_PANEL/) (snapshot Arduino consolidé, copié sans changement).
-- **Dernier binaire WT32 connu** : `Mira_Panel_WT32_SC01_Plus_0.7.44.bin` (OTA, 1 900 992 octets).
-- SHA-256 : `60eef0eac915d72b027b4aa86dad5a345700f07cecae9e5a49f9219a1ff1c4b7`.
-- **Statut de dépôt** : ce fichier binaire exact est dans la bibliothèque de fichiers ChatGPT, **pas encore dans GitHub**. Les deux binaires `Arduino/bin/archives/0.7.37/` sont anciens et ne doivent pas être confondus avec la 0.7.44.
+## WT32-SC01 Plus : Arduino 0.7.44
+- **Sources compilées vérifiées** : [`Arduino/MIRA_PANEL/`](Arduino/MIRA_PANEL/), copies identiques aux 62 fichiers du commit `dacb114deefcc9495ab781161449def50e288b8e`.
+- **Compilation originale validée** : [GitHub Actions 43027107986](https://github.com/Arokh76/Mira-panel/actions/runs/43027107986), le 11 novembre 2026.
+- **OTA officiel** : [`Arduino/bin/Mira_Panel_WT32_SC01_Plus_0.7.44.bin`](Arduino/bin/Mira_Panel_WT32_SC01_Plus_0.7.44.bin). SHA-256 : `60eef0eac915d72b027b4aa86dad5a345700f07cecae9e5a49f9219a1ff1c4b7`.
+- **FACTORY officiel** : [`Arduino/bin/Mira_Panel_WT32_SC01_Plus_0.7.44_FACTORY.bin`](Arduino/bin/Mira_Panel_WT32_SC01_Plus_0.7.44_FACTORY.bin). SHA-256 : `2c2f306ecbd80e1219e4efe16f0b1e2eee6b5c4801d5b1c45f7ac20ead31a29e`.
+- **Workflow à utiliser** : [`.github/workflows/build-mira.yml`](.github/workflows/build-mira.yml). Il lit les sources `Arduino/MIRA_PANEL/`, sans remplacer les binaires figés.
 
-## Waveshare 7" STD — ESP-IDF
-- **Sources à modifier** : [`esp-idf/`](esp-idf/) (`CMakeLists.txt`, `main/`, `partitions.csv`, etc.). Copie sans modification du commit `37f6cc94603b14d5b776c52c181aa99006486c13` (branche de test du 11/11/2026).
-- **Dernier binaire 7" connu** : `MIRA7_ETATS_COULEURS_BOOT_RESYNC_HTTP24K_OTA.bin` (OTA, 2 184 752 octets).
-- SHA-256 : `698d1f3a7cc7960215366cbfea84ee06a19f27929e0208b9776f9541aa2b1326`.
-- **Factory USB correspondante** : `MIRA7_ETATS_COULEURS_BOOT_RESYNC_HTTP24K_FACTORY_USB_0x0000.bin` (2 250 288 octets), SHA-256 `9d773419d17903b5f5801ecd7961c9564fc466ec6da2547666bd14a63bdcc614`. Vérification binaire effectuée : les 2 184 752 octets de l'application OTA sont **strictement identiques** à la séquence d'octets de l'image FACTORY à partir de l'offset `0x10000`.
-- **Contrôle de correspondance réalisé le 12/11/2026** : la métadonnée interne du binaire identifie une compilation du **10/11/2026 à 20:51:29** (horodatage intégré, fuseau non spécifié), IDF **v5.5.6**, projet `mira_idf_7std`, version applicative `0.7.37`. La sauvegarde `backup/mira7-bootresync-http24k-before-404-fix-20261111` pointe vers un commit du 10/11/2026 à 20:49:22 UTC. Comparaison **64 fichiers** du projet 7 pouces : **63/64 identiques** entre cette sauvegarde et `esp-idf/` ; la seule différence concerne `main/CMakeLists.txt`, où la branche plus récente ajoute `target_compile_definitions(... MIRA_PANEL_7_INCH=1)`. Ce sont de fortes indications sur la source d'origine, **pas une preuve de reproduction binaire bit à bit**.
-- **Statut de dépôt** : ces deux binaires exacts sont dans la bibliothèque de fichiers ChatGPT, **pas encore dans GitHub**. **Le lien entre le commit des sources ci-dessus et les binaires n'est pas encore attesté : ne pas annoncer une reconstruction identique sans comparaison.** Aucun de ces binaires ne doit être remplacé par une autre compilation sous le même nom.
+## Waveshare 7" STD : ESP-IDF BOOT_RESYNC_HTTP24K
+- **Sources compilées vérifiées** : [`esp-idf/`](esp-idf/). Les **64 fichiers du projet** (dont `main/CMakeLists.txt`) sont identiques au commit de compilation **`fe6867f5d6ef09d9fe96d0de04181942020c790d`**, après copie vers le nouveau chemin.
+- **Compilation originale validée** : [GitHub Actions 42899018718](https://github.com/Arokh76/Mira-panel/actions/runs/42899018718), le 10 novembre 2026.
+- **OTA officiel** : [`esp-idf/bin/MIRA7_ETATS_COULEURS_BOOT_RESYNC_HTTP24K_OTA.bin`](esp-idf/bin/MIRA7_ETATS_COULEURS_BOOT_RESYNC_HTTP24K_OTA.bin). SHA-256 : `698d1f3a7cc7960215366cbfea84ee06a19f27929e0208b9776f9541aa2b1326`, taille 2 184 752 octets.
+- **FACTORY USB 0x0000** associée : conservée dans la bibliothèque de fichiers ChatGPT, SHA-256 `9d773419d17903b5f5801ecd7961c9564fc466ec6da2547666bd14a63bdcc614`. Elle **n'est pas** encore dans ce GitHub. Ne pas substituer une image usine d'une autre compilation.
+- **Workflow de développement** : [`.github/workflows/build-mira-idf-waveshare7.yml`](.github/workflows/build-mira-idf-waveshare7.yml). Le binaire généré porte le nom **`MIRA7_IDF_DEV_OTA.bin`**, distinct du binaire officiel.
+- **Piles** : source de référence : `xTaskCreateWithCaps(jeedom_action_worker, "mira_jeedom_http", 24576, ...)`. Le champ `http_stack` de `/status` suit la pile HTTPD ; ne pas le confondre avec celle du travailleur Jeedom.
 
-## Règles impératives
-1. Le portage Arduino → ESP-IDF ne doit changer **aucun comportement** de Mira : UI, sauvegarde des paramètres, clé secrète, protocoles et widgets inchangés. Adapter seulement API/RTOS/pilotes/mémoire.
-2. Avant une correction, lire ce fichier et partir **exclusivement du dossier cible** ci-dessus ; vérifier que sa provenance est la bonne avant de compiler.
-3. Ne pas reprendre un ancien dossier `firmware/experiments/` ou une branche expérimentale comme vérité implicite.
-4. Les anciens chemins subsistent temporairement car des workflows CI les utilisent. **Ne pas les supprimer ni les déplacer sans adaptation ET compilation testée.**
-5. Ne jamais utiliser une image `FACTORY` dans l'OTA, ni effacer la configuration pour tester une correction.
-6. Tant que les binaires ne sont pas importés dans GitHub, dire explicitement qu'ils manquent : ne pas prétendre que le rangement est totalement terminé.
+## Règles obligatoires
+1. **Portage fidèle Arduino → ESP-IDF** : aucune modification fonctionnelle sans demande explicite. Même UI, configuration, clé secrète, Jeedom, widgets, états et commandes ; adapter seulement HAL, réseau, mémoire, piles et API.
+2. **Ne jamais repartir d'une branche `experiment/` ou `test/` par défaut.** L'unique base de travail est `firmware-beta` + dossier cible.
+3. **Ne jamais écraser les binaires de référence.** Toute nouvelle compilation a un autre nom et sa propre provenance.
+4. **OTA ≠ FACTORY**. Ne jamais flasher FACTORY depuis l'interface OTA ni effacer les partitions de configuration pour un test.
+5. Garder les protections anti-commandes Jeedom involontaires, les protections flash/SPIFFS, et la pile Jeedom de 24 KiB.
+6. Toute correction du 7 pouces doit être validée en compilation puis sur écran avant d'être considérée stable ; des redémarrages ont été rapportés chez Dimitri.
 
-## Travail restant
-- Importer **sans modifier les octets** les 3 binaires actuellement conservés dans la bibliothèque ChatGPT dans `Arduino/bin/` et `esp-idf/bin/`.
-- Adapter et valider les workflows de build aux nouveaux chemins, puis supprimer les anciens doublons et nettoyer les branches d'essai **après** sauvegarde et vérification.
-- Identifier le commit de compilation exact de chaque binaire par une preuve de build, plutôt que par le nom du fichier.
+## Historique et nettoyage
+- Ancien chemin Arduino : `firmware/source/consolidated/MIRA_PANEL/` — copie historique à retirer lorsque les builds du nouveau chemin sont validés.
+- Ancien chemin ESP-IDF 7" : `firmware/experiments/esp-idf/mira-idf-7/` — copie historique à retirer après validation.
+- Le projet ESP-IDF 4,3" séparé (`firmware/experiments/esp-idf/mira-idf/`) n'est **pas** la source du 7" et reste conservé pour éviter d'effacer ce travail.
+- Les anciennes branches ne constituent pas des bases de développement : leur suppression doit préserver leurs commits utiles.
