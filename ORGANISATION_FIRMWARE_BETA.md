@@ -4,6 +4,7 @@
 | --- | --- | --- |
 | WT32 Arduino 0.7.44 | `Arduino/MIRA_PANEL/` | `Arduino/bin/` |
 | Waveshare 7" ESP-IDF HTTP24K | `esp-idf/` | `esp-idf/bin/` |
+| Waveshare 4,3C ESP-IDF (conservé) | `esp-idf-4.3C/` | `esp-idf-4.3C/bin/` |
 
 **Sources et binaires exacts retrouvés et corrélés aux compilations GitHub Actions d'origine.**
 
@@ -14,6 +15,6 @@ Voir [VERSION_ACTIVE.md](VERSION_ACTIVE.md) pour les empreintes, règles de flas
 
 Les anciens doublons Arduino et ESP-IDF 7 pouces ont été supprimés après vérification des compilations de leurs nouveaux chemins. Le projet ESP-IDF 4,3 pouces, distinct, est encore conservé historiquement dans `esp-idf-4.3C/`. Les anciennes branches sont répertoriées dans `BRANCHES_AVANT_NETTOYAGE_20261113.md`.
 
-**Nettoyage terminé :** 58 → 18 branches ; 40 tags d'archive préservent les anciens essais. Les deux seuls workflows actifs de firmware de cette branche compilent les cibles WT32 et Waveshare 7". Les scripts d'archivage ont été déplacés dans `.github/archive/workflows/`.
+**Nettoyage terminé :** 58 → 18 branches ; 40 tags d'archive préservent les anciens essais. Les trois workflows actifs de firmware de cette branche compilent WT32, Waveshare 7" et Waveshare 4,3C. Les workflows ponctuels d'archivage ont été déplacés dans `.github/archive/workflows/`.
 
 - **Waveshare ESP-IDF 4,3C (à conserver)** : `esp-idf-4.3C/`, source et binaires propres, distinct du 7 pouces.

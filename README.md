@@ -1,6 +1,6 @@
 # Mira Panel — branche firmware-beta
 
-**Deux cibles actives, deux sources officielles, deux binaires de référence.**
+**Trois projets préservés, chacun avec ses propres sources et binaires de référence.**
 
 | Cible | Sources à modifier | Dernier binaire OTA archivé |
 | --- | --- | --- |

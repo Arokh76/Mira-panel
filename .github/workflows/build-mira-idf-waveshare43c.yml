@@ -84,7 +84,7 @@ jobs:
           Path('mira_idf_release/Mira_43C_DEV_FACTORY_USB_0x0.bin').write_bytes(out)
           print('Factory bytes',len(out))
           PY
-          test $(stat -c '%s' mira_idf_release/Mira_LVGL96_43C_UI_OTA.bin) -lt 3145728
+          test $(stat -c '%s' mira_idf_release/Mira_43C_DEV_OTA.bin) -lt 3145728
       - name: Upload build (hardware validation still required)
         uses: actions/upload-artifact@v4
         with:
