@@ -1,35 +1,30 @@
-# Mira Panel — firmware-beta
+# Mira Panel — branche firmware-beta
 
-**Point d'entrée obligatoire : [VERSION_ACTIVE.md](VERSION_ACTIVE.md).**
+**Deux cibles actives, deux sources officielles, deux binaires de référence.**
 
-| Matériel | Sources de travail | Binaire de référence |
+| Cible | Sources à modifier | Dernier binaire OTA archivé |
 | --- | --- | --- |
-| WT32 (Arduino) | [Arduino/MIRA_PANEL/](Arduino/MIRA_PANEL/) | `Mira_Panel_WT32_SC01_Plus_0.7.44.bin` |
-| Waveshare 7 pouces (ESP-IDF) | [esp-idf/](esp-idf/) | `MIRA7_ETATS_COULEURS_BOOT_RESYNC_HTTP24K_OTA.bin` |
+| **WT32-SC01 Plus — Arduino** | [`Arduino/MIRA_PANEL/`](Arduino/MIRA_PANEL/) | [`Arduino/bin/Mira_Panel_WT32_SC01_Plus_0.7.44.bin`](Arduino/bin/Mira_Panel_WT32_SC01_Plus_0.7.44.bin) |
+| **Waveshare 7" STD — ESP-IDF** | [`esp-idf/`](esp-idf/) | [`esp-idf/bin/MIRA7_ETATS_COULEURS_BOOT_RESYNC_HTTP24K_OTA.bin`](esp-idf/bin/MIRA7_ETATS_COULEURS_BOOT_RESYNC_HTTP24K_OTA.bin) |
 
-**Important :** les binaires exacts 0.7.44/24K sont encore conservés dans la bibliothèque de fichiers ChatGPT. Leurs SHA-256 et leur statut sont documentés dans `VERSION_ACTIVE.md`. Ne pas substituer un autre binaire ni reprendre les anciens dossiers expérimentaux.
+## À consulter impérativement avant toute modification
 
----
+- [**VERSION_ACTIVE.md**](VERSION_ACTIVE.md) : provenance des **sources exactes**, exécutions GitHub Actions d'origine, empreintes SHA-256 et protections à conserver.
+- [**ORGANISATION_FIRMWARE_BETA.md**](ORGANISATION_FIRMWARE_BETA.md) : organisation des dossiers.
+- [**Arduino/README.md**](Arduino/README.md) et [**esp-idf/README.md**](esp-idf/README.md) : instructions propres à chaque écran.
 
-# Mira Panel — firmware-beta
+### Compilation
 
-## Firmwares Arduino maintenus
+- **WT32** : [`.github/workflows/build-mira.yml`](.github/workflows/build-mira.yml), à partir de `Arduino/MIRA_PANEL/`.
+- **Waveshare 7 pouces** : [`.github/workflows/build-mira-idf-waveshare7.yml`](.github/workflows/build-mira-idf-waveshare7.yml), à partir de `esp-idf/`.
+- Les sorties de nouvelles compilations sont **des artefacts de développement**. Les derniers binaires vérifiés dans `Arduino/bin/` et `esp-idf/bin/` restent figés et ne doivent jamais être écrasés automatiquement.
 
-- **WT32-SC01 Plus** : base 0.7.37, avec les derniers correctifs bêta validés (stockage des valeurs JSON, thème Rose optionnel et logo Mira compact).
-- **Open Nextion Genius 2.8** : profil Arduino distinct, destiné aux essais matériels.
+### Règle fondamentale du portage
 
-Sources : `firmware/source/consolidated/MIRA_PANEL/`. Compilation et tests : `.github/workflows/build-mira.yml`.
+**ESP-IDF est une migration technique d'Arduino, pas une réécriture fonctionnelle.** Préserver strictement les widgets, la configuration, la clé secrète, Jeedom, les commandes, les états et les couleurs. Adapter uniquement les API, les pilotes, les accès réseau, la RAM/PSRAM et les piles indispensables.
 
-## Waveshare 4,3 pouces
+Le projet historique ESP-IDF Waveshare 4,3" reste conservé séparément dans `firmware/experiments/esp-idf/mira-idf/` pour ne pas perdre ses travaux ; il ne constitue **pas** une base du 7 pouces.
 
-**L'ancien firmware Waveshare 4.3C Arduino a été retiré de `firmware-beta`.** Son pilote, son build GitHub Actions, ses binaires et son manifeste USB ont été supprimés. Le port **ESP-IDF** 4.3C sera intégré séparément après compilation et validation sur l'écran réel.
+Les anciennes copies des sources WT32 et 7 pouces dans `firmware/source/consolidated/` et `firmware/experiments/esp-idf/mira-idf-7/` ont été retirées après compilation réussie des nouveaux dossiers. Les branches temporaires sont tracées dans [BRANCHES_AVANT_NETTOYAGE_20261113.md](BRANCHES_AVANT_NETTOYAGE_20261113.md).
 
-Les modifications de cette branche ne changent pas les anciens firmwares publiés depuis `main`, ne déclenchent pas de mise à jour sur les écrans déjà installés et ne touchent pas au développement ESP-IDF 7 pouces.
-
-## Versions / distribution
-
-Les binaires `firmware/releases/0.7.37/` encore présents concernent WT32 et Nextion. Ces binaires ont été produits **avant** les derniers correctifs WT32 JSON/Rose/logo ; ils ne sont donc pas équivalents au code bêta actuel. Les nouveaux artefacts ne sont pas publiés automatiquement.
-
-`firmware/targets.json` ne liste plus la cible Waveshare Arduino. L'installateur sous `docs/` reflète les profils Arduino restants dans cette branche. La version publique sur `main` est inchangée.
-
-Sauvegarde de la branche avant suppression : `backup/firmware-beta-before-wave-arduino-removal-20261106`. Sauvegarde de la bêta WT32 validée : `backup/wt32-dimitri-rose-logo-valide-20261106`.
+Le dépôt public `main`, les branches stables et les sauvegardes ne sont pas modifiés par ce classement.
