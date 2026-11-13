@@ -44,3 +44,5 @@ f45f3c54b9c1fa03c479f20d5f8d59a837ddc17e	test/waveshare7-ui-offline
 5e1b9d88e4afcad66c23057ab1ea01a73fae68e1	test/wt32-dimitri-rose-logo
 cc226f835a2fe3fb57c1fa931eba3319dc9cd232	test/wt32-json-dimitri-b1
 ```
+
+**Nettoyage exécuté avec succès le 13 novembre 2026** : 40 tags d'archive `archive/mira-precleanup-20261113/<ancienne-branche>` ont été créés et vérifiés, puis les 40 anciennes branches temporaires supprimées. Il reste 18 branches.

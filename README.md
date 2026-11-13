@@ -23,8 +23,10 @@
 
 **ESP-IDF est une migration technique d'Arduino, pas une réécriture fonctionnelle.** Préserver strictement les widgets, la configuration, la clé secrète, Jeedom, les commandes, les états et les couleurs. Adapter uniquement les API, les pilotes, les accès réseau, la RAM/PSRAM et les piles indispensables.
 
-Le projet historique ESP-IDF Waveshare 4,3" reste conservé séparément dans `firmware/experiments/esp-idf/mira-idf/` pour ne pas perdre ses travaux ; il ne constitue **pas** une base du 7 pouces.
+Le projet historique ESP-IDF Waveshare 4,3" reste conservé séparément dans `archive/esp-idf-43c/` pour ne pas perdre ses travaux ; il ne constitue **pas** une base du 7 pouces.
 
 Les anciennes copies des sources WT32 et 7 pouces dans `firmware/source/consolidated/` et `firmware/experiments/esp-idf/mira-idf-7/` ont été retirées après compilation réussie des nouveaux dossiers. Les branches temporaires sont tracées dans [BRANCHES_AVANT_NETTOYAGE_20261113.md](BRANCHES_AVANT_NETTOYAGE_20261113.md).
 
 Le dépôt public `main`, les branches stables et les sauvegardes ne sont pas modifiés par ce classement.
+
+Le nettoyage des branches temporaires a été validé : **58 → 18 branches**, avec **40 tags d'archive** `archive/mira-precleanup-20261113/*` pour préserver tous les anciens commits. Les workflows ponctuels sont conservés sous `.github/archive/workflows/`.
