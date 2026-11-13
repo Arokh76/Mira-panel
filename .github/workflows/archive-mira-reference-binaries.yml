@@ -1,0 +1,79 @@
+name: Mira beta - archiver les binaires de reference verifies
+on:
+  workflow_dispatch:
+  push:
+    branches: [firmware-beta]
+    paths:
+      - '.github/workflows/archive-mira-reference-binaries.yml'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout firmware-beta
+        uses: actions/checkout@v4
+      - name: Download exact WT32 0.7.44 build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Mira_Panel_WT32_SC01_Plus_0.7.44_preview
+          run-id: 43027107986
+          github-token: ${{ github.token }}
+          path: /tmp/mira-wt32-ref
+      - name: Download exact Mira7 HTTP24K build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: MIRA7_ETATS_COULEURS_OTA
+          run-id: 42899018718
+          github-token: ${{ github.token }}
+          path: /tmp/mira7-ref
+      - name: Verify SHA256 and archive exact bytes (no recompile)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, shutil
+          sources = {
+            "Arduino/bin/Mira_Panel_WT32_SC01_Plus_0.7.44.bin": (
+              Path("/tmp/mira-wt32-ref/Mira_Panel_WT32_SC01_Plus_0.7.44.bin"),
+              "60eef0eac915d72b027b4aa86dad5a345700f07cecae9e5a49f9219a1ff1c4b7",
+            ),
+            "Arduino/bin/Mira_Panel_WT32_SC01_Plus_0.7.44_FACTORY.bin": (
+              Path("/tmp/mira-wt32-ref/Mira_Panel_WT32_SC01_Plus_0.7.44_FACTORY.bin"),
+              "2c2f306ecbd80e1219e4efe16f0b1e2eee6b5c4801d5b1c45f7ac20ead31a29e",
+            ),
+            "esp-idf/bin/MIRA7_ETATS_COULEURS_BOOT_RESYNC_HTTP24K_OTA.bin": (
+              Path("/tmp/mira7-ref/MIRA7_ETATS_COULEURS_OTA.bin"),
+              "698d1f3a7cc7960215366cbfea84ee06a19f27929e0208b9776f9541aa2b1326",
+            ),
+          }
+          for name, (src, expected) in sources.items():
+              blob = src.read_bytes()
+              actual = hashlib.sha256(blob).hexdigest()
+              if actual != expected:
+                  raise SystemExit(f"Mismatch on {src.name}: {actual} != {expected}; refusing to archive")
+              dst = Path(name)
+              dst.parent.mkdir(parents=True,exist_ok=True)
+              shutil.copy2(src, dst)
+              print(f"VERIFIED {name}: {len(blob)} bytes, {actual}")
+          PY
+      - name: Commit verified reference binaries to firmware-beta
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- Arduino/bin/Mira_Panel_WT32_SC01_Plus_0.7.44.bin \
+            Arduino/bin/Mira_Panel_WT32_SC01_Plus_0.7.44_FACTORY.bin \
+            esp-idf/bin/MIRA7_ETATS_COULEURS_BOOT_RESYNC_HTTP24K_OTA.bin
+          if git diff --cached --quiet; then
+            echo "Exact binaries already committed; no changes needed."
+            exit 0
+          fi
+          git commit -m "chore(beta): archiver les binaires originaux WT32 0.7.44 et Mira7 HTTP24K"
+          git pull --rebase origin firmware-beta
+          git push origin HEAD:firmware-beta
