@@ -116,7 +116,18 @@ void mira_display_touch_read(lv_indev_t *indev, lv_indev_data_t *data) {
         return;
     }
     touch_last_status = status;
-    if (!(status & 0x80)) return; // Not ready yet; keep the raw status observable.
+    if (!(status & 0x80)) {
+        // GT911 sets bit 7 only when a NEW sample is ready. No fresh
+        // sample does NOT mean finger released: keep LVGL pressed at the
+        // last valid coordinate or drag events become discontinuous.
+        // A ready sample with count == 0 below is the actual release.
+        if (finger_down) {
+            data->point.x = (int32_t)touch_last_x;
+            data->point.y = (int32_t)touch_last_y;
+            data->state = LV_INDEV_STATE_PRESSED;
+        }
+        return;
+    }
     touch_ready_events++;
     const uint8_t count = status & 0x0f;
     if (count > 0 && count <= 5) {
