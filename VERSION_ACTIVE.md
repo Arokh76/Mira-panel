@@ -34,7 +34,7 @@
 ## Réorganisation vérifiée le 13 novembre 2026
 
 - Les deux builds canoniques WT32 et 7" ont réussi après suppression des doublons.
-- 40 branches temporaires ont été remplacées par 40 tags d'archive avant suppression ; 18 branches conservées restent.
+- 48 branches temporaires ou sauvegardes ont été archivées dans 48 tags Git en deux passages avant suppression ; 10 branches restent.
 - Le code 4,3 pouces est conservé dans `esp-idf-4.3C/` avec son propre workflow actif `.github/workflows/build-mira-idf-waveshare43c.yml`.
 - Les workflows ponctuels d'importation binaire et de nettoyage sont conservés dans `.github/archive/workflows/` pour audit, non exécutés automatiquement.
 

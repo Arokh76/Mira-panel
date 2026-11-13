@@ -1,6 +1,6 @@
 # Nettoyage final des branches — 13 novembre 2026
 
-Les huit références ci-dessous ont été relevées **avant suppression**. Le workflow `.github/workflows/archive-final-mira-branches.yml` vérifie leurs SHA exacts, crée pour chacune un tag Git `archive/mira-final-20261113/<ancien-nom>`, vérifie les tags distants et seulement ensuite supprime les branches.
+Les huit références ci-dessous ont été relevées **avant suppression**, puis chacune conservée sous forme de tag vérifié sur GitHub. Le workflow `.github/workflows/archive-final-mira-branches.yml` vérifie leurs SHA exacts, crée pour chacune un tag Git `archive/mira-final-20261113/<ancien-nom>`, vérifie les tags distants et seulement ensuite supprime les branches.
 
 Le code reste accessible via son tag Git même si la branche a été effacée. La branche `backup/mira7-bootresync-http24k-before-404-fix-20261111` qui est à l'origine de la build Mira7 HTTP24K est donc préservée explicitement.
 
@@ -19,4 +19,4 @@ db0abe65a6cc7d32e20cf5cfb662ec33f9348417	backup/waveshare7-jeedom-actions-202611
 
 Historique du premier ménage : 40 tags `archive/mira-precleanup-20261113/*` préservent les essais `experiment/`, `test/` et `cleanup/`.
 
-État final attendu : **10 branches**, **48 nouveaux tags d'archives** entre les deux passages de nettoyage.
+**État final confirmé sur GitHub : 10 branches, 48 nouveaux tags d'archives** entre les deux passages de nettoyage. Nettoyage réussi : [GitHub Actions 43501852871](https://github.com/Arokh76/Mira-panel/actions/runs/43501852871).
