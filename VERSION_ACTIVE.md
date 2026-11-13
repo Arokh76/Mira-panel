@@ -28,12 +28,18 @@
 ## Historique et nettoyage
 - Ancien chemin Arduino : `firmware/source/consolidated/MIRA_PANEL/` — **ancien doublon supprimé le 13/11/2026 après compilations réussies**.
 - Ancien chemin ESP-IDF 7" : `firmware/experiments/esp-idf/mira-idf-7/` — **ancien doublon supprimé le 13/11/2026 après compilations réussies**.
-- Le projet ESP-IDF 4,3" séparé (`archive/esp-idf-43c/`) n'est **pas** la source du 7" et reste conservé pour éviter d'effacer ce travail.
+- Le projet ESP-IDF 4,3" séparé (`esp-idf-4.3C/`) n'est **pas** la source du 7" et reste conservé pour éviter d'effacer ce travail.
 - Les anciennes branches ne constituent pas des bases de développement : leur suppression doit préserver leurs commits utiles.
 
 ## Réorganisation vérifiée le 13 novembre 2026
 
 - Les deux builds canoniques WT32 et 7" ont réussi après suppression des doublons.
 - 40 branches temporaires ont été remplacées par 40 tags d'archive avant suppression ; 18 branches utiles restent.
-- L'ancien code 4,3 pouces est conservé dans `archive/esp-idf-43c/`, sans workflow de build actif.
+- L'ancien code 4,3 pouces est conservé dans `esp-idf-4.3C/`, sans workflow de build actif.
 - Les workflows ponctuels d'importation binaire et de nettoyage sont conservés dans `.github/archive/workflows/` pour audit, non exécutés automatiquement.
+
+## Waveshare 4,3C ESP-IDF — projet conservé
+
+- Sources exactes (54 fichiers) dans [`esp-idf-4.3C/`](esp-idf-4.3C/), identiques au commit `2a9811cb885698401ee0652f2033e156d122f599`.
+- Compilations OTA et FACTORY d'origine : [run GitHub Actions 42285250664](https://github.com/Arokh76/Mira-panel/actions/runs/42285250664), le 6/11/2026 ; fichiers attendus dans [`esp-idf-4.3C/bin/`](esp-idf-4.3C/bin/), SHA-256 dans le README de ce répertoire.
+- **Ce projet ne doit pas être supprimé** même si le développement courant porte sur le 7 pouces.

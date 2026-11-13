@@ -12,6 +12,8 @@
 
 Voir [VERSION_ACTIVE.md](VERSION_ACTIVE.md) pour les empreintes, règles de flash et chemins de build.
 
-Les anciens doublons Arduino et ESP-IDF 7 pouces ont été supprimés après vérification des compilations de leurs nouveaux chemins. Le projet ESP-IDF 4,3 pouces, distinct, est encore conservé historiquement dans `archive/esp-idf-43c/`. Les anciennes branches sont répertoriées dans `BRANCHES_AVANT_NETTOYAGE_20261113.md`.
+Les anciens doublons Arduino et ESP-IDF 7 pouces ont été supprimés après vérification des compilations de leurs nouveaux chemins. Le projet ESP-IDF 4,3 pouces, distinct, est encore conservé historiquement dans `esp-idf-4.3C/`. Les anciennes branches sont répertoriées dans `BRANCHES_AVANT_NETTOYAGE_20261113.md`.
 
 **Nettoyage terminé :** 58 → 18 branches ; 40 tags d'archive préservent les anciens essais. Les deux seuls workflows actifs de firmware de cette branche compilent les cibles WT32 et Waveshare 7". Les scripts d'archivage ont été déplacés dans `.github/archive/workflows/`.
+
+- **Waveshare ESP-IDF 4,3C (à conserver)** : `esp-idf-4.3C/`, source et binaires propres, distinct du 7 pouces.
