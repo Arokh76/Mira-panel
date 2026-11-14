@@ -2335,6 +2335,20 @@ static bool put_remote_binding(long id,const char *value){
         if(err==ESP_OK)err=nvs_commit(nv);
         nvs_close(nv);
     }
+    if(err==ESP_OK && mira_index_mutex &&
+       xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(250))==pdTRUE){
+        // Legacy /setjeedomid endpoints must update the same PSRAM mapping
+        // used by outgoing HTTP; otherwise they only take effect after reboot.
+        if(mira_binding_cache&&mira_binding_cache->config_hash==hash){
+            const unsigned long remote=strtoul(value,NULL,10);
+            if(remote>0&&remote<=UINT32_MAX){
+                if(!mira_binding_cache->remote[id])
+                    mira_binding_cache->valid_count++;
+                mira_binding_cache->remote[id]=(uint32_t)remote;
+            }
+        }
+        xSemaphoreGive(mira_index_mutex);
+    }
     return err==ESP_OK;
 }
 static esp_err_t set_jeedom_id(httpd_req_t *req){
@@ -3104,6 +3118,11 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
     if(!decimal_id(init_id))init_id[0]=0;
     mira_full_state_diagnostics_t health={0};
     mira_full_state_diagnostics(&health);
+    unsigned cached_bindings=0;
+    if(mira_index_mutex&&xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(250))==pdTRUE){
+        if(mira_binding_cache)cached_bindings=(unsigned)mira_binding_cache->valid_count;
+        xSemaphoreGive(mira_index_mutex);
+    }
     char body[1180];
     snprintf(body,sizeof(body),
         "{\"jeedom_enabled\":%s,\"mapping_valid\":%s,"
@@ -3141,7 +3160,7 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
         (unsigned)__atomic_load_n(&mira_http_actions_no_index,__ATOMIC_RELAXED),
         (unsigned)__atomic_load_n(&mira_http_actions_no_mapping,__ATOMIC_RELAXED),
         (int)__atomic_load_n(&mira_http_action_last_status,__ATOMIC_RELAXED),
-        mira_binding_cache?(unsigned)mira_binding_cache->valid_count:0u,
+        cached_bindings,
         mira_http_config&&jeedom_mode_enabled?"true":"false");
     httpd_resp_set_type(req,"application/json");
     return httpd_resp_sendstr(req,body);
