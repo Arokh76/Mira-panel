@@ -427,6 +427,27 @@ static char *mira_index_template,*mira_index_response;
 static size_t mira_index_template_len,mira_index_response_cap;
 static mira_index_field_t *mira_index_fields;
 static size_t mira_index_fields_count;
+typedef struct {
+    char name[192];
+    char type[24];
+    char list_name[96];
+    int id,id0,id1;
+} mira_action_ref_t;
+static mira_action_ref_t *mira_action_refs;
+static size_t mira_action_ref_count;
+static uint32_t mira_index_hash;
+typedef struct {
+    uint32_t config_hash;
+    uint32_t remote[4097];
+    uint32_t valid_count;
+} mira_binding_cache_t;
+static mira_binding_cache_t *mira_binding_cache;
+static uint32_t mira_mapping_last_attempt_ms,mira_mapping_last_ok_ms;
+static volatile uint32_t mira_http_actions_queued,mira_http_actions_attempted;
+static volatile uint32_t mira_http_actions_acked,mira_http_actions_failed;
+static volatile uint32_t mira_http_actions_no_config,mira_http_actions_no_mapping;
+static volatile uint32_t mira_http_actions_no_index;
+static volatile int mira_http_action_last_status;
 static uint32_t mira_index_builds,mira_index_failures,mira_index_responses;
 static const char *index_find_field(const char *start,const char *end,
                                     const char *key,const char **token_end){
@@ -459,6 +480,7 @@ static bool mira_index_rebuild(void){
     }
     char *raw=read_config(NULL);
     if(!raw){__atomic_fetch_add(&mira_index_failures,1u,__ATOMIC_RELAXED);return false;}
+    const uint32_t index_hash=ui_config_hash(raw);
     cJSON *tree=index_from_config(raw);
     free(raw);
     if(!tree){__atomic_fetch_add(&mira_index_failures,1u,__ATOMIC_RELAXED);return false;}
@@ -475,8 +497,10 @@ static bool mira_index_rebuild(void){
     const size_t capacity=(size_t)count*3u+1u;
     mira_index_field_t *fields=heap_caps_calloc(capacity,sizeof(*fields),
                                                  MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
-    if(!snapshot||!fields){
-        heap_caps_free(snapshot);heap_caps_free(fields);
+    mira_action_ref_t *refs=heap_caps_calloc(count?count:1,sizeof(*refs),
+                                             MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!snapshot||!fields||!refs){
+        heap_caps_free(snapshot);heap_caps_free(fields);heap_caps_free(refs);
         cJSON_free(printed);cJSON_Delete(tree);
         __atomic_fetch_add(&mira_index_failures,1u,__ATOMIC_RELAXED);
         return false;
@@ -484,10 +508,24 @@ static bool mira_index_rebuild(void){
     memcpy(snapshot,printed,length+1);
     const char *cursor=strstr(snapshot,"\"actions\":[");
     if(cursor)cursor+=strlen("\"actions\":[");
-    size_t field_count=0;
+    size_t field_count=0,ref_count=0;
     const cJSON *action=NULL;
     cJSON_ArrayForEach(action,actions){
-        if(!cursor)break;
+        // Stable action-ID table mirrors WT32's in-memory SPIFFS_Config_Actions.
+        const char *ref_name=jstr((cJSON*)action,"nom","");
+        const char *ref_type=jstr((cJSON*)action,"type","");
+        if(*ref_name&&strlen(ref_name)<sizeof(refs[0].name)&&
+           strlen(ref_type)<sizeof(refs[0].type)&&ref_count<(size_t)count){
+            mira_action_ref_t *ref=&refs[ref_count++];
+            snprintf(ref->name,sizeof(ref->name),"%s",ref_name);
+            snprintf(ref->type,sizeof(ref->type),"%s",ref_type);
+            snprintf(ref->list_name,sizeof(ref->list_name),"%s",
+                     jstr((cJSON*)action,"nomliste",""));
+            ref->id=jint((cJSON*)action,"id",-1);
+            ref->id0=jint((cJSON*)action,"id0",-1);
+            ref->id1=jint((cJSON*)action,"id1",-1);
+        }
+        if(!cursor)continue;
         while(*cursor&&*cursor!='{')cursor++;
         if(!*cursor)break;
         const char *begin=cursor,*end=NULL;
@@ -543,17 +581,21 @@ static bool mira_index_rebuild(void){
         ESP_LOGW(TAG,"MIRA_INDEX_DYNAMIC_BUFFER_UNAVAILABLE: using static PSRAM snapshot");
     }
     if(xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(250))!=pdTRUE){
-        heap_caps_free(snapshot);heap_caps_free(fields);heap_caps_free(render);
+        heap_caps_free(snapshot);heap_caps_free(fields);heap_caps_free(refs);heap_caps_free(render);
         __atomic_fetch_add(&mira_index_failures,1u,__ATOMIC_RELAXED);
         return false;
     }
     char *previous_template=mira_index_template;
     char *previous_response=mira_index_response;
     mira_index_field_t *previous_fields=mira_index_fields;
+    mira_action_ref_t *previous_refs=mira_action_refs;
     mira_index_template=snapshot;
     mira_index_template_len=length;
     mira_index_fields=fields;
     mira_index_fields_count=field_count;
+    mira_action_refs=refs;
+    mira_action_ref_count=ref_count;
+    mira_index_hash=index_hash;
     mira_index_response=render;
     mira_index_response_cap=render_cap;
     __atomic_fetch_add(&mira_index_builds,1u,__ATOMIC_RELAXED);
@@ -561,6 +603,7 @@ static bool mira_index_rebuild(void){
     heap_caps_free(previous_template);
     heap_caps_free(previous_response);
     heap_caps_free(previous_fields);
+    heap_caps_free(previous_refs);
     ESP_LOGI(TAG,"MIRA_INDEX_PSRAM_READY: bytes=%u actions=%d live_fields=%u",
              (unsigned)length,count,(unsigned)field_count);
     return true;
@@ -2454,40 +2497,45 @@ bool mira_generic_queue_local_action(const char *name,const char *type,
     return true;
 }
 
-static int resolve_local_action(cJSON *index,const mira_action_msg_t *msg,
-                                char *value,size_t value_size) {
-    cJSON *entries=cJSON_GetObjectItemCaseSensitive(index,"actions"),*item;
-    cJSON_ArrayForEach(item,entries) {
-        const char *kind=jstr(item,"type","");
-        const char *name=jstr(item,"nom","");
-        if(!strcmp(msg->type,"toggle")&&!strcmp(kind,"toggle")&&!strcmp(name,msg->name))
-            return !strcmp(msg->value,"1")?jint(item,"id1",-1):jint(item,"id0",-1);
+static int resolve_local_action(const mira_action_msg_t *msg,
+                                char *value,size_t value_size,
+                                uint32_t *config_hash,uint32_t *remote_id){
+    if(!mira_index_mutex||
+       xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(600))!=pdTRUE)return -1;
+    int local_id=-1;
+    char expected[192];
+    for(size_t i=0;i<mira_action_ref_count;i++){
+        const mira_action_ref_t *item=&mira_action_refs[i];
+        const char *kind=item->type,*name=item->name;
+        if(!strcmp(msg->type,"toggle")&&!strcmp(kind,"toggle")&&!strcmp(name,msg->name)){
+            local_id=!strcmp(msg->value,"1")?item->id1:item->id0;
+            break;
+        }
         if((!strcmp(msg->type,"list")||!strcmp(msg->type,"listbutton"))&&
-           !strcmp(kind,"list") &&
-           !strcmp(jstr(item,"nomliste",""),msg->name)&&
-           !strcmp(name,msg->value)) {
-            const int id=jint(item,"id",-1);
-            snprintf(value,value_size,"%d",id); // Historical Jeedom list protocol.
-            return id;
+           !strcmp(kind,"list")&&!strcmp(item->list_name,msg->name)&&
+           !strcmp(name,msg->value)){
+            local_id=item->id;
+            snprintf(value,value_size,"%d",local_id);
+            break;
         }
         const bool range=!strcmp(msg->type,"range")||
                          !strcmp(msg->type,"roundrange")||
                          !strcmp(msg->type,"thermostat");
-        char expected[128];
         if(!strcmp(msg->type,"thermostat"))
             snprintf(expected,sizeof(expected),"%.95s__consigne",msg->name);
         else snprintf(expected,sizeof(expected),"%s",msg->name);
-        if(range&&!strcmp(kind,"range")&&!strcmp(name,expected)) {
+        if(range&&!strcmp(kind,"range")&&!strcmp(name,expected)){
+            local_id=item->id;
             snprintf(value,value_size,"%s",msg->value);
-            return jint(item,"id",-1);
+            break;
         }
         if(!strcmp(msg->type,"color")&&!strcmp(kind,"color")&&!strcmp(name,msg->name)){
             unsigned r=0,g=0,b=0;
             bool valid=false;
             if(msg->value[0]=='#'&&strlen(msg->value)==7){
                 bool hex=true;
-                for(size_t i=1;i<7;i++)
-                    if(!isxdigit((unsigned char)msg->value[i])){hex=false;break;}
+                for(size_t j=1;j<7;j++)
+                    if(!isxdigit((unsigned char)msg->value[j])){hex=false;break;}
                 if(hex){
                     unsigned color=0;
                     if(sscanf(msg->value+1,"%6x",&color)==1){
@@ -2499,39 +2547,40 @@ static int resolve_local_action(cJSON *index,const mira_action_msg_t *msg,
                 char extra=0;
                 valid=sscanf(msg->value,"%u,%u,%u %c",&r,&g,&b,&extra)==3;
             }
-            if(!valid||r>255u||g>255u||b>255u)return -1;
-            /* The beta Jeedom action expects #RRGGBB, just like WT32.
-             * Do not turn a color into a comma-separated RGB triplet.
-             * The subsequent URL encoder escapes '#' as %23.
-             */
+            if(!valid||r>255u||g>255u||b>255u)break;
             snprintf(value,value_size,"#%02X%02X%02X",r,g,b);
-            return jint(item,"id",-1);
+            local_id=item->id;
+            break;
         }
-        if(!strcmp(msg->type,"button")&&!strcmp(kind,"button")&&!strcmp(name,msg->name))
-            return jint(item,"id",-1);
+        if((!strcmp(msg->type,"button")&&!strcmp(kind,"button"))||
+           (!strcmp(msg->type,"httpaction")&&!strcmp(kind,"httpaction"))){
+            if(!strcmp(name,msg->name)){local_id=item->id;break;}
+        }
         if(!strcmp(msg->type,"inputbox")&&!strcmp(kind,"inputbox")&&
            !strcmp(name,msg->name)){
+            local_id=item->id;
             snprintf(value,value_size,"%s",msg->value);
-            return jint(item,"id",-1);
+            break;
         }
-        if(!strcmp(msg->type,"httpaction")&&!strcmp(kind,"httpaction")&&
-           !strcmp(name,msg->name))return jint(item,"id",-1);
-        // Mira beta publishes four distinct Jeedom button IDs for a
-        // multiaction widget. Resolve the gesture to its historical binding;
-        // unknown gestures never fall back silently to a single click.
-        if(!strcmp(msg->type,"multiaction")&&!strcmp(kind,"button")) {
+        if(!strcmp(msg->type,"multiaction")&&!strcmp(kind,"button")){
             const char *prefix=NULL;
             if(!strcmp(msg->value,"single")||!strcmp(msg->value,"1"))
                 prefix="Multi_Clic_";
             else if(!strcmp(msg->value,"double"))prefix="Multi_Double_";
             else if(!strcmp(msg->value,"triple"))prefix="Multi_Triple_";
             else if(!strcmp(msg->value,"long"))prefix="Multi_Long_";
-            if(!prefix)return -1;
+            if(!prefix)break;
             snprintf(expected,sizeof(expected),"%s%.95s",prefix,msg->name);
-            if(!strcmp(name,expected))return jint(item,"id",-1);
+            if(!strcmp(name,expected)){local_id=item->id;break;}
         }
     }
-    return -1;  // Fail closed if legacy bindings cannot be reconstructed.
+    if(config_hash)*config_hash=mira_index_hash;
+    if(remote_id)*remote_id=
+        local_id>0&&local_id<=4096&&mira_binding_cache&&
+        mira_binding_cache->config_hash==mira_index_hash?
+        mira_binding_cache->remote[local_id]:0;
+    xSemaphoreGive(mira_index_mutex);
+    return local_id;
 }
 static bool urlencode_to(char *dst,size_t capacity,const char *src) {
     const char *hex="0123456789ABCDEF";
