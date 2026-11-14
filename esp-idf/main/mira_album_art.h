@@ -12,5 +12,7 @@ void mira_album_art_stop(void);
 typedef struct {
     uint32_t requests, rejected, started, worker_errors;
     uint32_t fetch_ok, fetch_failed, frames_taken;
+    int32_t last_phase, last_http_status, last_connect_error;
+    int32_t last_tls_error, last_tls_flags, last_socket_errno;
 } mira_album_art_diag_t;
 void mira_album_art_diagnostics(mira_album_art_diag_t *out);

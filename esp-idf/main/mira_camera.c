@@ -227,28 +227,43 @@ static bool decode_mjpeg_first_frame(esp_http_client_handle_t http,
     }
     return false;
 }
-static bool fetch_snapshot(const char *url,mira_camera_frame_t *out){
+static bool fetch_snapshot_ex(const char *url,mira_camera_frame_t *out,
+                              mira_camera_fetch_diag_t *diag){
+    if(diag)memset(diag,0,sizeof(*diag));
     memset(out,0,sizeof(*out));
     esp_http_client_config_t cfg={
-        .url=url,.timeout_ms=3500,.disable_auto_redirect=true,
-        .crt_bundle_attach=esp_crt_bundle_attach
+        // WT32-style bounded one-shot request, with server CA verification.
+        .url=url,.method=HTTP_METHOD_GET,.timeout_ms=5500,
+        .disable_auto_redirect=true,.crt_bundle_attach=esp_crt_bundle_attach
     };
     esp_http_client_handle_t http=esp_http_client_init(&cfg);
-    if(!http)return false;
+    if(!http){if(diag)diag->phase=1;return false;}
+    (void)esp_http_client_set_header(http,"Connection","close");
+    (void)esp_http_client_set_header(http,"Accept","image/jpeg,image/bmp,image/*");
     bool ok=false;
     uint8_t *row=NULL;
     uint16_t *pixels=NULL;
     do {
-        if(esp_http_client_open(http,0)!=ESP_OK)break;
-        (void)esp_http_client_fetch_headers(http);
-        if(esp_http_client_get_status_code(http)!=200)break;
+        const esp_err_t conn=esp_http_client_open(http,0);
+        if(conn!=ESP_OK){
+            if(diag){diag->phase=2;diag->connect_error=(int32_t)conn;}
+            break;
+        }
+        // A negative length is legitimate for chunked/unknown bodies.
+        const int64_t length=esp_http_client_fetch_headers(http);
+        const int status=esp_http_client_get_status_code(http);
+        if(diag)diag->http_status=status;
+        if(status!=200){if(diag)diag->phase=3;break;}
         uint8_t header[54];
-        if(!read_exact(http,header,sizeof(header)))break;
+        if(!read_exact(http,header,sizeof(header))){
+            if(diag)diag->phase=4;
+            break;
+        }
         if(header[0]==0xff&&header[1]==0xd8){
-            // Some camera servers report a stale Content-Length or use a
-            // continuous JPEG body. Always bound by JPEG EOI and CAM_MAX_JPEG,
-            // not by an unreliable HTTP entity length.
-            ok=decode_jpeg(http,header,sizeof(header),-1,out);
+            // WT32 uses Content-Length to avoid a huge allocation for each
+            // 300x300 Spotify JPEG. Unknown length stays bounded by JPEG EOI.
+            ok=decode_jpeg(http,header,sizeof(header),length>0?length:-1,out);
+            if(!ok&&diag)diag->phase=5;
             break;
         }
         if(header[0]!='B'||header[1]!='M'){
@@ -257,6 +272,7 @@ static bool fetch_snapshot(const char *url,mira_camera_frame_t *out){
             // pages as camera streams.
             if(header[0]=='-' && header[1]=='-')
                 ok=decode_mjpeg_first_frame(http,header,sizeof(header),out);
+            if(!ok&&diag)diag->phase=6;
             break;
         }
         if(le32(header+14)<40||
@@ -307,9 +323,23 @@ static bool fetch_snapshot(const char *url,mira_camera_frame_t *out){
     }while(0);
     free(row);
     if(pixels)heap_caps_free(pixels);
+    if(diag){
+        if(ok)diag->phase=0;
+        else {
+            if(!diag->phase)diag->phase=7;
+            int tls=0,flags=0;
+            (void)esp_http_client_get_and_clear_last_tls_error(http,&tls,&flags);
+            diag->tls_error=tls;
+            diag->tls_flags=flags;
+            diag->socket_errno=esp_http_client_get_errno(http);
+        }
+    }
     esp_http_client_close(http);
     esp_http_client_cleanup(http);
     return ok;
+}
+static bool fetch_snapshot(const char *url,mira_camera_frame_t *out){
+    return fetch_snapshot_ex(url,out,NULL);
 }
 // A MJPEG stream stays on one TCP/TLS connection until the user closes the
 // camera, the URL changes, or the camera stalls. JPEG bytes are kept in PSRAM
@@ -514,11 +544,19 @@ esp_err_t mira_camera_init(void){
     }
     return ESP_OK;
 }
-bool mira_camera_fetch_url(const char *url,mira_camera_frame_t *out){
+bool mira_camera_fetch_url_diag(const char *url,mira_camera_frame_t *out,
+                                mira_camera_fetch_diag_t *diag){
     if(!out)return false;
     memset(out,0,sizeof(*out));
-    if(!mira_camera_url_valid(url))return false;
-    return fetch_snapshot(url,out);
+    if(diag)memset(diag,0,sizeof(*diag));
+    if(!mira_camera_url_valid(url)){
+        if(diag)diag->phase=6;
+        return false;
+    }
+    return fetch_snapshot_ex(url,out,diag);
+}
+bool mira_camera_fetch_url(const char *url,mira_camera_frame_t *out){
+    return mira_camera_fetch_url_diag(url,out,NULL);
 }
 bool mira_camera_start(const char *widget_name) {
     if(!lock && mira_camera_init()!=ESP_OK){

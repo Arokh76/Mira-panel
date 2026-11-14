@@ -4259,7 +4259,7 @@ static esp_err_t mira_health_get(httpd_req_t *req){
     mira_album_art_diagnostics(&art);
     // Keep the HTTPD task's 7168B internal stack untouched; this potentially
     // longer diagnostic response lives in PSRAM, not internal DMA memory.
-    const size_t cap=1200;
+    const size_t cap=1536;
     char *result=heap_caps_malloc(cap,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(!result){
         httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Media diagnostic allocation failed");
@@ -4282,7 +4282,10 @@ static esp_err_t mira_health_get(httpd_req_t *req){
         "\"media_art_requests\":%u,\"media_art_rejected\":%u,"
         "\"media_art_started\":%u,\"media_art_worker_errors\":%u,"
         "\"media_art_fetch_ok\":%u,\"media_art_fetch_failed\":%u,"
-        "\"media_art_frames_taken\":%u}",
+        "\"media_art_frames_taken\":%u,"
+        "\"media_art_last_phase\":%ld,\"media_art_last_http_status\":%ld,"
+        "\"media_art_last_connect_error\":%ld,\"media_art_last_tls_error\":%ld,"
+        "\"media_art_last_tls_flags\":%ld,\"media_art_last_socket_errno\":%ld}",
         (unsigned long long)(esp_timer_get_time()/1000),
         connected?3:6,connected?(int)ap.rssi:0,
         (unsigned)esp_get_free_heap_size(),
@@ -4310,7 +4313,10 @@ static esp_err_t mira_health_get(httpd_req_t *req){
         (unsigned)art.requests,(unsigned)art.rejected,
         (unsigned)art.started,(unsigned)art.worker_errors,
         (unsigned)art.fetch_ok,(unsigned)art.fetch_failed,
-        (unsigned)art.frames_taken);
+        (unsigned)art.frames_taken,
+        (long)art.last_phase,(long)art.last_http_status,
+        (long)art.last_connect_error,(long)art.last_tls_error,
+        (long)art.last_tls_flags,(long)art.last_socket_errno);
     if(written<0||(size_t)written>=cap){
         heap_caps_free(result);
         httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Media diagnostic too large");

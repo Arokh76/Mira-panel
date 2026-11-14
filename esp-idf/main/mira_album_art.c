@@ -24,6 +24,8 @@ static uint8_t delivered_index;
 // Atomic counters survive reconnects; diagnostic never records private URLs.
 static uint32_t art_requests,art_rejected,art_started,art_worker_errors;
 static uint32_t art_fetch_ok,art_fetch_failed,art_frames_taken;
+static int32_t last_phase,last_http_status,last_connect_error;
+static int32_t last_tls_error,last_tls_flags,last_socket_errno;
 void mira_album_art_diagnostics(mira_album_art_diag_t *out){
     if(!out)return;
     out->requests=__atomic_load_n(&art_requests,__ATOMIC_RELAXED);
@@ -33,6 +35,12 @@ void mira_album_art_diagnostics(mira_album_art_diag_t *out){
     out->fetch_ok=__atomic_load_n(&art_fetch_ok,__ATOMIC_RELAXED);
     out->fetch_failed=__atomic_load_n(&art_fetch_failed,__ATOMIC_RELAXED);
     out->frames_taken=__atomic_load_n(&art_frames_taken,__ATOMIC_RELAXED);
+    out->last_phase=__atomic_load_n(&last_phase,__ATOMIC_RELAXED);
+    out->last_http_status=__atomic_load_n(&last_http_status,__ATOMIC_RELAXED);
+    out->last_connect_error=__atomic_load_n(&last_connect_error,__ATOMIC_RELAXED);
+    out->last_tls_error=__atomic_load_n(&last_tls_error,__ATOMIC_RELAXED);
+    out->last_tls_flags=__atomic_load_n(&last_tls_flags,__ATOMIC_RELAXED);
+    out->last_socket_errno=__atomic_load_n(&last_socket_errno,__ATOMIC_RELAXED);
 }
 
 static bool cover_url(const char *url){
@@ -68,9 +76,33 @@ static void cover_worker(void *unused){
         }
         seen=generation;
         mira_camera_frame_t frame={0};
-        const bool success=mira_camera_fetch_url(url,&frame);
+        mira_camera_fetch_diag_t detail={0};
+        bool success=mira_camera_fetch_url_diag(url,&frame,&detail);
+        if(!success){
+            // Retry once only while this URL still belongs to the current song.
+            vTaskDelay(pdMS_TO_TICKS(350));
+            xSemaphoreTake(art_lock,portMAX_DELAY);
+            const bool current=art_enabled&&generation==art_generation;
+            xSemaphoreGive(art_lock);
+            if(current){
+                memset(&detail,0,sizeof(detail));
+                success=mira_camera_fetch_url_diag(url,&frame,&detail);
+            }
+        }
+        __atomic_store_n(&last_phase,detail.phase,__ATOMIC_RELAXED);
+        __atomic_store_n(&last_http_status,detail.http_status,__ATOMIC_RELAXED);
+        __atomic_store_n(&last_connect_error,detail.connect_error,__ATOMIC_RELAXED);
+        __atomic_store_n(&last_tls_error,detail.tls_error,__ATOMIC_RELAXED);
+        __atomic_store_n(&last_tls_flags,detail.tls_flags,__ATOMIC_RELAXED);
+        __atomic_store_n(&last_socket_errno,detail.socket_errno,__ATOMIC_RELAXED);
         if(success)__atomic_fetch_add(&art_fetch_ok,1u,__ATOMIC_RELAXED);
-        else __atomic_fetch_add(&art_fetch_failed,1u,__ATOMIC_RELAXED);
+        else {
+            __atomic_fetch_add(&art_fetch_failed,1u,__ATOMIC_RELAXED);
+            ESP_LOGW(TAG,"Cover fetch failed phase=%ld http=%ld connect=%ld tls=%ld flags=%ld errno=%ld",
+                (long)detail.phase,(long)detail.http_status,
+                (long)detail.connect_error,(long)detail.tls_error,
+                (long)detail.tls_flags,(long)detail.socket_errno);
+        }
         xSemaphoreTake(art_lock,portMAX_DELAY);
         if(success&&art_enabled&&generation==art_generation){
             if(delivered.pixels)heap_caps_free(delivered.pixels);
