@@ -6,6 +6,7 @@
 #include "freertos/idf_additions.h" // PSRAM task/queue memory-capability APIs
 #include "mira_full.h"
 #include "mira_camera.h"
+#include "mira_album_art.h"
 #include "mira_setup_access.h"
 #include "mira_legacy_cipher.h"
 #include "mira_mqtt.h"
@@ -666,7 +667,7 @@ static bool mira_index_live_token(const mira_index_field_t *field,
                !strcmp(field->name,mira_media_ranges[i].name)){
                 const int n=snprintf(dst,cap,"%s",mira_media_ranges[i].value);
                 if(n>0&&(size_t)n<cap){
-                    mira_media_range_overlays++;
+                    __atomic_fetch_add(&mira_media_range_overlays,1u,__ATOMIC_RELAXED);
                     return true;
                 }
             }
@@ -2744,7 +2745,7 @@ static void mira_media_range_record(const char *name,const char *type,
     if(slot<MIRA_MEDIA_RANGE_SLOTS){
         snprintf(mira_media_ranges[slot].name,sizeof(mira_media_ranges[slot].name),"%s",name);
         snprintf(mira_media_ranges[slot].value,sizeof(mira_media_ranges[slot].value),"%ld",v);
-        mira_media_range_updates++;
+        __atomic_fetch_add(&mira_media_range_updates,1u,__ATOMIC_RELAXED);
     }
     xSemaphoreGive(mira_index_mutex);
 }
