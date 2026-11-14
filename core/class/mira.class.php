@@ -2006,9 +2006,11 @@ class mira extends eqLogic {
               http_build_query(array('json'=>$payload)),
               array(CURLOPT_USERPWD=>'admin:'.$password,
                 CURLOPT_HTTPAUTH=>CURLAUTH_BASIC,
+                CURLOPT_CONNECTTIMEOUT_MS=>1200,
+                CURLOPT_TIMEOUT_MS=>5500,
                 CURLOPT_HTTPHEADER=>array('Content-Type: application/x-www-form-urlencoded',
                                            'X-Mira-Bindings: 1')),
-              '[BIND][HTTP]');
+              '[BIND][HTTP]',true);
             if ($result!==false && trim((string)$result)==='OK') {
               log::add('mira','debug','[BIND][OK] '.
                 count($bindings).' commande(s) transmises directement au WT32');
@@ -2022,7 +2024,7 @@ class mira extends eqLogic {
     }
     // Compatibility with older panels that do not support /actions/bindings.
     $url='http://'.$this->getConfiguration('adresseip').
-      '/sendjeedomorderid?key='.$this->getConfiguration('password').'&value='.$value;
+      '/sendjeedomorderid?key='.rawurlencode((string)$this->getConfiguration('password')).'&value='.rawurlencode((string)$value);
     $result=$this->panelHttpGet($url);
     if ($result===false) return "Erreur";
     return $result;
