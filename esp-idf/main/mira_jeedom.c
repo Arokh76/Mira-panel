@@ -146,12 +146,9 @@ static bool read_exact_request(httpd_req_t *req,char *buf,size_t length) {
     return true;
 }
 static bool read_setup_key(char *out,size_t cap) {
-    nvs_handle_t nvs;
-    if(nvs_open("mira_idf_auth",NVS_READONLY,&nvs)!=ESP_OK)return false;
-    size_t len=cap;
-    esp_err_t err=nvs_get_str(nvs,"jeedom_key",out,&len);
-    nvs_close(nvs);
-    return err==ESP_OK && len>1 && out[0]!=0;
+    // WT32 authenticates against its already loaded RAM key. A transient NVS
+    // read must never make /getindex fail while the web interface still works.
+    return mira_beta_web_auth_key_copy(out,cap);
 }
 static bool correct_key(const char *supplied) {
     char expected[MIRA_KEY_MAX+1]={0};
@@ -409,6 +406,260 @@ static cJSON *index_from_config(const char *json) {
     return out;
 }
 static bool decimal_id(const char *str);
+
+// WT32 parity: its SPIFFS_Config_Actions table persists between requests.
+// In ESP-IDF keep its serialized equivalent and mutable response workspace in
+// PSRAM. /getindex never reparses SPIFFS or allocates a cJSON action table.
+// Only a programming change or the initial boot reconstructs the index.
+// The response overlays current states (Info/Range/Toggle/Color) directly from
+// the existing passive PSRAM cache. This also preserves WT32-style live values
+// without mutating the immutable command ID mapping.
+enum { MIRA_INDEX_INFO=1, MIRA_INDEX_RANGE, MIRA_INDEX_TOGGLE,
+       MIRA_INDEX_RED, MIRA_INDEX_GREEN, MIRA_INDEX_BLUE };
+typedef struct {
+    uint32_t start,end;
+    uint8_t kind;
+    char name[96];
+} mira_index_field_t;
+static SemaphoreHandle_t mira_index_mutex;
+static char *mira_index_template,*mira_index_response;
+static size_t mira_index_template_len,mira_index_response_cap;
+static mira_index_field_t *mira_index_fields;
+static size_t mira_index_fields_count;
+static uint32_t mira_index_builds,mira_index_failures,mira_index_responses;
+static const char *index_find_field(const char *start,const char *end,
+                                    const char *key,const char **token_end){
+    char search[24];
+    snprintf(search,sizeof(search),"\"%s\":",key);
+    const char *p=strstr(start,search);
+    if(!p||p>=end)return NULL;
+    p+=strlen(search);
+    const char *begin=p;
+    if(*p=='"'){
+        ++p;
+        bool escaped=false;
+        while(p<end){
+            if(escaped)escaped=false;
+            else if(*p=='\\')escaped=true;
+            else if(*p=='"'){++p;break;}
+            ++p;
+        }
+    }else{
+        while(p<end&&*p!=','&&*p!='}'&&*p!=']')p++;
+    }
+    if(p>end||p<=begin)return NULL;
+    *token_end=p;
+    return begin;
+}
+static bool mira_index_rebuild(void){
+    if(!mira_index_mutex){
+        mira_index_mutex=xSemaphoreCreateMutex();
+        if(!mira_index_mutex)return false;
+    }
+    char *raw=read_config(NULL);
+    if(!raw){__atomic_fetch_add(&mira_index_failures,1u,__ATOMIC_RELAXED);return false;}
+    cJSON *tree=index_from_config(raw);
+    free(raw);
+    if(!tree){__atomic_fetch_add(&mira_index_failures,1u,__ATOMIC_RELAXED);return false;}
+    char *printed=cJSON_PrintUnformatted(tree);
+    const cJSON *actions=cJSON_GetObjectItemCaseSensitive(tree,"actions");
+    int count=cJSON_IsArray(actions)?cJSON_GetArraySize(actions):0;
+    if(!printed||count<0||count>640){
+        cJSON_free(printed);cJSON_Delete(tree);
+        __atomic_fetch_add(&mira_index_failures,1u,__ATOMIC_RELAXED);
+        return false;
+    }
+    const size_t length=strlen(printed);
+    char *snapshot=heap_caps_malloc(length+1,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    const size_t capacity=(size_t)count*3u+1u;
+    mira_index_field_t *fields=heap_caps_calloc(capacity,sizeof(*fields),
+                                                 MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!snapshot||!fields){
+        heap_caps_free(snapshot);heap_caps_free(fields);
+        cJSON_free(printed);cJSON_Delete(tree);
+        __atomic_fetch_add(&mira_index_failures,1u,__ATOMIC_RELAXED);
+        return false;
+    }
+    memcpy(snapshot,printed,length+1);
+    const char *cursor=strstr(snapshot,"\"actions\":[");
+    if(cursor)cursor+=strlen("\"actions\":[");
+    size_t field_count=0;
+    const cJSON *action=NULL;
+    cJSON_ArrayForEach(action,actions){
+        if(!cursor)break;
+        while(*cursor&&*cursor!='{')cursor++;
+        if(!*cursor)break;
+        const char *begin=cursor,*end=NULL;
+        int nesting=0;
+        bool quoted=false,escaped=false;
+        for(const char *p=cursor;*p;p++){
+            if(quoted){
+                if(escaped)escaped=false;
+                else if(*p=='\\')escaped=true;
+                else if(*p=='"')quoted=false;
+            }else if(*p=='"')quoted=true;
+            else if(*p=='{')nesting++;
+            else if(*p=='}'&&--nesting==0){end=p+1;break;}
+        }
+        if(!end)break;
+        cursor=end;
+        const char *type=jstr((cJSON*)action,"type","");
+        const char *name=jstr((cJSON*)action,"nom","");
+        if(!*name||strlen(name)>=96)continue;
+        const char *keys[3]={NULL,NULL,NULL};
+        uint8_t kinds[3]={0};
+        unsigned wanted=0;
+        if(!strcmp(type,"info")){keys[0]="value";kinds[0]=MIRA_INDEX_INFO;wanted=1;}
+        else if(!strcmp(type,"range")){keys[0]="value";kinds[0]=MIRA_INDEX_RANGE;wanted=1;}
+        else if(!strcmp(type,"toggle")){keys[0]="state";kinds[0]=MIRA_INDEX_TOGGLE;wanted=1;}
+        else if(!strcmp(type,"color")){
+            keys[0]="r";keys[1]="g";keys[2]="b";
+            kinds[0]=MIRA_INDEX_RED;kinds[1]=MIRA_INDEX_GREEN;kinds[2]=MIRA_INDEX_BLUE;
+            wanted=3;
+        }
+        for(unsigned j=0;j<wanted&&field_count<capacity;j++){
+            const char *token_end=NULL;
+            const char *token=index_find_field(begin,end,keys[j],&token_end);
+            if(!token)continue;
+            mira_index_field_t *field=&fields[field_count++];
+            field->start=(uint32_t)(token-snapshot);
+            field->end=(uint32_t)(token_end-snapshot);
+            field->kind=kinds[j];
+            snprintf(field->name,sizeof(field->name),"%s",name);
+        }
+    }
+    cJSON_free(printed);
+    cJSON_Delete(tree);
+    // Control characters may become \\u00XX (six bytes); allocate enough
+    // for the worst case, but bound the PSRAM workspace to avoid starvation.
+    size_t render_cap=length+field_count*(160u*6u+4u)+1u;
+    char *render=NULL;
+    if(render_cap<=1000000u)
+        render=heap_caps_malloc(render_cap,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!render){
+        // The index is still usable with static values if memory is scarce.
+        render_cap=0;
+        ESP_LOGW(TAG,"MIRA_INDEX_DYNAMIC_BUFFER_UNAVAILABLE: using static PSRAM snapshot");
+    }
+    if(xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(250))!=pdTRUE){
+        heap_caps_free(snapshot);heap_caps_free(fields);heap_caps_free(render);
+        __atomic_fetch_add(&mira_index_failures,1u,__ATOMIC_RELAXED);
+        return false;
+    }
+    char *previous_template=mira_index_template;
+    char *previous_response=mira_index_response;
+    mira_index_field_t *previous_fields=mira_index_fields;
+    mira_index_template=snapshot;
+    mira_index_template_len=length;
+    mira_index_fields=fields;
+    mira_index_fields_count=field_count;
+    mira_index_response=render;
+    mira_index_response_cap=render_cap;
+    __atomic_fetch_add(&mira_index_builds,1u,__ATOMIC_RELAXED);
+    xSemaphoreGive(mira_index_mutex);
+    heap_caps_free(previous_template);
+    heap_caps_free(previous_response);
+    heap_caps_free(previous_fields);
+    ESP_LOGI(TAG,"MIRA_INDEX_PSRAM_READY: bytes=%u actions=%d live_fields=%u",
+             (unsigned)length,count,(unsigned)field_count);
+    return true;
+}
+static bool mira_index_quote(const char *source,char *dst,size_t cap){
+    static const char hex[]="0123456789abcdef";
+    size_t n=0;
+    if(cap<3)return false;
+    dst[n++]='"';
+    for(const unsigned char *p=(const unsigned char *)source;*p;p++){
+        const unsigned char c=*p;
+        if(c=='"'||c=='\\'){
+            if(n+2>=cap)return false;
+            dst[n++]='\\';dst[n++]=(char)c;
+        }else if(c<32){
+            if(n+6>=cap)return false;
+            dst[n++]='\\';dst[n++]='u';dst[n++]='0';dst[n++]='0';
+            dst[n++]=hex[c>>4];dst[n++]=hex[c&15];
+        }else{
+            if(n+1>=cap)return false;
+            dst[n++]=(char)c;
+        }
+    }
+    if(n+2>cap)return false;
+    dst[n++]='"';dst[n]=0;
+    return true;
+}
+static bool mira_index_live_token(const mira_index_field_t *field,
+                                  char *dst,size_t cap){
+    char raw[160]={0};
+    if(!mira_full_cached_state(field->name,raw,sizeof(raw)))return false;
+    if(field->kind==MIRA_INDEX_INFO)return mira_index_quote(raw,dst,cap);
+    if(field->kind==MIRA_INDEX_TOGGLE){
+        const bool on=!strcasecmp(raw,"on")||!strcasecmp(raw,"true")||
+                      !strcasecmp(raw,"oui")||!strcasecmp(raw,"actif")||
+                      !strcmp(raw,"1");
+        return mira_index_quote(on?"On":"Off",dst,cap);
+    }
+    if(field->kind==MIRA_INDEX_RANGE){
+        char *end=NULL;
+        errno=0;
+        const double numeric=strtod(raw,&end);
+        if(!*raw||!end||*end||errno==ERANGE||!isfinite(numeric))return false;
+        const int n=snprintf(dst,cap,"%.10g",numeric);
+        return n>0&&(size_t)n<cap;
+    }
+    unsigned r=0,g=0,b=0;
+    if(raw[0]=='#'&&strlen(raw)==7){
+        for(int i=1;i<7;i++)if(!isxdigit((unsigned char)raw[i]))return false;
+        unsigned rgb=0;
+        if(sscanf(raw+1,"%6x",&rgb)!=1)return false;
+        r=(rgb>>16)&255u;g=(rgb>>8)&255u;b=rgb&255u;
+    }else{
+        char extra=0;
+        if(sscanf(raw,"%u,%u,%u %c",&r,&g,&b,&extra)!=3||
+           r>255||g>255||b>255)return false;
+    }
+    unsigned channel=field->kind==MIRA_INDEX_RED?r:
+                     field->kind==MIRA_INDEX_GREEN?g:b;
+    char value[4];
+    snprintf(value,sizeof(value),"%u",channel);
+    return mira_index_quote(value,dst,cap);
+}
+static esp_err_t mira_index_send_snapshot(httpd_req_t *req){
+    if(!mira_index_template && !mira_index_rebuild())return ESP_ERR_NOT_FOUND;
+    if(!mira_index_mutex||
+       xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(250))!=pdTRUE)return ESP_ERR_TIMEOUT;
+    const char *payload=mira_index_template;
+    size_t length=mira_index_template_len;
+    if(payload&&mira_index_response&&mira_index_response_cap){
+        char *output=mira_index_response;
+        size_t n=0,cursor=0;
+        bool complete=true;
+        for(size_t i=0;i<mira_index_fields_count;i++){
+            const mira_index_field_t *field=&mira_index_fields[i];
+            if(field->start<cursor||field->end>length){complete=false;break;}
+            const size_t literal=(size_t)field->start-cursor;
+            char token[160*6+4];
+            bool live=mira_index_live_token(field,token,sizeof(token));
+            const char *part=live?token:payload+field->start;
+            const size_t part_len=live?strlen(token):(size_t)field->end-field->start;
+            if(n+literal+part_len>=mira_index_response_cap){complete=false;break;}
+            memcpy(output+n,payload+cursor,literal);n+=literal;
+            memcpy(output+n,part,part_len);n+=part_len;
+            cursor=field->end;
+        }
+        if(complete&&n+(length-cursor)<mira_index_response_cap){
+            memcpy(output+n,payload+cursor,length-cursor);
+            n+=length-cursor;
+            output[n]=0;
+            payload=output;
+            length=n;
+        }else ESP_LOGW(TAG,"MIRA_INDEX_DYNAMIC_OVERLAY_SKIPPED: original snapshot retained");
+    }
+    esp_err_t result=payload?httpd_resp_send(req,payload,(ssize_t)length):ESP_ERR_NOT_FOUND;
+    if(result==ESP_OK)__atomic_fetch_add(&mira_index_responses,1u,__ATOMIC_RELAXED);
+    xSemaphoreGive(mira_index_mutex);
+    return result;
+}
+
 // HTML part of the original beta home page. Use the SAME command ids from
 // index_from_config() that the Jeedom plugin sees, no parallel ID mapping.
 static esp_err_t beta_html(httpd_req_t *req,const char *s){
@@ -1199,14 +1450,18 @@ static esp_err_t getlvgl(httpd_req_t *req) {
 }
 static esp_err_t getindex(httpd_req_t *req) {
     if(!require_key(req))return ESP_FAIL;
-    char *raw=read_config(NULL);
-    if(!raw){httpd_resp_send_err(req,HTTPD_404_NOT_FOUND,"Configuration Mira absente");return ESP_FAIL;}
-    cJSON *index=index_from_config(raw);free(raw);
-    if(!index){httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Index impossible");return ESP_FAIL;}
-    char *out=cJSON_PrintUnformatted(index);cJSON_Delete(index);
-    if(!out){httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Memoire insuffisante");return ESP_FAIL;}
     httpd_resp_set_type(req,"application/json");
-    esp_err_t err=httpd_resp_sendstr(req,out);cJSON_free(out);return err;
+    httpd_resp_set_hdr(req,"Cache-Control","no-store");
+    const esp_err_t status=mira_index_send_snapshot(req);
+    if(status==ESP_ERR_NOT_FOUND){
+        httpd_resp_send_err(req,HTTPD_404_NOT_FOUND,"Index Mira absent");
+        return ESP_FAIL;
+    }
+    if(status==ESP_ERR_TIMEOUT){
+        httpd_resp_send_err(req,HTTPD_503_SERVICE_UNAVAILABLE,"Index Mira occupe");
+        return ESP_FAIL;
+    }
+    return status;
 }
 static esp_err_t getmodule(httpd_req_t *req) {
     if(!require_key(req))return ESP_FAIL;
@@ -1430,6 +1685,8 @@ static esp_err_t beta_lvgl_save(httpd_req_t *req){
     }
     cJSON_Delete(beta_lvgl_stage);beta_lvgl_stage=NULL;
     beta_lvgl_dirty=false;
+    if(!mira_index_rebuild())
+        ESP_LOGW(TAG,"Jeedom index cache rebuild failed after screen save");
     mira_full_request_reload(); // always reload within the LVGL task
     jeedom_state_replay_pending=true;
     request_binding_sync();      // command IDs from Jeedom may have changed
@@ -1496,6 +1753,8 @@ static esp_err_t programui(httpd_req_t *req) {
         httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Enregistrement Mira echoue");return ESP_FAIL;
     }
     cJSON_Delete(beta_lvgl_stage);beta_lvgl_stage=NULL;beta_lvgl_dirty=false;
+    if(!mira_index_rebuild())
+        ESP_LOGW(TAG,"Jeedom index cache rebuild failed after programming");
     mira_full_request_reload();
     jeedom_state_replay_pending=true;
     request_binding_sync(); // get fresh Jeedom IDs; ignore stale index until plugin re-synchronizes
@@ -2671,7 +2930,7 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
     if(!decimal_id(init_id))init_id[0]=0;
     mira_full_state_diagnostics_t health={0};
     mira_full_state_diagnostics(&health);
-    char body[512];
+    char body[768];
     snprintf(body,sizeof(body),
         "{\"jeedom_enabled\":%s,\"mapping_valid\":%s,"
         "\"ids_valid\":%d,\"ids_expected\":%d,"
@@ -2679,7 +2938,9 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
         "\"state_cache_used\":%u,\"replay_pending\":%s,"
         "\"replay_attempts\":%u,\"replay_acks\":%u,"
         "\"replay_last_http\":%d,\"sse_clients\":%u,"
-        "\"sse_task_failures\":%u}",
+        "\"sse_task_failures\":%u,\"index_builds\":%u,"
+        "\"index_failures\":%u,\"index_live_fields\":%u,"
+        "\"index_responses\":%u}",
         enabled?"true":"false",
         (enabled&&total>0&&valid==total)?"true":"false",valid,total,
         init_id,last_binding_sync_http,(unsigned)health.state_cache_used,
@@ -2688,7 +2949,11 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
         (unsigned)__atomic_load_n(&jeedom_replay_acks,__ATOMIC_RELAXED),
         jeedom_last_replay_http,
         (unsigned)__atomic_load_n(&mira_sse_clients,__ATOMIC_RELAXED),
-        (unsigned)__atomic_load_n(&mira_sse_worker_failures,__ATOMIC_RELAXED));
+        (unsigned)__atomic_load_n(&mira_sse_worker_failures,__ATOMIC_RELAXED),
+        (unsigned)__atomic_load_n(&mira_index_builds,__ATOMIC_RELAXED),
+        (unsigned)__atomic_load_n(&mira_index_failures,__ATOMIC_RELAXED),
+        (unsigned)mira_index_fields_count,
+        (unsigned)__atomic_load_n(&mira_index_responses,__ATOMIC_RELAXED));
     httpd_resp_set_type(req,"application/json");
     return httpd_resp_sendstr(req,body);
 }
@@ -3044,6 +3309,10 @@ static void import_legacy_http_settings(void) {
 esp_err_t mira_jeedom_passive_init(void){
     if(!mira_sse_signal)mira_sse_signal=xEventGroupCreate();
     if(!mira_sse_signal)return ESP_ERR_NO_MEM;
+    // Startup allocates and serializes the index once, as on WT32.
+    // Failure does not disable incoming passive states or browser recovery.
+    if(!mira_index_rebuild())
+        ESP_LOGW(TAG,"Jeedom PSRAM index cache unavailable; /getindex will retry");
     ESP_LOGI(TAG,"JEEDOM_PASSIVE_HTTP_READY: /updatenr, /get, /events; outbound actions deferred");
     return ESP_OK;
 }
