@@ -20,6 +20,8 @@
 #include "esp_spiffs.h"
 #include "esp_partition.h"
 #include "esp_heap_caps.h"
+#include "esp_attr.h"
+#include "esp_memory_utils.h"
 #include "esp_http_server.h"
 #include "esp_wifi.h"
 #include "cJSON.h"
@@ -359,8 +361,12 @@ typedef struct {
     uint32_t local_input_until_ms;
     bool live_sent;
 } mira_widget_t;
-static mira_widget_t widgets[MAX_WIDGETS];
+// Exactly 30 fixed widget slots, allocated in external zero-initialized BSS.
+// LVGL objects and DMA buffers keep their existing memory allocations.
+static EXT_RAM_BSS_ATTR mira_widget_t widgets[MAX_WIDGETS];
 static uint8_t widget_n=0;
+bool mira_full_widget_table_in_psram(void){return esp_ptr_external_ram(widgets);}
+size_t mira_full_widget_table_bytes(void){return sizeof(widgets);}
 static lv_color_t text_c(void){return lv_color_hex(0xF3F6F7);}
 static lv_color_t muted_c(void){return lv_color_hex(0xA8B2B8);}
 // Exact palette of MiraPanelUI.cpp 0.7.37, not an invented IDF skin.
