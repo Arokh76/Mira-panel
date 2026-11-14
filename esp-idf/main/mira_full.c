@@ -641,6 +641,9 @@ static void remember_passive_state(const mira_state_update_t *msg);
 #define MIRA_WHEEL_SIZE 150
 #define MIRA_WHEEL_CENTER (MIRA_WHEEL_SIZE/2)
 #define MIRA_WHEEL_ARC_WIDTH 14
+// Match the Settings > Luminosite screen slider (14px track +
+// 6px LVGL-default knob padding on each side at the standard DPI).
+#define MIRA_COLOR_KNOB_SIZE 26
 typedef struct mira_wheel_bitmap {
     lv_image_dsc_t dsc;
     uint16_t pixels[MIRA_WHEEL_SIZE*MIRA_WHEEL_SIZE];
@@ -743,10 +746,16 @@ static void wheel_mark_hue(mira_widget_t *w,int hue){
         const float angle=(float)w->color_hue*(3.14159265f/180.0f);
         // LVGL 8: marker radius=(wheel diameter - arc width)/2.
         const float radius=(float)(MIRA_WHEEL_SIZE-MIRA_WHEEL_ARC_WIDTH)/2.0f;
-        // Center the larger WT32-style white marker on the hue ring.
-        const int x=MIRA_WHEEL_CENTER+(int)lroundf(radius*sinf(angle))-11;
-        const int y=MIRA_WHEEL_CENTER+(int)lroundf(radius*cosf(angle))-11;
+        // Center the brightness-slider-sized knob on the selected hue.
+        const int x=MIRA_WHEEL_CENTER+(int)lroundf(radius*sinf(angle))-
+                    MIRA_COLOR_KNOB_SIZE/2;
+        const int y=MIRA_WHEEL_CENTER+(int)lroundf(radius*cosf(angle))-
+                    MIRA_COLOR_KNOB_SIZE/2;
         lv_obj_set_pos(w->color_knob,x,y);
+        // The centre must show the ACTUAL selected RGB colour, including the
+        // current saturation and brightness, not a fixed white/cyan marker.
+        lv_obj_set_style_bg_color(w->color_knob,
+            lv_color_hsv_to_rgb(w->color_hue,w->color_sat,w->color_val),0);
     }
 }
 static void event_local(lv_event_t *e);
@@ -1953,16 +1962,16 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
             ESP_LOGW(TAG,"No PSRAM for WT32-equivalent color wheel");
         }
         w->color_knob=lv_obj_create(w->control);
-        // Match WT32's light colorwheel marker and cyan 2px border.
-        // This is the COLOR widget only: thermostat and roundrange stay intact.
-        lv_obj_set_size(w->color_knob,22,22);
+        // COLOR wheel only: same diameter as the brightness slider's knob,
+        // 2px white outline, and a fill that follows the selected RGB value.
+        // Thermostat, roundrange and brightness slider are NOT modified.
+        lv_obj_set_size(w->color_knob,MIRA_COLOR_KNOB_SIZE,MIRA_COLOR_KNOB_SIZE);
         lv_obj_set_style_pad_all(w->color_knob,0,0);
         lv_obj_set_style_radius(w->color_knob,LV_RADIUS_CIRCLE,0);
         lv_obj_set_style_bg_opa(w->color_knob,LV_OPA_COVER,0);
-        lv_obj_set_style_bg_color(w->color_knob,lv_color_hex(0xF0F8FC),0);
-        lv_obj_set_style_border_color(w->color_knob,cyan_c(),0);
+        lv_obj_set_style_border_color(w->color_knob,lv_color_white(),0);
         lv_obj_set_style_border_width(w->color_knob,2,0);
-        lv_obj_set_style_shadow_color(w->color_knob,cyan_c(),0);
+        lv_obj_set_style_shadow_color(w->color_knob,lv_color_hex(0x06121C),0);
         lv_obj_set_style_shadow_opa(w->color_knob,LV_OPA_20,0);
         lv_obj_set_style_shadow_width(w->color_knob,5,0);
         no_scroll(w->color_knob);
