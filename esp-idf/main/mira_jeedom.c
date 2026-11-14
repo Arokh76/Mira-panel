@@ -32,6 +32,7 @@
 #include "esp_netif.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
+#include "esp_attr.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -440,6 +441,15 @@ static char *mira_index_template,*mira_index_response;
 static size_t mira_index_template_len,mira_index_response_cap;
 static mira_index_field_t *mira_index_fields;
 static size_t mira_index_fields_count;
+// The WT32 updates IndexSetRange() before dispatching a Jeedom action.
+// The plugin's action->execute() then reads /getindex to find the value.
+// On ESP-IDF the outbound HTTP &value= is not consumed by plugin actions:
+// keep an equivalent PSRAM overlay for media volume/device commands.
+// 30 UI widgets * (volume_cmd + device_cmd), without internal heap use.
+#define MIRA_MEDIA_RANGE_SLOTS (MIRA_WIDGET_LIMIT*2u)
+typedef struct {char name[96]; char value[8];} mira_media_range_entry_t;
+static EXT_RAM_BSS_ATTR mira_media_range_entry_t mira_media_ranges[MIRA_MEDIA_RANGE_SLOTS];
+static uint32_t mira_media_range_updates,mira_media_range_overlays;
 typedef struct {
     char name[192];
     char type[24];
@@ -609,6 +619,8 @@ static bool mira_index_rebuild(void){
     mira_action_refs=refs;
     mira_action_ref_count=ref_count;
     mira_index_hash=index_hash;
+    // A reprogram changes local IDs: stale slider values must not survive.
+    memset(mira_media_ranges,0,sizeof(mira_media_ranges));
     mira_index_response=render;
     mira_index_response_cap=render_cap;
     __atomic_fetch_add(&mira_index_builds,1u,__ATOMIC_RELAXED);
@@ -646,6 +658,20 @@ static bool mira_index_quote(const char *source,char *dst,size_t cap){
 }
 static bool mira_index_live_token(const mira_index_field_t *field,
                                   char *dst,size_t cap){
+    // Match WT32 IndexSetRange semantics for Jeedom media actions. This
+    // function runs while mira_index_mutex is held by /getindex.
+    if(field->kind==MIRA_INDEX_RANGE){
+        for(size_t i=0;i<MIRA_MEDIA_RANGE_SLOTS;i++){
+            if(mira_media_ranges[i].name[0] &&
+               !strcmp(field->name,mira_media_ranges[i].name)){
+                const int n=snprintf(dst,cap,"%s",mira_media_ranges[i].value);
+                if(n>0&&(size_t)n<cap){
+                    mira_media_range_overlays++;
+                    return true;
+                }
+            }
+        }
+    }
     char raw[160]={0};
     if(!mira_full_cached_state(field->name,raw,sizeof(raw)))return false;
     if(field->kind==MIRA_INDEX_INFO)return mira_index_quote(raw,dst,cap);
@@ -2695,6 +2721,33 @@ static bool decimal_id(const char *str) {
     for(const char *p=str;*p;p++)if(*p<'0'||*p>'9')return false;
     return true;
 }
+static void mira_media_range_record(const char *name,const char *type,
+                                    const char *value){
+    if(strcmp(type,"range")||!mira_index_mutex)return;
+    const size_t len=strlen(name);
+    const bool is_volume=len>12&&!strcmp(name+len-12,"__volume_cmd");
+    const bool is_device=len>12&&!strcmp(name+len-12,"__device_cmd");
+    if(!is_volume&&!is_device)return;
+    char *end=NULL;
+    const long v=strtol(value,&end,10);
+    if(end==value||*end||v<0||v>(is_volume?100:11))return;
+    // Only a short protected PSRAM write, no HTTP or flash on the GUI task.
+    if(xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(20))!=pdTRUE)return;
+    size_t slot=MIRA_MEDIA_RANGE_SLOTS;
+    for(size_t i=0;i<MIRA_MEDIA_RANGE_SLOTS;i++){
+        if(!strcmp(mira_media_ranges[i].name,name)){
+            slot=i;break;
+        }
+        if(!mira_media_ranges[i].name[0]&&slot==MIRA_MEDIA_RANGE_SLOTS)
+            slot=i;
+    }
+    if(slot<MIRA_MEDIA_RANGE_SLOTS){
+        snprintf(mira_media_ranges[slot].name,sizeof(mira_media_ranges[slot].name),"%s",name);
+        snprintf(mira_media_ranges[slot].value,sizeof(mira_media_ranges[slot].value),"%ld",v);
+        mira_media_range_updates++;
+    }
+    xSemaphoreGive(mira_index_mutex);
+}
 bool mira_jeedom_queue_local_action(const char *name,const char *type,const char *value) {
     if(!jeedom_mode_enabled||!action_queue||!name||!type||!value||!*name ||
        strlen(name)>=96||strlen(type)>=24||strlen(value)>=160)return false;
@@ -2710,6 +2763,7 @@ bool mira_jeedom_queue_local_action(const char *name,const char *type,const char
         enqueue_latest(&msg):xQueueSend(action_queue,&msg,0)==pdTRUE;
     if(!accepted)return false;
     __atomic_fetch_add(&mira_http_actions_queued,1u,__ATOMIC_RELAXED);
+    mira_media_range_record(name,type,value);
     if(action_worker_handle)xTaskNotifyGive(action_worker_handle);
     return true;
 }
