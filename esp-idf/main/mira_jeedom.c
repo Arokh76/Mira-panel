@@ -96,6 +96,7 @@ static bool mira_other_transport(const char *name,const char *type,
 static void request_binding_sync(void);
 static void mira_http_param_written(const char *name,const char *value);
 static void mira_http_load_stored(void);
+static bool nvs_read_string(nvs_handle_t nvs,const char *key,char *out,size_t size);
 // As on WT32, the init command only requests passive state updates; it is
 // NOT an actuator command. Revalidate states on reconnect and periodically.
 static volatile bool jeedom_state_replay_pending=true;
@@ -2915,6 +2916,8 @@ static bool jeedom_request_passive_states(void){
     return acknowledged;
 }
 static void sync_jeedom_bindings(void){
+    mira_mapping_last_attempt_ms=(uint32_t)(esp_timer_get_time()/1000);
+    last_binding_sync_http=0;
     nvs_handle_t cfg;
     if(nvs_open("mira_idf_jeed",NVS_READONLY,&cfg)!=ESP_OK)return;
     char on[8]={0},base[192]={0},secret[256]={0},init[24]={0};
@@ -2978,29 +2981,43 @@ static void sync_jeedom_bindings(void){
         cJSON_Delete(remote);
         return;
     }
+    // Stage the complete mapping in PSRAM, then publish it only when NVS
+    // has committed the exact same validated ID set. Every outgoing action
+    // will reuse this snapshot rather than reopening NVS on each touch.
+    mira_binding_cache_t *fresh=heap_caps_calloc(1,sizeof(*fresh),
+                                                 MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(fresh)fresh->config_hash=hash;
     nvs_handle_t map;
     esp_err_t err=nvs_open("mira_idf_map",NVS_READWRITE,&map);
-    if(err!=ESP_OK){cJSON_Delete(local);cJSON_Delete(remote);return;}
+    if(err!=ESP_OK){
+        heap_caps_free(fresh);cJSON_Delete(local);cJSON_Delete(remote);
+        return;
+    }
     err=nvs_erase_all(map);
     cJSON *arr=cJSON_GetObjectItemCaseSensitive(remote,"actions"),*entry;
     int bound=0;
     if(err==ESP_OK) {
         cJSON_ArrayForEach(entry,arr){
-            if(!strcmp(jstr(entry,"type",""),"toggle")){
-                err=save_remote_mapping(map,jint(entry,"id0",-1),
-                                        jint(entry,"jeedom0",-1),hash);
-                if(err==ESP_OK){
-                    bound++;
-                    err=save_remote_mapping(map,jint(entry,"id1",-1),
-                                            jint(entry,"jeedom1",-1),hash);
-                    if(err==ESP_OK)bound++;
-                }
-            }else {
-                err=save_remote_mapping(map,jint(entry,"id",-1),
-                                        jint(entry,"jeedom",-1),hash);
-                if(err==ESP_OK)bound++;
-            }
+            const bool toggle=!strcmp(jstr(entry,"type",""),"toggle");
+            const int local0=toggle?jint(entry,"id0",-1):jint(entry,"id",-1);
+            const int remote0=toggle?jint(entry,"jeedom0",-1):jint(entry,"jeedom",-1);
+            err=save_remote_mapping(map,local0,remote0,hash);
             if(err!=ESP_OK)break;
+            bound++;
+            if(fresh&&local0>0&&local0<=4096&&remote0>0){
+                fresh->remote[local0]=(uint32_t)remote0;
+                fresh->valid_count++;
+            }
+            if(toggle){
+                const int local1=jint(entry,"id1",-1),remote1=jint(entry,"jeedom1",-1);
+                err=save_remote_mapping(map,local1,remote1,hash);
+                if(err!=ESP_OK)break;
+                bound++;
+                if(fresh&&local1>0&&local1<=4096&&remote1>0){
+                    fresh->remote[local1]=(uint32_t)remote1;
+                    fresh->valid_count++;
+                }
+            }
         }
     }
     if(err==ESP_OK)err=nvs_commit(map);
@@ -3008,9 +3025,21 @@ static void sync_jeedom_bindings(void){
     cJSON_Delete(local);
     cJSON_Delete(remote);
     if(err==ESP_OK){
+        mira_mapping_last_ok_ms=(uint32_t)(esp_timer_get_time()/1000);
+        if(fresh&&mira_index_mutex&&
+           xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(1000))==pdTRUE){
+            if(mira_index_hash==hash){
+                mira_binding_cache_t *old=mira_binding_cache;
+                mira_binding_cache=fresh;
+                fresh=NULL;
+                xSemaphoreGive(mira_index_mutex);
+                heap_caps_free(old);
+            }else xSemaphoreGive(mira_index_mutex);
+        }
         ESP_LOGI(TAG,"Jeedom full index synchronized: %d bounded command IDs",bound);
     }else ESP_LOGE(TAG,"Jeedom mapping validation/storage incomplete: %s",
                   esp_err_to_name(err));
+    heap_caps_free(fresh);
 }
 
 static esp_err_t jeedom_status_get(httpd_req_t *req) {
