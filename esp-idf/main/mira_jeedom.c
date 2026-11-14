@@ -82,6 +82,9 @@ static bool replace_lvgl_file_safely(void){
 // Legacy HTTP is the default. MQTT is an explicitly selected advanced mode.
 // Beta GetParamBool("Jeedom") defaults to false when unset.
 static volatile bool jeedom_mode_enabled=false;
+// Diagnostic only: never cache or expose API keys. Stage: 1=open, 2=set, 3=commit.
+static volatile int jeedom_nvs_last_write_error=ESP_OK;
+static volatile int jeedom_nvs_last_write_stage=0;
 bool mira_jeedom_actions_enabled(void){return jeedom_mode_enabled;}
 /* Only one event leaves the screen. If MQTT is not available, execute
  * the configured beta GenericCmd URL asynchronously (never on LVGL).
@@ -2294,13 +2297,24 @@ static esp_err_t param_set(httpd_req_t *req){
         return httpd_resp_sendstr(req,"OK");
     }
     nvs_handle_t nv;
+    int write_stage=1;
     esp_err_t err=nvs_open("mira_idf_jeed",NVS_READWRITE,&nv);
     if(err==ESP_OK) {
+        write_stage=2;
         err=nvs_set_str(nv,name,value);
-        if(err==ESP_OK)err=nvs_commit(nv);
+        if(err==ESP_OK){
+            write_stage=3;
+            err=nvs_commit(nv);
+        }
         nvs_close(nv);
     }
+    __atomic_store_n(&jeedom_nvs_last_write_error,(int)err,__ATOMIC_RELAXED);
+    __atomic_store_n(&jeedom_nvs_last_write_stage,
+                     err==ESP_OK?0:write_stage,__ATOMIC_RELAXED);
     if(err!=ESP_OK){
+        // No change to runtime mode when flash persistence has failed.
+        ESP_LOGE(TAG,"Jeedom NVS write failed at stage=%d: %s",
+                 write_stage,esp_err_to_name(err));
         httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Sauvegarde Jeedom impossible");
         return ESP_FAIL;
     }
@@ -3233,7 +3247,7 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
     uint32_t hash=raw?ui_config_hash(raw):0;
     cJSON *index=raw?index_from_config(raw):NULL;
     free(raw);
-    int total=0,valid=0;
+    int total=0,valid=0,first_missing_local_id=-1;
     const cJSON *items=index?cJSON_GetObjectItemCaseSensitive(index,"actions"):NULL,*item;
     nvs_handle_t map;
     bool nvs_ok=nvs_open("mira_idf_map",NVS_READONLY,&map)==ESP_OK;
@@ -3248,25 +3262,35 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
         }else id[0]=jint((cJSON*)item,"id",-1);
         for(int i=0;i<amount;i++) {
             total++;
-            if(!nvs_ok||id[i]<1||id[i]>4096)continue;
+            if(!nvs_ok||id[i]<1||id[i]>4096){
+                if(first_missing_local_id<0)first_missing_local_id=id[i];
+                continue;
+            }
             char key[14],stored[48]={0};
             snprintf(key,sizeof(key),"cmd%d",id[i]);
             if(nvs_read_string(map,key,stored,sizeof(stored))&&
                !strncmp(stored,expected,9)&&decimal_id(stored+9))valid++;
+            else if(first_missing_local_id<0)first_missing_local_id=id[i];
         }
     }
     if(nvs_ok)nvs_close(map);
     if(index)cJSON_Delete(index);
     nvs_handle_t cfg;
-    bool enabled=false; // Match beta GetParamBool("Jeedom") when absent.
+    bool enabled=false; // Persisted mode; RAM mode reported separately.
+    esp_err_t jeedom_nvs_read_error=nvs_open("mira_idf_jeed",NVS_READONLY,&cfg);
     char init_id[24]={0};
-    if(nvs_open("mira_idf_jeed",NVS_READONLY,&cfg)==ESP_OK){
+    if(jeedom_nvs_read_error==ESP_OK){
         char v[8]={0};
-        if(nvs_read_string(cfg,"Jeedom",v,sizeof(v)))enabled=strcmp(v,"0")!=0;
+        size_t cap=sizeof(v);
+        jeedom_nvs_read_error=nvs_get_str(cfg,"Jeedom",v,&cap);
+        // WT32 GetParamBool is true only for the exact value "1".
+        if(jeedom_nvs_read_error==ESP_OK)enabled=!strcmp(v,"1");
         (void)nvs_read_string(cfg,"Jeedom_Init_Cmd",init_id,sizeof(init_id));
         nvs_close(cfg);
     }
     if(!decimal_id(init_id))init_id[0]=0;
+    nvs_stats_t nvs_stats={0};
+    const esp_err_t nvs_stats_error=nvs_get_stats(NULL,&nvs_stats);
     mira_full_state_diagnostics_t health={0};
     mira_full_state_diagnostics(&health);
     unsigned cached_bindings=0;
@@ -3274,10 +3298,14 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
         if(mira_binding_cache)cached_bindings=(unsigned)mira_binding_cache->valid_count;
         xSemaphoreGive(mira_index_mutex);
     }
-    char body[1180];
+    char body[1500];
     snprintf(body,sizeof(body),
         "{\"jeedom_enabled\":%s,\"mapping_valid\":%s,"
         "\"ids_valid\":%d,\"ids_expected\":%d,"
+        "\"mapping_first_missing_local_id\":%d,"
+        "\"jeedom_runtime_enabled\":%s,\"jeedom_nvs_read_error\":%d,"
+        "\"jeedom_nvs_write_error\":%d,\"jeedom_nvs_write_stage\":%d,"
+        "\"nvs_stats_error\":%d,\"nvs_used_entries\":%u,\"nvs_free_entries\":%u,"
         "\"init_cmd_id\":\"%s\",\"last_init_http\":%d,"
         "\"state_cache_used\":%u,\"replay_pending\":%s,"
         "\"replay_attempts\":%u,\"replay_acks\":%u,"
@@ -3292,6 +3320,12 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
         "\"http_config_cached\":%s}",
         enabled?"true":"false",
         (enabled&&total>0&&valid==total)?"true":"false",valid,total,
+        first_missing_local_id,
+        jeedom_mode_enabled?"true":"false",(int)jeedom_nvs_read_error,
+        (int)__atomic_load_n(&jeedom_nvs_last_write_error,__ATOMIC_RELAXED),
+        (int)__atomic_load_n(&jeedom_nvs_last_write_stage,__ATOMIC_RELAXED),
+        (int)nvs_stats_error,(unsigned)nvs_stats.used_entries,
+        (unsigned)nvs_stats.free_entries,
         init_id,last_binding_sync_http,(unsigned)health.state_cache_used,
         jeedom_state_replay_pending?"true":"false",
         (unsigned)__atomic_load_n(&jeedom_replay_attempts,__ATOMIC_RELAXED),
@@ -3698,7 +3732,8 @@ esp_err_t mira_jeedom_action_init(void) {
     if(nvs_open("mira_idf_jeed",NVS_READONLY,&settings)==ESP_OK){
         char active[8]={0};size_t len=sizeof(active);
         if(nvs_get_str(settings,"Jeedom",active,&len)==ESP_OK)
-            jeedom_mode_enabled=strcmp(active,"0")!=0;
+            // WT32 treats missing and malformed boolean values as false.
+            jeedom_mode_enabled=!strcmp(active,"1");
         nvs_close(settings);
     }
     // External RAM for queue messages: RGB+Wi-Fi leaves a 6.9KB largest
