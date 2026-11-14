@@ -2699,48 +2699,61 @@ static esp_err_t capture_jeedom_ack(esp_http_client_event_t *event){
     return ESP_OK;
 }
 static void send_jeedom_action(const mira_action_msg_t *msg) {
-    // No network action before the screen plugin provisions *all* required
-    // IDs; a fresh /programui invalidates these mappings (see below).
-    nvs_handle_t cfg;
-    if(nvs_open("mira_idf_jeed",NVS_READONLY,&cfg)!=ESP_OK)return;
-    char enabled[8]={0},base[192]={0},secret[256]={0};
-    // Keep legacy HTTP as default; a missing mode flag must not silently
-    // redirect actions to MQTT. Network requests still require a configured
-    // Jeedom address and API key.
-    const bool mode_saved=nvs_read_string(cfg,"Jeedom",enabled,sizeof(enabled));
-    bool ready=(!mode_saved||!strcmp(enabled,"1"))&&
-               nvs_read_string(cfg,"Jeedom_IP",base,sizeof(base))&&
-               nvs_read_string(cfg,"Jeedom_Key_mira",secret,sizeof(secret));
-    nvs_close(cfg);
-    if(!ready)return;
+    // Never do flash I/O on every touch. WT32 keeps its action IDs and
+    // outbound Jeedom URL in memory, with retries and explicit ID ACK.
+    char base[192]={0},secret[256]={0};
+    if(!mira_http_copy_config(base,sizeof(base),secret,sizeof(secret))){
+        __atomic_fetch_add(&mira_http_actions_no_config,1u,__ATOMIC_RELAXED);
+        ESP_LOGW(TAG,"JEEDOM_HTTP_ACTION_CONFIG_MISSING: no request sent");
+        return;
+    }
     if(strncmp(base,"http://",7)!=0||strchr(base,'?')||strchr(base,'#')||
-       strchr(base,'@')||strchr(base,'\r')||strchr(base,'\n'))return;
+       strchr(base,'@')||strchr(base,'\r')||strchr(base,'\n')){
+        __atomic_fetch_add(&mira_http_actions_no_config,1u,__ATOMIC_RELAXED);
+        return;
+    }
     size_t baselen=strlen(base);
     while(baselen>7&&base[baselen-1]=='/')base[--baselen]=0;
-    if(baselen<=7)return;
+    if(baselen<=7){
+        __atomic_fetch_add(&mira_http_actions_no_config,1u,__ATOMIC_RELAXED);
+        return;
+    }
 
-    char *raw=read_config(NULL);
-    if(!raw)return;
-    const uint32_t current_hash=ui_config_hash(raw);
-    cJSON *index=index_from_config(raw);
-    free(raw);
-    if(!index)return;
     char value[160]={0};
-    int local_id=resolve_local_action(index,msg,value,sizeof(value));
-    cJSON_Delete(index);
-    if(local_id<1||local_id>4096)return;
-
-    nvs_handle_t map;
-    if(nvs_open("mira_idf_map",NVS_READONLY,&map)!=ESP_OK)return;
-    char local_key[14],binding[48]={0};
-    snprintf(local_key,sizeof(local_key),"cmd%d",local_id);
-    bool mapped=nvs_read_string(map,local_key,binding,sizeof(binding));
-    nvs_close(map);
-    char expected_prefix[12];
-    snprintf(expected_prefix,sizeof(expected_prefix),"%08" PRIx32 ":",current_hash);
-    if(!mapped||strncmp(binding,expected_prefix,9)!=0)return;
-    const char *remote_id=binding+9;
-    if(!decimal_id(remote_id))return;
+    uint32_t current_hash=0,remote_number=0;
+    int local_id=resolve_local_action(msg,value,sizeof(value),
+                                      &current_hash,&remote_number);
+    if(local_id<1||local_id>4096){
+        __atomic_fetch_add(&mira_http_actions_no_index,1u,__ATOMIC_RELAXED);
+        ESP_LOGW(TAG,"JEEDOM_HTTP_ACTION_LOCAL_ID_MISSING: %s",msg->type);
+        return;
+    }
+    char remote_id[24]={0};
+    if(remote_number>0){
+        snprintf(remote_id,sizeof(remote_id),"%" PRIu32,remote_number);
+    }else{
+        // Recovery only: if the in-RAM mapping has not yet been populated,
+        // try the previously committed NVS ID once. Never trust stale hashes.
+        nvs_handle_t map;
+        if(nvs_open("mira_idf_map",NVS_READONLY,&map)==ESP_OK){
+            char local_key[14],binding[48]={0};
+            snprintf(local_key,sizeof(local_key),"cmd%d",local_id);
+            bool mapped=nvs_read_string(map,local_key,binding,sizeof(binding));
+            nvs_close(map);
+            char expected_prefix[12];
+            snprintf(expected_prefix,sizeof(expected_prefix),
+                     "%08" PRIx32 ":",current_hash);
+            if(mapped&&!strncmp(binding,expected_prefix,9)&&
+               decimal_id(binding+9)){
+                snprintf(remote_id,sizeof(remote_id),"%s",binding+9);
+            }
+        }
+    }
+    if(!remote_id[0]){
+        __atomic_fetch_add(&mira_http_actions_no_mapping,1u,__ATOMIC_RELAXED);
+        ESP_LOGW(TAG,"JEEDOM_HTTP_ACTION_MAPPING_MISSING: local=%d",local_id);
+        return;
+    }
 
     char encoded_secret[768],encoded_value[480];
     if(!urlencode_to(encoded_secret,sizeof(encoded_secret),secret))return;
@@ -2771,9 +2784,14 @@ static void send_jeedom_action(const mira_action_msg_t *msg) {
             .user_data=&acknowledgement
         };
         esp_http_client_handle_t client=esp_http_client_init(&http);
-        if(!client){ESP_LOGW(TAG,"Jeedom HTTP client unavailable");return;}
+        if(!client){
+            __atomic_fetch_add(&mira_http_actions_failed,1u,__ATOMIC_RELAXED);
+            ESP_LOGW(TAG,"Jeedom HTTP client unavailable");return;
+        }
+        __atomic_fetch_add(&mira_http_actions_attempted,1u,__ATOMIC_RELAXED);
         esp_err_t result=esp_http_client_perform(client);
         const int status=esp_http_client_get_status_code(client);
+        __atomic_store_n(&mira_http_action_last_status,status,__ATOMIC_RELAXED);
         esp_http_client_cleanup(client);
         /* Strip HTTP whitespace only; the plugin response itself must
          * contain exactly one numeric remote ID and no unexpected content.
@@ -2786,6 +2804,7 @@ static void send_jeedom_action(const mira_action_msg_t *msg) {
         const bool confirmed=(result==ESP_OK&&status>=200&&status<300&&
                               !acknowledgement.overflow&&!strcmp(reply,remote_id));
         if(confirmed){
+            __atomic_fetch_add(&mira_http_actions_acked,1u,__ATOMIC_RELAXED);
             ESP_LOGI(TAG,"Jeedom action local=%d acknowledged (attempt %u)",
                      local_id,attempt);
             return;
@@ -2794,6 +2813,7 @@ static void send_jeedom_action(const mira_action_msg_t *msg) {
                  local_id,attempt,status,esp_err_to_name(result));
         if(attempt<3)vTaskDelay(pdMS_TO_TICKS(3000));
     }
+    __atomic_fetch_add(&mira_http_actions_failed,1u,__ATOMIC_RELAXED);
     ESP_LOGE(TAG,"Jeedom action local=%d dropped after three unacknowledged sends",local_id);
 }
 
