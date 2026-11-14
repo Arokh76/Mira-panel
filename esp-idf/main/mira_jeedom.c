@@ -22,6 +22,7 @@
 #include <inttypes.h>
 #include "cJSON.h"
 #include "nvs.h"
+#include "nvs_flash.h"
 #include "esp_log.h"
 #include "esp_err.h"
 #include "esp_http_client.h"
@@ -82,6 +83,10 @@ static bool replace_lvgl_file_safely(void){
 // Legacy HTTP is the default. MQTT is an explicitly selected advanced mode.
 // Beta GetParamBool("Jeedom") defaults to false when unset.
 static volatile bool jeedom_mode_enabled=false;
+static volatile bool jeedom_mode_known=false;
+// Separate flash errors from the active RAM copy, as WT32 does with params.json.
+static volatile int jeedom_nvs_last_write_error=ESP_OK;
+static volatile int jeedom_nvs_last_write_stage=0;
 bool mira_jeedom_actions_enabled(void){return jeedom_mode_enabled;}
 /* Only one event leaves the screen. If MQTT is not available, execute
  * the configured beta GenericCmd URL asynchronously (never on LVGL).
@@ -96,6 +101,11 @@ static bool mira_other_transport(const char *name,const char *type,
 static void request_binding_sync(void);
 static void mira_http_param_written(const char *name,const char *value);
 static void mira_http_load_stored(void);
+static bool mira_jeedom_copy_param(const char *name,char *dst,size_t cap);
+static bool mira_jeedom_legacy_read_param(const char *name,char *dst,size_t cap);
+static bool mira_http_copy_init_config(char *base,size_t base_cap,
+                                       char *secret,size_t secret_cap,
+                                       char *init,size_t init_cap);
 static bool nvs_read_string(nvs_handle_t nvs,const char *key,char *out,size_t size);
 // As on WT32, the init command only requests passive state updates; it is
 // NOT an actuator command. Revalidate states on reconnect and periodically.
@@ -2010,6 +2020,51 @@ static bool supported_jeedom_param(const char *name){
         if(strcmp(name,allowed[i])==0)return true;
     return false;
 }
+static bool mira_jeedom_legacy_read_param(const char *name,char *dst,size_t cap){
+    if(!name||!dst||cap<2)return false;
+    FILE *fp=fopen("/spiffs/params.json","rb");
+    if(!fp)return false;
+    bool success=false;
+    long length=0;
+    if(fseek(fp,0,SEEK_END)==0)length=ftell(fp);
+    if(length>1&&length<=32768&&fseek(fp,0,SEEK_SET)==0){
+        char *buf=malloc((size_t)length+1);
+        if(buf){
+            size_t used=fread(buf,1,(size_t)length,fp);
+            if(used==(size_t)length){
+                buf[used]=0;
+                cJSON *root=cJSON_ParseWithLength(buf,used);
+                const cJSON *entries=root?cJSON_GetObjectItemCaseSensitive(root,"params"):NULL;
+                const cJSON *entry;
+                cJSON_ArrayForEach(entry,entries){
+                    const char *field=jstr((cJSON*)entry,"param","");
+                    if(strcmp(field,name))continue;
+                    const char *value=jstr((cJSON*)entry,"value","");
+                    const char *type=jstr((cJSON*)entry,"type","");
+                    if(*value&&strcmp(value,"null")){
+                        if(!strcmp(type,"crypted-text")){
+                            char clear[256]={0};
+                            if(mira_legacy_decrypt(value,clear,sizeof(clear)) &&
+                               strlen(clear)<cap){
+                                snprintf(dst,cap,"%s",clear);
+                                success=true;
+                            }
+                            memset(clear,0,sizeof(clear));
+                        }else if(strlen(value)<cap){
+                            snprintf(dst,cap,"%s",value);
+                            success=true;
+                        }
+                    }
+                    break;
+                }
+                if(root)cJSON_Delete(root);
+            }
+            free(buf);
+        }
+    }
+    fclose(fp);
+    return success;
+}
 static esp_err_t param_get(httpd_req_t *req){
     if(!require_key(req))return ESP_FAIL;
     char name[32];
@@ -2024,18 +2079,13 @@ static esp_err_t param_get(httpd_req_t *req){
         httpd_resp_set_type(req,"text/plain");
         return httpd_resp_sendstr(req,ok?value:"Null");
     }
-    nvs_handle_t nv;
-    /* Arduino GetParamText() reports a missing parameter as null.
-     * Do not forge "Jeedom=1" when NVS is absent: the default Jeedom
-     * protocol on firmware-beta is disabled.
-     */
-    if(nvs_open("mira_idf_jeed",NVS_READONLY,&nv)!=ESP_OK)
-        return httpd_resp_sendstr(req,"Null");
-    char value[256]={0};size_t len=sizeof(value);
-    esp_err_t err=nvs_get_str(nv,name,value,&len);
-    nvs_close(nv);
+    // WT32 reads its RAM-loaded parameters, not flash on every /getparam.
+    char value[256]={0};
+    const bool found=mira_jeedom_copy_param(name,value,sizeof(value));
     httpd_resp_set_type(req,"text/plain");
-    return httpd_resp_sendstr(req,err==ESP_OK?value:"Null");
+    const esp_err_t result=httpd_resp_sendstr(req,found?value:"Null");
+    memset(value,0,sizeof(value));
+    return result;
 }
 // The original beta implements /get?key=...&toggle|info|infofa|id|param=...
 // Read-only: this endpoint MUST NOT issue an actuator or a Jeedom command.
@@ -2060,18 +2110,11 @@ static esp_err_t beta_get(httpd_req_t *req){
                 return httpd_resp_sendstr(req,display_value);
             return httpd_resp_sendstr(req,"Null");
         }
-        nvs_handle_t nv;
-        if(nvs_open("mira_idf_jeed",NVS_READONLY,&nv)==ESP_OK){
-            char result[256]={0};size_t z=sizeof(result);
-            esp_err_t got=nvs_get_str(nv,argument,result,&z);
-            nvs_close(nv);
-            if(got==ESP_OK){
-                esp_err_t sent=httpd_resp_sendstr(req,result);
-                memset(result,0,sizeof(result));
-                return sent;
-            }
-        }
-        return httpd_resp_sendstr(req,"Null");
+        char value[256]={0};
+        const bool found=mira_jeedom_copy_param(argument,value,sizeof(value));
+        const esp_err_t sent=httpd_resp_sendstr(req,found?value:"Null");
+        memset(value,0,sizeof(value));
+        return sent;
     }
     char *raw=read_config(NULL);
     cJSON *index=raw?index_from_config(raw):NULL;
@@ -2179,16 +2222,9 @@ static esp_err_t getallparams(httpd_req_t *req){
                                 char value[256]={0};
                                 bool have=false;
                                 const mira_display_field_t *display=display_field(name);
-                                if(display){
-                                    have=display_field_read(display,value,sizeof(value));
-                                }else if(supported_jeedom_param(name)){
-                                    nvs_handle_t nv;
-                                    if(nvs_open("mira_idf_jeed",NVS_READONLY,&nv)==ESP_OK){
-                                        size_t cap=sizeof(value);
-                                        have=nvs_get_str(nv,name,value,&cap)==ESP_OK;
-                                        nvs_close(nv);
-                                    }
-                                }
+                                if(display)have=display_field_read(display,value,sizeof(value));
+                                else if(supported_jeedom_param(name))
+                                    have=mira_jeedom_copy_param(name,value,sizeof(value));
                                 if(have){
                                     cJSON *newvalue=cJSON_CreateString(value);
                                     if(newvalue){
@@ -2226,8 +2262,6 @@ static esp_err_t getallparams(httpd_req_t *req){
     cJSON *params=doc?cJSON_AddArrayToObject(doc,"params"):NULL;
     if(!params){if(doc)cJSON_Delete(doc);return httpd_resp_send_err(
         req,HTTPD_500_INTERNAL_SERVER_ERROR,"Memoire indisponible"),ESP_FAIL;}
-    nvs_handle_t nv;
-    const bool have_nvs=nvs_open("mira_idf_jeed",NVS_READONLY,&nv)==ESP_OK;
     static const char *const names[]={
         "Jeedom","Jeedom_IP","Jeedom_Key","Jeedom_Key_mira",
         "Jeedom_Refresh","Jeedom_Init_Cmd"
@@ -2237,8 +2271,8 @@ static esp_err_t getallparams(httpd_req_t *req){
         // IDF stores those in NVS but has no compatible beta encryption
         // writer: never export raw secrets in synthesized JSON responses.
         if(strstr(names[i],"Key"))continue;
-        char value[256]={0};size_t cap=sizeof(value);
-        if(!have_nvs||nvs_get_str(nv,names[i],value,&cap)!=ESP_OK){
+        char value[256]={0};
+        if(!mira_jeedom_copy_param(names[i],value,sizeof(value))){
             // Arduino beta does not invent Jeedom=1 for an unset option.
             // The synthesized /getallparams must agree with /getparam and
             // the live action transport (both default to disabled).
@@ -2253,7 +2287,6 @@ static esp_err_t getallparams(httpd_req_t *req){
         cJSON_AddItemToArray(params,entry);
         memset(value,0,sizeof(value));
     }
-    if(have_nvs)nvs_close(nv);
     for(size_t i=0;i<sizeof(display_fields)/sizeof(display_fields[0]);i++){
         char value[48]={0};
         if(!display_field_read(&display_fields[i],value,sizeof(value)))continue;
@@ -2294,17 +2327,30 @@ static esp_err_t param_set(httpd_req_t *req){
         return httpd_resp_sendstr(req,"OK");
     }
     nvs_handle_t nv;
+    int write_stage=1; // open
     esp_err_t err=nvs_open("mira_idf_jeed",NVS_READWRITE,&nv);
-    if(err==ESP_OK) {
+    if(err==ESP_OK){
+        write_stage=2; // set
         err=nvs_set_str(nv,name,value);
-        if(err==ESP_OK)err=nvs_commit(nv);
+        if(err==ESP_OK){
+            write_stage=3; // commit
+            err=nvs_commit(nv);
+        }
         nvs_close(nv);
     }
+    __atomic_store_n(&jeedom_nvs_last_write_error,(int)err,__ATOMIC_RELAXED);
+    __atomic_store_n(&jeedom_nvs_last_write_stage,
+                     err==ESP_OK?0:write_stage,__ATOMIC_RELAXED);
     if(err!=ESP_OK){
+        ESP_LOGE(TAG,"Jeedom parameter persist failed, stage=%d err=%s",
+                 write_stage,esp_err_to_name(err));
         httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Sauvegarde Jeedom impossible");
         return ESP_FAIL;
     }
-    if(!strcmp(name,"Jeedom"))jeedom_mode_enabled=!strcmp(value,"1");
+    if(!strcmp(name,"Jeedom")){
+        jeedom_mode_enabled=!strcmp(value,"1");
+        jeedom_mode_known=true;
+    }
     mira_http_param_written(name,value);
     ESP_LOGI(TAG,"Jeedom parametre %s synchronise",name); // NEVER log its value.
     request_binding_sync();
@@ -2400,6 +2446,7 @@ static esp_err_t set_jeedom_init_id(httpd_req_t *req){
         httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Init ID non enregistre");
         return ESP_FAIL;
     }
+    mira_http_param_written("Jeedom_Init_Cmd",id);
     request_binding_sync(); // now fetch authoritative full index from plugin
     return httpd_resp_sendstr(req,"OK");
 }
@@ -2430,13 +2477,17 @@ static unsigned next_latest_slot;
 typedef struct {
     char base[192];
     char secret[256];
+    char init[24];
+    char refresh[24];
+    char jeedom_key[256];
 } mira_http_config_t;
 static SemaphoreHandle_t mira_http_config_mutex;
 static mira_http_config_t *mira_http_config;
 static void mira_http_param_written(const char *name,const char *value){
     if(!name||!value)return;
     if(strcmp(name,"Jeedom_IP")&&strcmp(name,"Jeedom_Key_mira")&&
-       strcmp(name,"Jeedom"))return;
+       strcmp(name,"Jeedom_Init_Cmd")&&strcmp(name,"Jeedom_Refresh")&&
+       strcmp(name,"Jeedom_Key")&&strcmp(name,"Jeedom"))return;
     if(!mira_http_config_mutex)
         mira_http_config_mutex=xSemaphoreCreateMutex();
     if(!mira_http_config_mutex)return;
@@ -2450,25 +2501,70 @@ static void mira_http_param_written(const char *name,const char *value){
         snprintf(mira_http_config->base,sizeof(mira_http_config->base),"%s",value);
     else if(!strcmp(name,"Jeedom_Key_mira"))
         snprintf(mira_http_config->secret,sizeof(mira_http_config->secret),"%s",value);
+    else if(!strcmp(name,"Jeedom_Init_Cmd"))
+        snprintf(mira_http_config->init,sizeof(mira_http_config->init),"%s",value);
+    else if(!strcmp(name,"Jeedom_Refresh"))
+        snprintf(mira_http_config->refresh,sizeof(mira_http_config->refresh),"%s",value);
+    else if(!strcmp(name,"Jeedom_Key"))
+        snprintf(mira_http_config->jeedom_key,sizeof(mira_http_config->jeedom_key),"%s",value);
     else if(!strcmp(name,"Jeedom")&&!strcmp(value,"0")){
-        // Security: turning Jeedom off also invalidates stored runtime credentials.
+        // Never retain outgoing HTTP credentials while Jeedom is explicitly off.
         memset(mira_http_config,0,sizeof(*mira_http_config));
     }
     xSemaphoreGive(mira_http_config_mutex);
 }
+static bool mira_jeedom_copy_param(const char *name,char *dst,size_t cap){
+    if(!name||!dst||cap<2)return false;
+    dst[0]=0;
+    if(!strcmp(name,"Jeedom")&&jeedom_mode_known){
+        snprintf(dst,cap,"%s",jeedom_mode_enabled?"1":"0");
+        return true;
+    }
+    if(mira_http_config&&mira_http_config_mutex&&
+       xSemaphoreTake(mira_http_config_mutex,pdMS_TO_TICKS(250))==pdTRUE){
+        const char *src=NULL;
+        if(!strcmp(name,"Jeedom_IP"))src=mira_http_config->base;
+        else if(!strcmp(name,"Jeedom_Key_mira"))src=mira_http_config->secret;
+        else if(!strcmp(name,"Jeedom_Init_Cmd"))src=mira_http_config->init;
+        else if(!strcmp(name,"Jeedom_Refresh"))src=mira_http_config->refresh;
+        else if(!strcmp(name,"Jeedom_Key"))src=mira_http_config->jeedom_key;
+        bool cached=src&&src[0]&&strlen(src)<cap;
+        if(cached)snprintf(dst,cap,"%s",src);
+        xSemaphoreGive(mira_http_config_mutex);
+        if(cached)return true;
+    }
+    bool found=false;
+    nvs_handle_t nv;
+    if(nvs_open("mira_idf_jeed",NVS_READONLY,&nv)==ESP_OK){
+        size_t len=cap;
+        found=nvs_get_str(nv,name,dst,&len)==ESP_OK&&dst[0];
+        nvs_close(nv);
+    }
+    if(!found)found=mira_jeedom_legacy_read_param(name,dst,cap);
+    if(found){
+        if(!strcmp(name,"Jeedom")){
+            if(strcmp(dst,"0")&&strcmp(dst,"1"))return false;
+            jeedom_mode_enabled=!strcmp(dst,"1");
+            jeedom_mode_known=true;
+        }else{
+            mira_http_param_written(name,dst);
+        }
+    }
+    return found;
+}
 static void mira_http_load_stored(void){
     if(!jeedom_mode_enabled)return;
-    nvs_handle_t cfg;
-    if(nvs_open("mira_idf_jeed",NVS_READONLY,&cfg)!=ESP_OK)return;
-    char base[192]={0},secret[256]={0};
-    const bool okay=nvs_read_string(cfg,"Jeedom_IP",base,sizeof(base))&&
-                    nvs_read_string(cfg,"Jeedom_Key_mira",secret,sizeof(secret));
-    nvs_close(cfg);
-    if(okay){
-        mira_http_param_written("Jeedom_IP",base);
-        mira_http_param_written("Jeedom_Key_mira",secret);
+    // As on WT32, load the command settings once into PSRAM. A later
+    // transient NVS error must not interrupt an otherwise valid HTTP action.
+    static const char *const names[]={
+        "Jeedom_IP","Jeedom_Key_mira","Jeedom_Init_Cmd",
+        "Jeedom_Refresh","Jeedom_Key"
+    };
+    for(size_t i=0;i<sizeof(names)/sizeof(names[0]);i++){
+        char value[256]={0};
+        (void)mira_jeedom_copy_param(names[i],value,sizeof(value));
+        memset(value,0,sizeof(value));
     }
-    memset(secret,0,sizeof(secret));
 }
 static bool mira_http_copy_config(char *base,size_t base_cap,
                                   char *secret,size_t secret_cap){
@@ -2480,8 +2576,6 @@ static bool mira_http_copy_config(char *base,size_t base_cap,
         xSemaphoreGive(mira_http_config_mutex);
         if(base[0]&&secret[0])return true;
     }
-    // One controlled recovery attempt when parameters were missing at boot.
-    // After success, subsequent actions use the PSRAM copy, not repeated NVS.
     mira_http_load_stored();
     if(mira_http_config&&mira_http_config_mutex&&
        xSemaphoreTake(mira_http_config_mutex,pdMS_TO_TICKS(250))==pdTRUE){
@@ -2490,6 +2584,27 @@ static bool mira_http_copy_config(char *base,size_t base_cap,
         xSemaphoreGive(mira_http_config_mutex);
     }
     return base[0]&&secret[0];
+}
+static bool mira_http_copy_init_config(char *base,size_t base_cap,
+                                       char *secret,size_t secret_cap,
+                                       char *init,size_t init_cap){
+    if(!init||!init_cap||!mira_http_copy_config(base,base_cap,secret,secret_cap))
+        return false;
+    init[0]=0;
+    if(mira_http_config&&mira_http_config_mutex&&
+       xSemaphoreTake(mira_http_config_mutex,pdMS_TO_TICKS(250))==pdTRUE){
+        snprintf(init,init_cap,"%s",mira_http_config->init);
+        xSemaphoreGive(mira_http_config_mutex);
+    }
+    if(!init[0]){
+        mira_http_load_stored();
+        if(mira_http_config&&mira_http_config_mutex&&
+           xSemaphoreTake(mira_http_config_mutex,pdMS_TO_TICKS(250))==pdTRUE){
+            snprintf(init,init_cap,"%s",mira_http_config->init);
+            xSemaphoreGive(mira_http_config_mutex);
+        }
+    }
+    return init[0]&&decimal_id(init);
 }
 
 static bool action_is_continuous(const char *type){
@@ -2897,16 +3012,10 @@ static bool jeedom_sta_has_ip(void){
 // Recovery logic later repeats this read-only init when cache stays empty.
 static bool jeedom_request_passive_states(void){
     if(!jeedom_sta_has_ip())return false;
-    nvs_handle_t cfg;
-    if(nvs_open("mira_idf_jeed",NVS_READONLY,&cfg)!=ESP_OK)return false;
-    char on[8]={0},base[192]={0},secret[256]={0},init[24]={0};
-    const bool ready=nvs_read_string(cfg,"Jeedom",on,sizeof(on))&&
-                     !strcmp(on,"1")&&
-                     nvs_read_string(cfg,"Jeedom_IP",base,sizeof(base))&&
-                     nvs_read_string(cfg,"Jeedom_Key_mira",secret,sizeof(secret))&&
-                     nvs_read_string(cfg,"Jeedom_Init_Cmd",init,sizeof(init));
-    nvs_close(cfg);
-    if(!ready||!decimal_id(init)||strncmp(base,"http://",7)||
+    char base[192]={0},secret[256]={0},init[24]={0};
+    if(!mira_http_copy_init_config(base,sizeof(base),secret,sizeof(secret),
+                                    init,sizeof(init))||
+       strncmp(base,"http://",7)||
        strchr(base,'?')||strchr(base,'#')||strchr(base,'@')||
        strchr(base,'\r')||strchr(base,'\n'))return false;
     size_t len=strlen(base);
@@ -2950,21 +3059,12 @@ static bool jeedom_request_passive_states(void){
     return acknowledged;
 }
 static void sync_jeedom_bindings(void){
+    char base[192]={0},secret[256]={0},init[24]={0};
+    // Reuse the same validated configuration as outgoing WT32-style actions.
+    if(!mira_http_copy_init_config(base,sizeof(base),secret,sizeof(secret),
+                                    init,sizeof(init)))return;
     mira_mapping_last_attempt_ms=(uint32_t)(esp_timer_get_time()/1000);
-    last_binding_sync_http=0;
-    nvs_handle_t cfg;
-    if(nvs_open("mira_idf_jeed",NVS_READONLY,&cfg)!=ESP_OK)return;
-    char on[8]={0},base[192]={0},secret[256]={0},init[24]={0};
-    const bool saved_mode=nvs_read_string(cfg,"Jeedom",on,sizeof(on));
-    /* Beta GetParamBool("Jeedom") is false when the parameter is absent.
-     * A missing NVS flag must never start background Jeedom sync.
-     */
-    const bool ready=saved_mode&&!strcmp(on,"1")&&
-                     nvs_read_string(cfg,"Jeedom_IP",base,sizeof(base))&&
-                     nvs_read_string(cfg,"Jeedom_Key_mira",secret,sizeof(secret))&&
-                     nvs_read_string(cfg,"Jeedom_Init_Cmd",init,sizeof(init));
-    nvs_close(cfg);
-    if(!ready||!decimal_id(init)||strncmp(base,"http://",7)||
+    if(strncmp(base,"http://",7)||
        strchr(base,'?')||strchr(base,'#')||strchr(base,'@')||
        strchr(base,'\r')||strchr(base,'\n'))return;
     size_t len=strlen(base);
@@ -3027,7 +3127,9 @@ static void sync_jeedom_bindings(void){
         heap_caps_free(fresh);cJSON_Delete(local);cJSON_Delete(remote);
         return;
     }
-    err=nvs_erase_all(map);
+    // WT32 keeps mappings in memory; never erase and rewrite a full NVS
+    // namespace every 30 minutes. Keep unchanged keys, update only differences.
+    bool map_changed=false;
     cJSON *arr=cJSON_GetObjectItemCaseSensitive(remote,"actions"),*entry;
     int bound=0;
     if(err==ESP_OK) {
@@ -3035,8 +3137,18 @@ static void sync_jeedom_bindings(void){
             const bool toggle=!strcmp(jstr(entry,"type",""),"toggle");
             const int local0=toggle?jint(entry,"id0",-1):jint(entry,"id",-1);
             const int remote0=toggle?jint(entry,"jeedom0",-1):jint(entry,"jeedom",-1);
-            err=save_remote_mapping(map,local0,remote0,hash);
-            if(err!=ESP_OK)break;
+            if(local0<1||local0>4096||remote0<1){
+                err=ESP_ERR_INVALID_ARG;break;
+            }
+            char key[14],desired[48],existing[48]={0};
+            snprintf(key,sizeof(key),"cmd%d",local0);
+            snprintf(desired,sizeof(desired),"%08" PRIx32 ":%d",hash,remote0);
+            if(!nvs_read_string(map,key,existing,sizeof(existing))||
+               strcmp(existing,desired)){
+                err=save_remote_mapping(map,local0,remote0,hash);
+                if(err!=ESP_OK)break;
+                map_changed=true;
+            }
             bound++;
             if(fresh&&local0>0&&local0<=4096&&remote0>0){
                 fresh->remote[local0]=(uint32_t)remote0;
@@ -3044,8 +3156,18 @@ static void sync_jeedom_bindings(void){
             }
             if(toggle){
                 const int local1=jint(entry,"id1",-1),remote1=jint(entry,"jeedom1",-1);
-                err=save_remote_mapping(map,local1,remote1,hash);
-                if(err!=ESP_OK)break;
+                if(local1<1||local1>4096||remote1<1){
+                    err=ESP_ERR_INVALID_ARG;break;
+                }
+                char key[14],desired[48],existing[48]={0};
+                snprintf(key,sizeof(key),"cmd%d",local1);
+                snprintf(desired,sizeof(desired),"%08" PRIx32 ":%d",hash,remote1);
+                if(!nvs_read_string(map,key,existing,sizeof(existing))||
+                   strcmp(existing,desired)){
+                    err=save_remote_mapping(map,local1,remote1,hash);
+                    if(err!=ESP_OK)break;
+                    map_changed=true;
+                }
                 bound++;
                 if(fresh&&local1>0&&local1<=4096&&remote1>0){
                     fresh->remote[local1]=(uint32_t)remote1;
@@ -3054,7 +3176,7 @@ static void sync_jeedom_bindings(void){
             }
         }
     }
-    if(err==ESP_OK)err=nvs_commit(map);
+    if(err==ESP_OK&&map_changed)err=nvs_commit(map);
     nvs_close(map);
     cJSON_Delete(local);
     cJSON_Delete(remote);
@@ -3184,14 +3306,19 @@ static esp_err_t mira_bindings_direct_post(httpd_req_t *req){
     nvs_handle_t nv;
     esp_err_t err=nvs_open("mira_idf_map",NVS_READWRITE,&nv);
     if(err==ESP_OK){
-        char key[14],value[48];
+        char key[14],value[48],existing[48];
+        bool changed=false;
         for(size_t i=0;i<updated&&err==ESP_OK;i++){
             snprintf(key,sizeof(key),"cmd%u",(unsigned)updates[i].local);
             snprintf(value,sizeof(value),"%08" PRIx32 ":%" PRIu32,
                      generation,updates[i].remote);
+            existing[0]=0;
+            if(nvs_read_string(nv,key,existing,sizeof(existing))&&
+               !strcmp(existing,value))continue;
             err=nvs_set_str(nv,key,value);
+            if(err==ESP_OK)changed=true;
         }
-        if(err==ESP_OK)err=nvs_commit(nv);
+        if(err==ESP_OK&&changed)err=nvs_commit(nv);
         nvs_close(nv);
     }
     heap_caps_free(updates);
@@ -3233,7 +3360,7 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
     uint32_t hash=raw?ui_config_hash(raw):0;
     cJSON *index=raw?index_from_config(raw):NULL;
     free(raw);
-    int total=0,valid=0;
+    int total=0,valid=0,first_missing_local_id=-1;
     const cJSON *items=index?cJSON_GetObjectItemCaseSensitive(index,"actions"):NULL,*item;
     nvs_handle_t map;
     bool nvs_ok=nvs_open("mira_idf_map",NVS_READONLY,&map)==ESP_OK;
@@ -3248,25 +3375,36 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
         }else id[0]=jint((cJSON*)item,"id",-1);
         for(int i=0;i<amount;i++) {
             total++;
-            if(!nvs_ok||id[i]<1||id[i]>4096)continue;
+            if(!nvs_ok||id[i]<1||id[i]>4096){
+                if(first_missing_local_id<0)first_missing_local_id=id[i];
+                continue;
+            }
             char key[14],stored[48]={0};
             snprintf(key,sizeof(key),"cmd%d",id[i]);
             if(nvs_read_string(map,key,stored,sizeof(stored))&&
                !strncmp(stored,expected,9)&&decimal_id(stored+9))valid++;
+            else if(first_missing_local_id<0)first_missing_local_id=id[i];
         }
     }
     if(nvs_ok)nvs_close(map);
     if(index)cJSON_Delete(index);
     nvs_handle_t cfg;
-    bool enabled=false; // Match beta GetParamBool("Jeedom") when absent.
+    bool persisted_enabled=false;
+    esp_err_t persisted_mode_error=nvs_open("mira_idf_jeed",NVS_READONLY,&cfg);
     char init_id[24]={0};
-    if(nvs_open("mira_idf_jeed",NVS_READONLY,&cfg)==ESP_OK){
+    if(persisted_mode_error==ESP_OK){
         char v[8]={0};
-        if(nvs_read_string(cfg,"Jeedom",v,sizeof(v)))enabled=strcmp(v,"0")!=0;
+        size_t cap=sizeof(v);
+        persisted_mode_error=nvs_get_str(cfg,"Jeedom",v,&cap);
+        if(persisted_mode_error==ESP_OK)persisted_enabled=!strcmp(v,"1");
         (void)nvs_read_string(cfg,"Jeedom_Init_Cmd",init_id,sizeof(init_id));
         nvs_close(cfg);
     }
+    if(!decimal_id(init_id))
+        (void)mira_jeedom_copy_param("Jeedom_Init_Cmd",init_id,sizeof(init_id));
     if(!decimal_id(init_id))init_id[0]=0;
+    nvs_stats_t nvs_statistics={0};
+    const esp_err_t nvs_stats_error=nvs_get_stats(NULL,&nvs_statistics);
     mira_full_state_diagnostics_t health={0};
     mira_full_state_diagnostics(&health);
     unsigned cached_bindings=0;
@@ -3274,10 +3412,16 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
         if(mira_binding_cache)cached_bindings=(unsigned)mira_binding_cache->valid_count;
         xSemaphoreGive(mira_index_mutex);
     }
-    char body[1180];
+    char body[1536];
     snprintf(body,sizeof(body),
         "{\"jeedom_enabled\":%s,\"mapping_valid\":%s,"
         "\"ids_valid\":%d,\"ids_expected\":%d,"
+        "\"mapping_first_missing_local_id\":%d,"
+        "\"jeedom_runtime_enabled\":%s,\"jeedom_persisted_enabled\":%s,"
+        "\"jeedom_nvs_read_error\":%d,\"jeedom_nvs_write_error\":%d,"
+        "\"jeedom_nvs_write_stage\":%d,\"nvs_stats_error\":%d,"
+        "\"nvs_used_entries\":%u,\"nvs_free_entries\":%u,"
+        "\"mapping_persistent_valid\":%s,"
         "\"init_cmd_id\":\"%s\",\"last_init_http\":%d,"
         "\"state_cache_used\":%u,\"replay_pending\":%s,"
         "\"replay_attempts\":%u,\"replay_acks\":%u,"
@@ -3290,8 +3434,16 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
         "\"http_actions_no_index\":%u,\"http_actions_no_mapping\":%u,"
         "\"http_actions_last_status\":%d,\"http_bindings_cached\":%u,"
         "\"http_config_cached\":%s}",
-        enabled?"true":"false",
-        (enabled&&total>0&&valid==total)?"true":"false",valid,total,
+        jeedom_mode_enabled?"true":"false",
+        (jeedom_mode_enabled&&total>0&&cached_bindings>=(unsigned)total)?"true":"false",
+        valid,total,first_missing_local_id,
+        jeedom_mode_enabled?"true":"false",persisted_enabled?"true":"false",
+        (int)persisted_mode_error,
+        (int)__atomic_load_n(&jeedom_nvs_last_write_error,__ATOMIC_RELAXED),
+        (int)__atomic_load_n(&jeedom_nvs_last_write_stage,__ATOMIC_RELAXED),
+        (int)nvs_stats_error,(unsigned)nvs_statistics.used_entries,
+        (unsigned)nvs_statistics.free_entries,
+        (persisted_enabled&&total>0&&valid==total)?"true":"false",
         init_id,last_binding_sync_http,(unsigned)health.state_cache_used,
         jeedom_state_replay_pending?"true":"false",
         (unsigned)__atomic_load_n(&jeedom_replay_attempts,__ATOMIC_RELAXED),
@@ -3695,11 +3847,24 @@ esp_err_t mira_jeedom_action_init(void) {
     import_legacy_screen_key();
     import_legacy_http_settings();
     nvs_handle_t settings;
+    bool got_mode=false;
     if(nvs_open("mira_idf_jeed",NVS_READONLY,&settings)==ESP_OK){
         char active[8]={0};size_t len=sizeof(active);
-        if(nvs_get_str(settings,"Jeedom",active,&len)==ESP_OK)
-            jeedom_mode_enabled=strcmp(active,"0")!=0;
+        if(nvs_get_str(settings,"Jeedom",active,&len)==ESP_OK){
+            got_mode=true;
+            jeedom_mode_enabled=!strcmp(active,"1");
+            jeedom_mode_known=true;
+        }
         nvs_close(settings);
+    }
+    if(!got_mode){
+        char active[8]={0};
+        if(mira_jeedom_legacy_read_param("Jeedom",active,sizeof(active))&&
+           (!strcmp(active,"0")||!strcmp(active,"1"))){
+            jeedom_mode_enabled=!strcmp(active,"1");
+            jeedom_mode_known=true;
+            ESP_LOGW(TAG,"Jeedom NVS mode missing; using WT32 legacy params in RAM");
+        }
     }
     // External RAM for queue messages: RGB+Wi-Fi leaves a 6.9KB largest
     // internal block and the old ~3.4KB queue plus 7168B worker stack
