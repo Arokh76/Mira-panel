@@ -3104,7 +3104,7 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
     if(!decimal_id(init_id))init_id[0]=0;
     mira_full_state_diagnostics_t health={0};
     mira_full_state_diagnostics(&health);
-    char body[768];
+    char body[1180];
     snprintf(body,sizeof(body),
         "{\"jeedom_enabled\":%s,\"mapping_valid\":%s,"
         "\"ids_valid\":%d,\"ids_expected\":%d,"
@@ -3114,7 +3114,12 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
         "\"replay_last_http\":%d,\"sse_clients\":%u,"
         "\"sse_task_failures\":%u,\"index_builds\":%u,"
         "\"index_failures\":%u,\"index_live_fields\":%u,"
-        "\"index_responses\":%u}",
+        "\"index_responses\":%u,\"http_actions_queued\":%u,"
+        "\"http_actions_attempted\":%u,\"http_actions_acked\":%u,"
+        "\"http_actions_failed\":%u,\"http_actions_no_config\":%u,"
+        "\"http_actions_no_index\":%u,\"http_actions_no_mapping\":%u,"
+        "\"http_actions_last_status\":%d,\"http_bindings_cached\":%u,"
+        "\"http_config_cached\":%s}",
         enabled?"true":"false",
         (enabled&&total>0&&valid==total)?"true":"false",valid,total,
         init_id,last_binding_sync_http,(unsigned)health.state_cache_used,
@@ -3127,7 +3132,17 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
         (unsigned)__atomic_load_n(&mira_index_builds,__ATOMIC_RELAXED),
         (unsigned)__atomic_load_n(&mira_index_failures,__ATOMIC_RELAXED),
         (unsigned)mira_index_fields_count,
-        (unsigned)__atomic_load_n(&mira_index_responses,__ATOMIC_RELAXED));
+        (unsigned)__atomic_load_n(&mira_index_responses,__ATOMIC_RELAXED),
+        (unsigned)__atomic_load_n(&mira_http_actions_queued,__ATOMIC_RELAXED),
+        (unsigned)__atomic_load_n(&mira_http_actions_attempted,__ATOMIC_RELAXED),
+        (unsigned)__atomic_load_n(&mira_http_actions_acked,__ATOMIC_RELAXED),
+        (unsigned)__atomic_load_n(&mira_http_actions_failed,__ATOMIC_RELAXED),
+        (unsigned)__atomic_load_n(&mira_http_actions_no_config,__ATOMIC_RELAXED),
+        (unsigned)__atomic_load_n(&mira_http_actions_no_index,__ATOMIC_RELAXED),
+        (unsigned)__atomic_load_n(&mira_http_actions_no_mapping,__ATOMIC_RELAXED),
+        (int)__atomic_load_n(&mira_http_action_last_status,__ATOMIC_RELAXED),
+        mira_binding_cache?(unsigned)mira_binding_cache->valid_count:0u,
+        mira_http_config&&jeedom_mode_enabled?"true":"false");
     httpd_resp_set_type(req,"application/json");
     return httpd_resp_sendstr(req,body);
 }
@@ -3250,6 +3265,15 @@ static void send_generic_action(const mira_action_msg_t *msg){
 static void jeedom_replay_maintenance(void){
     if(!jeedom_mode_enabled||!jeedom_sta_has_ip())return;
     const uint32_t now=(uint32_t)(esp_timer_get_time()/1000);
+    // WT32 parity: retry stale/failed command-ID synchronization without
+    // requiring a reboot. This GET only fetches the mapping; it never
+    // executes an actuator action.
+    if((!mira_mapping_last_attempt_ms||
+        (uint32_t)(now-mira_mapping_last_attempt_ms)>=300000u)&&
+       (!mira_mapping_last_ok_ms||
+        (uint32_t)(now-mira_mapping_last_ok_ms)>=1800000u)){
+        sync_jeedom_bindings();
+    }
     const uint32_t since_attempt=(uint32_t)(now-jeedom_last_replay_ms);
     // Retry sparingly if init has failed or no passive values have arrived.
     // Refresh at most every 30 minutes even with a nonempty cache, so a
