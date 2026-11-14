@@ -3394,7 +3394,8 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
     int total=0,valid=0,first_missing_local_id=-1;
     const cJSON *items=index?cJSON_GetObjectItemCaseSensitive(index,"actions"):NULL,*item;
     nvs_handle_t map;
-    bool nvs_ok=nvs_open("mira_idf_map",NVS_READONLY,&map)==ESP_OK;
+    const esp_err_t mapping_nvs_read_error=nvs_open("mira_idf_map",NVS_READONLY,&map);
+    const bool nvs_ok=mapping_nvs_read_error==ESP_OK;
     char expected[12];
     snprintf(expected,sizeof(expected),"%08" PRIx32 ":",hash);
     cJSON_ArrayForEach(item,items) {
@@ -3439,9 +3440,22 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
     mira_full_state_diagnostics_t health={0};
     mira_full_state_diagnostics(&health);
     unsigned cached_bindings=0;
+    bool runtime_mapping_valid=false;
     if(mira_index_mutex&&xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(250))==pdTRUE){
-        if(mira_binding_cache)cached_bindings=(unsigned)mira_binding_cache->valid_count;
+        if(mira_binding_cache){
+            cached_bindings=(unsigned)mira_binding_cache->valid_count;
+            runtime_mapping_valid=jeedom_mode_enabled&&total>0&&
+                mira_binding_cache->config_hash==hash&&
+                cached_bindings>=(unsigned)total;
+        }
         xSemaphoreGive(mira_index_mutex);
+    }
+    bool http_config_ready=false;
+    if(mira_http_config&&mira_http_config_mutex&&
+       xSemaphoreTake(mira_http_config_mutex,pdMS_TO_TICKS(250))==pdTRUE){
+        http_config_ready=jeedom_mode_enabled&&mira_http_config->base[0]&&
+            mira_http_config->secret[0];
+        xSemaphoreGive(mira_http_config_mutex);
     }
     char body[1536];
     snprintf(body,sizeof(body),
@@ -3451,6 +3465,7 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
         "\"jeedom_runtime_enabled\":%s,\"jeedom_persisted_enabled\":%s,"
         "\"jeedom_nvs_read_error\":%d,\"jeedom_nvs_write_error\":%d,"
         "\"jeedom_nvs_write_stage\":%d,\"nvs_stats_error\":%d,"
+        "\"mapping_nvs_read_error\":%d,"
         "\"nvs_used_entries\":%u,\"nvs_free_entries\":%u,"
         "\"mapping_persistent_valid\":%s,"
         "\"init_cmd_id\":\"%s\",\"last_init_http\":%d,"
@@ -3466,13 +3481,14 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
         "\"http_actions_last_status\":%d,\"http_bindings_cached\":%u,"
         "\"http_config_cached\":%s}",
         jeedom_mode_enabled?"true":"false",
-        (jeedom_mode_enabled&&total>0&&cached_bindings>=(unsigned)total)?"true":"false",
+        runtime_mapping_valid?"true":"false",
         valid,total,first_missing_local_id,
         jeedom_mode_enabled?"true":"false",persisted_enabled?"true":"false",
         (int)persisted_mode_error,
         (int)__atomic_load_n(&jeedom_nvs_last_write_error,__ATOMIC_RELAXED),
         (int)__atomic_load_n(&jeedom_nvs_last_write_stage,__ATOMIC_RELAXED),
-        (int)nvs_stats_error,(unsigned)nvs_statistics.used_entries,
+        (int)nvs_stats_error,(int)mapping_nvs_read_error,
+        (unsigned)nvs_statistics.used_entries,
         (unsigned)nvs_statistics.free_entries,
         (persisted_enabled&&total>0&&valid==total)?"true":"false",
         init_id,last_binding_sync_http,(unsigned)health.state_cache_used,
@@ -3495,7 +3511,7 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
         (unsigned)__atomic_load_n(&mira_http_actions_no_mapping,__ATOMIC_RELAXED),
         (int)__atomic_load_n(&mira_http_action_last_status,__ATOMIC_RELAXED),
         cached_bindings,
-        mira_http_config&&jeedom_mode_enabled?"true":"false");
+        http_config_ready?"true":"false");
     httpd_resp_set_type(req,"application/json");
     return httpd_resp_sendstr(req,body);
 }
