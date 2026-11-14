@@ -644,6 +644,10 @@ static void remember_passive_state(const mira_state_update_t *msg);
 // Match the Settings > Luminosite screen slider (14px track +
 // 6px LVGL-default knob padding on each side at the standard DPI).
 #define MIRA_COLOR_KNOB_SIZE 26
+// LVGL clips children to their parent: reserve room for the 26px knob
+// and its shadow outside the 150px hue bitmap on every side.
+#define MIRA_WHEEL_PADDING 12
+#define MIRA_WHEEL_CONTAINER_SIZE (MIRA_WHEEL_SIZE + 2*MIRA_WHEEL_PADDING)
 typedef struct mira_wheel_bitmap {
     lv_image_dsc_t dsc;
     uint16_t pixels[MIRA_WHEEL_SIZE*MIRA_WHEEL_SIZE];
@@ -747,10 +751,10 @@ static void wheel_mark_hue(mira_widget_t *w,int hue){
         // LVGL 8: marker radius=(wheel diameter - arc width)/2.
         const float radius=(float)(MIRA_WHEEL_SIZE-MIRA_WHEEL_ARC_WIDTH)/2.0f;
         // Center the brightness-slider-sized knob on the selected hue.
-        const int x=MIRA_WHEEL_CENTER+(int)lroundf(radius*sinf(angle))-
-                    MIRA_COLOR_KNOB_SIZE/2;
-        const int y=MIRA_WHEEL_CENTER+(int)lroundf(radius*cosf(angle))-
-                    MIRA_COLOR_KNOB_SIZE/2;
+        const int x=MIRA_WHEEL_PADDING+MIRA_WHEEL_CENTER+
+                    (int)lroundf(radius*sinf(angle))-MIRA_COLOR_KNOB_SIZE/2;
+        const int y=MIRA_WHEEL_PADDING+MIRA_WHEEL_CENTER+
+                    (int)lroundf(radius*cosf(angle))-MIRA_COLOR_KNOB_SIZE/2;
         lv_obj_set_pos(w->color_knob,x,y);
         // The centre must show the ACTUAL selected RGB colour, including the
         // current saturation and brightness, not a fixed white/cyan marker.
@@ -772,8 +776,8 @@ static void wheel_touch(lv_event_t *event){
     lv_indev_get_point(touch,&p);
     lv_area_t area;
     lv_obj_get_coords(w->control,&area);
-    const float dx=(float)p.x-(float)(area.x1+MIRA_WHEEL_CENTER);
-    const float dy=(float)p.y-(float)(area.y1+MIRA_WHEEL_CENTER);
+    const float dx=(float)p.x-(float)(area.x1+MIRA_WHEEL_PADDING+MIRA_WHEEL_CENTER);
+    const float dy=(float)p.y-(float)(area.y1+MIRA_WHEEL_PADDING+MIRA_WHEEL_CENTER);
     const float r2=dx*dx+dy*dy;
     // Match the original LVGL 8 colorwheel's inner hit radius (54px).
     // The extra 3px at the outside makes edge dragging easier.
@@ -1937,7 +1941,9 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         return;
     }
     if(!strcmp(type,"color")){
-        w->card=card(pg,786,196);
+        // A 150px ring needs only a half-width tile on the 800px screen.
+        // Height stays 196px, matching WT32 and leaving a 2-column layout.
+        w->card=card(pg,390,196);
         lv_obj_t *heading=label(w->card,display,0xF3F6F7,&mira_font_fr_16);
         lv_obj_set_pos(heading,8,3);
         // Native WT32-equivalent hue wheel, retaining LVGL 9.6 and PSRAM.
@@ -1945,8 +1951,10 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         w->color_sat=initial.s;
         w->color_val=initial.v;
         w->control=lv_obj_create(w->card);
-        lv_obj_set_size(w->control,MIRA_WHEEL_SIZE,MIRA_WHEEL_SIZE);
-        lv_obj_align(w->control,LV_ALIGN_CENTER,0,10); // WT32 position
+        // Give the marker space to cross the ring edge without being cut
+        // by the square boundaries of the LVGL parent object.
+        lv_obj_set_size(w->control,MIRA_WHEEL_CONTAINER_SIZE,MIRA_WHEEL_CONTAINER_SIZE);
+        lv_obj_align(w->control,LV_ALIGN_CENTER,0,6);
         lv_obj_set_style_pad_all(w->control,0,0);
         lv_obj_set_style_bg_color(w->control,panel_c(),0);
         lv_obj_set_style_border_width(w->control,0,0);
@@ -1956,7 +1964,7 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         if(wheel_prepare_bitmap(w)){
             w->color_wheel_image=lv_image_create(w->control);
             lv_image_set_src(w->color_wheel_image,&w->color_wheel_bitmap->dsc);
-            lv_obj_set_pos(w->color_wheel_image,0,0);
+            lv_obj_set_pos(w->color_wheel_image,MIRA_WHEEL_PADDING,MIRA_WHEEL_PADDING);
             lv_obj_remove_flag(w->color_wheel_image,LV_OBJ_FLAG_CLICKABLE);
         }else{
             ESP_LOGW(TAG,"No PSRAM for WT32-equivalent color wheel");
