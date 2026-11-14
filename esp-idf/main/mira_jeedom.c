@@ -1084,7 +1084,7 @@ static esp_err_t beta_events_get(httpd_req_t *req){
     free(raw);
     const cJSON *actions=index?cJSON_GetObjectItemCaseSensitive(index,"actions"):NULL;
     const int count=cJSON_IsArray(actions)?cJSON_GetArraySize(actions):0;
-    // MAX_BINDINGS=40; a media composite registers up to 15 Jeedom
+    // A single media widget registers up to 15 Jeedom
     // actions per widget. Include the three internal weather Infos.
     if(count<0||count>640){
         if(index)cJSON_Delete(index);
@@ -1657,10 +1657,10 @@ static esp_err_t beta_lvgl_append(httpd_req_t *req){
         return ESP_FAIL;
     }
     cJSON *array=cJSON_GetObjectItemCaseSensitive(beta_lvgl_stage,"lvgl");
-    // Arduino MiraPanelUI::MAX_BINDINGS=40. Do not accept 41-64 widgets
-    // which the screen would silently ignore after a successful Web save.
-    if(cJSON_GetArraySize(array)>=40){
-        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Maximum 40 widgets LVGL");
+    // Use the renderer limit, not the number of Jeedom action bindings.
+    // A media widget counts as one tile and can expose 15 commands.
+    if(cJSON_GetArraySize(array)>=MIRA_WIDGET_LIMIT){
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Maximum 20 widgets LVGL");
         return ESP_FAIL;
     }
     cJSON *item=cJSON_CreateObject();
@@ -1712,9 +1712,9 @@ static esp_err_t beta_lvgl_save(httpd_req_t *req){
         return ESP_FAIL;
     }
     const cJSON *pending=cJSON_GetObjectItemCaseSensitive(beta_lvgl_stage,"lvgl");
-    if(!cJSON_IsArray(pending)||cJSON_GetArraySize(pending)>40){
+    if(!cJSON_IsArray(pending)||cJSON_GetArraySize(pending)>MIRA_WIDGET_LIMIT){
         httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,
-                            "Programmation LVGL depasse 40 widgets");
+                            "Programmation LVGL depasse 20 widgets");
         return ESP_FAIL;
     }
     char *out=cJSON_PrintUnformatted(beta_lvgl_stage);
@@ -1788,7 +1788,7 @@ static esp_err_t programui(httpd_req_t *req) {
     const cJSON *widgets=root?cJSON_GetObjectItemCaseSensitive(root,"lvgl"):NULL;
     bool valid=cJSON_IsArray(widgets);
     const int count=valid?cJSON_GetArraySize(widgets):0;
-    if(count>40)valid=false;  // Exact firmware-beta MiraPanelUI::MAX_BINDINGS.
+    if(count>MIRA_WIDGET_LIMIT)valid=false;  // Shared 7-inch graphical widget ceiling.
     if(valid){
         const cJSON *entry=NULL;
         cJSON_ArrayForEach(entry,widgets){
