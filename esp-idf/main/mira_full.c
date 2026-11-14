@@ -2804,19 +2804,32 @@ static void build_config(void){
     }
     widget_count=(uint32_t)widget_n;
     cJSON_Delete(root);
-    // A configuration change rebuilds LVGL widgets. Reapply only passive
-    // observations already received, never dispatch Jeedom/MQTT actions.
-    for(uint8_t i=0;i<widget_n;i++){
-        const mira_widget_t *w=&widgets[i];
-        if(strcmp(w->type,"toggle")&&strcmp(w->type,"range")&&
-           strcmp(w->type,"color"))continue;
-        char cached[160]={0};
-        if(!mira_full_cached_state(w->name,cached,sizeof(cached)))continue;
-        mira_state_update_t replay={0};
-        snprintf(replay.name,sizeof(replay.name),"%.95s",w->name);
-        snprintf(replay.value,sizeof(replay.value),"%s",cached);
-        apply_state_on_lvgl_task(&replay);
+    // Match the WT32's persistent action values: a theme/program rebuild must
+    // restore ALL previously received passive data, not just toggles/sliders.
+    // Info, thermostat temperature/mode/setpoint, energy and media components
+    // share the same PSRAM state cache. Never send an outgoing Jeedom action.
+    // Take only one 256-byte snapshot at a time (no internal heap allocation)
+    // and do not hold the cache mutex during LVGL updates.
+    size_t cached_count=0;
+    if(state_cache&&state_cache_lock&&
+       xSemaphoreTake(state_cache_lock,pdMS_TO_TICKS(40))==pdTRUE){
+        cached_count=state_cache_count;
+        xSemaphoreGive(state_cache_lock);
     }
+    for(size_t ci=0;ci<cached_count;ci++){
+        mira_state_update_t replay={0};
+        bool have=false;
+        if(xSemaphoreTake(state_cache_lock,pdMS_TO_TICKS(40))==pdTRUE){
+            if(ci<state_cache_count){
+                replay=state_cache[ci];
+                have=replay.name[0]!=0;
+            }
+            xSemaphoreGive(state_cache_lock);
+        }
+        if(have)apply_state_on_lvgl_task(&replay);
+    }
+    ESP_LOGI(TAG,"MIRA_WIDGET_REPLAY: %u cached passive values restored after rebuild",
+             (unsigned)cached_count);
     if(!count)empty_notice("Aucun widget programmé : importer la configuration Jeedom");
     ESP_LOGI(TAG,"Mira JSON chargé, widgets=%u, heap PSRAM libre=%u",
              widget_n,(unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
