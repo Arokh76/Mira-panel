@@ -2489,7 +2489,7 @@ static bool jeedom_request_passive_states(void){
     nvs_close(cfg);
     if(!ready||!decimal_id(init)||strncmp(base,"http://",7)||
        strchr(base,'?')||strchr(base,'#')||strchr(base,'@')||
-       strchr(base,'\\r')||strchr(base,'\\n'))return false;
+       strchr(base,'\r')||strchr(base,'\n'))return false;
     size_t len=strlen(base);
     while(len>7&&base[len-1]=='/')base[--len]=0;
     char token[768];
