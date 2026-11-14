@@ -104,10 +104,29 @@ static bool pop_pending_state(mira_state_update_t *out){
 typedef struct {char name[96];char url[769];} mira_cover_update_t;
 static QueueHandle_t cover_update_queue;
 static uint32_t media_cover_received,media_cover_matched,media_cover_unmatched;
-#define MIRA_COVER_SLOTS 40
+#define MIRA_COVER_SLOTS MAX_WIDGETS // one coalesced cover URL per graphical widget
 static mira_cover_update_t *pending_covers;
 static SemaphoreHandle_t pending_covers_lock;
 static size_t pending_cover_cursor;
+// Required even on Mira 7's lightweight Jeedom passive boot: unlike the
+// optional mira_full_storage_init(), this runs on the actual boot path.
+static bool mira_full_cover_prepare(void){
+    if(pending_covers&&pending_covers_lock)return true;
+    mira_cover_update_t *new_covers=heap_caps_calloc(MIRA_COVER_SLOTS,
+                                  sizeof(*new_covers),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    SemaphoreHandle_t new_lock=xSemaphoreCreateMutex();
+    if(!new_covers||!new_lock){
+        heap_caps_free(new_covers);
+        if(new_lock)vSemaphoreDelete(new_lock);
+        ESP_LOGW(TAG,"MIRA_MEDIA_COVER_PSRAM_INIT_FAILED");
+        return false;
+    }
+    pending_covers=new_covers;
+    pending_covers_lock=new_lock;
+    ESP_LOGI(TAG,"MIRA_MEDIA_COVER_PSRAM_READY: %u slots",
+             (unsigned)MIRA_COVER_SLOTS);
+    return true;
+}
 static bool put_pending_cover(const mira_cover_update_t *cover){
     if(!cover||!pending_covers||!pending_covers_lock||
        xSemaphoreTake(pending_covers_lock,pdMS_TO_TICKS(20))!=pdTRUE)return false;
@@ -4157,7 +4176,10 @@ bool mira_full_storage_prepare(void){
 // and the /get cache, both in PSRAM. No internal state/cover FIFO, no camera,
 // no album-art task, no MQTT and no outbound HTTP action worker.
 bool mira_full_passive_init(void){
-    if(pending_states&&state_cache&&pending_states_lock&&state_cache_lock)return true;
+    if(pending_states&&state_cache&&pending_states_lock&&state_cache_lock){
+        (void)mira_full_cover_prepare();
+        return true;
+    }
     mira_state_update_t *new_pending=heap_caps_calloc(
         MIRA_PENDING_STATE_SLOTS,sizeof(*new_pending),
         MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
@@ -4184,6 +4206,10 @@ bool mira_full_passive_init(void){
     state_cache=new_cache;
     pending_states_lock=new_pending_lock;
     state_cache_lock=new_cache_lock;
+    // The plugin's __cover Info URLs are passive Jeedom state updates too.
+    // Without this allocation, every cover is refused with HTTP 503 on the
+    // 7-inch despite the album worker and UI being implemented correctly.
+    (void)mira_full_cover_prepare();
     ESP_LOGI(TAG,"JEEDOM_PASSIVE_PSRAM_READY: %u slots, %u cache, internal_free=%u largest=%u dma_free=%u dma_largest=%u psram_free=%u",
         (unsigned)MIRA_PENDING_STATE_SLOTS,(unsigned)MIRA_STATE_CACHE_LIMIT,
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
