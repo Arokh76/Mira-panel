@@ -44,7 +44,7 @@
 #define MIRA_HEIGHT 480
 #define NAV_H 50
 #define CONTENT_H (MIRA_HEIGHT - NAV_H)
-#define MAX_WIDGETS MIRA_WIDGET_LIMIT // 20 graphical tiles, not Jeedom commands
+#define MAX_WIDGETS MIRA_WIDGET_LIMIT // 30 graphical tiles, not Jeedom commands
 #define JSON_MAX 49152
 static const char *TAG="mira-full-43";
 static const char *JSON_PATH="/spiffs/miralvgl.json";
