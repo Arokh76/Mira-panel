@@ -1102,6 +1102,32 @@ static void thermostat_mode_selected(lv_event_t *event){
     // independently of the Jeedom list command.
     (void)mira_beta_user_action(name,"list",value,name,value,true);
 }
+// The shared WT32 media normalizer is defined later, before state replay.
+static void mira_media_display_text(const char *src,char *out,size_t cap);
+static void media_dropdown_opened(lv_event_t *event){
+    // The pop-up is a separate LVGL object; style both its ordinary rows
+    // and the selected row, as in the WT32 thermostat/media dropdowns.
+    lv_obj_t *dropdown=lv_event_get_target_obj(event);
+    lv_obj_t *list=lv_dropdown_get_list(dropdown);
+    if(!list)return;
+    lv_obj_set_style_bg_color(list,panel2_c(),LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(list,LV_OPA_COVER,LV_PART_MAIN);
+    lv_obj_set_style_text_color(list,lv_color_hex(0xF3F6F7),LV_PART_MAIN);
+    lv_obj_set_style_text_font(list,&mira_font_fr_16,LV_PART_MAIN);
+    lv_obj_set_style_border_color(list,border_c(),LV_PART_MAIN);
+    lv_obj_set_style_border_width(list,1,LV_PART_MAIN);
+    lv_obj_set_style_radius(list,9,LV_PART_MAIN);
+    lv_obj_set_style_bg_color(list,lv_color_hex(0x244563),LV_PART_SELECTED);
+    lv_obj_set_style_text_color(list,lv_color_white(),LV_PART_SELECTED);
+    lv_obj_set_style_bg_color(list,lv_color_hex(0x244563),
+                              LV_PART_SELECTED|LV_STATE_CHECKED);
+    lv_obj_set_style_text_color(list,lv_color_white(),
+                                LV_PART_SELECTED|LV_STATE_CHECKED);
+    lv_obj_set_style_bg_color(list,lv_color_hex(0x244563),
+                              LV_PART_SELECTED|LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(list,lv_color_white(),
+                                LV_PART_SELECTED|LV_STATE_PRESSED);
+}
 static void media_select_active_device(mira_widget_t *w){
     if(!w||!w->media_device_dropdown||!w->media_active_device[0])return;
     const char *options=lv_dropdown_get_options(w->media_device_dropdown);
@@ -1158,6 +1184,10 @@ static void media_direct_action(lv_event_t *event) {
     // device selection is deliberately Jeedom-only (not an MQTT command).
     const bool sent=mira_beta_user_action(command,(action>=3)?"range":"button",
                                           payload,command,payload,action!=4);
+    if(action==3&&sent&&w->fields[5]){
+        // WT32 shows the touched volume immediately, before next Jeedom Info.
+        lv_label_set_text_fmt(w->fields[5],"%s %%",payload);
+    }
     if(action==1&&sent){
         w->media_is_playing=!w->media_is_playing;
         if(w->media_play_caption)lv_label_set_text(w->media_play_caption,w->media_is_playing?LV_SYMBOL_PAUSE:LV_SYMBOL_PLAY);
@@ -2085,10 +2115,17 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         lv_obj_set_pos(w->media_device_dropdown,538,10);
         lv_obj_set_size(w->media_device_dropdown,226,38);
         lv_dropdown_set_options(w->media_device_dropdown,"Sélectionner un appareil");
+        lv_obj_set_style_text_font(w->media_device_dropdown,&mira_font_fr_16,0);
+        lv_obj_set_style_text_color(w->media_device_dropdown,lv_color_hex(0xF3F6F7),0);
+        lv_obj_set_style_text_color(w->media_device_dropdown,lv_color_white(),LV_STATE_CHECKED);
+        lv_obj_set_style_text_color(w->media_device_dropdown,lv_color_white(),LV_STATE_FOCUSED);
+        lv_obj_set_style_text_color(w->media_device_dropdown,lv_color_white(),LV_STATE_PRESSED);
         lv_obj_set_style_radius(w->media_device_dropdown,10,0);
         lv_obj_set_style_bg_color(w->media_device_dropdown,panel2_c(),0);
         lv_obj_set_style_border_color(w->media_device_dropdown,cyan_c(),0);
         lv_obj_set_style_border_width(w->media_device_dropdown,1,0);
+        lv_obj_add_event_cb(w->media_device_dropdown,media_dropdown_opened,
+                            LV_EVENT_READY,NULL);
         const uintptr_t device=((uintptr_t)(w-widgets)<<3)|4u;
         lv_obj_add_event_cb(w->media_device_dropdown,media_direct_action,
                             LV_EVENT_VALUE_CHANGED,(void*)(device+1));
@@ -2137,8 +2174,10 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         for(int n=0;n<9;n++){
             const char *initial=n==0?"Aucune lecture":n==3?"À l'arrêt":
                                 n==4?"-- %":n==5?"-- %":"";
-            const lv_font_t *font=n==0?&lv_font_montserrat_28:
-                                  n==1?&lv_font_montserrat_20:
+            // Use Mira's precomposed French glyph fonts. Regular LVGL
+            // Montserrat 28/20 lacks accents and renders empty squares.
+            const lv_font_t *font=n==0?&mira_font_fr_28:
+                                  n==1?&mira_font_fr_16:
                                   n==2?&mira_font_fr_16:&mira_font_fr_14;
             uint32_t color=n==0?0xF3F6F7:0xA8B2B8;
             w->fields[n]=label(w->card,initial,color,font);
@@ -3558,14 +3597,21 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                                         mira_label_set_text_if_changed(w->media_play_caption,playing?LV_SYMBOL_PAUSE:LV_SYMBOL_PLAY);
                                 }
                             }else if(n==7) {
-                                snprintf(w->media_active_device,sizeof(w->media_active_device),"%.95s",msg->value);
+                                mira_media_display_text(msg->value,w->media_active_device,
+                                                        sizeof(w->media_active_device));
+                                // Trim source-name whitespace like the WT32.
+                                size_t active_len=strlen(w->media_active_device);
+                                while(active_len && isspace((unsigned char)w->media_active_device[active_len-1]))
+                                    w->media_active_device[--active_len]=0;
                                 media_select_active_device(w);
                             }else if(n==5&&w->media_slider) {
                                 const int value=clamp(atoi(msg->value),0,100);
                                 lv_slider_set_value(w->media_slider,value,LV_ANIM_OFF);
                             }else if(n==8&&w->media_device_dropdown) {
-                                char options[240];
-                                snprintf(options,sizeof(options),"Sélectionner un appareil\n%.159s",msg->value);
+                                char normalized[256];
+                                mira_media_display_text(msg->value,normalized,sizeof(normalized));
+                                char options[300];
+                                snprintf(options,sizeof(options),"Sélectionner un appareil\n%.220s",normalized);
                                 for(char *p=options;*p;p++)if(*p=='|'||*p==';')*p='\n';
                                 lv_dropdown_set_options(w->media_device_dropdown,options);
                                 lv_dropdown_set_selected(w->media_device_dropdown,0);
