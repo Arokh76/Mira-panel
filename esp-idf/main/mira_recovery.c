@@ -750,6 +750,9 @@ static void wifi_status_event(void *arg,esp_event_base_t base,int32_t id,void *d
         // Schedule first initialization (or restart) in the dedicated task.
         // Do not invoke SNTP from the IP event handler.
         clock_start_requested=true;
+        // WT32 parity: when STA has an IP again, asynchronously ask Jeedom
+        // for fresh passive Info/Toggle states. This callback does no HTTP.
+        mira_jeedom_network_reconnected();
         ESP_LOGI(TAG,"Station Wi-Fi connected; recovery AP will be disabled");
     }else if(base==WIFI_EVENT&&id==WIFI_EVENT_STA_DISCONNECTED){
         station_connected=false;
