@@ -7,6 +7,9 @@ void mira_jeedom_register_http(httpd_handle_t server);
 
 // Called once after NVS, Wi-Fi and SPIFFS are initialized.
 esp_err_t mira_jeedom_action_init(void);
+// Notify the Jeedom worker when STA obtains an IP (initial boot or reconnect).
+// Queues read-only state replay; never performs HTTP inside the Wi-Fi callback.
+void mira_jeedom_network_reconnected(void);
 // Queue and worker status, independent of Jeedom enabled/disabled UI setting.
 bool mira_jeedom_action_ready(void);
 // First memory-budget phase: passive HTTP/SSE without any outbound task.
