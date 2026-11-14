@@ -25,6 +25,8 @@
 #include "cJSON.h"
 #include "nvs.h"
 #include "lvgl.h"
+// Pinned LVGL 9.6 keeps variable-image cache invalidation in this internal header.
+#include "misc/cache/instance/lv_image_cache.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
