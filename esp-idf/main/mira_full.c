@@ -320,6 +320,7 @@ static lv_image_dsc_t camera_dsc;
 static uint16_t *camera_image_pixels;
 static uint32_t camera_last_update;
 
+struct mira_wheel_bitmap;
 typedef struct {
     char name[96], unit[24], type[24], value[160];
     uint8_t page_index;
@@ -328,7 +329,8 @@ typedef struct {
     lv_obj_t *info_icon,*info_name;
     lv_obj_t *thermostat_temperature,*thermostat_mode,*thermostat_mode_select;
     lv_obj_t *color_saturation,*color_brightness,*color_preview;
-    lv_obj_t *color_knob;
+    lv_obj_t *color_knob,*color_wheel_image;
+    struct mira_wheel_bitmap *color_wheel_bitmap;
     uint16_t color_hue;
     uint8_t color_sat,color_val;
     lv_obj_t *fields[9]; // energy/media passive Jeedom composite infos
@@ -623,52 +625,106 @@ static void nav_click(lv_event_t *e){
     }else show_page(index);
 }
 static void remember_passive_state(const mira_state_update_t *msg);
-// LVGL 9 removed the LVGL 8 colorwheel: recreate the ORIGINAL 150px
-// hue ring as a cached RGB565 bitmap. Hue uses a real circular touch target;
-// saturation/value sliders preserve the complete RGB gamut. One bitmap is
-// shared by every card and rebuilt only when the theme palette changes.
+// Mira WT32 uses LVGL 8's fixed HUE colorwheel. LVGL 9.6 removed it:
+// reproduce its 150px geometry, red-at-bottom hue direction, knob, and
+// saturation/value-tinted ring in a PSRAM-backed RGB565 image per color tile.
+// Never change RGB DMA buffers or allocate the wheel image in internal RAM.
 #define MIRA_WHEEL_SIZE 150
 #define MIRA_WHEEL_CENTER (MIRA_WHEEL_SIZE/2)
-static uint16_t *wheel_pixels;
-static lv_image_dsc_t wheel_dsc;
-static uint8_t wheel_bitmap_theme=255;
+#define MIRA_WHEEL_ARC_WIDTH 14
+typedef struct mira_wheel_bitmap {
+    lv_image_dsc_t dsc;
+    uint16_t pixels[MIRA_WHEEL_SIZE*MIRA_WHEEL_SIZE];
+    uint8_t sat,val,theme;
+} mira_wheel_bitmap_t;
 static uint16_t wheel_rgb565(uint32_t c){
     return (uint16_t)(((c>>19)&31u)<<11|((c>>10)&63u)<<5|((c>>3)&31u));
 }
-static bool wheel_prepare_bitmap(void){
-    if(wheel_pixels&&wheel_bitmap_theme==ui_theme)return true;
-    if(!wheel_pixels){
-        wheel_pixels=heap_caps_malloc(MIRA_WHEEL_SIZE*MIRA_WHEEL_SIZE*2u,
-                                      MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
-        if(!wheel_pixels)return false;
+static uint32_t wheel_blend(uint32_t bg,uint32_t fg,uint32_t alpha){
+    const uint32_t inv=255u-alpha;
+    const uint32_t red=(((bg>>16)&255u)*inv+((fg>>16)&255u)*alpha+127u)/255u;
+    const uint32_t green=(((bg>>8)&255u)*inv+((fg>>8)&255u)*alpha+127u)/255u;
+    const uint32_t blue=((bg&255u)*inv+(fg&255u)*alpha+127u)/255u;
+    return (red<<16)|(green<<8)|blue;
+}
+static bool wheel_prepare_bitmap(mira_widget_t *w){
+    if(!w)return false;
+    mira_wheel_bitmap_t *bitmap=w->color_wheel_bitmap;
+    const bool fresh=bitmap==NULL;
+    if(fresh){
+        bitmap=heap_caps_calloc(1,sizeof(*bitmap),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+        if(!bitmap){
+            ESP_LOGW(TAG,"MIRA_COLORWHEEL_NO_PSRAM: need %u bytes",
+                     (unsigned)sizeof(*bitmap));
+            return false;
+        }
+        w->color_wheel_bitmap=bitmap;
+    }else if(bitmap->sat==w->color_sat&&bitmap->val==w->color_val&&
+             bitmap->theme==ui_theme){
+        return true;
+    }else{
+        // A variable image's decoded content may be in LVGL's image cache.
+        // Drop it BEFORE changing PSRAM pixels; retain the descriptor pointer.
+        lv_image_cache_drop(&bitmap->dsc);
     }
-    uint32_t bg=lv_color_to_u32(panel_c())&0xffffffu;
-    const uint16_t fill=wheel_rgb565(bg);
+    const uint32_t bg=lv_color_to_u32(panel_c())&0xffffffu;
+    uint32_t palette[360];
+    for(unsigned h=0;h<360;h++)
+        palette[h]=lv_color_to_u32(lv_color_hsv_to_rgb(h,w->color_sat,w->color_val))&0xffffffu;
+    // The original LVGL 8 wheel uses a 14-pixel arc, with antialiased inner
+    // and outer edges. Rotate hue zero to 6 o'clock, matching the WT32.
+    const float inner=(float)MIRA_WHEEL_CENTER-(float)MIRA_WHEEL_ARC_WIDTH;
+    const float outer=(float)MIRA_WHEEL_CENTER;
     for(int y=0;y<MIRA_WHEEL_SIZE;y++){
+        const float dy=(float)y+0.5f-(float)MIRA_WHEEL_CENTER;
         for(int x=0;x<MIRA_WHEEL_SIZE;x++){
-            float dx=(float)(x-MIRA_WHEEL_CENTER)+0.5f;
-            float dy=(float)(y-MIRA_WHEEL_CENTER)+0.5f;
-            float distance2=dx*dx+dy*dy;
-            uint16_t pixel=fill;
-            if(distance2>=58.0f*58.0f&&distance2<=74.0f*74.0f){
-                float angle=atan2f(dx,-dy);
-                if(angle<0)angle+=6.2831853f;
-                int hue=(int)lroundf(angle*(180.0f/3.14159265f))%360;
-                const lv_color_t color=lv_color_hsv_to_rgb(hue,100,100);
-                pixel=wheel_rgb565(lv_color_to_u32(color)&0xffffffu);
+            const float dx=(float)x+0.5f-(float)MIRA_WHEEL_CENTER;
+            const float d2=dx*dx+dy*dy;
+            uint32_t color=bg;
+            if(d2>(inner-1.0f)*(inner-1.0f)&&d2<(outer+1.0f)*(outer+1.0f)){
+                const float d=sqrtf(d2);
+                // One-pixel antialias on both edges; background remains
+                // identical to the WT32-style dark card (RGB565 texture).
+                float a=d-(inner-0.5f);
+                if(a>1.0f)a=1.0f;
+                const float b=(outer+0.5f)-d;
+                if(b<a)a=b;
+                if(a>1.0f)a=1.0f;
+                if(a>0.0f){
+                    float angle=atan2f(dx,dy); // red at bottom; clockwise
+                    if(angle<0)angle+=6.28318530718f;
+                    const unsigned hue=(unsigned)lroundf(angle*57.2957795f)%360u;
+                    const uint32_t fg=palette[hue];
+                    color=a>=1.0f?fg:wheel_blend(bg,fg,(uint32_t)(a*255.0f+0.5f));
+                }
             }
-            wheel_pixels[y*MIRA_WHEEL_SIZE+x]=pixel;
+            bitmap->pixels[y*MIRA_WHEEL_SIZE+x]=wheel_rgb565(color);
         }
     }
-    memset(&wheel_dsc,0,sizeof(wheel_dsc));
-    wheel_dsc.header.magic=LV_IMAGE_HEADER_MAGIC;
-    wheel_dsc.header.cf=LV_COLOR_FORMAT_RGB565;
-    wheel_dsc.header.w=MIRA_WHEEL_SIZE;
-    wheel_dsc.header.h=MIRA_WHEEL_SIZE;
-    wheel_dsc.data_size=MIRA_WHEEL_SIZE*MIRA_WHEEL_SIZE*2u;
-    wheel_dsc.data=(const uint8_t *)wheel_pixels;
-    wheel_bitmap_theme=ui_theme;
+    bitmap->dsc.header.magic=LV_IMAGE_HEADER_MAGIC;
+    bitmap->dsc.header.cf=LV_COLOR_FORMAT_RGB565;
+    bitmap->dsc.header.w=MIRA_WHEEL_SIZE;
+    bitmap->dsc.header.h=MIRA_WHEEL_SIZE;
+    bitmap->dsc.data_size=sizeof(bitmap->pixels);
+    bitmap->dsc.data=(const uint8_t *)bitmap->pixels;
+    bitmap->sat=w->color_sat;bitmap->val=w->color_val;bitmap->theme=ui_theme;
+    if(w->color_wheel_image){
+        lv_image_set_src(w->color_wheel_image,&bitmap->dsc);
+        lv_obj_invalidate(w->color_wheel_image);
+    }
     return true;
+}
+static void wheel_release_all(void){
+    // Called on LVGL task before deleting tiles on JSON/theme rebuild.
+    for(uint8_t i=0;i<widget_n;i++){
+        mira_widget_t *w=&widgets[i];
+        if(!w->color_wheel_bitmap)continue;
+        if(w->color_wheel_image)lv_image_set_src(w->color_wheel_image,NULL);
+        lv_image_cache_drop(&w->color_wheel_bitmap->dsc);
+        heap_caps_free(w->color_wheel_bitmap);
+        w->color_wheel_bitmap=NULL;
+        w->color_wheel_image=NULL;
+    }
 }
 static void wheel_mark_hue(mira_widget_t *w,int hue){
     if(!w||!w->control)return;
@@ -676,11 +732,13 @@ static void wheel_mark_hue(mira_widget_t *w,int hue){
     w->color_hue=(uint16_t)(hue%360);
     if(w->color_knob){
         const float angle=(float)w->color_hue*(3.14159265f/180.0f);
-        const int x=MIRA_WHEEL_CENTER+(int)lroundf(66.0f*sinf(angle))-7;
-        const int y=MIRA_WHEEL_CENTER-(int)lroundf(66.0f*cosf(angle))-7;
+        // LVGL 8: marker radius=(wheel diameter - arc width)/2.
+        const float radius=(float)(MIRA_WHEEL_SIZE-MIRA_WHEEL_ARC_WIDTH)/2.0f;
+        const int x=MIRA_WHEEL_CENTER+(int)lroundf(radius*sinf(angle))-7;
+        const int y=MIRA_WHEEL_CENTER+(int)lroundf(radius*cosf(angle))-7;
         lv_obj_set_pos(w->color_knob,x,y);
         lv_obj_set_style_bg_color(w->color_knob,
-            lv_color_hsv_to_rgb(w->color_hue,100,100),0);
+            lv_color_hsv_to_rgb(w->color_hue,w->color_sat,w->color_val),0);
     }
 }
 static void event_local(lv_event_t *e);
@@ -700,18 +758,18 @@ static void wheel_touch(lv_event_t *event){
     const float dx=(float)p.x-(float)(area.x1+MIRA_WHEEL_CENTER);
     const float dy=(float)p.y-(float)(area.y1+MIRA_WHEEL_CENTER);
     const float r2=dx*dx+dy*dy;
-    if(r2<44.0f*44.0f||r2>84.0f*84.0f)return;
-    float angle=atan2f(dx,-dy);
-    if(angle<0)angle+=6.2831853f;
-    int hue=(int)lroundf(angle*57.2957795f)%360;
+    // Match the original LVGL 8 colorwheel's inner hit radius (54px).
+    // The extra 3px at the outside makes edge dragging easier.
+    if(r2<54.0f*54.0f||r2>78.0f*78.0f)return;
+    float angle=atan2f(dx,dy);
+    if(angle<0)angle+=6.28318530718f;
+    const int hue=(int)lroundf(angle*57.2957795f)%360;
     if(w->color_hue!=hue){
         wheel_mark_hue(w,hue);
-        const int sat=w->color_sat;
-        const int brightness=w->color_val;
         if(w->color_preview)
             lv_obj_set_style_bg_color(w->color_preview,
-              lv_color_hsv_to_rgb(w->color_hue,sat,brightness),0);
-        /* The beta publishes each changed RGB while dragging. */
+              lv_color_hsv_to_rgb(w->color_hue,w->color_sat,w->color_val),0);
+        // Keep existing per-change Jeedom/MQTT RGB sends and final release.
         event_local(event);
     }
 }
@@ -1865,30 +1923,29 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         w->card=card(pg,786,196);
         lv_obj_t *heading=label(w->card,display,0xF3F6F7,&mira_font_fr_16);
         lv_obj_set_pos(heading,8,3);
-        // Restore the beta hue WHEEL (not a linear arc). The shared image
-        // costs only 45KB PSRAM and does not recompute on scroll/redraw.
+        // Native WT32-equivalent hue wheel, retaining LVGL 9.6 and PSRAM.
         const lv_color_hsv_t initial=lv_color_rgb_to_hsv(50,120,180);
         w->color_sat=initial.s;
         w->color_val=initial.v;
         w->control=lv_obj_create(w->card);
         lv_obj_set_size(w->control,MIRA_WHEEL_SIZE,MIRA_WHEEL_SIZE);
-        lv_obj_set_pos(w->control,318,36);
+        lv_obj_align(w->control,LV_ALIGN_CENTER,0,10); // WT32 position
         lv_obj_set_style_pad_all(w->control,0,0);
         lv_obj_set_style_bg_color(w->control,panel_c(),0);
         lv_obj_set_style_border_width(w->control,0,0);
         lv_obj_set_style_radius(w->control,LV_RADIUS_CIRCLE,0);
         lv_obj_set_style_shadow_width(w->control,0,0);
         no_scroll(w->control);
-        if(wheel_prepare_bitmap()){
-            lv_obj_t *ring=lv_image_create(w->control);
-            lv_image_set_src(ring,&wheel_dsc);
-            lv_obj_set_pos(ring,0,0);
-            lv_obj_remove_flag(ring,LV_OBJ_FLAG_CLICKABLE);
+        if(wheel_prepare_bitmap(w)){
+            w->color_wheel_image=lv_image_create(w->control);
+            lv_image_set_src(w->color_wheel_image,&w->color_wheel_bitmap->dsc);
+            lv_obj_set_pos(w->color_wheel_image,0,0);
+            lv_obj_remove_flag(w->color_wheel_image,LV_OBJ_FLAG_CLICKABLE);
         }else{
-            ESP_LOGW(TAG,"No PSRAM for the beta hue wheel");
+            ESP_LOGW(TAG,"No PSRAM for WT32-equivalent color wheel");
         }
         w->color_knob=lv_obj_create(w->control);
-        lv_obj_set_size(w->color_knob,14,14);
+        lv_obj_set_size(w->color_knob,MIRA_WHEEL_ARC_WIDTH,MIRA_WHEEL_ARC_WIDTH);
         lv_obj_set_style_pad_all(w->color_knob,0,0);
         lv_obj_set_style_radius(w->color_knob,LV_RADIUS_CIRCLE,0);
         lv_obj_set_style_border_color(w->color_knob,cyan_c(),0);
@@ -1897,9 +1954,7 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         no_scroll(w->color_knob);
         lv_obj_remove_flag(w->color_knob,LV_OBJ_FLAG_CLICKABLE);
         wheel_mark_hue(w,initial.h);
-        // Arduino beta: fixed Hue-only wheel in a 196 px card. There are
-        // NO separate saturation/value sliders. Preserve the RGB-derived
-        // saturation/value internally when remote state changes.
+        // Fixed HUE mode as on WT32; RGB stays saturated/valued as received.
         lv_obj_add_event_cb(w->control,wheel_touch,LV_EVENT_PRESSED,w);
         lv_obj_add_event_cb(w->control,wheel_touch,LV_EVENT_PRESSING,w);
         lv_obj_add_event_cb(w->control,event_local,LV_EVENT_RELEASED,w);
@@ -2719,6 +2774,7 @@ static void build_config(void){
     }
     artwork_reset(); // detach any old cover before deleting media cards
     scroll_cache_reset(); // release every LVGL image reference BEFORE card deletion
+    wheel_release_all(); // drop each colorwheel image source/cache before freeing PSRAM
     widget_n=0;clock_text=NULL;date_text=NULL;clock_status_text=NULL;
     clock_weather_temperature_label=NULL;clock_weather_condition_label=NULL;
     for(size_t i=0;i<3;i++)clock_weather_icons[i]=NULL;
@@ -3592,9 +3648,10 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
             if(valid){
                 const lv_color_hsv_t hsv=lv_color_rgb_to_hsv((uint8_t)r,(uint8_t)g,(uint8_t)b);
                 suppress_events=true;
-                wheel_mark_hue(w,hsv.h);
                 w->color_sat=hsv.s;
                 w->color_val=hsv.v;
+                (void)wheel_prepare_bitmap(w); // WT32 ring follows RGB saturation/value
+                wheel_mark_hue(w,hsv.h);
                 if(w->color_saturation)
                     lv_slider_set_value(w->color_saturation,hsv.s,LV_ANIM_OFF);
                 if(w->color_brightness)
