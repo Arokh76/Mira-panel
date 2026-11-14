@@ -3387,39 +3387,58 @@ static esp_err_t mira_bindings_direct_post(httpd_req_t *req){
 
 static esp_err_t jeedom_status_get(httpd_req_t *req) {
     if(!require_key(req))return ESP_FAIL;
-    char *raw=read_config(NULL);
-    uint32_t hash=raw?ui_config_hash(raw):0;
-    cJSON *index=raw?index_from_config(raw):NULL;
-    free(raw);
+    // WT32-style diagnostics: read the already published PSRAM index,
+    // never reparse the SPIFFS widget JSON in the 7 KiB INTERNAL HTTP task.
+    // Large diagnostics must not compete with display/DMA for internal heap.
     int total=0,valid=0,first_missing_local_id=-1;
-    const cJSON *items=index?cJSON_GetObjectItemCaseSensitive(index,"actions"):NULL,*item;
+    uint32_t hash=0;
+    const size_t max_ids=1280u; // index_rebuild caps actions at 640; toggle has two IDs.
+    int *ids=heap_caps_malloc(max_ids*sizeof(*ids),
+                              MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!ids){
+        httpd_resp_set_status(req,"503 Service Unavailable");
+        return httpd_resp_sendstr(req,"Memoire diagnostic indisponible");
+    }
+    bool index_ready=false;
+    if(mira_index_mutex &&
+       xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(250))==pdTRUE){
+        if(mira_action_refs&&mira_action_ref_count&&
+           mira_action_ref_count<=max_ids/2u){
+            hash=mira_index_hash;
+            index_ready=true;
+            for(size_t i=0;i<mira_action_ref_count;i++){
+                const mira_action_ref_t *ref=&mira_action_refs[i];
+                if(!strcmp(ref->type,"toggle")){
+                    ids[total++]=ref->id0;
+                    ids[total++]=ref->id1;
+                }else ids[total++]=ref->id;
+            }
+        }
+        xSemaphoreGive(mira_index_mutex);
+    }
+    if(!index_ready){
+        heap_caps_free(ids);
+        httpd_resp_set_status(req,"503 Service Unavailable");
+        return httpd_resp_sendstr(req,"Index Jeedom en PSRAM indisponible");
+    }
     nvs_handle_t map;
     const esp_err_t mapping_nvs_read_error=nvs_open("mira_idf_map",NVS_READONLY,&map);
     const bool nvs_ok=mapping_nvs_read_error==ESP_OK;
     char expected[12];
     snprintf(expected,sizeof(expected),"%08" PRIx32 ":",hash);
-    cJSON_ArrayForEach(item,items) {
-        int id[2],amount=1;
-        if(!strcmp(jstr((cJSON*)item,"type",""),"toggle")) {
-            id[0]=jint((cJSON*)item,"id0",-1);
-            id[1]=jint((cJSON*)item,"id1",-1);
-            amount=2;
-        }else id[0]=jint((cJSON*)item,"id",-1);
-        for(int i=0;i<amount;i++) {
-            total++;
-            if(!nvs_ok||id[i]<1||id[i]>4096){
-                if(first_missing_local_id<0)first_missing_local_id=id[i];
-                continue;
-            }
-            char key[14],stored[48]={0};
-            snprintf(key,sizeof(key),"cmd%d",id[i]);
-            if(nvs_read_string(map,key,stored,sizeof(stored))&&
-               !strncmp(stored,expected,9)&&decimal_id(stored+9))valid++;
-            else if(first_missing_local_id<0)first_missing_local_id=id[i];
+    for(int i=0;i<total;i++){
+        if(!nvs_ok||ids[i]<1||ids[i]>4096){
+            if(first_missing_local_id<0)first_missing_local_id=ids[i];
+            continue;
         }
+        char key[14],stored[48]={0};
+        snprintf(key,sizeof(key),"cmd%d",ids[i]);
+        if(nvs_read_string(map,key,stored,sizeof(stored))&&
+           !strncmp(stored,expected,9)&&decimal_id(stored+9))valid++;
+        else if(first_missing_local_id<0)first_missing_local_id=ids[i];
     }
     if(nvs_ok)nvs_close(map);
-    if(index)cJSON_Delete(index);
+    heap_caps_free(ids);
     nvs_handle_t cfg;
     bool persisted_enabled=false;
     esp_err_t persisted_mode_error=nvs_open("mira_idf_jeed",NVS_READONLY,&cfg);
@@ -3432,8 +3451,12 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
         (void)nvs_read_string(cfg,"Jeedom_Init_Cmd",init_id,sizeof(init_id));
         nvs_close(cfg);
     }
-    if(!decimal_id(init_id))
-        (void)mira_jeedom_copy_param("Jeedom_Init_Cmd",init_id,sizeof(init_id));
+    // Diagnostics must not trigger SPIFFS parsing or NVS recovery under HTTPD.
+    if(!decimal_id(init_id)&&mira_http_config&&mira_http_config_mutex&&
+       xSemaphoreTake(mira_http_config_mutex,pdMS_TO_TICKS(100))==pdTRUE){
+        snprintf(init_id,sizeof(init_id),"%s",mira_http_config->init);
+        xSemaphoreGive(mira_http_config_mutex);
+    }
     if(!decimal_id(init_id))init_id[0]=0;
     nvs_stats_t nvs_statistics={0};
     const esp_err_t nvs_stats_error=nvs_get_stats(NULL,&nvs_statistics);
@@ -3457,8 +3480,16 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
             mira_http_config->secret[0];
         xSemaphoreGive(mira_http_config_mutex);
     }
-    char body[1536];
-    snprintf(body,sizeof(body),
+    // The 7-inch HTTPD stack stays INTERNAL for flash/OTA safety, but the
+    // long diagnostic JSON belongs to PSRAM, not that scarce 7168B stack.
+    enum { MIRA_JEEDOM_STATUS_CAP=1536 };
+    char *body=heap_caps_malloc(MIRA_JEEDOM_STATUS_CAP,
+                                MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!body){
+        httpd_resp_set_status(req,"503 Service Unavailable");
+        return httpd_resp_sendstr(req,"Memoire JSON diagnostic indisponible");
+    }
+    const int json_len=snprintf(body,MIRA_JEEDOM_STATUS_CAP,
         "{\"jeedom_enabled\":%s,\"mapping_valid\":%s,"
         "\"ids_valid\":%d,\"ids_expected\":%d,"
         "\"mapping_first_missing_local_id\":%d,"
@@ -3512,8 +3543,15 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
         (int)__atomic_load_n(&mira_http_action_last_status,__ATOMIC_RELAXED),
         cached_bindings,
         http_config_ready?"true":"false");
+    if(json_len<0||json_len>=MIRA_JEEDOM_STATUS_CAP){
+        heap_caps_free(body);
+        httpd_resp_set_status(req,"503 Service Unavailable");
+        return httpd_resp_sendstr(req,"Diagnostic JSON trop long");
+    }
     httpd_resp_set_type(req,"application/json");
-    return httpd_resp_sendstr(req,body);
+    const esp_err_t sent=httpd_resp_send(req,body,json_len);
+    heap_caps_free(body);
+    return sent;
 }
 
 static void request_binding_sync(void){
