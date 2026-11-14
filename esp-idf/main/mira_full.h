@@ -44,5 +44,8 @@ typedef struct {
     uint32_t state_cache_evictions;
     uint32_t state_queue_dropped;
     uint32_t state_queue_pending;
+    uint32_t media_cover_received;
+    uint32_t media_cover_matched;
+    uint32_t media_cover_unmatched;
 } mira_full_state_diagnostics_t;
 void mira_full_state_diagnostics(mira_full_state_diagnostics_t *out);
