@@ -7,6 +7,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "freertos/idf_additions.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -77,7 +78,10 @@ bool mira_album_art_request(uint8_t widget_index,const char *url){
     if(!cover_url(url))return false;
     if(!art_lock&&mira_album_art_init()!=ESP_OK)return false;
     if(!worker_started){
-        if(xTaskCreate(cover_worker,"mira_album_art",6656,NULL,3,NULL)!=pdPASS){
+        // Album JPEG/TLS decoding is deferred and can run on a PSRAM-backed
+        // stack; preserve INTERNAL RAM for Wi-Fi, HTTPD, DMA and flash tasks.
+        if(xTaskCreateWithCaps(cover_worker,"mira_album_art",6656,NULL,3,NULL,
+                               MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)!=pdPASS){
             ESP_LOGW(TAG,"Deferred JPEG cover worker allocation failed");
             return false;
         }
