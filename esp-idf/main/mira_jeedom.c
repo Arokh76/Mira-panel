@@ -94,6 +94,8 @@ static bool mira_other_transport(const char *name,const char *type,
 
 // Request async synchronization after Jeedom changes its command table.
 static void request_binding_sync(void);
+static void mira_http_param_written(const char *name,const char *value);
+static void mira_http_load_stored(void);
 // As on WT32, the init command only requests passive state updates; it is
 // NOT an actuator command. Revalidate states on reconnect and periodically.
 static volatile bool jeedom_state_replay_pending=true;
@@ -2302,6 +2304,7 @@ static esp_err_t param_set(httpd_req_t *req){
         return ESP_FAIL;
     }
     if(!strcmp(name,"Jeedom"))jeedom_mode_enabled=!strcmp(value,"1");
+    mira_http_param_written(name,value);
     ESP_LOGI(TAG,"Jeedom parametre %s synchronise",name); // NEVER log its value.
     request_binding_sync();
     return httpd_resp_sendstr(req,"OK");
@@ -2406,6 +2409,74 @@ static TaskHandle_t action_worker_handle;
 static portMUX_TYPE last_value_lock=portMUX_INITIALIZER_UNLOCKED;
 static unsigned next_latest_slot;
 
+// The WT32 holds JEEDOM_IP and JEEDOM_Key_mira in memory during normal
+// operation. Do the same in PSRAM: an intermittent NVS miss during a click
+// must not silently discard a physical light command.
+typedef struct {
+    char base[192];
+    char secret[256];
+} mira_http_config_t;
+static SemaphoreHandle_t mira_http_config_mutex;
+static mira_http_config_t *mira_http_config;
+static void mira_http_param_written(const char *name,const char *value){
+    if(!name||!value)return;
+    if(strcmp(name,"Jeedom_IP")&&strcmp(name,"Jeedom_Key_mira")&&
+       strcmp(name,"Jeedom"))return;
+    if(!mira_http_config_mutex)
+        mira_http_config_mutex=xSemaphoreCreateMutex();
+    if(!mira_http_config_mutex)return;
+    if(!mira_http_config){
+        mira_http_config=heap_caps_calloc(1,sizeof(*mira_http_config),
+                                         MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+        if(!mira_http_config)return;
+    }
+    if(xSemaphoreTake(mira_http_config_mutex,pdMS_TO_TICKS(250))!=pdTRUE)return;
+    if(!strcmp(name,"Jeedom_IP"))
+        snprintf(mira_http_config->base,sizeof(mira_http_config->base),"%s",value);
+    else if(!strcmp(name,"Jeedom_Key_mira"))
+        snprintf(mira_http_config->secret,sizeof(mira_http_config->secret),"%s",value);
+    else if(!strcmp(name,"Jeedom")&&!strcmp(value,"0")){
+        // Security: turning Jeedom off also invalidates stored runtime credentials.
+        memset(mira_http_config,0,sizeof(*mira_http_config));
+    }
+    xSemaphoreGive(mira_http_config_mutex);
+}
+static void mira_http_load_stored(void){
+    if(!jeedom_mode_enabled)return;
+    nvs_handle_t cfg;
+    if(nvs_open("mira_idf_jeed",NVS_READONLY,&cfg)!=ESP_OK)return;
+    char base[192]={0},secret[256]={0};
+    const bool okay=nvs_read_string(cfg,"Jeedom_IP",base,sizeof(base))&&
+                    nvs_read_string(cfg,"Jeedom_Key_mira",secret,sizeof(secret));
+    nvs_close(cfg);
+    if(okay){
+        mira_http_param_written("Jeedom_IP",base);
+        mira_http_param_written("Jeedom_Key_mira",secret);
+    }
+    memset(secret,0,sizeof(secret));
+}
+static bool mira_http_copy_config(char *base,size_t base_cap,
+                                  char *secret,size_t secret_cap){
+    if(!jeedom_mode_enabled||!base||!secret)return false;
+    if(mira_http_config&&mira_http_config_mutex&&
+       xSemaphoreTake(mira_http_config_mutex,pdMS_TO_TICKS(250))==pdTRUE){
+        snprintf(base,base_cap,"%s",mira_http_config->base);
+        snprintf(secret,secret_cap,"%s",mira_http_config->secret);
+        xSemaphoreGive(mira_http_config_mutex);
+        if(base[0]&&secret[0])return true;
+    }
+    // One controlled recovery attempt when parameters were missing at boot.
+    // After success, subsequent actions use the PSRAM copy, not repeated NVS.
+    mira_http_load_stored();
+    if(mira_http_config&&mira_http_config_mutex&&
+       xSemaphoreTake(mira_http_config_mutex,pdMS_TO_TICKS(250))==pdTRUE){
+        snprintf(base,base_cap,"%s",mira_http_config->base);
+        snprintf(secret,secret_cap,"%s",mira_http_config->secret);
+        xSemaphoreGive(mira_http_config_mutex);
+    }
+    return base[0]&&secret[0];
+}
+
 static bool action_is_continuous(const char *type){
     return !strcmp(type,"range")||!strcmp(type,"roundrange")||
            !strcmp(type,"thermostat")||!strcmp(type,"color");
@@ -2474,8 +2545,10 @@ bool mira_jeedom_queue_local_action(const char *name,const char *type,const char
     snprintf(msg.name,sizeof(msg.name),"%s",name);
     snprintf(msg.type,sizeof(msg.type),"%s",type);
     snprintf(msg.value,sizeof(msg.value),"%s",value);
-    if(action_is_continuous(type))return enqueue_latest(&msg);
-    if(xQueueSend(action_queue,&msg,0)!=pdTRUE)return false;
+    bool accepted=action_is_continuous(type)?
+        enqueue_latest(&msg):xQueueSend(action_queue,&msg,0)==pdTRUE;
+    if(!accepted)return false;
+    __atomic_fetch_add(&mira_http_actions_queued,1u,__ATOMIC_RELAXED);
     if(action_worker_handle)xTaskNotifyGive(action_worker_handle);
     return true;
 }
@@ -3421,6 +3494,7 @@ esp_err_t mira_jeedom_action_init(void) {
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA),
         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA),
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    mira_http_load_stored(); // WT32-style outbound HTTP config in PSRAM
     request_binding_sync(); // read-only ID map fetch; never an actuator command
     return ESP_OK;
 }
