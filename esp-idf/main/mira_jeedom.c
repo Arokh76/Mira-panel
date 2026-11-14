@@ -4255,8 +4255,17 @@ static esp_err_t mira_health_get(httpd_req_t *req){
     mira_full_navigation_stats(&count,&last_heap,&lowest_heap);
     mira_full_state_diagnostics_t diagnostic={0};
     mira_full_state_diagnostics(&diagnostic);
-    char result[850];
-    snprintf(result,sizeof(result),
+    mira_album_art_diag_t art={0};
+    mira_album_art_diagnostics(&art);
+    // Keep the HTTPD task's 7168B internal stack untouched; this potentially
+    // longer diagnostic response lives in PSRAM, not internal DMA memory.
+    const size_t cap=1200;
+    char *result=heap_caps_malloc(cap,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!result){
+        httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Media diagnostic allocation failed");
+        return ESP_FAIL;
+    }
+    const int written=snprintf(result,cap,
         "{\"uptime_ms\":%llu,\"wifi\":%d,\"rssi_dbm\":%d,"
         "\"heap_free\":%u,\"heap_min\":%u,\"heap_largest_block\":%u,"
         "\"psram_free\":%u,\"nav_count\":%u,\"nav_last_heap\":%u,"
@@ -4266,7 +4275,14 @@ static esp_err_t mira_health_get(httpd_req_t *req){
         "\"widget_table_psram\":%s,\"widget_table_bytes\":%u,"
         "\"state_cache_used\":%u,\"state_cache_capacity\":%u,"
         "\"state_unchanged\":%u,\"state_cache_evictions\":%u,"
-        "\"state_queue_dropped\":%u,\"state_queue_pending\":%u}",
+        "\"state_queue_dropped\":%u,\"state_queue_pending\":%u,"
+        "\"media_range_updates\":%u,\"media_range_overlays\":%u,"
+        "\"media_cover_received\":%u,\"media_cover_matched\":%u,"
+        "\"media_cover_unmatched\":%u,"
+        "\"media_art_requests\":%u,\"media_art_rejected\":%u,"
+        "\"media_art_started\":%u,\"media_art_worker_errors\":%u,"
+        "\"media_art_fetch_ok\":%u,\"media_art_fetch_failed\":%u,"
+        "\"media_art_frames_taken\":%u}",
         (unsigned long long)(esp_timer_get_time()/1000),
         connected?3:6,connected?(int)ap.rssi:0,
         (unsigned)esp_get_free_heap_size(),
@@ -4285,10 +4301,26 @@ static esp_err_t mira_health_get(httpd_req_t *req){
         (unsigned)diagnostic.state_unchanged,
         (unsigned)diagnostic.state_cache_evictions,
         (unsigned)diagnostic.state_queue_dropped,
-        (unsigned)diagnostic.state_queue_pending);
+        (unsigned)diagnostic.state_queue_pending,
+        (unsigned)__atomic_load_n(&mira_media_range_updates,__ATOMIC_RELAXED),
+        (unsigned)__atomic_load_n(&mira_media_range_overlays,__ATOMIC_RELAXED),
+        (unsigned)diagnostic.media_cover_received,
+        (unsigned)diagnostic.media_cover_matched,
+        (unsigned)diagnostic.media_cover_unmatched,
+        (unsigned)art.requests,(unsigned)art.rejected,
+        (unsigned)art.started,(unsigned)art.worker_errors,
+        (unsigned)art.fetch_ok,(unsigned)art.fetch_failed,
+        (unsigned)art.frames_taken);
+    if(written<0||(size_t)written>=cap){
+        heap_caps_free(result);
+        httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Media diagnostic too large");
+        return ESP_FAIL;
+    }
     httpd_resp_set_type(req,"application/json");
     httpd_resp_set_hdr(req,"Cache-Control","no-store");
-    return httpd_resp_sendstr(req,result);
+    const esp_err_t response=httpd_resp_sendstr(req,result);
+    heap_caps_free(result);
+    return response;
 }
 // Beta /sync/toggle: Jeedom synchronizes a switch passively by command ID.
 // Never publish an actuator command in response to this HTTP request.
