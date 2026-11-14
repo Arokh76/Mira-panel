@@ -3076,6 +3076,157 @@ static void sync_jeedom_bindings(void){
     heap_caps_free(fresh);
 }
 
+// WT32-compatible direct Jeedom binding push. The plugin POSTs its existing
+// action->Jeedom command IDs over authenticated HTTP; no reverse HTTP fetch
+// and no device actuator action. Stage, validate, NVS-commit, then swap PSRAM.
+typedef struct { uint16_t local; uint32_t remote; } mira_binding_update_t;
+static esp_err_t mira_bindings_direct_post(httpd_req_t *req){
+    if(!mira_beta_web_authorized(req))return ESP_FAIL;
+    char header[24]={0};
+    const size_t hdr_len=httpd_req_get_hdr_value_len(req,"X-Mira-Bindings");
+    if(hdr_len==0||hdr_len>=sizeof(header)||
+       httpd_req_get_hdr_value_str(req,"X-Mira-Bindings",header,sizeof(header))!=ESP_OK||
+       strcmp(header,"1")){
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"En-tete bindings absent");
+        return ESP_FAIL;
+    }
+    const size_t length=req->content_len;
+    if(length<6||length>32000){
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Associations trop grandes");
+        return ESP_FAIL;
+    }
+    char *body=heap_caps_malloc(length+1,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!body){
+        httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Memoire absente");
+        return ESP_FAIL;
+    }
+    if(!read_exact_request(req,body,length)){
+        heap_caps_free(body);
+        httpd_resp_send_err(req,HTTPD_408_REQ_TIMEOUT,"Formulaire incomplet");
+        return ESP_FAIL;
+    }
+    char *json=NULL;
+    for(char *part=body;part&&*part;){
+        char *next=strchr(part,'&');
+        if(next)*next++=0;
+        if(!strncmp(part,"json=",5)){json=part+5;break;}
+        part=next;
+    }
+    if(!json||!decode_url(json)||strlen(json)>10000u){
+        heap_caps_free(body);
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"JSON associations invalide");
+        return ESP_FAIL;
+    }
+    cJSON *root=cJSON_Parse(json);
+    heap_caps_free(body);
+    const cJSON *actions=root?cJSON_GetObjectItemCaseSensitive(root,"actions"):NULL;
+    const int count=cJSON_IsArray(actions)?cJSON_GetArraySize(actions):0;
+    if(count<1||count>256){
+        cJSON_Delete(root);
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Nombre associations invalide");
+        return ESP_FAIL;
+    }
+    mira_binding_cache_t *staged=heap_caps_calloc(1,sizeof(*staged),
+                                                  MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    mira_binding_update_t *updates=heap_caps_calloc(512,sizeof(*updates),
+                                                     MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!staged||!updates){
+        heap_caps_free(staged);heap_caps_free(updates);cJSON_Delete(root);
+        httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Memoire associations absente");
+        return ESP_FAIL;
+    }
+    size_t updated=0;
+    bool lookup_ready=mira_index_mutex&&
+        xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(1000))==pdTRUE;
+    uint32_t generation=0;
+    if(lookup_ready){
+        generation=mira_index_hash;
+        if(mira_binding_cache&&mira_binding_cache->config_hash==generation)
+            memcpy(staged,mira_binding_cache,sizeof(*staged));
+        else staged->config_hash=generation;
+        const cJSON *incoming=NULL;
+        cJSON_ArrayForEach(incoming,actions){
+            const char *name=jstr((cJSON*)incoming,"nom","");
+            const char *type=jstr((cJSON*)incoming,"type","");
+            if(!*name||!*type)continue;
+            const bool toggle=!strcmp(type,"toggle");
+            const int id0=jint((cJSON*)incoming,toggle?"id0":"id",-1);
+            const int id1=toggle?jint((cJSON*)incoming,"id1",-1):-1;
+            for(size_t i=0;i<mira_action_ref_count;i++){
+                const mira_action_ref_t *ref=&mira_action_refs[i];
+                if(strcmp(ref->name,name)||strcmp(ref->type,type))continue;
+                if((toggle&&(id0!=ref->id0||id1!=ref->id1))||
+                   (!toggle&&id0!=ref->id))continue;
+                const int remote0=jint((cJSON*)incoming,
+                                       toggle?"jeedom0":"jeedom",-1);
+                const int remote1=toggle?jint((cJSON*)incoming,"jeedom1",-1):-1;
+                const int ids[]={id0,id1},remotes[]={remote0,remote1};
+                for(int j=0;j<(toggle?2:1);j++){
+                    if(ids[j]<1||ids[j]>4096||remotes[j]<1||updated>=512)continue;
+                    updates[updated].local=(uint16_t)ids[j];
+                    updates[updated].remote=(uint32_t)remotes[j];
+                    updated++;
+                    if(!staged->remote[ids[j]])staged->valid_count++;
+                    staged->remote[ids[j]]=(uint32_t)remotes[j];
+                }
+                break;
+            }
+        }
+        xSemaphoreGive(mira_index_mutex);
+    }
+    cJSON_Delete(root);
+    if(!lookup_ready||!generation||!updated){
+        heap_caps_free(staged);heap_caps_free(updates);
+        httpd_resp_set_status(req,"409 Conflict");
+        httpd_resp_sendstr(req,"Aucun ID Jeedom correspondant");
+        return ESP_FAIL;
+    }
+    nvs_handle_t nv;
+    esp_err_t err=nvs_open("mira_idf_map",NVS_READWRITE,&nv);
+    if(err==ESP_OK){
+        char key[14],value[48];
+        for(size_t i=0;i<updated&&err==ESP_OK;i++){
+            snprintf(key,sizeof(key),"cmd%u",(unsigned)updates[i].local);
+            snprintf(value,sizeof(value),"%08" PRIx32 ":%" PRIu32,
+                     generation,updates[i].remote);
+            err=nvs_set_str(nv,key,value);
+        }
+        if(err==ESP_OK)err=nvs_commit(nv);
+        nvs_close(nv);
+    }
+    heap_caps_free(updates);
+    if(err!=ESP_OK){
+        heap_caps_free(staged);
+        ESP_LOGW(TAG,"Direct bindings failed to commit: %s",esp_err_to_name(err));
+        httpd_resp_set_status(req,"503 Service Unavailable");
+        httpd_resp_sendstr(req,"Sauvegarde associations impossible");
+        return ESP_FAIL;
+    }
+    bool published=false;
+    if(mira_index_mutex&&
+       xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(1000))==pdTRUE){
+        if(mira_index_hash==generation){
+            mira_binding_cache_t *previous=mira_binding_cache;
+            mira_binding_cache=staged;
+            staged=NULL;
+            xSemaphoreGive(mira_index_mutex);
+            heap_caps_free(previous);
+            published=true;
+        }else xSemaphoreGive(mira_index_mutex);
+    }
+    heap_caps_free(staged);
+    if(!published){
+        httpd_resp_set_status(req,"409 Conflict");
+        httpd_resp_sendstr(req,"Programmation modifiee, relancer la synchro");
+        return ESP_FAIL;
+    }
+    last_binding_sync_http=200;
+    mira_mapping_last_ok_ms=(uint32_t)(esp_timer_get_time()/1000);
+    ESP_LOGI(TAG,"WT32 direct HTTP bindings accepted: %u entries",(unsigned)updated);
+    httpd_resp_set_type(req,"text/plain; charset=utf-8");
+    return httpd_resp_sendstr(req,"OK");
+}
+
 static esp_err_t jeedom_status_get(httpd_req_t *req) {
     if(!require_key(req))return ESP_FAIL;
     char *raw=read_config(NULL);
@@ -3921,6 +4072,7 @@ void mira_jeedom_register_http(httpd_handle_t server) {
         {.uri="/setjeedomid",.method=HTTP_GET,.handler=set_jeedom_id},
         {.uri="/setjeedomtoggleid",.method=HTTP_GET,.handler=set_jeedom_toggle_id},
         {.uri="/sendjeedomorderid",.method=HTTP_GET,.handler=set_jeedom_init_id},
+        {.uri="/actions/bindings",.method=HTTP_POST,.handler=mira_bindings_direct_post},
         {.uri="/mira/jeedom/status",.method=HTTP_GET,.handler=jeedom_status_get},
         {.uri="/camera/config",.method=HTTP_POST,.handler=camera_config_post},
         {.uri="/navpages",.method=HTTP_GET,.handler=nav_pages_get},
