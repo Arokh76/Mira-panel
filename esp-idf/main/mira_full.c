@@ -44,7 +44,7 @@
 #define MIRA_HEIGHT 480
 #define NAV_H 50
 #define CONTENT_H (MIRA_HEIGHT - NAV_H)
-#define MAX_WIDGETS 40 // beta MiraPanelUI::MAX_BINDINGS
+#define MAX_WIDGETS MIRA_WIDGET_LIMIT // 20 graphical tiles, not Jeedom commands
 #define JSON_MAX 49152
 static const char *TAG="mira-full-43";
 static const char *JSON_PATH="/spiffs/miralvgl.json";
@@ -60,7 +60,7 @@ static QueueHandle_t state_queue;
 /* A broker reconnect can deliver hundreds of retained composite states
  * before the LVGL task consumes its 24-entry fallback FIFO. Use PSRAM
  * last-value slots per topic so the latest passive state survives a burst.
- * 40 beta widgets x 9 media fields = 360, plus weather controls. */
+ * Keep ample room for rich composite widgets and their many Jeedom states. */
 #define MIRA_PENDING_STATE_SLOTS 384
 static mira_state_update_t *pending_states;
 static SemaphoreHandle_t pending_states_lock;
