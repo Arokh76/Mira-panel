@@ -11,6 +11,7 @@
 #include "nvs.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/idf_additions.h"
 #include "freertos/semphr.h"
 #include <inttypes.h>
 #include <stdlib.h>
@@ -503,7 +504,10 @@ esp_err_t mira_camera_init(void){
     if(lock)return ESP_OK;
     lock=xSemaphoreCreateMutex();
     if(!lock)return ESP_ERR_NO_MEM;
-    if(xTaskCreate(camera_worker,"mira_camera",6656,NULL,3,NULL)!=pdPASS){
+    // Network/JPEG worker has no flash-write responsibilities; keep its
+    // 6656-byte stack out of scarce INTERNAL RAM (TCB remains internal).
+    if(xTaskCreateWithCaps(camera_worker,"mira_camera",6656,NULL,3,NULL,
+                           MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)!=pdPASS){
         vSemaphoreDelete(lock);
         lock=NULL;
         return ESP_ERR_NO_MEM;
