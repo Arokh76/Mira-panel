@@ -23,9 +23,9 @@ class mira extends eqLogic {
    * A missing panel must not block Jeedom's MQTT and mapped actions.
    * Per-panel 20-second circuit breaker; normal calls never exceed 1.5s.
    */
-  public function panelHttpRequest($url, $method='GET', $postFields=null, $extraOptions=array(), $diagnostic='') {
+  public function panelHttpRequest($url, $method='GET', $postFields=null, $extraOptions=array(), $diagnostic='', $bypassOfflineGuard=false) {
     $until=(int)$this->getCache('mira_panel_offline_until',0);
-    if ($until>time()) {
+    if ($until>time() && !$bypassOfflineGuard) {
       if ($diagnostic!=='') log::add('mira','warning',$diagnostic.' : protection HTTP active, nouvel essai dans 20 s maximum');
       return false;
     }
@@ -2103,21 +2103,36 @@ class mira extends eqLogic {
   }
   
   public function GetIndex($brut = false) {
-    $url = 'http://'.$this->getConfiguration('adresseip').'/getindex?key='.$this->getConfiguration('password');
-    $result=$this->panelHttpGet($url);
-    if ($result===false) return "Erreur";
-
-    if ($result === false || trim((string)$result) === '') return "Erreur";
-    $jsonData = json_decode($result, true);
-    if (!is_array($jsonData) || !isset($jsonData['actions']) || !is_array($jsonData['actions'])) {
-        log::add(__CLASS__, 'warning', '[GetIndex] Réponse invalide reçue de /getindex');
-        return "Erreur";
+    // WT32 compatibility: /getindex is an essential metadata snapshot.
+    // Do not inherit the 350ms connect/1500ms action timeout or an offline
+    // circuit breaker caused by an unrelated, failed HTTP command.
+    // Keep all other Mira action calls on their existing short deadlines.
+    $ip=trim((string)$this->getConfiguration('adresseip'));
+    $key=(string)$this->getConfiguration('password');
+    if ($ip==='' || $key==='') {
+      log::add('mira','warning','[GetIndex] IP ou cle Mira manquante sur '.$this->getName());
+      return 'Erreur';
     }
-
+    $url='http://'.$ip.'/getindex?key='.rawurlencode($key);
+    $result=$this->panelHttpRequest(
+      $url,'GET',null,
+      array(CURLOPT_CONNECTTIMEOUT_MS=>1200,CURLOPT_TIMEOUT_MS=>5500),
+      '[GetIndex] '.$this->getName(),true);
+    if ($result===false || trim((string)$result)==='') {
+      log::add('mira','warning','[GetIndex] Aucun index recu de '.$this->getName());
+      return 'Erreur';
+    }
+    $jsonData=json_decode($result,true);
+    if (!is_array($jsonData) ||
+        !isset($jsonData['actions']) || !is_array($jsonData['actions'])) {
+      log::add('mira','warning','[GetIndex] JSON index invalide pour '.$this->getName().
+        ' (octets='.strlen((string)$result).', erreur='.json_last_error_msg().')');
+      return 'Erreur';
+    }
     if ($brut) return $jsonData;
     return $jsonData['actions'];
   }
-  
+
   public function AddListLvgl($type,$name,$loc,$min,$max,$value,$unit) {
     $url = 'http://'.$this->getConfiguration('adresseip').'/setjeedomid?key='.$this->getConfiguration('password').'&type='.$type.'&name='.$name.'&loc='.$loc.'&min='.$min.'&max='.$max.'&value='.$value.'&unit='.$unit;
     $result=$this->panelHttpGet($url);
