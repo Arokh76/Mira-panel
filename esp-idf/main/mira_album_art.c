@@ -21,6 +21,19 @@ static uint8_t art_index;
 static bool art_enabled;
 static mira_camera_frame_t delivered;
 static uint8_t delivered_index;
+// Atomic counters survive reconnects; diagnostic never records private URLs.
+static uint32_t art_requests,art_rejected,art_started,art_worker_errors;
+static uint32_t art_fetch_ok,art_fetch_failed,art_frames_taken;
+void mira_album_art_diagnostics(mira_album_art_diag_t *out){
+    if(!out)return;
+    out->requests=__atomic_load_n(&art_requests,__ATOMIC_RELAXED);
+    out->rejected=__atomic_load_n(&art_rejected,__ATOMIC_RELAXED);
+    out->started=__atomic_load_n(&art_started,__ATOMIC_RELAXED);
+    out->worker_errors=__atomic_load_n(&art_worker_errors,__ATOMIC_RELAXED);
+    out->fetch_ok=__atomic_load_n(&art_fetch_ok,__ATOMIC_RELAXED);
+    out->fetch_failed=__atomic_load_n(&art_fetch_failed,__ATOMIC_RELAXED);
+    out->frames_taken=__atomic_load_n(&art_frames_taken,__ATOMIC_RELAXED);
+}
 
 static bool cover_url(const char *url){
     if(!url||!*url||strlen(url)>MIRA_COVER_URL)return false;
@@ -56,6 +69,8 @@ static void cover_worker(void *unused){
         seen=generation;
         mira_camera_frame_t frame={0};
         const bool success=mira_camera_fetch_url(url,&frame);
+        if(success)__atomic_fetch_add(&art_fetch_ok,1u,__ATOMIC_RELAXED);
+        else __atomic_fetch_add(&art_fetch_failed,1u,__ATOMIC_RELAXED);
         xSemaphoreTake(art_lock,portMAX_DELAY);
         if(success&&art_enabled&&generation==art_generation){
             if(delivered.pixels)heap_caps_free(delivered.pixels);
@@ -75,13 +90,18 @@ esp_err_t mira_album_art_init(void){
     return art_lock?ESP_OK:ESP_ERR_NO_MEM;
 }
 bool mira_album_art_request(uint8_t widget_index,const char *url){
-    if(!cover_url(url))return false;
+    __atomic_fetch_add(&art_requests,1u,__ATOMIC_RELAXED);
+    if(!cover_url(url)){
+        __atomic_fetch_add(&art_rejected,1u,__ATOMIC_RELAXED);
+        return false;
+    }
     if(!art_lock&&mira_album_art_init()!=ESP_OK)return false;
     if(!worker_started){
         // Album JPEG/TLS decoding is deferred and can run on a PSRAM-backed
         // stack; preserve INTERNAL RAM for Wi-Fi, HTTPD, DMA and flash tasks.
         if(xTaskCreateWithCaps(cover_worker,"mira_album_art",6656,NULL,3,NULL,
                                MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)!=pdPASS){
+            __atomic_fetch_add(&art_worker_errors,1u,__ATOMIC_RELAXED);
             ESP_LOGW(TAG,"Deferred JPEG cover worker allocation failed");
             return false;
         }
@@ -97,6 +117,7 @@ bool mira_album_art_request(uint8_t widget_index,const char *url){
     if(!art_generation)art_generation++;
     art_index=widget_index;
     art_enabled=true;
+    __atomic_fetch_add(&art_started,1u,__ATOMIC_RELAXED);
     snprintf(requested,sizeof(requested),"%s",url);
     if(delivered.pixels){heap_caps_free(delivered.pixels);memset(&delivered,0,sizeof(delivered));}
     xSemaphoreGive(art_lock);
@@ -109,6 +130,7 @@ bool mira_album_art_take(uint8_t *index,mira_camera_frame_t *frame){
     if(got){
         *index=delivered_index;
         *frame=delivered;
+        __atomic_fetch_add(&art_frames_taken,1u,__ATOMIC_RELAXED);
         memset(&delivered,0,sizeof(delivered));
     }
     xSemaphoreGive(art_lock);
