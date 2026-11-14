@@ -4207,6 +4207,7 @@ static esp_err_t mira_health_get(httpd_req_t *req){
         "\"psram_free\":%u,\"nav_count\":%u,\"nav_last_heap\":%u,"
         "\"nav_lowest_heap\":%u,\"internal_heap_free\":%u,"
         "\"internal_largest_block\":%u,"
+        "\"internal_min_free\":%u,\"dma_min_free\":%u,"
         "\"state_cache_used\":%u,\"state_cache_capacity\":%u,"
         "\"state_unchanged\":%u,\"state_cache_evictions\":%u,"
         "\"state_queue_dropped\":%u,\"state_queue_pending\":%u}",
@@ -4219,6 +4220,8 @@ static esp_err_t mira_health_get(httpd_req_t *req){
         (unsigned)count,(unsigned)last_heap,(unsigned)lowest_heap,
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+        (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+        (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA),
         (unsigned)diagnostic.state_cache_used,
         (unsigned)diagnostic.state_cache_capacity,
         (unsigned)diagnostic.state_unchanged,
