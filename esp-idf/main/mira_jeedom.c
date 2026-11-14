@@ -93,9 +93,13 @@ static bool mira_other_transport(const char *name,const char *type,
 
 // Request async synchronization after Jeedom changes its command table.
 static void request_binding_sync(void);
-// Restore state after a fresh boot or LVGL reprogramming, exactly once per
-// programming generation. The legacy init command is read-only.
+// As on WT32, the init command only requests passive state updates; it is
+// NOT an actuator command. Revalidate states on reconnect and periodically.
 static volatile bool jeedom_state_replay_pending=true;
+static volatile uint32_t jeedom_replay_attempts,jeedom_replay_acks;
+static volatile uint32_t jeedom_last_replay_ms,jeedom_last_replay_ok_ms;
+static volatile int jeedom_last_replay_http;
+static volatile uint32_t mira_sse_worker_failures;
 static uint32_t ui_config_hash(const char *s);
 
 // URL/form decoding is deliberately bounded, including malformed percent escapes.
@@ -752,7 +756,8 @@ static void mira_sse_worker(void *argument){
     free(client->last);
     free(client);
     __atomic_sub_fetch(&mira_sse_clients,1u,__ATOMIC_RELAXED);
-    vTaskDelete(NULL);
+    // The PSRAM-backed stack must be deleted with the matching ESP-IDF API.
+    vTaskDeleteWithCaps(NULL);
 }
 
 static esp_err_t beta_events_get(httpd_req_t *req){
@@ -816,7 +821,15 @@ static esp_err_t beta_events_get(httpd_req_t *req){
         httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"SSE async unavailable");
         return ESP_FAIL;
     }
-    if(xTaskCreate(mira_sse_worker,"mira_sse",6144,client,4,NULL)!=pdPASS){
+    // Unlike WT32's AsyncEventSource, an ESP-IDF SSE client needs a task.
+    // The former 6144-byte INTERNAL stack exceeded the ~4.6KB largest block
+    // on Mira 7. Allocate its 8KB stack in PSRAM; TCB stays internal.
+    if(xTaskCreateWithCaps(mira_sse_worker,"mira_sse",8192,client,4,NULL,
+                           MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)!=pdPASS){
+        __atomic_fetch_add(&mira_sse_worker_failures,1u,__ATOMIC_RELAXED);
+        ESP_LOGW(TAG,"MIRA_SSE_PSRAM_TASK_FAILED: free=%u largest_internal=%u",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
         httpd_req_async_handler_complete(client->req);
         cJSON_Delete(index);free(client->last);free(client);
         __atomic_sub_fetch(&mira_sse_clients,1u,__ATOMIC_RELAXED);
@@ -2459,6 +2472,64 @@ static bool jeedom_sta_has_ip(void){
     return sta&&esp_netif_get_ip_info(sta,&ip)==ESP_OK&&ip.ip.addr!=0&&
            esp_wifi_sta_get_ap_info(&connected_ap)==ESP_OK;
 }
+// WT32 sends its Init Jeedom request directly. Never require a successful
+// Jeedom ID-map download before asking the plugin for its passive state data.
+// The HTTP acknowledgement confirms dispatch, NOT that values were received.
+// Recovery logic later repeats this read-only init when cache stays empty.
+static bool jeedom_request_passive_states(void){
+    if(!jeedom_sta_has_ip())return false;
+    nvs_handle_t cfg;
+    if(nvs_open("mira_idf_jeed",NVS_READONLY,&cfg)!=ESP_OK)return false;
+    char on[8]={0},base[192]={0},secret[256]={0},init[24]={0};
+    const bool ready=nvs_read_string(cfg,"Jeedom",on,sizeof(on))&&
+                     !strcmp(on,"1")&&
+                     nvs_read_string(cfg,"Jeedom_IP",base,sizeof(base))&&
+                     nvs_read_string(cfg,"Jeedom_Key_mira",secret,sizeof(secret))&&
+                     nvs_read_string(cfg,"Jeedom_Init_Cmd",init,sizeof(init));
+    nvs_close(cfg);
+    if(!ready||!decimal_id(init)||strncmp(base,"http://",7)||
+       strchr(base,'?')||strchr(base,'#')||strchr(base,'@')||
+       strchr(base,'\\r')||strchr(base,'\\n'))return false;
+    size_t len=strlen(base);
+    while(len>7&&base[len-1]=='/')base[--len]=0;
+    char token[768];
+    if(len<=7||!urlencode_to(token,sizeof(token),secret))return false;
+    char url[1100];
+    int n=snprintf(url,sizeof(url),
+        "%s/core/api/jeeApi.php?plugin=mira&type=event&apikey=%s&id=%s",
+        base,token,init);
+    if(n<=0||n>=(int)sizeof(url))return false;
+    const uint32_t now=(uint32_t)(esp_timer_get_time()/1000);
+    jeedom_last_replay_ms=now;
+    __atomic_fetch_add(&jeedom_replay_attempts,1u,__ATOMIC_RELAXED);
+    mira_jeedom_ack_t ack={0};
+    esp_http_client_config_t http={
+        .url=url,.timeout_ms=18000,.disable_auto_redirect=true,
+        .event_handler=capture_jeedom_ack,.user_data=&ack
+    };
+    esp_http_client_handle_t client=esp_http_client_init(&http);
+    if(!client){jeedom_last_replay_http=0;return false;}
+    esp_err_t result=esp_http_client_perform(client);
+    int status=esp_http_client_get_status_code(client);
+    esp_http_client_cleanup(client);
+    jeedom_last_replay_http=status;
+    while(ack.len&&isspace((unsigned char)ack.buf[ack.len-1]))
+        ack.buf[--ack.len]=0;
+    char *reply=ack.buf;
+    while(*reply&&isspace((unsigned char)*reply))reply++;
+    const bool acknowledged=result==ESP_OK&&status==200&&!ack.overflow&&
+                             !strcmp(reply,init);
+    if(acknowledged){
+        jeedom_last_replay_ok_ms=(uint32_t)(esp_timer_get_time()/1000);
+        __atomic_fetch_add(&jeedom_replay_acks,1u,__ATOMIC_RELAXED);
+        jeedom_state_replay_pending=false;
+        ESP_LOGI(TAG,"JEEDOM_STATE_REPLAY_ACK: read-only WT32 init accepted");
+    }else{
+        ESP_LOGW(TAG,"JEEDOM_STATE_REPLAY_FAILED: HTTP %d, transport=%s",
+                 status,esp_err_to_name(result));
+    }
+    return acknowledged;
+}
 static void sync_jeedom_bindings(void){
     nvs_handle_t cfg;
     if(nvs_open("mira_idf_jeed",NVS_READONLY,&cfg)!=ESP_OK)return;
@@ -2554,44 +2625,6 @@ static void sync_jeedom_bindings(void){
     cJSON_Delete(remote);
     if(err==ESP_OK){
         ESP_LOGI(TAG,"Jeedom full index synchronized: %d bounded command IDs",bound);
-        if(jeedom_state_replay_pending){
-            // Unlike ?value=json (index-only), invoking the saved beta init
-            // action restores real Jeedom infos and toggles via passive HTTP.
-            // Keep replay pending until the Jeedom init request is
-            // acknowledged. A failed/early HTTP call must be retried.
-            // The init event only asks Jeedom to replay passive states:
-            // it must never emit an On/Off action to the lamps.
-            char restore_uri[1100];
-            int n=snprintf(restore_uri,sizeof(restore_uri),
-                "%s/core/api/jeeApi.php?plugin=mira&type=event&apikey=%s&id=%s",
-                base,token,init);
-            if(n>0&&n<(int)sizeof(restore_uri)){
-                mira_jeedom_ack_t ack={0};
-                esp_http_client_config_t restore_http={
-                    .url=restore_uri,.timeout_ms=18000,
-                    .disable_auto_redirect=true,
-                    .event_handler=capture_jeedom_ack,.user_data=&ack
-                };
-                esp_http_client_handle_t client=esp_http_client_init(&restore_http);
-                if(client){
-                    esp_err_t result=esp_http_client_perform(client);
-                    int status=esp_http_client_get_status_code(client);
-                    esp_http_client_cleanup(client);
-                    while(ack.len&&isspace((unsigned char)ack.buf[ack.len-1]))
-                        ack.buf[--ack.len]=0;
-                    char *reply=ack.buf;
-                    while(*reply&&isspace((unsigned char)*reply))reply++;
-                    if(result==ESP_OK&&status==200&&!ack.overflow&&
-                       !strcmp(reply,init)){
-                        jeedom_state_replay_pending=false;
-                        ESP_LOGI(TAG,"JEEDOM_BOOT_REPLAY_ACK: init accepted; passive states requested");
-                    }else{
-                        ESP_LOGW(TAG,"Jeedom boot state replay not acknowledged (HTTP %d, %s)",
-                            status,esp_err_to_name(result));
-                    }
-                }else ESP_LOGW(TAG,"Jeedom boot state replay client unavailable");
-            }
-        }
     }else ESP_LOGE(TAG,"Jeedom mapping validation/storage incomplete: %s",
                   esp_err_to_name(err));
 }
@@ -2636,14 +2669,26 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
         nvs_close(cfg);
     }
     if(!decimal_id(init_id))init_id[0]=0;
-    char body[248];
+    mira_full_state_diagnostics_t health={0};
+    mira_full_state_diagnostics(&health);
+    char body[512];
     snprintf(body,sizeof(body),
         "{\"jeedom_enabled\":%s,\"mapping_valid\":%s,"
         "\"ids_valid\":%d,\"ids_expected\":%d,"
-        "\"init_cmd_id\":\"%s\",\"last_init_http\":%d}",
+        "\"init_cmd_id\":\"%s\",\"last_init_http\":%d,"
+        "\"state_cache_used\":%u,\"replay_pending\":%s,"
+        "\"replay_attempts\":%u,\"replay_acks\":%u,"
+        "\"replay_last_http\":%d,\"sse_clients\":%u,"
+        "\"sse_task_failures\":%u}",
         enabled?"true":"false",
         (enabled&&total>0&&valid==total)?"true":"false",valid,total,
-        init_id,last_binding_sync_http);
+        init_id,last_binding_sync_http,(unsigned)health.state_cache_used,
+        jeedom_state_replay_pending?"true":"false",
+        (unsigned)__atomic_load_n(&jeedom_replay_attempts,__ATOMIC_RELAXED),
+        (unsigned)__atomic_load_n(&jeedom_replay_acks,__ATOMIC_RELAXED),
+        jeedom_last_replay_http,
+        (unsigned)__atomic_load_n(&mira_sse_clients,__ATOMIC_RELAXED),
+        (unsigned)__atomic_load_n(&mira_sse_worker_failures,__ATOMIC_RELAXED));
     httpd_resp_set_type(req,"application/json");
     return httpd_resp_sendstr(req,body);
 }
@@ -2652,8 +2697,16 @@ static void request_binding_sync(void){
     if(!action_queue)return;
     mira_action_msg_t msg={0};
     snprintf(msg.type,sizeof(msg.type),"__sync");
-    if(xQueueSend(action_queue,&msg,0)==pdTRUE&&action_worker_handle)
-        xTaskNotifyGive(action_worker_handle);
+    if(xQueueSend(action_queue,&msg,0)!=pdTRUE)
+        ESP_LOGW(TAG,"Jeedom sync FIFO busy; periodic state recovery remains active");
+    if(action_worker_handle)xTaskNotifyGive(action_worker_handle);
+}
+void mira_jeedom_network_reconnected(void){
+    // Wi-Fi callbacks must never start HTTP work or touch LVGL. Queue the
+    // same read-only re-initialization the WT32 performs after reconnect.
+    jeedom_state_replay_pending=true;
+    jeedom_last_replay_ms=0;
+    request_binding_sync();
 }
 
 /* The beta GenericCmd() looks up a widget's configured URL in the
@@ -2755,6 +2808,27 @@ static void send_generic_action(const mira_action_msg_t *msg){
     esp_http_client_cleanup(client);
 }
 
+static void jeedom_replay_maintenance(void){
+    if(!jeedom_mode_enabled||!jeedom_sta_has_ip())return;
+    const uint32_t now=(uint32_t)(esp_timer_get_time()/1000);
+    const uint32_t since_attempt=(uint32_t)(now-jeedom_last_replay_ms);
+    // Retry sparingly if init has failed or no passive values have arrived.
+    // Refresh at most every 30 minutes even with a nonempty cache, so a
+    // long-running screen recovers after an interrupted Jeedom update stream.
+    // No user actuator command is ever synthesized here.
+    if(jeedom_last_replay_ms && since_attempt<300000u)return;
+    mira_full_state_diagnostics_t health={0};
+    mira_full_state_diagnostics(&health);
+    const bool no_values=health.state_cache_used==0;
+    const bool refresh_due=jeedom_last_replay_ok_ms==0||
+        (uint32_t)(now-jeedom_last_replay_ok_ms)>=1800000u;
+    if(jeedom_state_replay_pending||no_values||refresh_due){
+        ESP_LOGI(TAG,"JEEDOM_REPLAY_MAINT: pending=%d cache=%u",
+                 jeedom_state_replay_pending?1:0,
+                 (unsigned)health.state_cache_used);
+        (void)jeedom_request_passive_states();
+    }
+}
 static void jeedom_action_worker(void *unused) {
     (void)unused;
     mira_action_msg_t action;
@@ -2764,35 +2838,35 @@ static void jeedom_action_worker(void *unused) {
         if(!found)found=xQueueReceive(action_queue,&action,0)==pdTRUE;
         if(!found)found=dequeue_latest(&action);
         if(!found){
-            (void)ulTaskNotifyTake(pdTRUE,portMAX_DELAY);
+            // Periodic wakeup permits state recovery without an extra task.
+            // The WT32 already treats Jeedom init as a read-only replay.
+            (void)ulTaskNotifyTake(pdTRUE,pdMS_TO_TICKS(30000));
+            jeedom_replay_maintenance();
             continue;
         }
         prefer_latest=!prefer_latest;
         if(!strcmp(action.type,"__sync")){
-            if(jeedom_mode_enabled&&jeedom_state_replay_pending){
-                // On cold boot, the Wi-Fi connection and STA IP may not
-                // exist yet. Retry the read-only Jeedom index + init handshake
-                // from this PSRAM worker; never block LVGL or HTTP handlers.
-                const unsigned max_attempts=10;
-                for(unsigned attempt=1;
-                    attempt<=max_attempts&&jeedom_state_replay_pending;
-                    ++attempt){
-                    if(jeedom_sta_has_ip()){
-                        ESP_LOGI(TAG,"JEEDOM_BOOT_REPLAY_TRY=%u/%u",
-                                 attempt,max_attempts);
+            // Mapping and state replay are independent. A temporary failure
+            // fetching ID associations must not suppress incoming Info values.
+            const unsigned max_attempts=4;
+            bool mapping_checked=false;
+            for(unsigned attempt=1;attempt<=max_attempts;attempt++){
+                if(!jeedom_mode_enabled)break;
+                if(jeedom_sta_has_ip()){
+                    if(!mapping_checked){
                         sync_jeedom_bindings();
-                    }else{
-                        ESP_LOGI(TAG,"JEEDOM_BOOT_REPLAY_WAIT_IP=%u/%u",
-                                 attempt,max_attempts);
+                        mapping_checked=true;
                     }
-                    if(jeedom_state_replay_pending&&attempt<max_attempts)
-                        vTaskDelay(pdMS_TO_TICKS(3000));
+                    if(!jeedom_state_replay_pending||
+                       jeedom_request_passive_states())break;
+                }else{
+                    ESP_LOGI(TAG,"JEEDOM_BOOT_REPLAY_WAIT_IP=%u/%u",
+                             attempt,max_attempts);
                 }
-                if(jeedom_state_replay_pending)
-                    ESP_LOGW(TAG,"JEEDOM_BOOT_REPLAY_PENDING: retry on next Jeedom sync");
-            }else sync_jeedom_bindings();
-            // ESP-IDF reports the minimum remaining stack in bytes.
-            // Keep this in serial logs to validate the 24 KiB margin.
+                if(attempt<max_attempts)vTaskDelay(pdMS_TO_TICKS(3000));
+            }
+            if(jeedom_state_replay_pending)
+                ESP_LOGW(TAG,"JEEDOM_REPLAY_PENDING: automatic maintenance will retry");
             ESP_LOGI(TAG,"JEEDOM_HTTP_STACK_MIN_FREE=%u bytes",
                      (unsigned)uxTaskGetStackHighWaterMark(NULL));
         }else if(!strcmp(action.type,"__generic"))send_generic_action(&action);
