@@ -1459,7 +1459,9 @@ static esp_err_t getindex(httpd_req_t *req) {
         return ESP_FAIL;
     }
     if(status==ESP_ERR_TIMEOUT){
-        httpd_resp_send_err(req,HTTPD_503_SERVICE_UNAVAILABLE,"Index Mira occupe");
+        httpd_resp_set_status(req,"503 Service Unavailable");
+        httpd_resp_set_type(req,"text/plain");
+        httpd_resp_sendstr(req,"Index Mira occupe");
         return ESP_FAIL;
     }
     return status;
