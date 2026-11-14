@@ -7,7 +7,7 @@
 
 // Waveshare 7-inch: one UI widget may expose many Jeedom commands.
 // Keep this shared with both the renderer and the HTTP programming endpoints.
-#define MIRA_WIDGET_LIMIT 20
+#define MIRA_WIDGET_LIMIT 30
 
 bool mira_full_storage_prepare(void); // mount/format only if blank, no queues
 bool mira_full_storage_init(void);
