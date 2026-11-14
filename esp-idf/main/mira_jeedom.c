@@ -1660,7 +1660,7 @@ static esp_err_t beta_lvgl_append(httpd_req_t *req){
     // Use the renderer limit, not the number of Jeedom action bindings.
     // A media widget counts as one tile and can expose 15 commands.
     if(cJSON_GetArraySize(array)>=MIRA_WIDGET_LIMIT){
-        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Maximum 20 widgets LVGL");
+        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Maximum 30 widgets LVGL");
         return ESP_FAIL;
     }
     cJSON *item=cJSON_CreateObject();
@@ -1714,7 +1714,7 @@ static esp_err_t beta_lvgl_save(httpd_req_t *req){
     const cJSON *pending=cJSON_GetObjectItemCaseSensitive(beta_lvgl_stage,"lvgl");
     if(!cJSON_IsArray(pending)||cJSON_GetArraySize(pending)>MIRA_WIDGET_LIMIT){
         httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,
-                            "Programmation LVGL depasse 20 widgets");
+                            "Programmation LVGL depasse 30 widgets");
         return ESP_FAIL;
     }
     char *out=cJSON_PrintUnformatted(beta_lvgl_stage);
