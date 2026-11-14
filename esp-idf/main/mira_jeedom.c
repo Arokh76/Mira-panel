@@ -1852,17 +1852,32 @@ static esp_err_t programui(httpd_req_t *req) {
 // Remote "button" does not create a new outgoing MQTT/Jeedom action.
 static esp_err_t updatenr(httpd_req_t *req) {
     if(!require_key(req))return ESP_FAIL;
-    const char *types[]={"info","toggle","toogle","range","list","color","button"};
-    char selected[24]={0},action_id[16]={0},value[769]={0};
+    // Jeedom beta sends passive thermostat mode feedback by list GROUP
+    // and LABEL, not a per-choice numeric ID: ?listvalue=<group>&value=<label>.
+    const char *types[]={"info","toggle","toogle","range","list","listvalue","color","button"};
+    char selected[24]={0},action_id[128]={0},value[769]={0};
     for(size_t i=0;i<sizeof(types)/sizeof(types[0]);i++){
         if(query_param(req,types[i],action_id,sizeof(action_id))){
             snprintf(selected,sizeof(selected),"%s",types[i]);break;
         }
     }
     if(!*selected){httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Type d'action absent");return ESP_FAIL;}
-    char *end=NULL;long id=strtol(action_id,&end,10);
-    if(end==action_id||*end!=0||id<1||id>4096){
-        httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"ID invalide");return ESP_FAIL;
+    const bool list_by_value=!strcmp(selected,"listvalue");
+    long id=-1;
+    if(list_by_value){
+        // The compound list name is looked up in the current widget index.
+        // This is strictly state feedback, never a command to Jeedom.
+        if(!*action_id||strlen(action_id)>=96||
+           !query_param(req,"value",value,sizeof(value))||!*value){
+            httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Etat de liste invalide");
+            return ESP_FAIL;
+        }
+    }else{
+        char *end=NULL;
+        id=strtol(action_id,&end,10);
+        if(end==action_id||*end!=0||id<1||id>4096){
+            httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"ID invalide");return ESP_FAIL;
+        }
     }
     char *raw=read_config(NULL);
     cJSON *index=raw?index_from_config(raw):NULL;
@@ -1872,6 +1887,15 @@ static esp_err_t updatenr(httpd_req_t *req) {
     char name[96]={0};bool found=false;
     cJSON_ArrayForEach(entry,array){
         const char *kind=jstr((cJSON*)entry,"type","");
+        if(list_by_value){
+            if(strcmp(kind,"list")||
+               strcmp(jstr((cJSON*)entry,"nomliste",""),action_id)||
+               strcmp(jstr((cJSON*)entry,"nom",""),value))continue;
+            snprintf(name,sizeof(name),"%s",action_id);
+            // Always forward the option label validated against the index.
+            // No action queue, MQTT publish or GenericCmd execution.
+            found=true;break;
+        }
         if((!strcmp(selected,"toggle")||!strcmp(selected,"toogle")) && !strcmp(kind,"toggle")){
             int off=jint((cJSON*)entry,"id0",-1),on=jint((cJSON*)entry,"id1",-1);
             if(id==off||id==on){

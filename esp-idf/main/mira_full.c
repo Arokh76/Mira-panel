@@ -1077,6 +1077,9 @@ static int clamp(int a,int lo,int hi){return a<lo?lo:(a>hi?hi:a);}
 // Mode commands use the legacy <thermostat>__mode list identity.
 // Keep the same choice syntax and MAX_LIST_ITEMS=12 behavior as the
 // Arduino beta, including literal \\n separators and trimmed labels.
+// The same UTF-8 NFC display normalization already proven for Spotify also
+// handles decomposed French thermostat modes such as E + combining acute.
+static void mira_media_display_text(const char *src,char *out,size_t cap);
 static void beta_dropdown_options(const char *source,char *out,size_t capacity){
     if(!capacity)return;
     size_t used=0,letters=0;
@@ -1096,10 +1099,12 @@ static void beta_dropdown_options(const char *source,char *out,size_t capacity){
         while(*first&&isspace((unsigned char)*first))first++;
         char *end=first+strlen(first);
         while(end>first&&isspace((unsigned char)end[-1]))*--end=0;
-        const size_t len=strlen(first);
+        char normalized[sizeof(option)];
+        mira_media_display_text(first,normalized,sizeof(normalized));
+        const size_t len=strlen(normalized);
         if(len&&count<12&&used+len+(count?1u:0u)<capacity){
             if(count)out[used++]='\n';
-            memcpy(out+used,first,len);
+            memcpy(out+used,normalized,len);
             used+=len;
             count++;
         }
@@ -1123,7 +1128,6 @@ static void thermostat_mode_selected(lv_event_t *event){
     (void)mira_beta_user_action(name,"list",value,name,value,true);
 }
 // The shared WT32 media normalizer is defined later, before state replay.
-static void mira_media_display_text(const char *src,char *out,size_t cap);
 static void media_dropdown_opened(lv_event_t *event){
     // The pop-up is a separate LVGL object; style both its ordinary rows
     // and the selected row, as in the WT32 thermostat/media dropdowns.
@@ -1893,6 +1897,11 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
                                       modes,sizeof(modes));
                 lv_dropdown_set_options(w->thermostat_mode_select,
                                         *modes?modes:"Confort");
+                // The pop-up is a distinct LVGL object. Just like the
+                // working media speaker selector, give its rows the French
+                // font (including É) and a readable selected-row style.
+                lv_obj_add_event_cb(w->thermostat_mode_select,media_dropdown_opened,
+                                    LV_EVENT_READY,NULL);
                 lv_obj_add_event_cb(w->thermostat_mode_select,thermostat_mode_selected,
                                     LV_EVENT_VALUE_CHANGED,w);
             }
@@ -3454,8 +3463,10 @@ static void mira_media_display_text(const char *src,char *out,size_t cap){
         {"u\xCC\x80","\xC3\xB9"},{"u\xCC\x81","\xC3\xBA"},
         {"u\xCC\x82","\xC3\xBB"},{"u\xCC\x88","\xC3\xBC"},
         {"c\xCC\xA7","\xC3\xA7"},{"n\xCC\x83","\xC3\xB1"},
-        {"A\xCC\x82","\xC3\x82"},{"E\xCC\x82","\xC3\x8A"},
-        {"I\xCC\x82","\xC3\x8E"},{"O\xCC\x82","\xC3\x94"},
+        {"A\xCC\x80","\xC3\x80"},{"A\xCC\x81","\xC3\x81"},
+        {"A\xCC\x82","\xC3\x82"},{"E\xCC\x80","\xC3\x88"},
+        {"E\xCC\x81","\xC3\x89"},{"E\xCC\x82","\xC3\x8A"},
+        {"E\xCC\x88","\xC3\x8B"},{"I\xCC\x82","\xC3\x8E"},{"O\xCC\x82","\xC3\x94"},
         {"U\xCC\x82","\xC3\x9B"},
         {"\xE2\x80\x99","'"},{"\xE2\x80\x98","'"},
         {"\xCA\xBC","'"},{"\xE2\x80\x9C","\""},
@@ -3663,12 +3674,14 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                 continue; // This is information, never a setpoint command.
             }
             if(!strcmp(mode_name,msg->name)&&w->thermostat_mode){
-                const char *selected_text=msg->value;
+                char normalized_mode[160]={0};
+                mira_media_display_text(msg->value,normalized_mode,sizeof(normalized_mode));
+                const char *selected_text=normalized_mode;
                 char selected_option[96]={0};
                 if(w->thermostat_mode_select){
                     char *end=NULL;
-                    const long choice=strtol(msg->value,&end,10);
-                    if(*msg->value&&end&&!*end&&choice>=0&&
+                    const long choice=strtol(normalized_mode,&end,10);
+                    if(*normalized_mode&&end&&!*end&&choice>=0&&
                        (uint32_t)choice<lv_dropdown_get_option_count(w->thermostat_mode_select)){
                         suppress_events=true;
                         lv_dropdown_set_selected(w->thermostat_mode_select,(uint32_t)choice);
@@ -3678,7 +3691,6 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                         selected_text=selected_option;
                     }
                 }
-                mira_label_set_text_if_changed(w->thermostat_mode,selected_text);
                 if(w->thermostat_mode_select){
                     const char *opts=lv_dropdown_get_options(w->thermostat_mode_select);
                     if(opts){
@@ -3691,6 +3703,9 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                                 suppress_events=true;
                                 lv_dropdown_set_selected(w->thermostat_mode_select,index);
                                 suppress_events=false;
+                                lv_dropdown_get_selected_str(w->thermostat_mode_select,
+                                                             selected_option,sizeof(selected_option));
+                                selected_text=selected_option;
                                 break;
                             }
                             if(!end)break;
@@ -3699,6 +3714,7 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                         }
                     }
                 }
+                mira_label_set_text_if_changed(w->thermostat_mode,selected_text);
                 continue;
             }
         }
