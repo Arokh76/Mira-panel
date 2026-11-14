@@ -2235,6 +2235,37 @@ static esp_err_t getallparams(httpd_req_t *req){
                                 memset(value,0,sizeof(value));
                             }
                         }
+                        // Arduino exposes the complete params table. A migrated
+                        // unit may have a legacy params.json without newer IDF
+                        // parameters: append those safely, preserving old secrets.
+                        static const char *const reflected[]={
+                            "Jeedom","Jeedom_IP","Jeedom_Refresh","Jeedom_Init_Cmd"
+                        };
+                        if(cJSON_IsArray(entries)){
+                            for(size_t i=0;i<sizeof(reflected)/sizeof(reflected[0]);i++){
+                                bool exists=false;
+                                const cJSON *entry;
+                                cJSON_ArrayForEach(entry,entries){
+                                    if(!strcmp(jstr((cJSON*)entry,"param",""),reflected[i])){
+                                        exists=true;break;
+                                    }
+                                }
+                                if(exists)continue;
+                                char value[256]={0};
+                                if(!mira_jeedom_copy_param(reflected[i],value,sizeof(value)))
+                                    continue;
+                                cJSON *item=cJSON_CreateObject();
+                                if(item &&
+                                   cJSON_AddStringToObject(item,"param",reflected[i]) &&
+                                   cJSON_AddStringToObject(item,"value",value) &&
+                                   cJSON_AddStringToObject(item,"type",
+                                       !strcmp(reflected[i],"Jeedom")?"toggle":"text")){
+                                    cJSON_AddItemToArray(entries,item);
+                                    changed=true;
+                                }else if(item)cJSON_Delete(item);
+                                memset(value,0,sizeof(value));
+                            }
+                        }
                         if(changed){
                             char *updated=cJSON_PrintUnformatted(root);
                             if(updated){
@@ -2283,7 +2314,7 @@ static esp_err_t getallparams(httpd_req_t *req){
         cJSON_AddStringToObject(entry,"param",names[i]);
         cJSON_AddStringToObject(entry,"value",value);
         cJSON_AddStringToObject(entry,"type",
-            strstr(names[i],"Key")?"hidden-text":"text");
+            !strcmp(names[i],"Jeedom")?"toggle":"text");
         cJSON_AddItemToArray(params,entry);
         memset(value,0,sizeof(value));
     }
