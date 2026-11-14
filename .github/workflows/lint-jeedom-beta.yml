@@ -78,3 +78,37 @@ jobs:
           grep -Fq 'mira_input_gpio' desktop/js/mira.js
           grep -Fq '/gpio/multi/config' core/class/mira.class.php
           grep -Fq "type === 'multiaction'" core/ajax/mira.ajax.php
+      - name: Build installable Jeedom plugin ZIP
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import pathlib
+          import zipfile
+
+          root = pathlib.Path(".")
+          version = json.loads((root / "plugin_info/info.json").read_text())["version"]
+          dest = pathlib.Path("dist")
+          dest.mkdir(exist_ok=True)
+          archive = dest / ("Mira_Jeedom_" + version + ".zip")
+          roots = ("3rdparty", "core", "desktop", "docs", "plugin_info", "resources")
+          with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED, compresslevel=7) as z:
+              for folder in roots:
+                  for path in sorted((root / folder).rglob("*")):
+                      if path.is_file():
+                          z.write(path, path.as_posix())
+              for name in ("LICENSE", "NOTICE", "README.md"):
+                  if (root / name).is_file():
+                      z.write(root / name, name)
+          with zipfile.ZipFile(archive) as z:
+              assert "plugin_info/info.json" in z.namelist()
+              assert "core/class/mira.class.php" in z.namelist()
+          print(f"Packaged {archive} ({archive.stat().st_size} bytes)")
+          PY
+      - name: Upload installable plugin ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mira_Jeedom_Beta_Installable
+          path: dist/Mira_Jeedom_*.zip
+          if-no-files-found: error
+          retention-days: 30
