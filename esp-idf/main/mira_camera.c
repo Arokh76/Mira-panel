@@ -23,6 +23,10 @@
 #define CAM_HEIGHT 428
 #define CAM_MAX_JPEG (900u * 1024u)
 
+// Native ESP-IDF decoder first; proven WT32 JPEGDEC path only if it fails.
+// JPEGDEC is called on the existing network/art worker, never from LVGL.
+extern bool mira_jpegdec_fallback(uint8_t *jpeg,size_t size,mira_camera_frame_t *out);
+
 static const char *TAG="mira-idf-camera";
 static SemaphoreHandle_t lock;
 static char active_url[CAM_MAX_URL+1];
@@ -115,9 +119,16 @@ static bool decode_jpeg_buffer(uint8_t *jpeg,size_t used,mira_camera_frame_t *ou
             fit=true;break;
         }
     }
-    if(!fit)return false;
+    if(!fit){
+        // Espressif's tiny decoder only understands some baseline JPEGs.
+        ESP_LOGW(TAG,"JPEG info unsupported; trying WT32 JPEGDEC fallback");
+        return mira_jpegdec_fallback(jpeg,used,out);
+    }
     uint16_t *pixels=heap_caps_malloc(info.output_len,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
-    if(!pixels){return false;}
+    if(!pixels){
+        ESP_LOGW(TAG,"Native JPEG RGB565 buffer allocation failed");
+        return mira_jpegdec_fallback(jpeg,used,out);
+    }
     config.outbuf=(uint8_t*)pixels;
     config.outbuf_size=(uint32_t)info.output_len;
     esp_jpeg_image_output_t decoded={0};
@@ -126,7 +137,11 @@ static bool decode_jpeg_buffer(uint8_t *jpeg,size_t used,mira_camera_frame_t *ou
             decoded.output_len>=(size_t)decoded.width*(size_t)decoded.height*2u &&
             decoded.output_len<=info.output_len;
     
-    if(!ok){heap_caps_free(pixels);return false;}
+    if(!ok){
+        heap_caps_free(pixels);
+        ESP_LOGW(TAG,"Native JPEG decode failed; trying WT32 JPEGDEC fallback");
+        return mira_jpegdec_fallback(jpeg,used,out);
+    }
     out->pixels=pixels;
     out->width=decoded.width;
     out->height=decoded.height;
