@@ -341,6 +341,7 @@ typedef struct {
     lv_obj_t *energy_gauge[3],*energy_extra_names[2];
     bool energy_extra_active[2];
     lv_obj_t *media_slider,*media_device_dropdown,*media_play_caption;
+    lv_obj_t *media_progress_bar;
     lv_obj_t *media_artwork_image,*media_artwork_placeholder;
     bool media_is_playing;
     // Distinguish Mira beta simple, double, triple and long-click commands.
@@ -742,11 +743,10 @@ static void wheel_mark_hue(mira_widget_t *w,int hue){
         const float angle=(float)w->color_hue*(3.14159265f/180.0f);
         // LVGL 8: marker radius=(wheel diameter - arc width)/2.
         const float radius=(float)(MIRA_WHEEL_SIZE-MIRA_WHEEL_ARC_WIDTH)/2.0f;
-        const int x=MIRA_WHEEL_CENTER+(int)lroundf(radius*sinf(angle))-7;
-        const int y=MIRA_WHEEL_CENTER+(int)lroundf(radius*cosf(angle))-7;
+        // Center the larger WT32-style white marker on the hue ring.
+        const int x=MIRA_WHEEL_CENTER+(int)lroundf(radius*sinf(angle))-11;
+        const int y=MIRA_WHEEL_CENTER+(int)lroundf(radius*cosf(angle))-11;
         lv_obj_set_pos(w->color_knob,x,y);
-        lv_obj_set_style_bg_color(w->color_knob,
-            lv_color_hsv_to_rgb(w->color_hue,w->color_sat,w->color_val),0);
     }
 }
 static void event_local(lv_event_t *e);
@@ -1158,8 +1158,8 @@ static void media_direct_action(lv_event_t *event) {
 }
 static void media_add_button(mira_widget_t *w,int action,int x,const char *text){
     lv_obj_t *button=lv_button_create(w->card);
-    lv_obj_set_size(button,72,57);
-    lv_obj_set_pos(button,x,380);
+    lv_obj_set_size(button,72,54);
+    lv_obj_set_pos(button,x,274);
     panel_style(button,true);
     lv_obj_t *caption=label(button,text,0xF3F6F7,&lv_font_montserrat_20);
     lv_obj_center(caption);
@@ -1480,7 +1480,7 @@ static void artwork_poll(void){
     mira_widget_t *w=&widgets[index];
     lv_image_set_src(w->media_artwork_image,&artwork_desc);
     const uint32_t biggest=frame.width>frame.height?frame.width:frame.height;
-    uint32_t scale=biggest?(230u*256u/biggest):256u;
+    uint32_t scale=biggest?(232u*256u/biggest):256u;
     if(scale<16)scale=16;
     if(scale>512)scale=512;
     lv_image_set_scale(w->media_artwork_image,scale);
@@ -1953,12 +1953,18 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
             ESP_LOGW(TAG,"No PSRAM for WT32-equivalent color wheel");
         }
         w->color_knob=lv_obj_create(w->control);
-        lv_obj_set_size(w->color_knob,MIRA_WHEEL_ARC_WIDTH,MIRA_WHEEL_ARC_WIDTH);
+        // Match WT32's light colorwheel marker and cyan 2px border.
+        // This is the COLOR widget only: thermostat and roundrange stay intact.
+        lv_obj_set_size(w->color_knob,22,22);
         lv_obj_set_style_pad_all(w->color_knob,0,0);
         lv_obj_set_style_radius(w->color_knob,LV_RADIUS_CIRCLE,0);
+        lv_obj_set_style_bg_opa(w->color_knob,LV_OPA_COVER,0);
+        lv_obj_set_style_bg_color(w->color_knob,lv_color_hex(0xF0F8FC),0);
         lv_obj_set_style_border_color(w->color_knob,cyan_c(),0);
         lv_obj_set_style_border_width(w->color_knob,2,0);
-        lv_obj_set_style_shadow_width(w->color_knob,0,0);
+        lv_obj_set_style_shadow_color(w->color_knob,cyan_c(),0);
+        lv_obj_set_style_shadow_opa(w->color_knob,LV_OPA_20,0);
+        lv_obj_set_style_shadow_width(w->color_knob,5,0);
         no_scroll(w->color_knob);
         lv_obj_remove_flag(w->color_knob,LV_OBJ_FLAG_CLICKABLE);
         wheel_mark_hue(w,initial.h);
@@ -2043,41 +2049,62 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         return;
     }
     if(!strcmp(type,"media")){
-        // Restore beta's 786x558 Spotify-style card. The former generic
-        // key/value table was not Mira 0.7.37's multimedia widget.
-        w->card=card(pg,786,558);
+        // Mira 7-inch: the WT32 786x558 portrait stack is taller than the
+        // 430px content region. Use the thermostat's 786x414 card footprint.
+        // Only the layout changes; all 9 Infos and 6 Jeedom actions are kept.
+        const int media_w=786;
+        const int media_h=CONTENT_H-16;  // 414px above the 50px navigation
+        w->card=card(pg,media_w,media_h);
         lv_obj_set_layout(w->card,LV_LAYOUT_NONE);
         lv_obj_set_style_pad_all(w->card,0,0);
         no_scroll(w->card);
         lv_obj_t *heading=label(w->card,display,0xF3F6F7,&mira_font_fr_16);
-        lv_obj_set_width(heading,742);
-        lv_obj_set_style_text_align(heading,LV_TEXT_ALIGN_CENTER,0);
-        lv_obj_set_pos(heading,22,7);
-        const int artX=(786-230)/2,artY=38;
+        lv_obj_set_pos(heading,22,14);
+        lv_obj_set_width(heading,500);
+        lv_label_set_long_mode(heading,LV_LABEL_LONG_DOT);
+
+        // Output selector remains the original Jeedom-only device_cmd action.
+        w->media_device_dropdown=lv_dropdown_create(w->card);
+        lv_obj_set_pos(w->media_device_dropdown,538,10);
+        lv_obj_set_size(w->media_device_dropdown,226,38);
+        lv_dropdown_set_options(w->media_device_dropdown,"Sélectionner un appareil");
+        lv_obj_set_style_radius(w->media_device_dropdown,10,0);
+        lv_obj_set_style_bg_color(w->media_device_dropdown,panel2_c(),0);
+        lv_obj_set_style_border_color(w->media_device_dropdown,cyan_c(),0);
+        lv_obj_set_style_border_width(w->media_device_dropdown,1,0);
+        const uintptr_t device=((uintptr_t)(w-widgets)<<3)|4u;
+        lv_obj_add_event_cb(w->media_device_dropdown,media_direct_action,
+                            LV_EVENT_VALUE_CHANGED,(void*)(device+1));
+
+        // One artwork buffer, as before. A subtle sleeve stack sits behind
+        // the rounded image; no second JPEG or DMA allocation is introduced.
+        const int art_x=22,art_y=67,art_size=244;
         for(int side=-1;side<=1;side+=2){
             lv_obj_t *sleeve=lv_obj_create(w->card);
-            lv_obj_set_pos(sleeve,artX+side*24,artY+7);
-            lv_obj_set_size(sleeve,225,225);
+            lv_obj_set_pos(sleeve,art_x+side*9,art_y+6);
+            lv_obj_set_size(sleeve,art_size-8,art_size-8);
             lv_obj_set_style_radius(sleeve,15,0);
             lv_obj_set_style_bg_color(sleeve,lv_color_hex(0x244463),0);
             lv_obj_set_style_bg_grad_color(sleeve,lv_color_hex(0x101C34),0);
             lv_obj_set_style_bg_grad_dir(sleeve,LV_GRAD_DIR_VER,0);
             lv_obj_set_style_border_width(sleeve,0,0);
-            lv_obj_set_style_shadow_width(sleeve,0,0); // preserves fast scroll
+            lv_obj_set_style_shadow_width(sleeve,0,0);
             lv_obj_set_style_pad_all(sleeve,0,0);
             lv_obj_remove_flag(sleeve,LV_OBJ_FLAG_CLICKABLE|LV_OBJ_FLAG_SCROLLABLE);
         }
         lv_obj_t *art=lv_obj_create(w->card);
-        lv_obj_set_size(art,230,230);
-        lv_obj_set_pos(art,artX,artY);
+        lv_obj_set_size(art,art_size,art_size);
+        lv_obj_set_pos(art,art_x,art_y);
         lv_obj_set_style_radius(art,15,0);
         lv_obj_set_style_clip_corner(art,true,0);
         lv_obj_set_style_bg_color(art,lv_color_hex(0x132A47),0);
         lv_obj_set_style_bg_grad_color(art,lv_color_hex(0x315C87),0);
         lv_obj_set_style_bg_grad_dir(art,LV_GRAD_DIR_VER,0);
-        lv_obj_set_style_pad_all(art,0,0);
         lv_obj_set_style_border_width(art,0,0);
-        lv_obj_set_style_shadow_width(art,0,0);
+        lv_obj_set_style_shadow_color(art,lv_color_hex(0x050B16),0);
+        lv_obj_set_style_shadow_width(art,12,0);
+        lv_obj_set_style_shadow_opa(art,LV_OPA_30,0);
+        lv_obj_set_style_pad_all(art,0,0);
         no_scroll(art);
         lv_obj_remove_flag(art,LV_OBJ_FLAG_CLICKABLE);
         w->media_artwork_placeholder=label(art,LV_SYMBOL_AUDIO,0x22BEEA,
@@ -2087,49 +2114,64 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         lv_obj_align(w->media_artwork_image,LV_ALIGN_CENTER,0,0);
         lv_obj_add_flag(w->media_artwork_image,LV_OBJ_FLAG_HIDDEN);
         lv_obj_remove_flag(w->media_artwork_image,LV_OBJ_FLAG_CLICKABLE);
-        // Keep the original passive field names; hidden metadata still
-        // receives Jeedom Infos without creating duplicate visual labels.
+
+        // Keep the nine original composite state labels so existing passive
+        // updates, cache replay and Jeedom command IDs remain unchanged.
         for(int n=0;n<9;n++){
             const char *initial=n==0?"Aucune lecture":n==3?"À l'arrêt":
-                                n==5?"-- %":"";
-            const lv_font_t *font=n==0?&mira_font_fr_16:
-                                   n==1?&mira_font_fr_14:&mira_font_fr_12;
+                                n==4?"-- %":n==5?"-- %":"";
+            const lv_font_t *font=n==0?&lv_font_montserrat_28:
+                                  n==1?&lv_font_montserrat_20:
+                                  n==2?&mira_font_fr_16:&mira_font_fr_14;
             uint32_t color=n==0?0xF3F6F7:0xA8B2B8;
             w->fields[n]=label(w->card,initial,color,font);
-            if(n==0||n==1||n==3){
-                lv_obj_set_width(w->fields[n],742);
-                lv_obj_set_style_text_align(w->fields[n],LV_TEXT_ALIGN_CENTER,0);
-                lv_obj_set_pos(w->fields[n],22,n==0?279:n==1?314:340);
+            if(n<=3){
+                const int y[]={70,112,145,177};
+                lv_obj_set_width(w->fields[n],470);
+                lv_obj_set_pos(w->fields[n],292,y[n]);
                 lv_label_set_long_mode(w->fields[n],LV_LABEL_LONG_DOT);
-            }else if(n==5){
-                lv_obj_set_width(w->fields[n],49);
+            }else if(n==4){
+                lv_obj_set_width(w->fields[n],64);
                 lv_obj_set_style_text_align(w->fields[n],LV_TEXT_ALIGN_RIGHT,0);
-                lv_obj_set_pos(w->fields[n],710,472);
+                lv_obj_set_pos(w->fields[n],697,251);
+            }else if(n==5){
+                lv_obj_set_width(w->fields[n],55);
+                lv_obj_set_style_text_align(w->fields[n],LV_TEXT_ALIGN_RIGHT,0);
+                lv_obj_set_pos(w->fields[n],708,351);
             }else lv_obj_add_flag(w->fields[n],LV_OBJ_FLAG_HIDDEN);
         }
-        media_add_button(w,0,261,LV_SYMBOL_PREV);
-        media_add_button(w,1,357,LV_SYMBOL_PLAY);
-        media_add_button(w,2,453,LV_SYMBOL_NEXT);
+
+        lv_obj_t *progress_label=label(w->card,"Progression",0xA8B2B8,&mira_font_fr_12);
+        lv_obj_set_pos(progress_label,292,208);
+        w->media_progress_bar=lv_bar_create(w->card);
+        lv_obj_set_size(w->media_progress_bar,464,12);
+        lv_obj_set_pos(w->media_progress_bar,292,231);
+        lv_bar_set_range(w->media_progress_bar,0,100);
+        lv_bar_set_value(w->media_progress_bar,0,LV_ANIM_OFF);
+        lv_obj_set_style_bg_color(w->media_progress_bar,panel2_c(),LV_PART_MAIN);
+        lv_obj_set_style_bg_color(w->media_progress_bar,cyan_c(),LV_PART_INDICATOR);
+        lv_obj_set_style_radius(w->media_progress_bar,LV_RADIUS_CIRCLE,LV_PART_MAIN);
+        lv_obj_set_style_radius(w->media_progress_bar,LV_RADIUS_CIRCLE,LV_PART_INDICATOR);
+        lv_obj_remove_flag(w->media_progress_bar,LV_OBJ_FLAG_CLICKABLE);
+
+        media_add_button(w,0,340,LV_SYMBOL_PREV);
+        media_add_button(w,1,448,LV_SYMBOL_PLAY);
+        media_add_button(w,2,556,LV_SYMBOL_NEXT);
         lv_obj_t *volume_icon=label(w->card,LV_SYMBOL_VOLUME_MAX,
                                      0x22BEEA,&lv_font_montserrat_20);
-        lv_obj_set_pos(volume_icon,22,469);
+        lv_obj_set_pos(volume_icon,292,351);
         w->media_slider=lv_slider_create(w->card);
-        lv_obj_set_size(w->media_slider,646,18);
-        lv_obj_set_pos(w->media_slider,60,474);
+        lv_obj_set_size(w->media_slider,366,17);
+        lv_obj_set_pos(w->media_slider,330,357);
         lv_slider_set_range(w->media_slider,0,100);
         lv_slider_set_value(w->media_slider,40,LV_ANIM_OFF);
+        lv_obj_set_style_bg_color(w->media_slider,panel2_c(),LV_PART_MAIN);
         lv_obj_set_style_bg_color(w->media_slider,cyan_c(),LV_PART_INDICATOR);
-        uintptr_t vol=((uintptr_t)(w-widgets)<<3)|3u;
-        lv_obj_add_event_cb(w->media_slider,media_direct_action,LV_EVENT_RELEASED,(void*)(vol+1));
-        w->media_device_dropdown=lv_dropdown_create(w->card);
-        lv_obj_set_size(w->media_device_dropdown,660,36);
-        lv_obj_set_pos(w->media_device_dropdown,106,509);
-        lv_dropdown_set_options(w->media_device_dropdown,"Sélectionner un appareil");
-        lv_obj_t *device_title=label(w->card,"Sortie",0xA8B2B8,&mira_font_fr_14);
-        lv_obj_set_pos(device_title,22,520);
-        uintptr_t device=((uintptr_t)(w-widgets)<<3)|4u;
-        lv_obj_add_event_cb(w->media_device_dropdown,media_direct_action,
-                            LV_EVENT_VALUE_CHANGED,(void*)(device+1));
+        lv_obj_set_style_bg_color(w->media_slider,lv_color_hex(0xF0F8FC),LV_PART_KNOB);
+        lv_obj_set_style_pad_all(w->media_slider,3,LV_PART_KNOB);
+        const uintptr_t vol=((uintptr_t)(w-widgets)<<3)|3u;
+        lv_obj_add_event_cb(w->media_slider,media_direct_action,
+                            LV_EVENT_RELEASED,(void*)(vol+1));
         return;
     }
     if(!strcmp(type,"camera")){
@@ -3389,7 +3431,20 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                         if(media&&n==5&&w->local_input_until_ms!=0&&
                            (int32_t)(lv_tick_get()-w->local_input_until_ms)<0)
                             break;
-                        if(media&&n==5){
+                        if(media&&n==4){
+                            // Jeedom's progress is a 0..100 percentage, not
+                            // playback timestamps. Keep this bar passive.
+                            char *end=NULL;
+                            const long percent=strtol(msg->value,&end,10);
+                            const bool valid=end!=msg->value&&percent>=0&&percent<=100&&
+                                (*end==0||*end=='%'||*end==' ');
+                            char shown[24]="-- %";
+                            if(valid)snprintf(shown,sizeof(shown),"%ld %%",percent);
+                            mira_label_set_text_if_changed(w->fields[n],shown);
+                            if(w->media_progress_bar)
+                                lv_bar_set_value(w->media_progress_bar,
+                                                 valid?(int)percent:0,LV_ANIM_OFF);
+                        }else if(media&&n==5){
                             char *end=NULL;
                             long vol=strtol(msg->value,&end,10);
                             char volume_text[24]="-- %";
