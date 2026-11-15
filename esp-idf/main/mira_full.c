@@ -1191,9 +1191,35 @@ static void media_direct_action(lv_event_t *event) {
     if(action==2)suffix="next";
     if(action==3){
         if(!w->media_slider)return;
+        const lv_event_code_t code=lv_event_get_code(event);
+        const uint32_t now=lv_tick_get();
+        // Protect an ongoing finger drag from delayed passive Jeedom echoes,
+        // even when the finger pauses and the slider value does not change.
+        if(code==LV_EVENT_PRESSED||code==LV_EVENT_PRESSING){
+            w->local_input_until_ms=now+350u;
+            return;
+        }
+        if(code!=LV_EVENT_VALUE_CHANGED&&code!=LV_EVENT_RELEASED)return;
+        const int volume=lv_slider_get_value(w->media_slider);
+        w->local_input_until_ms=now+(code==LV_EVENT_RELEASED?650u:350u);
+        // The user must see the exact finger position immediately, even if
+        // the HTTP/MQTT send is throttled or the network is temporarily slow.
+        if(w->fields[5]){
+            char shown[24];
+            snprintf(shown,sizeof(shown),"%d %%",volume);
+            const char *current=lv_label_get_text(w->fields[5]);
+            if(!current||strcmp(current,shown))
+                lv_label_set_text(w->fields[5],shown);
+        }
+        // Bound remote volume updates to roughly 7/s. The Jeedom worker
+        // coalesces pending range values by name, keeping the latest one.
+        // Release ALWAYS sends the final position, including an unchanged one.
+        if(code==LV_EVENT_VALUE_CHANGED){
+            if(w->live_sent&&w->live_last_value==volume)return;
+            if(w->live_sent&&(uint32_t)(now-w->live_last_tick)<150u)return;
+        }
         suffix="volume_cmd";
-        w->local_input_until_ms=lv_tick_get()+350u;
-        snprintf(payload,sizeof(payload),"%ld",(long)lv_slider_get_value(w->media_slider));
+        snprintf(payload,sizeof(payload),"%d",volume);
     }
     if(action==4){
         if(!w->media_device_dropdown)return;
@@ -1208,9 +1234,10 @@ static void media_direct_action(lv_event_t *event) {
     // device selection is deliberately Jeedom-only (not an MQTT command).
     const bool sent=mira_beta_user_action(command,(action>=3)?"range":"button",
                                           payload,command,payload,action!=4);
-    if(action==3&&sent&&w->fields[5]){
-        // WT32 shows the touched volume immediately, before next Jeedom Info.
-        lv_label_set_text_fmt(w->fields[5],"%s %%",payload);
+    if(action==3&&sent){
+        w->live_sent=true;
+        w->live_last_value=atoi(payload);
+        w->live_last_tick=lv_tick_get();
     }
     if(action==1&&sent){
         w->media_is_playing=!w->media_is_playing;
@@ -2255,6 +2282,14 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         lv_obj_set_style_bg_color(w->media_slider,lv_color_hex(0xF0F8FC),LV_PART_KNOB);
         lv_obj_set_style_pad_all(w->media_slider,3,LV_PART_KNOB);
         const uintptr_t vol=((uintptr_t)(w-widgets)<<3)|3u;
+        // Live volume like a physical slider: never wait for finger release.
+        // One final unthrottled update guarantees the precise selected value.
+        lv_obj_add_event_cb(w->media_slider,media_direct_action,
+                            LV_EVENT_PRESSED,(void*)(vol+1));
+        lv_obj_add_event_cb(w->media_slider,media_direct_action,
+                            LV_EVENT_PRESSING,(void*)(vol+1));
+        lv_obj_add_event_cb(w->media_slider,media_direct_action,
+                            LV_EVENT_VALUE_CHANGED,(void*)(vol+1));
         lv_obj_add_event_cb(w->media_slider,media_direct_action,
                             LV_EVENT_RELEASED,(void*)(vol+1));
         return;
