@@ -5,7 +5,7 @@ ui=(Path(__file__).resolve().parents[1]/"main"/"mira_full.c").read_text(encoding
 start=ui.index("static void media_direct_action(")
 end=ui.index("static void media_add_button(",start)
 volume=ui[start:end]
-assert "code==LV_EVENT_VALUE_CHANGED&&code!=LV_EVENT_RELEASED" in volume
+assert "code!=LV_EVENT_VALUE_CHANGED&&code!=LV_EVENT_RELEASED" in volume
 assert "code==LV_EVENT_PRESSED||code==LV_EVENT_PRESSING" in volume
 assert "w->live_last_value==volume" in volume
 assert "now-w->live_last_tick)<150u" in volume
