@@ -48,6 +48,14 @@ static bool cover_url(const char *url){
     static const char *const allowed[]={
         "https://i.scdn.co/image/",
         "https://mosaic.scdn.co/",
+        // YouTube Music / Google Cast public artwork thumbnails.
+        // Accept explicit Google CDN hosts only (no arbitrary URL fetch).
+        "https://lh3.googleusercontent.com/",
+        "https://lh4.googleusercontent.com/",
+        "https://lh5.googleusercontent.com/",
+        "https://lh6.googleusercontent.com/",
+        "https://i.ytimg.com/",
+        "https://yt3.ggpht.com/",
         "https://yt3.googleusercontent.com/"
     };
     for(unsigned i=0;i<sizeof(allowed)/sizeof(allowed[0]);i++){

@@ -103,6 +103,7 @@ jobs:
           assert 'mira_beta_web_auth_key_set(plaintext);' in jeed
           PY
           python3 "$ROOT/tests/test_media_volume_live.py"
+          python3 "$ROOT/tests/test_google_cast_cover_hosts.py"
       - name: Native ESP-IDF 5.5.6 build
         uses: espressif/esp-idf-ci-action@v1
         with:
