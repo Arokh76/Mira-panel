@@ -2410,7 +2410,7 @@ class mira extends eqLogic {
     return $result;    
   }  
   
-  public function refresh() {
+  public function refresh($syncCommands=false) {
     // User-triggered refresh: existing passive IDs first. /getindex is
     // optional metadata and must never suppress Info delivery.
     try { $this->syncGpioStates(); }
@@ -2421,11 +2421,13 @@ class mira extends eqLogic {
     $this->refreshLightToggleStates(null,true);
     $this->refreshClockWeather(true);
 
-    $index=$this->GetIndex(false,true);
-    if (is_array($index)) {
+    $index=$this->GetIndex(true,true);
+    if (is_array($index) && isset($index['actions']) &&
+        is_array($index['actions'])) {
       $status=$this->getCmd(null,'Statut');
       if (is_object($status)) $this->checkAndUpdateCmd('Statut','1');
-      $this->repairScreenTransportIds($index);
+      if ($syncCommands) $this->postUpdate($index);
+      else $this->repairScreenTransportIds($index['actions']);
     } else {
       // Metadata alone cannot prove the screen is physically offline.
       log::add('mira','debug','[Refresh] '.$this->getName().
@@ -2633,14 +2635,10 @@ class miraCmd extends cmd {
  public function execute($_options = array()) {
     $eqLogic = $this->getEqLogic();
 	if ($this->getLogicalId() == 'refresh') {
-        /* Un refresh relit aussi la structure de l'ecran afin de creer
-         * les commandes ajoutees depuis la derniere programmation. */
-        $eqLogic->postUpdate();
-        $eqLogic->syncGpioStates();
-        // Saving/rebuilding the index alone does not resend current Info values.
-        $eqLogic->refreshPassiveWidgets(true);
-        $eqLogic->refreshClockWeather(true);
-        $eqLogic->refreshLightToggleStates(null,true);
+        // Send Info and light states BEFORE any metadata request. Then
+        // reconstruct new commands using that SAME /getindex snapshot.
+        // Never execute physical actions as part of refresh.
+        $eqLogic->refresh(true);
       	return;
 	}
    
