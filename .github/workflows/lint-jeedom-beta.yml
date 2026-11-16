@@ -60,6 +60,8 @@ jobs:
         run: php tests/test_thermostat_passive_resync.php
       - name: Check fast thermostat mode and read-only real-state feedback
         run: php tests/test_thermostat_latency.php
+      - name: Regress read-only INFO and light feedback when index times out
+        run: php tests/test_passive_info_light_refresh.php
       - name: 'Regression: rebind changed Mira transport IDs safely'
         run: php tests/test_boot_transport_rebind.php
       - name: Check compact media/camera editor
