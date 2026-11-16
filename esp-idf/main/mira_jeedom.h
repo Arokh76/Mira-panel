@@ -3,7 +3,7 @@
 #include "esp_err.h"
 #include "esp_http_server.h"
 // Read-only and authenticated Jeedom plugin protocol + safe programming and state commands.
-void mira_jeedom_register_http(httpd_handle_t server);
+void mira_jeedom_register_http(httpd_handle_t server, unsigned max_open_sockets);
 
 // Called once after NVS, Wi-Fi and SPIFFS are initialized.
 esp_err_t mira_jeedom_action_init(void);
