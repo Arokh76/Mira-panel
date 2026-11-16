@@ -13,7 +13,7 @@ $pre=$method('public function preUpdate()', 'public function postUpdate(');
 if(strpos($pre,'GetModule(')!==false || strpos($pre,'GetIndex(')!==false)
     throw new RuntimeException('Saving Jeedom config must never require live HTTP in preUpdate');
 $post=$method('public function postUpdate(', 'public function repairScreenTransportIds(');
-if(strpos($post,'[SyncCmd]')===false || strpos($post,'commandes existantes conservees')===false ||
+if(strpos($post,'[SyncCmd]')===false || strpos($post,'conservation des commandes existantes')===false ||
    strpos($post,'modifications Jeedom conservees')===false)
     throw new RuntimeException('Post-update should preserve edits when the screen is offline');
 $event=$method('public static function event()', 'public function preUpdate()');
