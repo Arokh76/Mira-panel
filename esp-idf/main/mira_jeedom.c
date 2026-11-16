@@ -1115,8 +1115,11 @@ static void mira_sse_worker(void *argument){
         if(err!=ESP_OK)break;
         // EventSource is notified directly by the MQTT/Jeedom state cache
         // or by the browser action route, just as Arduino events.send().
+        // EventGroup bits are shared by up to two browsers. A wakeup
+        // consumed by one EventSource must not leave the other stale for
+        // ten seconds. Reconcile its own cached values at least every 500ms.
         xEventGroupWaitBits(mira_sse_signal,MIRA_SSE_CHANGED,pdTRUE,pdFALSE,
-                            pdMS_TO_TICKS(10000));
+                            pdMS_TO_TICKS(500));
         TickType_t now=xTaskGetTickCount();
         if(now-last_heartbeat>=pdMS_TO_TICKS(10000)){
             err=httpd_resp_send_chunk(req,": Mira keepalive\n\n",HTTPD_RESP_USE_STRLEN);
@@ -1144,18 +1147,23 @@ static esp_err_t beta_events_get(httpd_req_t *req){
         }
     }while(!__atomic_compare_exchange_n(&mira_sse_clients,&active,active+1u,
                                         false,__ATOMIC_RELAXED,__ATOMIC_RELAXED));
-    // Connection establishment must not block the sole HTTP dispatcher
-    // with SPIFFS I/O and a full widget-to-action index rebuild.
-    cJSON *index=mira_index_copy_actions();
+    // Restore the previously verified 3715629 SSE action-index path.
+    // The cached-index clone can fail during index contention; accepting a
+    // zero-action EventSource left an apparently connected but inert browser.
+    char *raw=read_config(NULL);
+    cJSON *index=raw?index_from_config(raw):NULL;
+    free(raw);
     const cJSON *actions=index?cJSON_GetObjectItemCaseSensitive(index,"actions"):NULL;
     const int count=cJSON_IsArray(actions)?cJSON_GetArraySize(actions):0;
     // A single media widget registers up to 15 Jeedom
     // actions per widget. Include the three internal weather Infos.
-    if(count<0||count>640){
+    // No empty client: EventSource will retry instead of staying silently
+    // connected forever with no toggle/Info subscriptions.
+    if(!index||count<=0||count>640){
         if(index)cJSON_Delete(index);
         __atomic_sub_fetch(&mira_sse_clients,1u,__ATOMIC_RELAXED);
         httpd_resp_set_status(req,"503 Service Unavailable");
-        httpd_resp_sendstr(req,"SSE index too large");
+        httpd_resp_sendstr(req,"SSE index unavailable or invalid");
         return ESP_FAIL;
     }
     // Created once on startup, never concurrently in two HTTP requests.
