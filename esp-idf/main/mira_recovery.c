@@ -1239,7 +1239,14 @@ esp_err_t mira_recovery_init(void) {
     // 7168 is a compromise; report its observed high-water mark via /status.
     conf.stack_size = setup_only?6144:7168;
     conf.task_caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
-    conf.recv_wait_timeout = 15;
+    // The web UI and asynchronous SSE consumers share a bounded socket pool.
+    // Purge stale idle clients instead of letting abandoned browser connections
+    // make the entire HTTP interface intermittently unreachable.
+    conf.lru_purge_enable = true;
+    // Keep an unresponsive peer from occupying the single HTTP dispatcher
+    // for 15 seconds. OTA sends still have five seconds per socket operation.
+    conf.recv_wait_timeout = 5;
+    conf.send_wait_timeout = 5;
     const uint32_t internal=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
     ESP_LOGI(TAG,"HTTPD_PREFLIGHT setup=%u stack=%u routes=%u internal_free=%u largest=%u dma_free=%u",
         setup_only?1u:0u,(unsigned)conf.stack_size,(unsigned)conf.max_uri_handlers,
