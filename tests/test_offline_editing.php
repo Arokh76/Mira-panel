@@ -23,7 +23,9 @@ if(strpos($ajax,'/testmodule?key=')!==false)
     throw new RuntimeException('ProgramUI must not be blocked by a brief preflight probe');
 if(strpos($ajax,'/programui')===false || strpos($ajax,'$miraVerifyProgramUI(')===false)
     throw new RuntimeException('ProgramUI must POST once and verify on lost ACK');
-$execute=$method('public function execute($_options = array())', 'private function listOptionNameFromValue(');
+$executeStart=strpos($source,'public function execute($_options = array())');
+if($executeStart===false)throw new RuntimeException('Missing command execute method');
+$execute=substr($source,$executeStart);
 if(strpos($execute,'mira_info_http_value')===false || strpos($execute,'45.0')===false)
     throw new RuntimeException('Unchanged Info HTTP needs bounded deduplication');
 if(strpos($execute,'if ($output!==false)')===false)
