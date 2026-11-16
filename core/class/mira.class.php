@@ -704,6 +704,71 @@ class mira extends eqLogic {
   }
 
   /**
+   * Thermostat mode and setpoint feedback must not wait for the 60s cron.
+   * Listen only to the Jeedom INFO sources explicitly bound in
+   * Value_<thermostat>__mode / __consigne ("Recevoir de").
+   * Other devices and action commands are never subscribed.
+   */
+  public static function rebuildThermostatListener() {
+    $ids=array();
+    foreach (eqLogic::byType('mira') as $panel) {
+      if (!is_object($panel) || !$panel->getIsEnable()) continue;
+      foreach ($panel->getCmd('info') as $target) {
+        if (!is_object($target) || $target->getType()!=='info') continue;
+        $logical=(string)$target->getLogicalId();
+        if (!preg_match('/^Value_.+__(mode|consigne)$/D',$logical)) continue;
+        $kind=(string)$target->getConfiguration('type');
+        if ($kind!=='list' && $kind!=='range') continue;
+        $binding=trim((string)$target->getConfiguration('calcul',''));
+        if ($binding==='') continue;
+        $source=cmd::byString($binding);
+        if (!is_object($source) || $source->getType()!=='info' ||
+            (int)$source->getId()===(int)$target->getId()) continue;
+        $ids[(int)$source->getId()]=true;
+      }
+    }
+    $listener=listener::byClassAndFunction('mira','onThermostatSourceEvent');
+    if (!is_object($listener)) $listener=new listener();
+    $listener->setClass('mira');
+    $listener->setFunction('onThermostatSourceEvent');
+    $listener->emptyEvent();
+    foreach (array_keys($ids) as $id) $listener->addEvent($id);
+    // Never block a thermostat, equipment or plugin while forwarding a
+    // screen-only status change: use an isolated background PHP listener.
+    $listener->setOption(array('background'=>true));
+    if (count($ids)) $listener->save();
+    else if ($listener->getId()) $listener->remove();
+  }
+
+  public static function onThermostatSourceEvent($_option) {
+    $sourceId=(int)($_option['event_id']??0);
+    if ($sourceId<1) return;
+    $source=cmd::byId($sourceId);
+    if (!is_object($source) || $source->getType()!=='info') return;
+    foreach (eqLogic::byType('mira',true) as $panel) {
+      if (!is_object($panel)) continue;
+      foreach ($panel->getCmd('info') as $target) {
+        if (!is_object($target) || $target->getType()!=='info') continue;
+        if (!preg_match('/^Value_.+__(mode|consigne)$/D',
+                         (string)$target->getLogicalId())) continue;
+        if (!in_array((string)$target->getConfiguration('type'),array('list','range'),true)) continue;
+        $binding=trim((string)$target->getConfiguration('calcul',''));
+        if ($binding==='') continue;
+        $bound=cmd::byString($binding);
+        if (!is_object($bound) || (int)$bound->getId()!==$sourceId) continue;
+        try {
+          // Info execution only uses /updatenr; never issue the thermostat
+          // ACTION, and never turn a passive feedback into heating.
+          $target->execute();
+        } catch (Throwable $e) {
+          log::add('mira','warning','[THERMO][PASSIVE] '.
+            $target->getLogicalId().' : '.$e->getMessage());
+        }
+      }
+    }
+  }
+
+  /**
    * Optional weather source for the existing date/time widget.
    * A single enabled Jeedom Weather equipment is selected automatically.
    * When several exist, the screen setting chooses which one to use.
@@ -883,6 +948,8 @@ class mira extends eqLogic {
     catch (Throwable $e) { log::add('mira','warning','[Navigation] Pages : '.$e->getMessage()); }
     try { $this->configureMediaSource(); self::rebuildMediaListener(); }
     catch (Throwable $e) { log::add('mira','warning','[MEDIA] Liaison : '.$e->getMessage()); }
+    try { self::rebuildThermostatListener(); }
+    catch (Throwable $e) { log::add('mira','warning','[THERMO] Liaison : '.$e->getMessage()); }
   }
   
 
@@ -946,6 +1013,14 @@ class mira extends eqLogic {
   // Jeedom minute scheduler: passive Info refresh is a read of sources,
   // NOT an action. The source listener handles low-latency Spotify changes.
   public static function cron() {
+    // Existing users updating the plugin do not necessarily save an
+    // equipment immediately. Install the feedback listener lazily.
+    if (!is_object(listener::byClassAndFunction('mira','onThermostatSourceEvent'))) {
+      try { self::rebuildThermostatListener(); }
+      catch (Throwable $e) {
+        log::add('mira','warning','[THERMO] Activation listener : '.$e->getMessage());
+      }
+    }
     foreach (eqLogic::byType('mira',true) as $eqLogic) {
       try { $eqLogic->syncGpioStates(); }
       catch (Throwable $e) {
@@ -1046,7 +1121,31 @@ class mira extends eqLogic {
           // Legacy WT32 callbacks without a value keep their old behavior.
           $logical=(string)$cmd->getLogicalId();
           $sentValue=init('value',init('v',null));
-          if (preg_match('/__(volume_cmd|device_cmd)$/D',$logical) &&
+          if ($cmd->getConfiguration('type')==='list' &&
+              $sentValue!==null && $sentValue!=='') {
+            // WT32 and IDF send the selected numeric option ID, NOT its
+            // human-readable label. Validate it against the saved
+            // id|name;id|name choice map before any physical action.
+            // Without this option, thermostat mode was executed as select=''
+            // and the real Confort/Eco command was not dispatched promptly.
+            $choice=(string)$sentValue;
+            $valid=false;
+            foreach (explode(';',(string)$cmd->getConfiguration('listValue','')) as $entry) {
+              $pair=explode('|',$entry,2);
+              if (count($pair)===2 && $pair[0]===$choice) {
+                $valid=true;
+                break;
+              }
+            }
+            if ($valid) {
+              $cmd->execute(array('select'=>$choice,'mira_from_panel'=>true));
+            } else {
+              // A stale/corrupt mapping must never actuate heating or
+              // trigger retries of an unrecognized option.
+              log::add('mira','warning','[LIST][HTTP] Option inconnue pour '.
+                $logical.' (ID '.$choice.') : aucune action executee');
+            }
+          } elseif (preg_match('/__(volume_cmd|device_cmd)$/D',$logical) &&
               $sentValue!==null && $sentValue!=='') {
             $cmd->execute(array('slider'=>$sentValue,'value'=>$sentValue));
           } else {
@@ -2654,13 +2753,21 @@ class miraCmd extends cmd {
                  '&value=' . rawurlencode($optionValue);
           // Use HTTP directly; do not execute the Jeedom select/action command.
           // This is state feedback only, not a physical heating command.
+          // Duplicate source notifications may arrive in a burst. Avoid
+          // saturating IDF HTTP while still reasserting state periodically.
+          $now=microtime(true);
+          $old=(string)$this->getCache('mira_list_http_value','');
+          $lastAt=(float)$this->getCache('mira_list_http_at',0);
+          if ($old===$selected && $lastAt>0 && $now>=$lastAt &&
+              ($now-$lastAt)<15.0) return $result;
           $output=$eqLogic->panelHttpGet($url);
           if ($output===false || trim((string)$output)==='Erreur' ||
               trim((string)$output)==='') {
             log::add('mira','debug','[PASSIVE] LIST STATE non synchronisé : '.$listName);
-            // The Jeedom Info value is valid even when the display is absent.
             return $result;
           }
+          $this->setCache(array('mira_list_http_value'=>$selected,
+                                'mira_list_http_at'=>$now));
           log::add('mira','debug','[PASSIVE] LIST STATE '.$listName.' -> '.$output);
           // Preserve Jeedom info value semantics (label remains a label,
           // not the screen-specific numeric command ID returned by /listvalue).
@@ -3022,10 +3129,16 @@ class miraCmd extends cmd {
                     $options_action = array('select'=>$selected);
                     cmd::byString($result)->execCmd($options_action, $cache=0);
                 }
-              	log::add('mira','debug','[HTTP] notification d’écran effectuée si disponible');
-        		$eqLogic->panelHttpGet($miraDeferredUrl);
+                // Touchscreen already shows the selected option. A
+                // synchronous HTTP callback to the SAME screen would hold
+                // the Jeedom API acknowledgement for up to 1.5 seconds,
+                // causing the IDF 3s client to retry the heating action.
+                // The real Jeedom Info feedback is handled independently.
+                if (empty($_options['mira_from_panel'])) {
+                  $eqLogic->panelHttpGet($miraDeferredUrl);
+                }
                 break;
-              
+
             }else if ($type == 'button'){
               	$url = 'http://'. $eqLogic->getConfiguration('adresseip') . '/updatenr?key=' . $eqLogic->getConfiguration('password') . '&button=' . $cmd;
                 $url = str_replace(' ', '%20', $url);
