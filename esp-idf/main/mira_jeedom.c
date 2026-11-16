@@ -4086,25 +4086,21 @@ static void jeedom_sync_worker(void *unused){
     for(;;){
         (void)ulTaskNotifyTake(pdTRUE,pdMS_TO_TICKS(30000));
         if(__atomic_exchange_n(&sync_requested,false,__ATOMIC_ACQ_REL)){
-            const unsigned max_attempts=4;
-            bool mapping_checked=false;
-            for(unsigned attempt=1;attempt<=max_attempts;attempt++){
-                if(!jeedom_mode_enabled)break;
-                if(jeedom_sta_has_ip()){
-                    if(!mapping_checked){
-                        sync_jeedom_bindings();
-                        mapping_checked=true;
-                    }
-                    if(!jeedom_state_replay_pending||
-                       jeedom_request_passive_states())break;
-                }else{
-                    ESP_LOGI(TAG,"JEEDOM_BOOT_REPLAY_WAIT_IP=%u/%u",
-                             attempt,max_attempts);
-                }
-                if(attempt<max_attempts)vTaskDelay(pdMS_TO_TICKS(3000));
+            // Do not generate four near-identical Jeedom init requests just
+            // 3 seconds apart. Each init invokes /getindex on the panel and
+            // then sends many read-only Infos; under contention, all but
+            // one can time out and trip the plugin's 20-second offline guard.
+            // The maintenance path above handles paced recovery using the
+            // actual number of received values, without actuator commands.
+            if(jeedom_mode_enabled&&jeedom_sta_has_ip()){
+                sync_jeedom_bindings();
+                if(jeedom_state_replay_pending)
+                    (void)jeedom_request_passive_states();
+            }else if(jeedom_mode_enabled){
+                ESP_LOGI(TAG,"JEEDOM_BOOT_REPLAY_WAIT_IP: next maintenance pass");
             }
             if(jeedom_state_replay_pending)
-                ESP_LOGW(TAG,"JEEDOM_REPLAY_PENDING: automatic maintenance will retry");
+                ESP_LOGW(TAG,"JEEDOM_REPLAY_PENDING: paced maintenance will retry");
             ESP_LOGI(TAG,"JEEDOM_SYNC_STACK_MIN_FREE=%u bytes",
                      (unsigned)uxTaskGetStackHighWaterMark(NULL));
         }
