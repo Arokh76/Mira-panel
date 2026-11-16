@@ -980,18 +980,19 @@ void mira_jeedom_sse_notify(void){
     EventGroupHandle_t signal=mira_sse_signal;
     if(signal)xEventGroupSetBits(signal,MIRA_SSE_CHANGED);
 }
-/* Direct HTTP form actions used to call Arduino events.send() immediately.
- * A fixed 16-event history lets both browsers receive that event without
- * holding an HTTP socket or allocating from the LVGL task. */
+/* WT32-style immediate HTTP events shared with browser SSE clients.
+ * Keep a bounded 64-event burst history in PSRAM: incoming Jeedom updates
+ * must not consume scarce internal/DMA memory during network bursts. */
 typedef struct {uint32_t seq;int id;char value[160];} mira_sse_direct_t;
-static mira_sse_direct_t mira_sse_direct[16];
+#define MIRA_SSE_HISTORY 64u
+static EXT_RAM_BSS_ATTR mira_sse_direct_t mira_sse_direct[MIRA_SSE_HISTORY];
 static uint32_t mira_sse_direct_seq;
 static portMUX_TYPE mira_sse_lock=portMUX_INITIALIZER_UNLOCKED;
 static void mira_sse_record_direct(int id,const char *value){
     if(id<1||id>4096||!value)return;
     portENTER_CRITICAL(&mira_sse_lock);
     uint32_t next=++mira_sse_direct_seq;
-    mira_sse_direct_t *slot=&mira_sse_direct[next%16u];
+    mira_sse_direct_t *slot=&mira_sse_direct[next%MIRA_SSE_HISTORY];
     slot->seq=next;slot->id=id;
     size_t n=0;
     while(value[n]&&n<sizeof(slot->value)-1){
@@ -1040,16 +1041,16 @@ static esp_err_t mira_sse_changed(mira_sse_client_t *client){
     }
     /* Send the direct events from the beta browser's action route,
      * without waiting for a separate Jeedom/MQTT state reflection. */
-    for(unsigned attempt=0;attempt<16u;attempt++){
+    for(unsigned attempt=0;attempt<MIRA_SSE_HISTORY;attempt++){
         mira_sse_direct_t copy={0};
         bool pending=false;
         portENTER_CRITICAL(&mira_sse_lock);
         uint32_t latest=mira_sse_direct_seq;
-        if(latest-client->last_direct_seq>16u)
-            client->last_direct_seq=latest-16u;
+        if(latest-client->last_direct_seq>MIRA_SSE_HISTORY)
+            client->last_direct_seq=latest-MIRA_SSE_HISTORY;
         if(client->last_direct_seq!=latest){
             const uint32_t wanted=client->last_direct_seq+1u;
-            copy=mira_sse_direct[wanted%16u];
+            copy=mira_sse_direct[wanted%MIRA_SSE_HISTORY];
             client->last_direct_seq=wanted;
             pending=copy.seq==wanted;
         }
