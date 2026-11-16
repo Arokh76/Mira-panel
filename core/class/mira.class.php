@@ -1686,8 +1686,27 @@ class mira extends eqLogic {
             log::add('mira','debug',
               '[SyncCmd] Synchronisation non destructive : commandes conservees');
 
-          	//Mise a jour SPIFFS mira
-          	$mira_plugin = mira::GetParam('Jeedom');
+            // Check the six legacy transport parameters once after a change,
+            // then periodically. Saving many Jeedom command rows should not
+            // generate six /getparam requests plus /getindex per row.
+            // Only a hash of API secrets is cached, never the secrets.
+            $transportSignature=hash('sha256',json_encode(array(
+              (string)$this->getConfiguration('adresseip',''),
+              (string)$this->getConfiguration('password',''),
+              (string)network::getNetworkAccess(),
+              (string)network::getNetworkAccess('internal'),
+              (string)jeedom::getApiKey(),(string)jeedom::getApiKey('mira'),
+              (string)$refresh->getId(),(string)$init_cmd->getId())));
+            $checkedAt=(int)$this->getCache('mira_transport_checked_at',0);
+            $transportFresh= $checkedAt>0 && time()>=$checkedAt &&
+              time()-$checkedAt<1800 &&
+              (string)$this->getCache('mira_transport_checked_sig','')===$transportSignature;
+            if ($transportFresh) {
+              log::add('mira','debug','[SyncCmd] Parametres transport deja verifies, pas de relecture HTTP');
+            } else {
+            // Legacy WT32 transport parameters; the same routes are supported
+            // by the 7-inch, but only one short verification burst is needed.
+            $mira_plugin = mira::GetParam('Jeedom');
             log::add(__CLASS__, 'debug', 'Toggle Jeedom: '.$mira_plugin);
           	
             $mira_adresseip = mira::GetParam('Jeedom_IP');
@@ -1797,6 +1816,21 @@ class mira extends eqLogic {
               if ($update>0) mira::SaveListParam();
 
             }
+            // Cache only when all six values were already present and readable.
+            // First installation and transport changes get rechecked next time;
+            // interrupted requests are NEVER marked as synchronized.
+            $paramsReadOk=true;
+            foreach (array($mira_plugin,$mira_adresseip,$mira_key,
+                           $mira_key_mira,$mira_refresh,$mira_init) as $value) {
+              if ($value==='Erreur' || $value==='Null' || $value===false) {
+                $paramsReadOk=false; break;
+              }
+            }
+            if ($paramsReadOk && $update===0) {
+              $this->setCache(array('mira_transport_checked_sig'=>$transportSignature,
+                                    'mira_transport_checked_at'=>time()));
+            }
+            } // End optional legacy transport check.
             try {
               // No duplicate metadata read or DNS request after /getindex.
               $this->Init_mira_Module($indexDocument);
