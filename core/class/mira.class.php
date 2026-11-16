@@ -886,7 +886,7 @@ class mira extends eqLogic {
                       substr($logical,-6)==='__mode'))))) {
           // Only Info command objects pass the outer getType() guard.
           // Never execute the paired thermostat slider or mode action.
-          $value=$target->execute();
+          $value=$target->execute($force ? array('mira_force_refresh'=>true) : array());
           if ($value!==null && is_scalar($value)) $target->event((string)$value);
           $count++;
         }
@@ -898,11 +898,13 @@ class mira extends eqLogic {
   }
 
   /**
-   * Restore Jeedom light-switch states after WT32 boot without touching
-   * their On/Off ACTION commands. /updatenr?toggle would fire a real action,
-   * so use the dedicated firmware state-only endpoint instead.
+   * Passive light-state synchronization shared by WT32 and Mira 7.
+   * /sync/toggle changes only the LVGL state, NEVER a Jeedom actuator.
+   * A changed Info source pushes immediately; the minute cron repairs
+   * missed events with a bounded 180-second resend. Nothing is sent on
+   * every 3-second Jeedom sensor poll when the state is unchanged.
    */
-  public function refreshLightToggleStates() {
+  public function refreshLightToggleStates($sourceId=null,$force=false) {
     $ip=trim((string)$this->getConfiguration('adresseip',''));
     $key=(string)$this->getConfiguration('password','');
     if (!filter_var($ip,FILTER_VALIDATE_IP,FILTER_FLAG_IPV4) || $key==='') return 0;
@@ -915,25 +917,80 @@ class mira extends eqLogic {
       $expression=trim((string)$stateCmd->getConfiguration('calcul',''));
       if ($expression==='') continue;
       try {
-        // Evaluate ONLY an Info expression. Never execute On_/Off_ commands.
+        if ($sourceId!==null) {
+          $source=cmd::byString($expression);
+          if (!is_object($source) || $source->getType()!=='info' ||
+              (int)$source->getId()!==(int)$sourceId) continue;
+        }
         $raw=jeedom::evaluateExpression($expression);
         if (!is_scalar($raw)) continue;
         $value=strtolower(trim((string)$raw));
         if (is_numeric($value)) $on=(float)$value>0;
         else if (in_array($value,array('on','true','allumé','allumée','actif','active','ouvert'),true)) $on=true;
         else if (in_array($value,array('off','false','éteint','eteint','éteinte','eteinte','inactif','inactive','fermé','ferme'),true)) $on=false;
-        else continue; // Unknown state: never invent OFF.
+        else continue; // Unknown source state must never be fabricated.
         $toggleId=(int)$stateCmd->getConfiguration($on?'id_1':'id_0',0);
         if ($toggleId<1) continue;
+        $now=microtime(true);
+        $lastId=(int)$stateCmd->getCache('mira_light_sync_id',0);
+        $lastAt=(float)$stateCmd->getCache('mira_light_sync_at',0);
+        if (!$force && $lastId===$toggleId && $lastAt>0 &&
+            $now>=$lastAt && ($now-$lastAt)<180.0) continue;
         $url='http://'.$ip.'/sync/toggle?key='.rawurlencode($key).'&id='.$toggleId;
-        if ($this->panelHttpGet($url)!==false) ++$sent;
-        else log::add('mira','debug','[BOOT][TOGGLE] Etat non synchronise : '.
-                      $stateCmd->getLogicalId().' (écran indisponible)');
+        if ($this->panelHttpGet($url)!==false) {
+          $stateCmd->setCache(array('mira_light_sync_id'=>$toggleId,
+                                    'mira_light_sync_at'=>$now));
+          ++$sent;
+        } else {
+          log::add('mira','debug','[LIGHT][PASSIVE] Etat non synchronise : '.
+            $stateCmd->getLogicalId().' (nouvel essai permis après le coupe-circuit)');
+        }
       } catch (Throwable $e) {
-        log::add('mira','warning','[BOOT][TOGGLE] '.$stateCmd->getLogicalId().' : '.$e->getMessage());
+        log::add('mira','warning','[LIGHT][PASSIVE] '.$stateCmd->getLogicalId().
+          ' : '.$e->getMessage());
       }
     }
     return $sent;
+  }
+
+  /** Subscribe to actual Jeedom light Info events for immediate feedback. */
+  public static function rebuildLightStateListener() {
+    $ids=array();
+    foreach (eqLogic::byType('mira') as $panel) {
+      if (!is_object($panel) || !$panel->getIsEnable()) continue;
+      foreach ($panel->getCmd('info') as $target) {
+        if (!is_object($target) || $target->getType()!=='info' ||
+            $target->getConfiguration('type')!=='toggle' ||
+            $target->getConfiguration('mira_source','jeedom')==='gpio') continue;
+        $binding=trim((string)$target->getConfiguration('calcul',''));
+        if ($binding==='') continue;
+        $source=cmd::byString($binding);
+        if (!is_object($source) || $source->getType()!=='info' ||
+            (int)$source->getId()===(int)$target->getId()) continue;
+        $ids[(int)$source->getId()]=true;
+      }
+    }
+    $listener=listener::byClassAndFunction('mira','onLightStateSourceEvent');
+    if (!is_object($listener)) $listener=new listener();
+    $listener->setClass('mira');
+    $listener->setFunction('onLightStateSourceEvent');
+    $listener->emptyEvent();
+    foreach (array_keys($ids) as $id) $listener->addEvent($id);
+    $listener->setOption(array('background'=>true));
+    if (count($ids)) $listener->save();
+    else if ($listener->getId()) $listener->remove();
+  }
+
+  public static function onLightStateSourceEvent($_option) {
+    $sourceId=(int)($_option['event_id']??0);
+    if ($sourceId<1) return;
+    $source=cmd::byId($sourceId);
+    if (!is_object($source) || $source->getType()!=='info') return;
+    foreach (eqLogic::byType('mira',true) as $panel) {
+      if (!is_object($panel)) continue;
+      // Never execute a paired light ACTION on an Info source update.
+      $panel->refreshLightToggleStates($sourceId);
+    }
   }
 
   /** Saved Jeedom equipment configuration is the source of truth. */
@@ -950,6 +1007,8 @@ class mira extends eqLogic {
     catch (Throwable $e) { log::add('mira','warning','[MEDIA] Liaison : '.$e->getMessage()); }
     try { self::rebuildThermostatListener(); }
     catch (Throwable $e) { log::add('mira','warning','[THERMO] Liaison : '.$e->getMessage()); }
+    try { self::rebuildLightStateListener(); }
+    catch (Throwable $e) { log::add('mira','warning','[LIGHT] Liaison : '.$e->getMessage()); }
   }
   
 
@@ -1010,15 +1069,19 @@ class mira extends eqLogic {
     return $changed;
   }
 
-  // Jeedom minute scheduler: passive Info refresh is a read of sources,
-  // NOT an action. The source listener handles low-latency Spotify changes.
+  // Index metadata is optional for ordinary Info/On-Off feedback.
+  // State updates always run before the infrequent transport-ID check.
   public static function cron() {
-    // Existing users updating the plugin do not necessarily save an
-    // equipment immediately. Install the feedback listener lazily.
     if (!is_object(listener::byClassAndFunction('mira','onThermostatSourceEvent'))) {
       try { self::rebuildThermostatListener(); }
       catch (Throwable $e) {
         log::add('mira','warning','[THERMO] Activation listener : '.$e->getMessage());
+      }
+    }
+    if (!is_object(listener::byClassAndFunction('mira','onLightStateSourceEvent'))) {
+      try { self::rebuildLightStateListener(); }
+      catch (Throwable $e) {
+        log::add('mira','warning','[LIGHT] Activation listener : '.$e->getMessage());
       }
     }
     foreach (eqLogic::byType('mira',true) as $eqLogic) {
@@ -1026,24 +1089,39 @@ class mira extends eqLogic {
       catch (Throwable $e) {
         log::add('mira','warning','[GPIO] Lecture état : '.$e->getMessage());
       }
+      try { $eqLogic->refreshPassiveWidgets(); }
+      catch (Throwable $e) {
+        log::add('mira','warning','[Refresh] Infos passives : '.$e->getMessage());
+      }
+      try { $eqLogic->refreshLightToggleStates(); }
+      catch (Throwable $e) {
+        log::add('mira','warning','[Refresh] Retours eclairage : '.$e->getMessage());
+      }
+      try { $eqLogic->refreshClockWeather(); }
+      catch (Throwable $e) {
+        log::add('mira','warning','[Refresh] Meteo : '.$e->getMessage());
+      }
+
+      // A busy or broken /getindex must never gate ordinary Info updates.
+      // 15 min normal check, 2 min retry when Jeedom mapping is pending.
       try {
-        // Avoid multiple sequential HTTP timeouts when the screen is offline.
-        if (trim((string)$eqLogic->getConfiguration('adresseip',''))!=='') {
-          $index=$eqLogic->GetIndex(true);
-          if (is_array($index) && isset($index['actions'])) {
-            if ((int)$eqLogic->getCache('mira_pending_sync',0)===1) {
-              $last=(int)$eqLogic->getCache('mira_pending_sync_attempt_at',0);
-              if ($last===0 || time()-$last>=120) {
-                $eqLogic->setCache('mira_pending_sync_attempt_at',time());
-                $eqLogic->postUpdate($index);
-              }
-            }
-            $eqLogic->refreshPassiveWidgets();
-          }
+        if (trim((string)$eqLogic->getConfiguration('adresseip',''))==='') continue;
+        $now=time();
+        $pending=(int)$eqLogic->getCache('mira_pending_sync',0)===1;
+        $last=(int)$eqLogic->getCache('mira_index_refresh_at',0);
+        $interval=$pending?120:900;
+        if ($last>0 && $now>=$last && ($now-$last)<$interval) continue;
+        $eqLogic->setCache('mira_index_refresh_at',$now);
+        $index=$eqLogic->GetIndex(true);
+        if (!is_array($index) || !isset($index['actions']) ||
+            !is_array($index['actions'])) continue;
+        if ($pending) {
+          $eqLogic->postUpdate($index);
+        } else {
+          $eqLogic->repairScreenTransportIds($index['actions']);
         }
-        $eqLogic->refreshClockWeather();
       } catch (Throwable $e) {
-        log::add('mira','warning','[Refresh] Synchronisation passive : '.$e->getMessage());
+        log::add('mira','warning','[Refresh] Verification index : '.$e->getMessage());
       }
     }
   }
@@ -2333,34 +2411,30 @@ class mira extends eqLogic {
   }  
   
   public function refresh() {
-    // Lecture seule : un rafraîchissement ne doit jamais déclencher les
-    // commandes On/Off, le slider, les listes ni les couleurs de Jeedom.
-    // L'index interne peut contenir l'état OFF par défaut d'un ESP redémarré.
-    $json_index = $this->GetIndex();
-    $status = $this->getCmd(null, 'Statut');
-    if (!is_object($status)) {
-      log::add(__CLASS__, 'warning', '[Refresh] commande Statut introuvable');
-      return false;
+    // User-triggered refresh: existing passive IDs first. /getindex is
+    // optional metadata and must never suppress Info delivery.
+    try { $this->syncGpioStates(); }
+    catch (Throwable $e) {
+      log::add('mira','warning','[Refresh] GPIO : '.$e->getMessage());
     }
-    if ($json_index === 'Erreur') {
-      $this->checkAndUpdateCmd('Statut', '0');
-      return false;
-    }
-    $this->checkAndUpdateCmd('Statut', '1');
-    // Non-destructive recovery even if the screen boot index was transiently
-    // incomplete: each refresh rechecks the live screen transport IDs.
-    $this->repairScreenTransportIds($json_index);
-    // Seules les sorties GPIO locales sont lues depuis l'ecran.
-    // Les actionneurs Jeedom classiques gardent Jeedom comme source de verite.
-    $this->syncGpioStates();
-    $this->refreshPassiveWidgets();
-    // Explicit screen refresh must restore weather even if unchanged.
+    $this->refreshPassiveWidgets(true);
+    $this->refreshLightToggleStates(null,true);
     $this->refreshClockWeather(true);
+
+    $index=$this->GetIndex(false,true);
+    if (is_array($index)) {
+      $status=$this->getCmd(null,'Statut');
+      if (is_object($status)) $this->checkAndUpdateCmd('Statut','1');
+      $this->repairScreenTransportIds($index);
+    } else {
+      // Metadata alone cannot prove the screen is physically offline.
+      log::add('mira','debug','[Refresh] '.$this->getName().
+        ' : index indisponible, etats passifs deja envoyes');
+    }
     return true;
   }
 
 }
-
 
 
 class miraCmd extends cmd {
@@ -2564,9 +2638,9 @@ class miraCmd extends cmd {
         $eqLogic->postUpdate();
         $eqLogic->syncGpioStates();
         // Saving/rebuilding the index alone does not resend current Info values.
-        $eqLogic->refreshPassiveWidgets();
+        $eqLogic->refreshPassiveWidgets(true);
         $eqLogic->refreshClockWeather(true);
-        $eqLogic->refreshLightToggleStates();
+        $eqLogic->refreshLightToggleStates(null,true);
       	return;
 	}
    
@@ -2651,7 +2725,8 @@ class miraCmd extends cmd {
           $now=microtime(true);
           $lastValue=$this->getCache('mira_info_http_value',null);
           $lastAt=(float)$this->getCache('mira_info_http_at',0);
-          if ($lastValue!==null && (string)$lastValue===(string)$result &&
+          if (empty($_options['mira_force_refresh']) &&
+              $lastValue!==null && (string)$lastValue===(string)$result &&
               $lastAt>0 && $now>=$lastAt && ($now-$lastAt)<45.0)
             return $result;
           $url = 'http://'. $eqLogic->getConfiguration('adresseip') . '/updatenr?key=' . $eqLogic->getConfiguration('password') . '&info=' . $cmd .'&value='.$result;
@@ -2758,7 +2833,8 @@ class miraCmd extends cmd {
           $now=microtime(true);
           $old=(string)$this->getCache('mira_list_http_value','');
           $lastAt=(float)$this->getCache('mira_list_http_at',0);
-          if ($old===$selected && $lastAt>0 && $now>=$lastAt &&
+          if (empty($_options['mira_force_refresh']) &&
+              $old===$selected && $lastAt>0 && $now>=$lastAt &&
               ($now-$lastAt)<15.0) return $result;
           $output=$eqLogic->panelHttpGet($url);
           if ($output===false || trim((string)$output)==='Erreur' ||
