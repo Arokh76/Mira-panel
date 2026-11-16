@@ -1903,7 +1903,8 @@ static esp_err_t programui(httpd_req_t *req) {
 }
 // Maps Jeedom's numeric action IDs into local PASSIVE widget state updates.
 // Remote "button" does not create a new outgoing MQTT/Jeedom action.
-static esp_err_t updatenr(httpd_req_t *req) {
+// The implementation is reused by the native async worker below.
+static esp_err_t updatenr_process(httpd_req_t *req) {
     if(!require_key(req))return ESP_FAIL;
     // Jeedom beta sends passive thermostat mode feedback by list GROUP
     // and LABEL, not a per-choice numeric ID: ?listvalue=<group>&value=<label>.
@@ -2024,6 +2025,75 @@ static esp_err_t updatenr(httpd_req_t *req) {
     }
     httpd_resp_set_type(req,"text/plain");
     return httpd_resp_sendstr(req,"OK");
+}
+// WT32 AsyncWebServer parity: /updatenr must never monopolize the IDF
+// dispatch task while resolving the widget cache or sending a TCP reply.
+// Keep a small fixed set of PSRAM workers rather than spawning a task per
+// incoming Jeedom notification. The queue stores only borrowed requests;
+// each worker MUST release its HTTP async request on every completion.
+#define MIRA_PASSIVE_WORKERS 2u
+#define MIRA_PASSIVE_PENDING 4u
+static QueueHandle_t mira_passive_requests;
+static volatile uint32_t mira_passive_async_dropped;
+static void mira_passive_worker(void *unused){
+    (void)unused;
+    httpd_req_t *req=NULL;
+    for(;;){
+        if(xQueueReceive(mira_passive_requests,&req,portMAX_DELAY)!=pdTRUE)continue;
+        if(!req)continue;
+        (void)updatenr_process(req);
+        httpd_req_async_handler_complete(req);
+    }
+}
+static esp_err_t updatenr(httpd_req_t *req){
+    // Authenticate before borrowing a socket. The existing handler repeats
+    // authentication inside the worker as a defense-in-depth check.
+    if(!require_key(req))return ESP_FAIL;
+    if(!mira_passive_requests)
+        return updatenr_process(req); // safe boot-time fallback
+    if(uxQueueSpacesAvailable(mira_passive_requests)==0){
+        __atomic_fetch_add(&mira_passive_async_dropped,1u,__ATOMIC_RELAXED);
+        httpd_resp_set_status(req,"503 Service Unavailable");
+        return httpd_resp_sendstr(req,"Passive requests busy");
+    }
+    httpd_req_t *async_req=NULL;
+    esp_err_t err=httpd_req_async_handler_begin(req,&async_req);
+    if(err!=ESP_OK){
+        __atomic_fetch_add(&mira_passive_async_dropped,1u,__ATOMIC_RELAXED);
+        httpd_resp_set_status(req,"503 Service Unavailable");
+        return httpd_resp_sendstr(req,"Passive async unavailable");
+    }
+    if(xQueueSend(mira_passive_requests,&async_req,0)!=pdTRUE){
+        __atomic_fetch_add(&mira_passive_async_dropped,1u,__ATOMIC_RELAXED);
+        httpd_resp_set_status(async_req,"503 Service Unavailable");
+        httpd_resp_sendstr(async_req,"Passive requests busy");
+        httpd_req_async_handler_complete(async_req);
+    }
+    return ESP_OK;
+}
+static bool mira_passive_async_start(void){
+    if(mira_passive_requests)return true;
+    QueueHandle_t q=xQueueCreateWithCaps(MIRA_PASSIVE_PENDING,sizeof(httpd_req_t *),
+                                          MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!q)return false;
+    mira_passive_requests=q;
+    for(unsigned i=0;i<MIRA_PASSIVE_WORKERS;i++){
+        if(xTaskCreateWithCaps(mira_passive_worker,"mira_passive_http",
+                               8192,NULL,3,NULL,
+                               MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)!=pdPASS){
+            // Do not free the queue: previously created workers may already
+            // be blocked on it. The remaining worker continues safely.
+            ESP_LOGW(TAG,"JEEDOM_PASSIVE_ASYNC_WORKER_%u_FAILED",i);
+            if(i==0){
+                vQueueDeleteWithCaps(q);
+                mira_passive_requests=NULL;
+                return false;
+            }
+            break;
+        }
+    }
+    ESP_LOGI(TAG,"JEEDOM_PASSIVE_ASYNC_READY workers<=%u",MIRA_PASSIVE_WORKERS);
+    return true;
 }
 // Provision the existing Jeedom screen password on the recovery AP.
 // This separate NVS namespace never alters the old ESP firmware's NVS or SPIFFS files.
@@ -4071,6 +4141,8 @@ static void import_legacy_http_settings(void) {
 esp_err_t mira_jeedom_passive_init(void){
     if(!mira_sse_signal)mira_sse_signal=xEventGroupCreate();
     if(!mira_sse_signal)return ESP_ERR_NO_MEM;
+    if(!mira_passive_async_start())
+        ESP_LOGW(TAG,"Passive async workers unavailable; use direct handler");
     // Startup allocates and serializes the index once, as on WT32.
     // Failure does not disable incoming passive states or browser recovery.
     if(!mira_index_rebuild())
