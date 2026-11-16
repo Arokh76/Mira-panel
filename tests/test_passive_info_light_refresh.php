@@ -87,12 +87,12 @@ class LightPanel {
     }
     public function getCmd($type){return array($this->cmd);}
     public function panelHttpGet($url){$this->urls[]=$url;return $this->fail?false:'OK';}
-    '.$light.'
 }
+eval('class LightPanelWithSync extends LightPanel {'.$light.'}');
 cmd::$sources['#101#']=new FakeInfoSource();
 jeedom::$values['#101#']='1';
 $command=new FakeStateCommand();
-$panel=new LightPanel($command);
+$panel=new LightPanelWithSync($command);
 if($panel->refreshLightToggleStates()!==1 ||
    !str_contains($panel->urls[0],'/sync/toggle?key=secret&id=9'))
    throw new RuntimeException('Light ON not synchronized passively');
