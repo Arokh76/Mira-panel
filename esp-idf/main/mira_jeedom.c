@@ -1961,6 +1961,13 @@ static esp_err_t updatenr(httpd_req_t *req) {
             httpd_resp_set_status(req,"503 Service Unavailable");
             return httpd_resp_sendstr(req,"File d'etats pleine");
         }
+        // WT32 parity: a successful /updatenr immediately publishes the
+        // exact Jeedom command ID + value to the browser EventSource.
+        // Never wait for an LVGL pass or a cache/index rescan to emit it.
+        // The PSRAM state cache above remains the reconnect snapshot.
+        const int event_id=list_by_value?matched_ref.id:(int)id;
+        if(event_id>0 && event_id<=4096)
+            mira_sse_record_direct(event_id,value);
     }
     httpd_resp_set_type(req,"text/plain");
     return httpd_resp_sendstr(req,"OK");
