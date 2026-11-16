@@ -1826,7 +1826,13 @@ class mira extends eqLogic {
                 $paramsReadOk=false; break;
               }
             }
-            if ($paramsReadOk && $update===0) {
+            if ($paramsReadOk && $update===0 &&
+                (string)$mira_plugin==='1' &&
+                (string)$mira_adresseip===(string)$adresseip &&
+                (string)$mira_key===(string)$cleapi &&
+                (string)$mira_key_mira===(string)$cleapi_mira &&
+                (string)$mira_refresh===(string)$idrefresh &&
+                (string)$mira_init===(string)$idinitcmd) {
               $this->setCache(array('mira_transport_checked_sig'=>$transportSignature,
                                     'mira_transport_checked_at'=>time()));
             }

@@ -9,12 +9,12 @@ $method=function($begin,$end)use($source) {
     if($a===false||$b===false)throw new RuntimeException('Missing method boundary: '.$begin);
     return substr($source,$a,$b-$a);
 };
-$pre=$method('public function preUpdate()', 'public function postUpdate()');
+$pre=$method('public function preUpdate()', 'public function postUpdate(');
 if(strpos($pre,'GetModule(')!==false || strpos($pre,'GetIndex(')!==false)
     throw new RuntimeException('Saving Jeedom config must never require live HTTP in preUpdate');
-$post=$method('public function postUpdate()', 'public function repairScreenTransportIds(');
+$post=$method('public function postUpdate(', 'public function repairScreenTransportIds(');
 if(strpos($post,'[SyncCmd]')===false || strpos($post,'commandes existantes conservees')===false ||
-   strpos($post,'sauvegarde Jeedom conservee')===false)
+   strpos($post,'modifications Jeedom conservees')===false)
     throw new RuntimeException('Post-update should preserve edits when the screen is offline');
 $event=$method('public static function event()', 'public function preUpdate()');
 if(strpos($event,"'slider'=>\$sentValue")===false || strpos($event,"'value'=>\$sentValue")===false)
@@ -47,7 +47,7 @@ $ajaxSyncEnd=strpos($ajax,"if (init('action') == 'PostHTTPJson')");
 $sync=substr($ajax,$ajaxSyncStart,$ajaxSyncEnd-$ajaxSyncStart);
 if(strpos($sync,'postUpdate($decoded)')===false ||
    strpos($sync,'usleep(1500000)')===false ||
-   strpos($sync,"'status' => $synced===true ? 'synced' : 'deferred'")===false)
+   strpos($sync,"'status' => ".'$synced'."===true ? 'synced' : 'deferred'")===false)
     throw new RuntimeException('Autosync must reuse read-only index, throttle reads and report deferred sync');
 $getIndex=$method('public function GetIndex(', 'public function AddListLvgl(');
 if(strpos($getIndex,'mira_index_retry_after')===false ||
