@@ -115,6 +115,11 @@ static volatile bool jeedom_state_replay_pending=true;
 static volatile uint32_t jeedom_replay_attempts,jeedom_replay_acks;
 static volatile uint32_t jeedom_last_replay_ms,jeedom_last_replay_ok_ms;
 static volatile int jeedom_last_replay_http;
+// Jeedom's init acknowledgement confirms dispatch, not delivery of the
+// individual passive HTTP Infos. Track bounded boot recovery independently
+// from the existing 30-minute normal refresh.
+static volatile uint32_t jeedom_boot_recovery_attempts;
+static volatile uint32_t jeedom_boot_expected_min;
 static volatile uint32_t mira_sse_worker_failures;
 static uint32_t ui_config_hash(const char *s);
 
@@ -3832,6 +3837,7 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
         "\"mapping_persistent_valid\":%s,"
         "\"init_cmd_id\":\"%s\",\"last_init_http\":%d,"
         "\"state_cache_used\":%u,\"replay_pending\":%s,"
+        "\"replay_expected_min\":%u,\"replay_recovery_attempts\":%u,"
         "\"replay_attempts\":%u,\"replay_acks\":%u,"
         "\"replay_last_http\":%d,\"sse_clients\":%u,"
         "\"sse_task_failures\":%u,\"index_builds\":%u,"
@@ -3858,6 +3864,8 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
         (persisted_enabled&&total>0&&valid==total)?"true":"false",
         init_id,last_binding_sync_http,(unsigned)health.state_cache_used,
         jeedom_state_replay_pending?"true":"false",
+        (unsigned)__atomic_load_n(&jeedom_boot_expected_min,__ATOMIC_RELAXED),
+        (unsigned)__atomic_load_n(&jeedom_boot_recovery_attempts,__ATOMIC_RELAXED),
         (unsigned)__atomic_load_n(&jeedom_replay_attempts,__ATOMIC_RELAXED),
         (unsigned)__atomic_load_n(&jeedom_replay_acks,__ATOMIC_RELAXED),
         jeedom_last_replay_http,
@@ -4005,33 +4013,69 @@ static void send_generic_action(const mira_action_msg_t *msg){
     esp_http_client_cleanup(client);
 }
 
+// Count eligible inbound widget states, not all remote Jeedom IDs: buttons
+// are actions, toggles have two IDs but only one state, and range/list infos
+// may be unbound in Jeedom. A conservative floor prevents a three-value
+// cache from masquerading as completed initialization on a 42-ID panel.
+static unsigned jeedom_boot_expected_states(void){
+    if(!mira_index_mutex||!mira_action_refs)return 0;
+    if(xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(40))!=pdTRUE)
+        return __atomic_load_n(&jeedom_boot_expected_min,__ATOMIC_RELAXED);
+    unsigned candidates=0;
+    for(size_t i=0;i<mira_action_ref_count;i++){
+        const char *type=mira_action_refs[i].type;
+        if(!strcmp(type,"info")||!strcmp(type,"infofa")||
+           !strcmp(type,"toggle")||!strcmp(type,"range")||
+           !strcmp(type,"list")||!strcmp(type,"color"))
+            candidates++;
+    }
+    xSemaphoreGive(mira_index_mutex);
+    // Aim for most bound values but never assume every configured Info has a
+    // live source. Four attempts max; a sparsely bound panel remains usable.
+    const unsigned expected=candidates>4u?
+        ((candidates*2u/3u)>20u?20u:(candidates*2u/3u)):0u;
+    __atomic_store_n(&jeedom_boot_expected_min,expected,__ATOMIC_RELAXED);
+    return expected;
+}
 static void jeedom_replay_maintenance(void){
     if(!jeedom_mode_enabled||!jeedom_sta_has_ip())return;
     const uint32_t now=(uint32_t)(esp_timer_get_time()/1000);
-    // WT32 parity: retry stale/failed command-ID synchronization without
-    // requiring a reboot. This GET only fetches the mapping; it never
-    // executes an actuator action.
+    // Keep ID validation infrequent: it neither causes nor repairs passive
+    // state loss, and should not compete with Jeedom info refresh traffic.
     if((!mira_mapping_last_attempt_ms||
         (uint32_t)(now-mira_mapping_last_attempt_ms)>=300000u)&&
        (!mira_mapping_last_ok_ms||
         (uint32_t)(now-mira_mapping_last_ok_ms)>=1800000u)){
         sync_jeedom_bindings();
     }
-    const uint32_t since_attempt=(uint32_t)(now-jeedom_last_replay_ms);
-    // Retry sparingly if init has failed or no passive values have arrived.
-    // Refresh at most every 30 minutes even with a nonempty cache, so a
-    // long-running screen recovers after an interrupted Jeedom update stream.
-    // No user actuator command is ever synthesized here.
-    if(jeedom_last_replay_ms && since_attempt<300000u)return;
     mira_full_state_diagnostics_t health={0};
     mira_full_state_diagnostics(&health);
+    const unsigned expected=jeedom_boot_expected_states();
+    const uint32_t recovery_count=__atomic_load_n(
+        &jeedom_boot_recovery_attempts,__ATOMIC_RELAXED);
+    const bool incomplete=expected>0 &&
+        health.state_cache_used<expected &&
+        recovery_count<4u;
+    // The Jeedom plugin suppresses new panel HTTP attempts for 20 seconds
+    // after any cURL transport timeout. Do not hammer the plugin during
+    // that guard or issue multiple overlapping full reinitializations.
+    static const uint32_t recovery_delays_ms[]={60000u,90000u,150000u,300000u};
+    const uint32_t interval=incomplete?
+        recovery_delays_ms[recovery_count]:300000u;
+    const uint32_t since_attempt=(uint32_t)(now-jeedom_last_replay_ms);
+    if(jeedom_last_replay_ms && since_attempt<interval)return;
     const bool no_values=health.state_cache_used==0;
     const bool refresh_due=jeedom_last_replay_ok_ms==0||
         (uint32_t)(now-jeedom_last_replay_ok_ms)>=1800000u;
-    if(jeedom_state_replay_pending||no_values||refresh_due){
-        ESP_LOGI(TAG,"JEEDOM_REPLAY_MAINT: pending=%d cache=%u",
-                 jeedom_state_replay_pending?1:0,
-                 (unsigned)health.state_cache_used);
+    if(jeedom_state_replay_pending||no_values||refresh_due||incomplete){
+        if(incomplete)
+            __atomic_add_fetch(&jeedom_boot_recovery_attempts,1u,__ATOMIC_RELAXED);
+        ESP_LOGI(TAG,"JEEDOM_STATE_REPLAY_RECOVERY: cache=%u expected_min=%u retry=%u pending=%u",
+                 (unsigned)health.state_cache_used,expected,
+                 (unsigned)__atomic_load_n(&jeedom_boot_recovery_attempts,__ATOMIC_RELAXED),
+                 jeedom_state_replay_pending?1u:0u);
+        // This only invokes the existing Jeedom init_cmd: the plugin reads
+        // Info sources and returns passive values; it never runs actuators.
         (void)jeedom_request_passive_states();
     }
 }
