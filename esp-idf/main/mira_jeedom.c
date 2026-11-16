@@ -2550,6 +2550,9 @@ static QueueHandle_t action_queue;
 #define MIRA_LAST_VALUE_SLOTS 96u
 static mira_action_msg_t *last_value_actions;
 static TaskHandle_t action_worker_handle;
+// Read-only Jeedom index/state synchronization must never occupy the action queue.
+static TaskHandle_t sync_worker_handle;
+static bool sync_requested;
 static portMUX_TYPE last_value_lock=portMUX_INITIALIZER_UNLOCKED;
 static unsigned next_latest_slot;
 
@@ -3634,12 +3637,9 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
 }
 
 static void request_binding_sync(void){
-    if(!action_queue)return;
-    mira_action_msg_t msg={0};
-    snprintf(msg.type,sizeof(msg.type),"__sync");
-    if(xQueueSend(action_queue,&msg,0)!=pdTRUE)
-        ESP_LOGW(TAG,"Jeedom sync FIFO busy; periodic state recovery remains active");
-    if(action_worker_handle)xTaskNotifyGive(action_worker_handle);
+    // Coalesce requests: repeated configuration changes need one latest snapshot.
+    __atomic_store_n(&sync_requested,true,__ATOMIC_RELEASE);
+    if(sync_worker_handle)xTaskNotifyGive(sync_worker_handle);
 }
 void mira_jeedom_network_reconnected(void){
     // Wi-Fi callbacks must never start HTTP work or touch LVGL. Queue the
@@ -3778,25 +3778,13 @@ static void jeedom_replay_maintenance(void){
         (void)jeedom_request_passive_states();
     }
 }
-static void jeedom_action_worker(void *unused) {
+// Network synchronization is read-only and may take seconds. Never stall a
+// physical action, slider or thermostat while Jeedom rebuilds its index.
+static void jeedom_sync_worker(void *unused){
     (void)unused;
-    mira_action_msg_t action;
-    bool prefer_latest=true;
-    for(;;) {
-        bool found=prefer_latest&&dequeue_latest(&action);
-        if(!found)found=xQueueReceive(action_queue,&action,0)==pdTRUE;
-        if(!found)found=dequeue_latest(&action);
-        if(!found){
-            // Periodic wakeup permits state recovery without an extra task.
-            // The WT32 already treats Jeedom init as a read-only replay.
-            (void)ulTaskNotifyTake(pdTRUE,pdMS_TO_TICKS(30000));
-            jeedom_replay_maintenance();
-            continue;
-        }
-        prefer_latest=!prefer_latest;
-        if(!strcmp(action.type,"__sync")){
-            // Mapping and state replay are independent. A temporary failure
-            // fetching ID associations must not suppress incoming Info values.
+    for(;;){
+        (void)ulTaskNotifyTake(pdTRUE,pdMS_TO_TICKS(30000));
+        if(__atomic_exchange_n(&sync_requested,false,__ATOMIC_ACQ_REL)){
             const unsigned max_attempts=4;
             bool mapping_checked=false;
             for(unsigned attempt=1;attempt<=max_attempts;attempt++){
@@ -3816,9 +3804,26 @@ static void jeedom_action_worker(void *unused) {
             }
             if(jeedom_state_replay_pending)
                 ESP_LOGW(TAG,"JEEDOM_REPLAY_PENDING: automatic maintenance will retry");
-            ESP_LOGI(TAG,"JEEDOM_HTTP_STACK_MIN_FREE=%u bytes",
+            ESP_LOGI(TAG,"JEEDOM_SYNC_STACK_MIN_FREE=%u bytes",
                      (unsigned)uxTaskGetStackHighWaterMark(NULL));
-        }else if(!strcmp(action.type,"__generic"))send_generic_action(&action);
+        }
+        jeedom_replay_maintenance();
+    }
+}
+static void jeedom_action_worker(void *unused) {
+    (void)unused;
+    mira_action_msg_t action;
+    bool prefer_latest=true;
+    for(;;) {
+        bool found=prefer_latest&&dequeue_latest(&action);
+        if(!found)found=xQueueReceive(action_queue,&action,0)==pdTRUE;
+        if(!found)found=dequeue_latest(&action);
+        if(!found){
+            (void)ulTaskNotifyTake(pdTRUE,pdMS_TO_TICKS(30000));
+            continue;
+        }
+        prefer_latest=!prefer_latest;
+        if(!strcmp(action.type,"__generic"))send_generic_action(&action);
         else send_jeedom_action(&action);
     }
 }
@@ -4066,6 +4071,16 @@ esp_err_t mira_jeedom_action_init(void) {
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA),
         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA),
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    // Keep the existing action worker intact; a separate low-priority
+    // PSRAM-backed worker handles potentially slow read-only HTTP sync.
+    // Its 24 KiB stack preserves the previously measured JSON/NVS margin.
+    if(xTaskCreateWithCaps(jeedom_sync_worker,"mira_jeedom_sync",24576,
+                           NULL,2,&sync_worker_handle,
+                           MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)!=pdPASS) {
+        ESP_LOGE(TAG,"JEEDOM_SYNC_STACK_PSRAM_NO_MEM");
+        // Keep actions operational; report partial initialization.
+        return ESP_ERR_NO_MEM;
+    }
     mira_http_load_stored(); // WT32-style outbound HTTP config in PSRAM
     request_binding_sync(); // read-only ID map fetch; never an actuator command
     return ESP_OK;
