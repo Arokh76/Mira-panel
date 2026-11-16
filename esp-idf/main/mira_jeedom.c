@@ -738,6 +738,22 @@ static esp_err_t mira_index_send_snapshot(httpd_req_t *req){
             length=n;
         }else ESP_LOGW(TAG,"MIRA_INDEX_DYNAMIC_OVERLAY_SKIPPED: original snapshot retained");
     }
+    // Do not hold the index mutex while TCP sends a potentially large JSON
+    // response. A slow /getindex peer previously blocked /updatenr updates
+    // for 250ms, making otherwise healthy Jeedom Infos fail with HTTP 503.
+    // Copy the stable snapshot to PSRAM and release the lock before sending.
+    char *snapshot=NULL;
+    if(payload && length)
+        snapshot=heap_caps_malloc(length,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(snapshot){
+        memcpy(snapshot,payload,length);
+        xSemaphoreGive(mira_index_mutex);
+        esp_err_t result=httpd_resp_send(req,snapshot,(ssize_t)length);
+        heap_caps_free(snapshot);
+        if(result==ESP_OK)__atomic_fetch_add(&mira_index_responses,1u,__ATOMIC_RELAXED);
+        return result;
+    }
+    // Rare memory pressure fallback: preserve index functionality.
     esp_err_t result=payload?httpd_resp_send(req,payload,(ssize_t)length):ESP_ERR_NOT_FOUND;
     if(result==ESP_OK)__atomic_fetch_add(&mira_index_responses,1u,__ATOMIC_RELAXED);
     xSemaphoreGive(mira_index_mutex);
