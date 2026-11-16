@@ -1232,6 +1232,17 @@ esp_err_t mira_recovery_init(void) {
     const bool setup_only=mira_beta_setup_unconfigured();
     conf.max_uri_handlers = setup_only?12:96;
     conf.uri_match_fn = httpd_uri_match_wildcard;
+    // IDF stock max_open_sockets=7 is shared with a persistent SSE browser,
+    // async /getindex, passive /updatenr and other HTTP clients. Under load,
+    // Jeedom's cURL requests may not even reach our handlers. Increase only
+    // the configured mode; keep the recovery/setup footprint unchanged.
+    // Requires CONFIG_LWIP_MAX_SOCKETS=18 (3 internal HTTPD sockets + 10
+    // sessions, leaving five FDs for MQTT, DNS and outbound connections).
+    conf.max_open_sockets = setup_only?7:10;
+    conf.backlog_conn = setup_only?5:8;
+    ESP_LOGI(TAG,"HTTPD_CONNECTION_BUDGET clients=%u backlog=%u lwip_max=%u",
+             (unsigned)conf.max_open_sockets,(unsigned)conf.backlog_conn,
+             (unsigned)CONFIG_LWIP_MAX_SOCKETS);
     // Beta HTML templates, JSON status pages and multipart OTA need deeper
     // handler call chains than the initial diagnostic web server.
     // The configured 10KB HTTP task stack did not fit alongside RGB DMA
