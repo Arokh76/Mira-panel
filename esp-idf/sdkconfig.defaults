@@ -86,6 +86,11 @@ CONFIG_LCD_RGB_RESTART_IN_VSYNC=n
 # Prefer external PSRAM for Wi-Fi/LwIP buffers that support it. Hardware RX/TX
 # DMA buffers must still reside in internal RAM, hence small static pools.
 # Espressif "minimum memory" profile: 4 RX, 4 TX, AMPDU disabled.
+# HTTP server has persistent EventSource sockets plus simultaneous Jeedom
+# /getindex and /updatenr clients. Stock 10 total lwIP FDs leave no margin.
+# 18 total: 10 HTTP clients + 3 HTTP control/listening + 5 for MQTT, DNS,
+# NTP, outbound Jeedom HTTP, and occasional additional connections.
+CONFIG_LWIP_MAX_SOCKETS=18
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=4
 CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16
