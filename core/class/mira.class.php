@@ -953,9 +953,19 @@ class mira extends eqLogic {
       }
       try {
         // Avoid multiple sequential HTTP timeouts when the screen is offline.
-        if (trim((string)$eqLogic->getConfiguration('adresseip',''))!=='' &&
-            $eqLogic->GetIndex()!=='Erreur')
-          $eqLogic->refreshPassiveWidgets();
+        if (trim((string)$eqLogic->getConfiguration('adresseip',''))!=='') {
+          $index=$eqLogic->GetIndex(true);
+          if (is_array($index) && isset($index['actions'])) {
+            if ((int)$eqLogic->getCache('mira_pending_sync',0)===1) {
+              $last=(int)$eqLogic->getCache('mira_pending_sync_attempt_at',0);
+              if ($last===0 || time()-$last>=120) {
+                $eqLogic->setCache('mira_pending_sync_attempt_at',time());
+                $eqLogic->postUpdate($index);
+              }
+            }
+            $eqLogic->refreshPassiveWidgets();
+          }
+        }
         $eqLogic->refreshClockWeather();
       } catch (Throwable $e) {
         log::add('mira','warning','[Refresh] Synchronisation passive : '.$e->getMessage());
@@ -1103,18 +1113,11 @@ class mira extends eqLogic {
       throw new Exception(__("L'adresse IP et la clé Mira sont obligatoires", __FILE__));
   }
 
-    public function postUpdate() {
-    // Never reject an equipment/command save because the screen HTTP is
-    // temporarily offline. Existing Jeedom commands/associations stay intact.
-    $retour_module = $this->GetModule();
-    if ($retour_module !== "Erreur" && $retour_module !== "") {
-      $this->setConfiguration('module',$retour_module);
-    } else {
-      log::add('mira','warning','[SyncCmd] '.$this->getName().
-        ' : module HTTP indisponible, sauvegarde Jeedom conservee');
-      return;
-    }
-
+  public function postUpdate($knownIndex=null) {
+    // Never gate a Jeedom equipment save on /getmodule. The firmware's
+    // module display label is optional metadata, not a precondition for
+    // synchronizing commands. Fetch it only once for a new installation,
+    // and only after the index is confirmed reachable.
     if ($this->getConfiguration('adresseip') == '') {
       throw new Exception(__("L'adresse IP ne peut pas être vide", __FILE__));
     }else{
@@ -1122,15 +1125,27 @@ class mira extends eqLogic {
       		throw new Exception(__("Le mot de passe ne peut pas être vide", __FILE__));
     	}else{
           	
-          	$json_index = $this->GetIndex();
-              
-            if ($json_index == 'Erreur'){
-                log::add('mira','warning','[SyncCmd] '.$this->getName().
-                  ' : index HTTP indisponible, commandes existantes conservees');
-                return;
+            // Use the exact validated /getindex snapshot from AutoSync
+            // when provided; manual saves make one explicit read instead.
+            $indexDocument=(is_array($knownIndex) &&
+              isset($knownIndex['actions']) && is_array($knownIndex['actions']))
+              ? $knownIndex : $this->GetIndex(true,true);
+            if (!is_array($indexDocument) ||
+                !isset($indexDocument['actions']) ||
+                !is_array($indexDocument['actions'])) {
+              $this->setCache('mira_pending_sync',1);
+              log::add('mira','warning','[SyncCmd] '.$this->getName().
+                ' : index HTTP indisponible, modifications Jeedom conservees; synchro differee');
+              return false;
             }
-          
-          	$json_count = count($json_index);
+            $json_index=$indexDocument['actions'];
+            // Never require this additional metadata request to succeed.
+            if (trim((string)$this->getConfiguration('module',''))==='') {
+              $retour_module=$this->GetModule();
+              if ($retour_module!=='Erreur' && trim((string)$retour_module)!=='')
+                $this->setConfiguration('module',$retour_module);
+            }
+            $json_count=count($json_index);
           	if ($json_count == 0) {
                 // An OTA can briefly return a blank index even when all
                 // Jeedom commands remain configured. Never prune them.
@@ -1144,9 +1159,10 @@ class mira extends eqLogic {
                   }
                 }
                 if ($hasSavedWidgets) {
+                  $this->setCache('mira_pending_sync',1);
                   log::add('mira','warning',
                     '[SyncCmd] index ecran vide : conservation des commandes existantes');
-                  return;
+                  return false;
                 }
             }
 
@@ -1781,7 +1797,16 @@ class mira extends eqLogic {
               if ($update>0) mira::SaveListParam();
 
             }
-          	$this->Init_mira_Module();
+            try {
+              // No duplicate metadata read or DNS request after /getindex.
+              $this->Init_mira_Module($indexDocument);
+            } catch (Throwable $e) {
+              $this->setCache('mira_pending_sync',1);
+              log::add('mira','warning','[SyncCmd] '.$this->getName().
+                ' : initialisation differee ('.$e->getMessage().')');
+              return false;
+            }
+            $this->setCache('mira_pending_sync',0);
             try { $this->refreshClockWeather(true); }
             catch (Throwable $e) { log::add('mira','warning','[WEATHER] Initialisation : '.$e->getMessage()); }
             try { $this->configureMediaSource(); self::rebuildMediaListener(); }
@@ -1789,7 +1814,8 @@ class mira extends eqLogic {
               log::add('mira','warning','[MEDIA] Liaison : '.$e->getMessage());
             }
           	
-          log::add(__CLASS__, 'debug', 'Sauvegarde OK');	
+          log::add(__CLASS__, 'debug', 'Sauvegarde OK');
+          return true;
         }
     }
   }
@@ -1863,9 +1889,12 @@ class mira extends eqLogic {
       return $changed;
     }
 
-    public function Init_mira_Module() {
-    
-    $json_index = $this->GetIndex(true);
+    public function Init_mira_Module($indexSnapshot=null) {
+    // Explicit boot/rebind can bypass the background read cooldown.
+    // A caller that already fetched a valid index reuses it instead.
+    $json_index=(is_array($indexSnapshot) &&
+      isset($indexSnapshot['actions']) && is_array($indexSnapshot['actions']))
+      ? $indexSnapshot : $this->GetIndex(true,true);
     //log::add('mira', 'debug', json_encode($json_index));
     
     $name = "Statut";
@@ -2119,33 +2148,40 @@ class mira extends eqLogic {
     return $result; 
   }
   
-  public function GetIndex($brut = false) {
-    // WT32 compatibility: /getindex is an essential metadata snapshot.
-    // Do not inherit the 350ms connect/1500ms action timeout or an offline
-    // circuit breaker caused by an unrelated, failed HTTP command.
-    // Keep all other Mira action calls on their existing short deadlines.
+  public function GetIndex($brut = false, $force = false) {
+    // Metadata reads belong to a per-panel circuit breaker, just like
+    // /updatenr. Do not flood the IDF HTTP task with 5.5s GETs during
+    // a failure. Explicit boot/reprogramming may bypass the cooldown.
     $ip=trim((string)$this->getConfiguration('adresseip'));
     $key=(string)$this->getConfiguration('password');
     if ($ip==='' || $key==='') {
       log::add('mira','warning','[GetIndex] IP ou cle Mira manquante sur '.$this->getName());
       return 'Erreur';
     }
+    $now=time();
+    if (!$force && (int)$this->getCache('mira_index_retry_after',0)>$now)
+      return 'Erreur';
     $url='http://'.$ip.'/getindex?key='.rawurlencode($key);
     $result=$this->panelHttpRequest(
       $url,'GET',null,
       array(CURLOPT_CONNECTTIMEOUT_MS=>1200,CURLOPT_TIMEOUT_MS=>5500),
-      '[GetIndex] '.$this->getName(),true);
+      '[GetIndex] '.$this->getName(),$force);
     if ($result===false || trim((string)$result)==='') {
+      // Background cron/ping/volume fallback may retry no more often
+      // than once per minute; a real user edit/boot can probe at once.
+      $this->setCache('mira_index_retry_after',time()+60);
       log::add('mira','warning','[GetIndex] Aucun index recu de '.$this->getName());
       return 'Erreur';
     }
     $jsonData=json_decode($result,true);
     if (!is_array($jsonData) ||
         !isset($jsonData['actions']) || !is_array($jsonData['actions'])) {
+      $this->setCache('mira_index_retry_after',time()+60);
       log::add('mira','warning','[GetIndex] JSON index invalide pour '.$this->getName().
         ' (octets='.strlen((string)$result).', erreur='.json_last_error_msg().')');
       return 'Erreur';
     }
+    $this->setCache('mira_index_retry_after',0);
     if ($brut) return $jsonData;
     return $jsonData['actions'];
   }

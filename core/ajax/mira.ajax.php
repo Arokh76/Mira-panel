@@ -216,7 +216,8 @@ try {
                     $lastState = 'ESP indisponible';
                 }
 
-                usleep(750000);
+                // Back off between autosync reads; never poll a struggling HTTP server 1.3 times/s.
+                usleep(1500000);
             }
 
             if (!$ready) {
@@ -234,11 +235,17 @@ try {
                 /* Maintenant seulement, l'ecran expose le nouvel index. postUpdate
                  * cree/met a jour les commandes puis reinjecte les IDs Jeedom dans
                  * l'ESP32 comme lors d'un clic manuel sur Sauvegarder. */
-                $eqLogic->postUpdate();
-                log::add('mira', 'debug', '[AutoSync] commandes synchronisees pour ' . $wantedIp . ' apres ' . $attempts . ' essais');
+                // Reuse the already validated snapshot. No second /getindex
+                // in postUpdate(), and do not claim sync if it was deferred.
+                $synced=$eqLogic->postUpdate($decoded);
+                if ($synced===true) {
+                    log::add('mira','debug','[AutoSync] commandes synchronisees pour '.$wantedIp.' apres '.$attempts.' essais');
+                } else {
+                    log::add('mira','warning','[AutoSync] index pret, liaison Jeedom differee pour '.$wantedIp);
+                }
                 $results[] = array(
                     'id' => $eqLogic->getId(),
-                    'status' => 'synced',
+                    'status' => $synced===true ? 'synced' : 'deferred',
                     'attempts' => $attempts
                 );
             } catch (Exception $syncException) {
@@ -432,8 +439,15 @@ try {
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $url);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT_MS, 350);
-        curl_setopt($ch, CURLOPT_TIMEOUT_MS, 1500);
+        // The editor's connection test and widget fetch are user-initiated
+        // metadata requests; the shared 350ms/1.5s action deadlines are too
+        // short on a busy ESP-IDF 7-inch server.
+        $path=parse_url($url,PHP_URL_PATH);
+        $metadata=in_array($path,array('/testmodule','/getlvgl'),true);
+        curl_setopt($ch,CURLOPT_CONNECTTIMEOUT_MS,$metadata?1200:350);
+        curl_setopt($ch,CURLOPT_TIMEOUT_MS,$metadata?5500:1500);
+        curl_setopt($ch,CURLOPT_NOSIGNAL,true);
+        curl_setopt($ch,CURLOPT_FOLLOWLOCATION,false);
         $result = curl_exec($ch);
         if (curl_errno($ch)) {
         }

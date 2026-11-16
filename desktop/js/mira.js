@@ -119,46 +119,18 @@ function HTTPTestModule(url,ip,mdp){
 
 
 
-function HTTPTestModuleSend(url,ip,mdp){
-  $.ajax({
-    type: 'POST',
-    url: 'plugins/mira/core/ajax/mira.ajax.php',
-    data: {
-      action: 'GetHTTP',
-      url: url,
-
-    },
-    dataType: 'json',
-    timeout: 8000,
-    error: function(request, status, error) {
-      handleAjaxError(request, status, error)
-    },
-    success: function(data) {
-      if (data.result == 'Tout est OK'){
-        var r = document.querySelector(':root');
-        var rs = getComputedStyle(r);
-        var button = document.getElementById('miraboutontester');
-        button.style.backgroundColor = rs.getPropertyValue('--bt-success-color');
-        SendListHTTP(ip,mdp);
-      }else{
-        var r = document.querySelector(':root');
-        var rs = getComputedStyle(r);
-        var button = document.getElementById('miraboutontester');
-        button.style.backgroundColor = rs.getPropertyValue('--al-danger-color');
-        alert("Oups! N'y aurait-il pas un petit problème dans les informations d'identification saisies?");
-      }
-         
-    }     
-  })      
-}
-
-$("#miraboutonenvoyer").on('click', function (event) {
-  var ip = $("#miraip").val();
-    var mdp = $("#miramdp").val();
-    var url = 'http://'+ip+'/testmodule?key='+mdp;
-    HTTPTestModuleSend(url,ip,mdp);
-  
-})
+// The editor connection button already checks credentials. Do not require
+// another fragile 1.5-second HTTP GET immediately before /programui.
+// Send a SINGLE POST; the PHP relay checks its actual HTTP response and
+// verifies the persisted screen configuration if the ACK is lost.
+$("#miraboutonenvoyer").on('click', function () {
+  var ip = $("#miraip").val(), mdp = $("#miramdp").val();
+  if (!ip || !mdp) {
+    alert("Renseigne l'adresse IP et le mot de passe de l'écran.");
+    return;
+  }
+  SendListHTTP(ip,mdp);
+});
                             
                             
 function MiraSafeText(value){
@@ -2065,7 +2037,7 @@ $('#miradesignersave').on('click',function(){
   var ip = $('#miraip').val();
   var mdp = $('#miramdp').val();
   if(!ip || !mdp){ alert("Renseigne l'adresse IP et le mot de passe de l'écran."); return; }
-  HTTPTestModuleSend('http://'+ip+'/testmodule?key='+mdp,ip,mdp);
+  SendListHTTP(ip,mdp);
 });
 $(document).on('click','.mira-page-tab',function(){ MiraDesignerPage=$(this).data('page'); $('.mira-page-tab').removeClass('active'); $(this).addClass('active'); MiraDesignerSelected=null; MiraDesignerRender(); });
 $('#miradesignergrid').on('click',function(){ MiraDesignerGridEnabled=!MiraDesignerGridEnabled; $(this).toggleClass('active',MiraDesignerGridEnabled); });
