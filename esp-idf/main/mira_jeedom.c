@@ -473,6 +473,9 @@ static volatile uint32_t mira_http_actions_no_config,mira_http_actions_no_mappin
 static volatile uint32_t mira_http_actions_no_index;
 static volatile int mira_http_action_last_status;
 static uint32_t mira_index_builds,mira_index_failures,mira_index_responses;
+// Session budget is configured by the HTTP server owner in recovery.c.
+static httpd_handle_t mira_http_server;
+static unsigned mira_http_session_capacity;
 static const char *index_find_field(const char *start,const char *end,
                                     const char *key,const char **token_end){
     char search[24];
@@ -3761,6 +3764,14 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
     const esp_err_t nvs_stats_error=nvs_get_stats(NULL,&nvs_statistics);
     mira_full_state_diagnostics_t health={0};
     mira_full_state_diagnostics(&health);
+    // Count actual HTTPD client sessions in the running server, including
+    // this status request, rather than guessing from SSE client count.
+    int client_fds[16]={0};
+    size_t active_clients=sizeof(client_fds)/sizeof(client_fds[0]);
+    const esp_err_t active_clients_err=mira_http_server?
+        httpd_get_client_list(mira_http_server,&active_clients,client_fds):
+        ESP_ERR_INVALID_STATE;
+    if(active_clients_err!=ESP_OK)active_clients=0;
     unsigned cached_bindings=0;
     bool runtime_mapping_valid=false;
     if(mira_index_mutex&&xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(250))==pdTRUE){
@@ -3809,7 +3820,10 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
         "\"http_actions_failed\":%u,\"http_actions_no_config\":%u,"
         "\"http_actions_no_index\":%u,\"http_actions_no_mapping\":%u,"
         "\"http_actions_last_status\":%d,\"http_bindings_cached\":%u,"
-        "\"http_config_cached\":%s}",
+        "\"http_config_cached\":%s,"
+        "\"http_clients_active\":%u,\"http_clients_limit\":%u,"
+        "\"http_clients_error\":%d,\"http_index_inflight\":%u,"
+        "\"http_passive_pending\":%u,\"http_passive_rejected\":%u}",
         jeedom_mode_enabled?"true":"false",
         runtime_mapping_valid?"true":"false",
         valid,total,first_missing_local_id,
@@ -3841,7 +3855,12 @@ static esp_err_t jeedom_status_get(httpd_req_t *req) {
         (unsigned)__atomic_load_n(&mira_http_actions_no_mapping,__ATOMIC_RELAXED),
         (int)__atomic_load_n(&mira_http_action_last_status,__ATOMIC_RELAXED),
         cached_bindings,
-        http_config_ready?"true":"false");
+        http_config_ready?"true":"false",
+        (unsigned)active_clients,mira_http_session_capacity,
+        (int)active_clients_err,
+        __atomic_load_n(&mira_index_async_active,__ATOMIC_RELAXED),
+        mira_passive_requests?(unsigned)uxQueueMessagesWaiting(mira_passive_requests):0u,
+        (unsigned)__atomic_load_n(&mira_passive_async_dropped,__ATOMIC_RELAXED));
     if(json_len<0||json_len>=MIRA_JEEDOM_STATUS_CAP){
         heap_caps_free(body);
         httpd_resp_set_status(req,"503 Service Unavailable");
@@ -4653,7 +4672,9 @@ static esp_err_t legacy_reboot_get(httpd_req_t *req){
     esp_restart();
     return ESP_OK;
 }
-void mira_jeedom_register_http(httpd_handle_t server) {
+void mira_jeedom_register_http(httpd_handle_t server,unsigned max_open_sockets) {
+    mira_http_server=server;
+    mira_http_session_capacity=max_open_sockets;
     const httpd_uri_t routes[]={
         {.uri="/getlvgl",.method=HTTP_GET,.handler=getlvgl},
         {.uri="/getindex",.method=HTTP_GET,.handler=getindex},
