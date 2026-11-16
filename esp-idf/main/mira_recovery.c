@@ -152,6 +152,49 @@ static const char recovery_page[] =
 "catch(e){document.getElementById('msg').innerText=String(e);}}"
 "</script></html>";
 
+// The beta home page writes many chunked HTML fragments for Jeedom actions.
+// Do not monopolize the single HTTPD dispatcher while rendering it: a slow
+// browser must not prevent Jeedom /getindex and /updatenr from being accepted.
+// Only the configured home page is moved off-thread; first-run and rescue
+// pages keep their original low-memory synchronous handling.
+static volatile uint32_t mira_root_async_active;
+static void mira_root_async_worker(void *argument){
+    httpd_req_t *req=(httpd_req_t *)argument;
+    const esp_err_t result=mira_beta_web_home(req);
+    if(result!=ESP_OK)ESP_LOGW(TAG,"MIRA_HOME_ASYNC_RENDER_FAILED: %s",
+                               esp_err_to_name(result));
+    httpd_req_async_handler_complete(req);
+    __atomic_sub_fetch(&mira_root_async_active,1u,__ATOMIC_RELAXED);
+    vTaskDeleteWithCaps(NULL);
+}
+static esp_err_t mira_root_async_home(httpd_req_t *req){
+    if(!mira_beta_web_authorized(req))return ESP_FAIL;
+    uint32_t active=__atomic_load_n(&mira_root_async_active,__ATOMIC_RELAXED);
+    do{
+        if(active>=2u){
+            httpd_resp_set_status(req,"503 Service Unavailable");
+            return httpd_resp_sendstr(req,"Mira browser pages busy");
+        }
+    }while(!__atomic_compare_exchange_n(&mira_root_async_active,&active,active+1u,
+                                        false,__ATOMIC_ACQ_REL,__ATOMIC_RELAXED));
+    httpd_req_t *borrowed=NULL;
+    esp_err_t err=httpd_req_async_handler_begin(req,&borrowed);
+    if(err!=ESP_OK){
+        __atomic_sub_fetch(&mira_root_async_active,1u,__ATOMIC_RELAXED);
+        httpd_resp_set_status(req,"503 Service Unavailable");
+        return httpd_resp_sendstr(req,"Mira browser async unavailable");
+    }
+    // Reserve a bounded PSRAM stack and leave RGB DMA/internal heap alone.
+    if(xTaskCreateWithCaps(mira_root_async_worker,"mira_browser",12288,
+                           borrowed,3,NULL,
+                           MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)!=pdPASS){
+        httpd_resp_set_status(borrowed,"503 Service Unavailable");
+        httpd_resp_sendstr(borrowed,"Mira browser worker unavailable");
+        httpd_req_async_handler_complete(borrowed);
+        __atomic_sub_fetch(&mira_root_async_active,1u,__ATOMIC_RELAXED);
+    }
+    return ESP_OK;
+}
 static esp_err_t index_get(httpd_req_t *req) {
     // Mirror the 0.7.37 first-run workflow: beta key page then Wi-Fi page.
     // The performance/recovery UI remains available after provisioning.
@@ -180,7 +223,7 @@ static esp_err_t index_get(httpd_req_t *req) {
             else if (strcmp(requested, "off") == 0) pending_cache_request = 0;
         }
     }
-    return mira_beta_web_home(req);
+    return mira_root_async_home(req);
 }
 static esp_err_t recovery_debug_get(httpd_req_t *req){
     if(!mira_beta_web_authorized(req))return ESP_FAIL;
