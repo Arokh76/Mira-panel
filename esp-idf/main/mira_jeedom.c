@@ -4537,26 +4537,26 @@ static esp_err_t sync_toggle_get(httpd_req_t *req){
         httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"ID invalide");
         return ESP_FAIL;
     }
-    char *raw=read_config(NULL);
-    cJSON *index=raw?index_from_config(raw):NULL;
-    free(raw);
-    if(!index){
-        httpd_resp_send_err(req,HTTPD_404_NOT_FOUND,"Index absent");
-        return ESP_FAIL;
-    }
-    const cJSON *actions=cJSON_GetObjectItemCaseSensitive(index,"actions");
-    const cJSON *entry=NULL;
+    // Match the WT32's resident action index: a passive toggle update
+    // must never reopen SPIFFS or rebuild cJSON inside the HTTP hot path.
+    // The PSRAM index cache is already maintained by /programui and save.
     char name[96]={0},value[2]={0};
-    cJSON_ArrayForEach(entry,actions){
-        if(strcmp(jstr((cJSON*)entry,"type",""),"toggle"))continue;
-        int off=jint((cJSON*)entry,"id0",-1);
-        int on=jint((cJSON*)entry,"id1",-1);
-        if(id!=off&&id!=on)continue;
-        snprintf(name,sizeof(name),"%s",jstr((cJSON*)entry,"nom",""));
-        snprintf(value,sizeof(value),"%s",id==on?"1":"0");
+    if(!mira_index_mutex||!mira_action_refs){
+        httpd_resp_set_status(req,"503 Service Unavailable");
+        return httpd_resp_sendstr(req,"Index non initialise");
+    }
+    if(xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(250))!=pdTRUE){
+        httpd_resp_set_status(req,"503 Service Unavailable");
+        return httpd_resp_sendstr(req,"Index occupe");
+    }
+    for(size_t i=0;i<mira_action_ref_count;i++){
+        const mira_action_ref_t *ref=&mira_action_refs[i];
+        if(strcmp(ref->type,"toggle")||(id!=ref->id0&&id!=ref->id1))continue;
+        snprintf(name,sizeof(name),"%.95s",ref->name);
+        snprintf(value,sizeof(value),"%s",id==ref->id1?"1":"0");
         break;
     }
-    cJSON_Delete(index);
+    xSemaphoreGive(mira_index_mutex);
     if(!*name){
         httpd_resp_send_err(req,HTTPD_404_NOT_FOUND,"Interrupteur inconnu");
         return ESP_FAIL;
@@ -4565,6 +4565,9 @@ static esp_err_t sync_toggle_get(httpd_req_t *req){
         httpd_resp_set_status(req,"503 Service Unavailable");
         return httpd_resp_sendstr(req,"File d'etats pleine");
     }
+    // Preserve WT32 immediate browser feedback: send the ON/OFF transport
+    // ID straight to EventSource, independent of the LVGL refresh cycle.
+    mira_sse_record_direct((int)id,value);
     httpd_resp_set_type(req,"text/plain");
     return httpd_resp_sendstr(req,"OK");
 }
