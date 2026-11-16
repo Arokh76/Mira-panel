@@ -1030,7 +1030,18 @@ class mira extends eqLogic {
     	if($type == 'action'){
           log::add('mira', 'debug', $cmd->getName()." ACTION HTTP");
               	
-          $cmd->execute();
+          // IDF 7-inch sends the numeric range value with its event ID.
+          // Pass it directly to the media action: fetching /getindex during
+          // every volume adjustment is fragile when the HTTP port is busy.
+          // Legacy WT32 callbacks without a value keep their old behavior.
+          $logical=(string)$cmd->getLogicalId();
+          $sentValue=init('value',init('v',null));
+          if (preg_match('/__(volume_cmd|device_cmd)$/D',$logical) &&
+              $sentValue!==null && $sentValue!=='') {
+            $cmd->execute(array('slider'=>$sentValue,'value'=>$sentValue));
+          } else {
+            $cmd->execute();
+          }
           echo init('id');
         
         }else{
@@ -1082,25 +1093,28 @@ class mira extends eqLogic {
   
   
   
-  public function preUpdate() {  
-    $retour_module = $this->GetModule();    
-    if ($retour_module != "Erreur" && $retour_module != ""){          
-      $this->setConfiguration('module',$retour_module);
-    }else{
-      throw new Exception(__("Oups! N'y aurait-il pas un petit problème dans la saisie des informations?", __FILE__));
-      die();
-    }
+  public function preUpdate() {
+    // Editing an existing Jeedom panel must NEVER depend on the panel's HTTP
+    // availability. Under load the IDF 7-inch panel can still serve its local
+    // browser while Jeedom's brief HTTP probe times out. Save locally first;
+    // postUpdate() synchronizes only when /getindex is actually available.
+    if (trim((string)$this->getConfiguration('adresseip','')) === '' ||
+        (string)$this->getConfiguration('password','') === '')
+      throw new Exception(__("L'adresse IP et la clé Mira sont obligatoires", __FILE__));
   }
-  
-  public function postUpdate() {
-    $retour_module = $this->GetModule();    
-    if ($retour_module != "Erreur" && $retour_module != ""){          
+
+    public function postUpdate() {
+    // Never reject an equipment/command save because the screen HTTP is
+    // temporarily offline. Existing Jeedom commands/associations stay intact.
+    $retour_module = $this->GetModule();
+    if ($retour_module !== "Erreur" && $retour_module !== "") {
       $this->setConfiguration('module',$retour_module);
-    }else{
-      throw new Exception(__("Oups! N'y aurait-il pas un petit problème dans la saisie des informations?", __FILE__));
-      die();
+    } else {
+      log::add('mira','warning','[SyncCmd] '.$this->getName().
+        ' : module HTTP indisponible, sauvegarde Jeedom conservee');
+      return;
     }
-    
+
     if ($this->getConfiguration('adresseip') == '') {
       throw new Exception(__("L'adresse IP ne peut pas être vide", __FILE__));
     }else{
@@ -1111,8 +1125,9 @@ class mira extends eqLogic {
           	$json_index = $this->GetIndex();
               
             if ($json_index == 'Erreur'){
-                throw new Exception(__("Oups! N'y aurait-il pas un petit problème dans la saisie des informations?", __FILE__));
-                die();
+                log::add('mira','warning','[SyncCmd] '.$this->getName().
+                  ' : index HTTP indisponible, commandes existantes conservees');
+                return;
             }
           
           	$json_count = count($json_index);
@@ -2454,9 +2469,22 @@ class miraCmd extends cmd {
             // The Mira cached value is also rounded; source is unchanged.
             return $formattedResult;
           }
-          $url = 'http://'. $eqLogic->getConfiguration('adresseip') . '/updatenr?key=' . $eqLogic->getConfiguration('password') . '&info=' . $cmd .'&value='.$result; 
-          log::add('mira','debug',$eqLogic->getName().': INFO: '.$nom);
-          $output=$eqLogic->panelHttpGet($url);          	
+          // Changed values must propagate immediately; unchanged values
+          // only need occasional refresh for recovery after panel reboot.
+          // Cache only confirmed HTTP deliveries: a failed push stays
+          // eligible for retry after the offline circuit breaker expires.
+          $now=microtime(true);
+          $lastValue=$this->getCache('mira_info_http_value',null);
+          $lastAt=(float)$this->getCache('mira_info_http_at',0);
+          if ($lastValue!==null && (string)$lastValue===(string)$result &&
+              $lastAt>0 && $now>=$lastAt && ($now-$lastAt)<45.0)
+            return $result;
+          $url = 'http://'. $eqLogic->getConfiguration('adresseip') . '/updatenr?key=' . $eqLogic->getConfiguration('password') . '&info=' . $cmd .'&value='.$result;
+          $output=$eqLogic->panelHttpGet($url);
+          if ($output!==false) {
+            $this->setCache(array('mira_info_http_value'=>(string)$result,
+                                  'mira_info_http_at'=>$now));
+          }
           return $result;            
         
         }else if ($this->getConfiguration('calcul') != '' && $this->getConfiguration('type') == 'toggle'){

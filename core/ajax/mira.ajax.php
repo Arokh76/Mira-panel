@@ -360,31 +360,11 @@ try {
             @session_write_close();
         }
         $host = $parts['host'];
-        // Abort fast if the panel is missing: never keep a Jeedom PHP worker
-        // busy in the 12s POST + 17s reboot-verification loop for an offline WT32.
-        // A panel that *was* online is still allowed to reboot during /programui.
-        // /getindex returns 404 on a factory-new screen with no UI saved yet.
-        // /testmodule checks HTTP readiness and the Mira key without requiring widgets.
-        $probe=curl_init('http://'.$host.'/testmodule?key='.rawurlencode($key));
-        curl_setopt_array($probe,array(
-            CURLOPT_RETURNTRANSFER=>true,
-            CURLOPT_CONNECTTIMEOUT_MS=>350,
-            CURLOPT_TIMEOUT_MS=>1500,
-            CURLOPT_NOSIGNAL=>true,
-            CURLOPT_FOLLOWLOCATION=>false
-        ));
-        $probeBody=curl_exec($probe);
-        $probeErr=curl_errno($probe);
-        $probeCode=(int)curl_getinfo($probe,CURLINFO_HTTP_CODE);
-        curl_close($probe);
-        if ($probeBody===false || $probeCode===0) {
-            log::add('mira','debug','[ProgramUI] Ecran indisponible '.$host.
-                ' (sonde cURL '.$probeErr.') : abandon immédiat, aucun POST');
-            throw new Exception('Mira : écran hors ligne ou en démarrage. Réessayer lorsqu’il est disponible.');
-        }
-        if ($probeCode!==200) {
-            throw new Exception('Mira : écran non prêt (HTTP '.$probeCode.'). Aucun POST envoyé.');
-        }
+        // One user-initiated POST is authoritative. The former mandatory
+        // /testmodule probe (350 ms connect, 1.5 s total) could reject a
+        // reachable 7-inch panel while its HTTP task was temporarily busy.
+        // Do not make another HTTP request before the actual programming.
+        // Existing read-back verification below covers a lost POST response.
         // 12 s maximum pour l'accuse-reception, suivi si besoin d'une
         // verification en lecture seule. Aucun nouvel envoi n'est effectue.
         log::add('mira', 'debug', '[ProgramUI] Envoi vers ' . $host .
