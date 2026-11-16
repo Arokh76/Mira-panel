@@ -3,7 +3,7 @@
 // against synthetic WT32 /getindex data after a firmware version change.
 $source=file_get_contents(__DIR__.'/../core/class/mira.class.php');
 $start=strpos($source,'    public static function screenTransportBindings(');
-$end=strpos($source,'    public function Init_mira_Module() {',$start);
+$end=strpos($source,'    public function Init_mira_Module(',$start);
 if($start===false || $end===false) throw new RuntimeException('Production remap not found');
 $production=substr($source,$start,$end-$start);
 class MiraRebindCmd {
@@ -63,8 +63,8 @@ if(isset($ambiguous['Duplicate']))
   throw new RuntimeException('Ambiguous names must not be rebound');
 if(strpos($source,'[SyncCmd] index ecran vide : conservation des commandes existantes')===false)
   throw new RuntimeException('Empty-index destructive sync guard missing');
-$syncStart=strpos($source,'  public function postUpdate() {');
-$syncEnd=strpos($source,'    public function Init_mira_Module() {',$syncStart);
+$syncStart=strpos($source,'  public function postUpdate(');
+$syncEnd=strpos($source,'    public function Init_mira_Module(',$syncStart);
 if($syncStart===false || $syncEnd===false) throw new RuntimeException('Cannot inspect postUpdate');
 $postUpdate=substr($source,$syncStart,$syncEnd-$syncStart);
 if(strpos($postUpdate,'$existingCmd->remove()')!==false)
