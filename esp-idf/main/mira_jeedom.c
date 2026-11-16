@@ -760,6 +760,27 @@ static esp_err_t mira_index_send_snapshot(httpd_req_t *req){
     return result;
 }
 
+// Reuse the already-built Jeedom action index for browser SSE sessions.
+// Only copy the stable, serialized PSRAM snapshot under its mutex; parsing
+// happens after unlocking and never rereads/rebuilds the SPIFFS widget file.
+static cJSON *mira_index_copy_actions(void){
+    if(!mira_index_template && !mira_index_rebuild())return NULL;
+    if(!mira_index_mutex ||
+       xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(100))!=pdTRUE)return NULL;
+    const size_t length=mira_index_template_len;
+    char *snapshot=NULL;
+    if(mira_index_template && length)
+        snapshot=heap_caps_malloc(length+1,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(snapshot){
+        memcpy(snapshot,mira_index_template,length);
+        snapshot[length]=0;
+    }
+    xSemaphoreGive(mira_index_mutex);
+    if(!snapshot)return NULL;
+    cJSON *index=cJSON_ParseWithLength(snapshot,length);
+    heap_caps_free(snapshot);
+    return index;
+}
 // HTML part of the original beta home page. Use the SAME command ids from
 // index_from_config() that the Jeedom plugin sees, no parallel ID mapping.
 static esp_err_t beta_html(httpd_req_t *req,const char *s){
@@ -1123,9 +1144,9 @@ static esp_err_t beta_events_get(httpd_req_t *req){
         }
     }while(!__atomic_compare_exchange_n(&mira_sse_clients,&active,active+1u,
                                         false,__ATOMIC_RELAXED,__ATOMIC_RELAXED));
-    char *raw=read_config(NULL);
-    cJSON *index=raw?index_from_config(raw):NULL;
-    free(raw);
+    // Connection establishment must not block the sole HTTP dispatcher
+    // with SPIFFS I/O and a full widget-to-action index rebuild.
+    cJSON *index=mira_index_copy_actions();
     const cJSON *actions=index?cJSON_GetObjectItemCaseSensitive(index,"actions"):NULL;
     const int count=cJSON_IsArray(actions)?cJSON_GetArraySize(actions):0;
     // A single media widget registers up to 15 Jeedom
@@ -2310,9 +2331,54 @@ static esp_err_t beta_get(httpd_req_t *req){
         memset(value,0,sizeof(value));
         return sent;
     }
-    char *raw=read_config(NULL);
-    cJSON *index=raw?index_from_config(raw):NULL;
-    free(raw);
+    // WT32 parity: numeric /get queries look up the resident Jeedom action
+    // table. Repeated browser/API reads must not reread SPIFFS or regenerate
+    // cJSON on the ESP-IDF HTTP dispatcher. The rare /get?id diagnostic still
+    // uses the full list below.
+    if(strcmp(kind,"id") && mira_index_mutex && mira_action_refs){
+        char *end=NULL;
+        const long local=strtol(argument,&end,10);
+        if(!*argument||end==argument||*end||local<1||local>4096)
+            return httpd_resp_sendstr(req,"Null");
+        const bool is_toggle=!strcmp(kind,"toggle")||!strcmp(kind,"toogle");
+        const bool is_info=!strcmp(kind,"info");
+        const bool is_infofa=!strcmp(kind,"infofa");
+        if(!is_toggle&&!is_info&&!is_infofa)
+            return httpd_resp_sendstr(req,"Null");
+        if(xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(60))==pdTRUE){
+            char cached_name[96]={0};
+            bool match=false;
+            for(size_t i=0;i<mira_action_ref_count;i++){
+                const mira_action_ref_t *ref=&mira_action_refs[i];
+                match=(is_toggle&&!strcmp(ref->type,"toggle")&&
+                       (local==ref->id0||local==ref->id1))||
+                      (is_info&&!strcmp(ref->type,"info")&&local==ref->id)||
+                      (is_infofa&&!strcmp(ref->type,"infofa")&&local==ref->id);
+                if(match){
+                    snprintf(cached_name,sizeof(cached_name),"%.95s",ref->name);
+                    break;
+                }
+            }
+            xSemaphoreGive(mira_index_mutex);
+            if(!match)return httpd_resp_sendstr(req,"Null");
+            char value[160]={0};
+            bool found=mira_full_cached_state(cached_name,value,sizeof(value));
+            if(is_toggle){
+                const bool on=found&&(!strcasecmp(value,"On")||
+                                      !strcasecmp(value,"true")||
+                                      !strcasecmp(value,"oui")||
+                                      !strcasecmp(value,"actif")||
+                                      !strcmp(value,"1"));
+                snprintf(value,sizeof(value),"%s",on?"On":"Off");
+                found=true; // WT32 toggles default to Off before first update
+            }
+            return httpd_resp_sendstr(req,found?value:"Null");
+        }
+        // A concurrent index reprogramming is rare. Keep the original
+        // compatibility fallback rather than return a fabricated state.
+    }
+    cJSON *index=mira_index_copy_actions();
+
     if(!index)return httpd_resp_sendstr(req,"Null");
     cJSON *actions=cJSON_GetObjectItemCaseSensitive(index,"actions");
     const cJSON *entry=NULL;
