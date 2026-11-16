@@ -1340,7 +1340,7 @@ esp_err_t mira_recovery_init(void) {
     register_optional_route(httpd, &shadow_relief);
     mira_full_register_http(httpd); // optional 0.7.37 SPIFFS config and upload
     mira_mqtt_register_http(httpd); // optional native MQTT settings
-    mira_jeedom_register_http(httpd); // beta Jeedom protocol compatibility
+    mira_jeedom_register_http(httpd,conf.max_open_sockets); // beta Jeedom protocol compatibility
     ESP_RETURN_ON_ERROR(mira_beta_setup_register(httpd),TAG,"Mira beta first-run setup");
     ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_register_uri_handler(httpd,&clock_get));
     ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_register_uri_handler(httpd,&wifi_get));
