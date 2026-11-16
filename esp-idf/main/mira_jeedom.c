@@ -1549,22 +1549,58 @@ static esp_err_t getlvgl(httpd_req_t *req) {
     esp_err_t err=httpd_resp_send(req,buf,(ssize_t)n);
     free(buf);return err;
 }
-static esp_err_t getindex(httpd_req_t *req) {
-    if(!require_key(req))return ESP_FAIL;
+// Native ESP-IDF asynchronous request processing, equivalent in intent
+// to WT32's non-blocking AsyncWebServer callbacks. Never occupy the sole
+// esp_http_server dispatcher while transferring the large /getindex JSON.
+// Bound concurrency so two browsers cannot exhaust internal request/socket
+// resources. The worker stack is allocated in octal PSRAM.
+static volatile unsigned mira_index_async_active;
+#define MIRA_INDEX_ASYNC_LIMIT 2u
+static void mira_index_async_worker(void *arg){
+    httpd_req_t *req=(httpd_req_t *)arg;
     httpd_resp_set_type(req,"application/json");
     httpd_resp_set_hdr(req,"Cache-Control","no-store");
     const esp_err_t status=mira_index_send_snapshot(req);
     if(status==ESP_ERR_NOT_FOUND){
         httpd_resp_send_err(req,HTTPD_404_NOT_FOUND,"Index Mira absent");
-        return ESP_FAIL;
-    }
-    if(status==ESP_ERR_TIMEOUT){
+    }else if(status==ESP_ERR_TIMEOUT){
         httpd_resp_set_status(req,"503 Service Unavailable");
         httpd_resp_set_type(req,"text/plain");
         httpd_resp_sendstr(req,"Index Mira occupe");
-        return ESP_FAIL;
     }
-    return status;
+    // Every borrowed request must be completed, including socket failures,
+    // or HTTP sockets remain reserved permanently.
+    httpd_req_async_handler_complete(req);
+    __atomic_sub_fetch(&mira_index_async_active,1u,__ATOMIC_RELAXED);
+    vTaskDeleteWithCaps(NULL);
+}
+static esp_err_t getindex(httpd_req_t *req) {
+    if(!require_key(req))return ESP_FAIL;
+    unsigned active=__atomic_load_n(&mira_index_async_active,__ATOMIC_RELAXED);
+    do {
+        if(active>=MIRA_INDEX_ASYNC_LIMIT){
+            httpd_resp_set_status(req,"503 Service Unavailable");
+            return httpd_resp_sendstr(req,"Index requests busy");
+        }
+    }while(!__atomic_compare_exchange_n(&mira_index_async_active,&active,active+1u,
+                                        false,__ATOMIC_ACQ_REL,__ATOMIC_RELAXED));
+    httpd_req_t *async_req=NULL;
+    esp_err_t err=httpd_req_async_handler_begin(req,&async_req);
+    if(err!=ESP_OK){
+        __atomic_sub_fetch(&mira_index_async_active,1u,__ATOMIC_RELAXED);
+        httpd_resp_set_status(req,"503 Service Unavailable");
+        return httpd_resp_sendstr(req,"Index async unavailable");
+    }
+    if(xTaskCreateWithCaps(mira_index_async_worker,"mira_index_async",8192,
+                           async_req,3,NULL,
+                           MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)!=pdPASS){
+        httpd_resp_set_status(async_req,"503 Service Unavailable");
+        httpd_resp_sendstr(async_req,"Index worker unavailable");
+        httpd_req_async_handler_complete(async_req);
+        __atomic_sub_fetch(&mira_index_async_active,1u,__ATOMIC_RELAXED);
+        return ESP_OK;
+    }
+    return ESP_OK;
 }
 static esp_err_t getmodule(httpd_req_t *req) {
     if(!require_key(req))return ESP_FAIL;
