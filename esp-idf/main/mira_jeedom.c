@@ -1949,19 +1949,31 @@ static esp_err_t updatenr_process(httpd_req_t *req) {
     }
     if(!*selected){httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Type d'action absent");return ESP_FAIL;}
     const bool list_by_value=!strcmp(selected,"listvalue");
+    const bool list_by_id=!strcmp(selected,"list");
+    const bool list_group=list_by_value||list_by_id;
     long id=-1;
-    if(list_by_value){
-        // The compound list name is looked up in the current widget index.
-        // This is strictly state feedback, never a command to Jeedom.
+    if(list_group){
+        // WT32 protocol: list=<group>&value=<numeric option ID>, or
+        // listvalue=<group>&value=<option label>. The original ESP-IDF
+        // port incorrectly parsed the GROUP NAME as a numeric action ID.
+        // Never use this passive feedback to execute thermostat commands.
         if(!*action_id||strlen(action_id)>=96||
            !query_param(req,"value",value,sizeof(value))||!*value){
             httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Etat de liste invalide");
             return ESP_FAIL;
         }
+        if(list_by_id){
+            char *endptr=NULL;
+            id=strtol(value,&endptr,10);
+            if(endptr==value||*endptr||id<1||id>4096){
+                httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"ID option invalide");
+                return ESP_FAIL;
+            }
+        }
     }else{
-        char *end=NULL;
-        id=strtol(action_id,&end,10);
-        if(end==action_id||*end!=0||id<1||id>4096){
+        char *endptr=NULL;
+        id=strtol(action_id,&endptr,10);
+        if(endptr==action_id||*endptr||id<1||id>4096){
             httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"ID invalide");return ESP_FAIL;
         }
     }
@@ -1981,10 +1993,10 @@ static esp_err_t updatenr_process(httpd_req_t *req) {
     }
     for(size_t i=0;i<mira_action_ref_count;i++){
         const mira_action_ref_t *ref=&mira_action_refs[i];
-        if(list_by_value){
+        if(list_group){
             if(strcmp(ref->type,"list")||
                strcmp(ref->list_name,action_id)||
-               strcmp(ref->name,value))continue;
+               (list_by_value?strcmp(ref->name,value):(ref->id!=id)))continue;
         }else if((!strcmp(selected,"toggle")||!strcmp(selected,"toogle")) &&
                  !strcmp(ref->type,"toggle")){
             if(id!=ref->id0&&id!=ref->id1)continue;
@@ -1998,8 +2010,10 @@ static esp_err_t updatenr_process(httpd_req_t *req) {
     xSemaphoreGive(mira_index_mutex);
     char name[96]={0};
     if(found){
-        if(list_by_value){
+        if(list_group){
             snprintf(name,sizeof(name),"%s",action_id);
+            // Send the option label to LVGL, not the numeric transport ID.
+            snprintf(value,sizeof(value),"%.768s",matched_ref.name);
         }else if((!strcmp(selected,"toggle")||!strcmp(selected,"toogle")) &&
                  !strcmp(matched_ref.type,"toggle")){
             snprintf(name,sizeof(name),"%.95s",matched_ref.name);
@@ -2051,11 +2065,18 @@ static esp_err_t updatenr_process(httpd_req_t *req) {
         // exact Jeedom command ID + value to the browser EventSource.
         // Never wait for an LVGL pass or a cache/index rescan to emit it.
         // The PSRAM state cache above remains the reconnect snapshot.
-        const int event_id=list_by_value?matched_ref.id:(int)id;
+        const int event_id=list_group?matched_ref.id:(int)id;
         if(event_id>0 && event_id<=4096)
             mira_sse_record_direct(event_id,value);
     }
     httpd_resp_set_type(req,"text/plain");
+    // As on WT32, list and listvalue acknowledge the resolved option ID.
+    // Jeedom uses this response to verify that its mode was accepted.
+    if(list_group){
+        char resolved[16];
+        snprintf(resolved,sizeof(resolved),"%d",matched_ref.id);
+        return httpd_resp_sendstr(req,resolved);
+    }
     return httpd_resp_sendstr(req,"OK");
 }
 // WT32 AsyncWebServer parity: /updatenr must never monopolize the IDF
