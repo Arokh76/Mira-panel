@@ -1879,59 +1879,72 @@ static esp_err_t updatenr(httpd_req_t *req) {
             httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"ID invalide");return ESP_FAIL;
         }
     }
-    char *raw=read_config(NULL);
-    cJSON *index=raw?index_from_config(raw):NULL;
-    free(raw);
-    if(!index){httpd_resp_send_err(req,HTTPD_404_NOT_FOUND,"Index absent");return ESP_FAIL;}
-    const cJSON *array=cJSON_GetObjectItemCaseSensitive(index,"actions"),*entry=NULL;
-    char name[96]={0};bool found=false;
-    cJSON_ArrayForEach(entry,array){
-        const char *kind=jstr((cJSON*)entry,"type","");
+    // Same principle as the WT32's resident action table: /updatenr is
+    // the hot path for every passive Jeedom Info. Never reopen SPIFFS or
+    // regenerate a cJSON command index per value.
+    mira_action_ref_t matched_ref={0};
+    bool found=false;
+    if(!mira_index_mutex || !mira_action_refs){
+        httpd_resp_set_status(req,"503 Service Unavailable");
+        httpd_resp_sendstr(req,"Index non initialise");
+        return ESP_FAIL;
+    }
+    if(xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(250))!=pdTRUE){
+        httpd_resp_set_status(req,"503 Service Unavailable");
+        return httpd_resp_sendstr(req,"Index occupe");
+    }
+    for(size_t i=0;i<mira_action_ref_count;i++){
+        const mira_action_ref_t *ref=&mira_action_refs[i];
         if(list_by_value){
-            if(strcmp(kind,"list")||
-               strcmp(jstr((cJSON*)entry,"nomliste",""),action_id)||
-               strcmp(jstr((cJSON*)entry,"nom",""),value))continue;
-            snprintf(name,sizeof(name),"%s",action_id);
-            // Always forward the option label validated against the index.
-            // No action queue, MQTT publish or GenericCmd execution.
-            found=true;break;
+            if(strcmp(ref->type,"list")||
+               strcmp(ref->list_name,action_id)||
+               strcmp(ref->name,value))continue;
+        }else if((!strcmp(selected,"toggle")||!strcmp(selected,"toogle")) &&
+                 !strcmp(ref->type,"toggle")){
+            if(id!=ref->id0&&id!=ref->id1)continue;
+        }else{
+            if(strcmp(ref->type,selected)||id!=ref->id)continue;
         }
-        if((!strcmp(selected,"toggle")||!strcmp(selected,"toogle")) && !strcmp(kind,"toggle")){
-            int off=jint((cJSON*)entry,"id0",-1),on=jint((cJSON*)entry,"id1",-1);
-            if(id==off||id==on){
-                snprintf(name,sizeof(name),"%s",jstr((cJSON*)entry,"nom",""));
-                snprintf(value,sizeof(value),"%s",id==on?"1":"0");
-                found=true;break;
-            }
-        }else if(!strcmp(kind,selected) && jint((cJSON*)entry,"id",-1)==id){
-            if(!strcmp(kind,"list")){
-                snprintf(name,sizeof(name),"%s",jstr((cJSON*)entry,"nomliste",""));
-                snprintf(value,sizeof(value),"%s",jstr((cJSON*)entry,"nom",""));
-            } else {
-                snprintf(name,sizeof(name),"%s",jstr((cJSON*)entry,"nom",""));
-                if(!strcmp(kind,"info")||!strcmp(kind,"range")){
-                    if(!query_param(req,"value",value,sizeof(value)))break;
-                }else if(!strcmp(kind,"color")){
-                    char r[8],g[8],b[8];
-                    if(!query_param(req,"r",r,sizeof(r))||
-                       !query_param(req,"g",g,sizeof(g))||
-                       !query_param(req,"b",b,sizeof(b)))break;
+        matched_ref=*ref;
+        found=true;
+        break;
+    }
+    xSemaphoreGive(mira_index_mutex);
+    char name[96]={0};
+    if(found){
+        if(list_by_value){
+            snprintf(name,sizeof(name),"%s",action_id);
+        }else if((!strcmp(selected,"toggle")||!strcmp(selected,"toogle")) &&
+                 !strcmp(matched_ref.type,"toggle")){
+            snprintf(name,sizeof(name),"%s",matched_ref.name);
+            snprintf(value,sizeof(value),"%s",id==matched_ref.id1?"1":"0");
+        }else if(!strcmp(matched_ref.type,"list")){
+            snprintf(name,sizeof(name),"%s",matched_ref.list_name);
+            snprintf(value,sizeof(value),"%s",matched_ref.name);
+        }else{
+            snprintf(name,sizeof(name),"%s",matched_ref.name);
+            if(!strcmp(matched_ref.type,"info")||!strcmp(matched_ref.type,"range")){
+                if(!query_param(req,"value",value,sizeof(value)))found=false;
+            }else if(!strcmp(matched_ref.type,"color")){
+                char r[8],g[8],b[8];
+                if(!query_param(req,"r",r,sizeof(r))||
+                   !query_param(req,"g",g,sizeof(g))||
+                   !query_param(req,"b",b,sizeof(b)))found=false;
+                else{
                     unsigned ri=0,gi=0,bi=0;
                     char trailing=0;
                     if(sscanf(r,"%u %c",&ri,&trailing)!=1||
                        sscanf(g,"%u %c",&gi,&trailing)!=1||
                        sscanf(b,"%u %c",&bi,&trailing)!=1||
-                       ri>255||gi>255||bi>255)break;
-                    snprintf(value,sizeof(value),"#%02x%02x%02x",ri,gi,bi);
-                }else if(!strcmp(kind,"button")){
-                    // This legacy endpoint receives a button ID but cannot safely run an action from a state refresh.
-                    snprintf(value,sizeof(value),"1");
+                       ri>255||gi>255||bi>255)found=false;
+                    else snprintf(value,sizeof(value),"#%02x%02x%02x",ri,gi,bi);
                 }
+            }else if(!strcmp(matched_ref.type,"button")){
+                // Passive button feedback never triggers an actuator.
+                snprintf(value,sizeof(value),"1");
             }
-            found=true;break;
         }
     }
-    cJSON_Delete(index);
     if(!found||!*name){
         httpd_resp_send_err(req,HTTPD_404_NOT_FOUND,"Commande inconnue");return ESP_FAIL;
     }
