@@ -1916,13 +1916,13 @@ static esp_err_t updatenr(httpd_req_t *req) {
             snprintf(name,sizeof(name),"%s",action_id);
         }else if((!strcmp(selected,"toggle")||!strcmp(selected,"toogle")) &&
                  !strcmp(matched_ref.type,"toggle")){
-            snprintf(name,sizeof(name),"%s",matched_ref.name);
+            snprintf(name,sizeof(name),"%.95s",matched_ref.name);
             snprintf(value,sizeof(value),"%s",id==matched_ref.id1?"1":"0");
         }else if(!strcmp(matched_ref.type,"list")){
             snprintf(name,sizeof(name),"%s",matched_ref.list_name);
             snprintf(value,sizeof(value),"%s",matched_ref.name);
         }else{
-            snprintf(name,sizeof(name),"%s",matched_ref.name);
+            snprintf(name,sizeof(name),"%.95s",matched_ref.name);
             if(!strcmp(matched_ref.type,"info")||!strcmp(matched_ref.type,"range")){
                 if(!query_param(req,"value",value,sizeof(value)))found=false;
             }else if(!strcmp(matched_ref.type,"color")){
