@@ -379,6 +379,7 @@ static bool native_jeedom_request(AsyncWebServerRequest *r){
     const bool stage_clear=path=="/removelistlvgl"||path=="/screenformat";
     const bool stage_add=path=="/addlistlvgl"||path=="/screenadd";
     const bool stage_save=path=="/savelistlvgl"||path=="/screensave";
+    const bool health=path=="/mira-health";
     const bool camera_config=path=="/camera/config";
     const bool allparams=path=="/getallparams";
     const bool navpages=path=="/navpages";
@@ -398,8 +399,22 @@ static bool native_jeedom_request(AsyncWebServerRequest *r){
     const bool writeparam=path=="/updateparam"||path=="/addparam"||
                           path=="/addlistparam"||path=="/updatelistparam";
     const bool saveparam=path=="/savelistparam"||path=="/createlistparam";
-    if(!camera_config&&!stage_clear&&!stage_add&&!stage_save&&!allparams&&!navpages&&!navfavorites&&!sync_toggle&&!lvgl&&!display&&!program&&!batch&&!single&&!toggle&&!init&&!readstate&&!readparam&&!writeparam&&!saveparam)
+    if(!health&&!camera_config&&!stage_clear&&!stage_add&&!stage_save&&!allparams&&!navpages&&!navfavorites&&!sync_toggle&&!lvgl&&!display&&!program&&!batch&&!single&&!toggle&&!init&&!readstate&&!readparam&&!writeparam&&!saveparam)
         return false;
+    if(health){
+        size_t len=0;
+        char *json=mira_jeedom_async_health_json(&len);
+        if(!json){r->send(503,"text/plain","Diagnostic indisponible");return true;}
+        auto owner=std::shared_ptr<char>(json,[](char *p){heap_caps_free(p);});
+        auto *resp=r->beginResponse("application/json",len,
+            [owner,len](uint8_t *out,size_t max,size_t pos)->size_t{
+                if(pos>=len)return 0;
+                size_t n=std::min(max,len-pos);
+                memcpy(out,owner.get()+pos,n);return n;
+            });
+        resp->addHeader("Cache-Control","no-store");
+        r->send(resp);return true;
+    }
     if(camera_config){
         if(r->method()!=AsyncWebRequestMethod::HTTP_POST)return false;
         const auto *key=r->getParam("key",true);
@@ -773,6 +788,7 @@ extern "C" void mira_async_web_start(void){
             __atomic_load_n(&ota_busy,__ATOMIC_ACQUIRE)?"true":"false");
         r->send(200,"application/json",answer);
     });
+    server.on("/mira-health",AsyncWebRequestMethod::HTTP_GET,proxy_request);
     server.on("/getindex",AsyncWebRequestMethod::HTTP_GET,index_get);
     server.on("/updatenr",AsyncWebRequestMethod::HTTP_GET,updatenr_get);
     server.on("/get",AsyncWebRequestMethod::HTTP_GET,proxy_request);
