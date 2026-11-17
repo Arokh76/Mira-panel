@@ -14,6 +14,7 @@
 #include <ctime>
 #include <esp_timer.h>
 #include <esp_system.h>
+#include <esp_random.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <memory>
@@ -83,9 +84,13 @@ static void nvs_text(const char *ns,const char *key,const char *fallback,
 }
 static unsigned nvs_number(const char *ns,const char *key,unsigned fallback){
     nvs_handle_t nv;
-    uint32_t u32=0;uint8_t u8=0;
+    uint32_t u32=0;uint8_t u8=0;uint16_t u16=0;
     if(nvs_open(ns,NVS_READONLY,&nv)!=ESP_OK)return fallback;
     esp_err_t err=nvs_get_u32(nv,key,&u32);
+    if(err!=ESP_OK){
+        err=nvs_get_u16(nv,key,&u16);
+        if(err==ESP_OK)u32=u16;
+    }
     if(err!=ESP_OK){
         err=nvs_get_u8(nv,key,&u8);
         if(err==ESP_OK)u32=u8;
@@ -158,8 +163,7 @@ static bool action_rows(PsramPage& out){
             snprintf(local,sizeof(local),"<div class='mira-info'>%d : ",id);
             char cached[160]={0};
             (void)mira_full_cached_state(name,cached,sizeof(cached));
-            ok=out.add(local)&&out.escaped(name)&&out.add(" <span id='")&&
-               out.add(local+0,0); // keep IDs supplied by actual index below
+            ok=out.add(local)&&out.escaped(name)&&out.add(" <span id='");
             if(ok){
                 snprintf(local,sizeof(local),"%d",id);
                 ok=out.add(local)&&out.add("'>")&&out.escaped(cached)&&
@@ -534,7 +538,7 @@ static bool save_display(AsyncWebServerRequest *r){
     String start=post(r,"DISPLAY_DebutNuit"),end=post(r,"DISPLAY_FinNuit");
     auto time_valid=[](const String& s)->bool{
         if(s.length()!=5||s[2]!=':')return false;
-        for(int i:{0,1,3,4})if(!isdigit((unsigned char)s[i]))return false;
+        for(int i=0;i<5;i++)if(i!=2&&!isdigit((unsigned char)s[i]))return false;
         return s.substring(0,2).toInt()<24&&s.substring(3).toInt()<60;
     };
     if(!time_valid(start)||!time_valid(end)){
@@ -564,13 +568,13 @@ static volatile uint32_t network_nonce=0;
 static volatile int64_t network_nonce_started=0;
 bool mira_async_handle_beta(AsyncWebServerRequest *r){
     const String path=r->url();
-    if(path=="/mira/wifi/scan"&&r->method()==HTTP_GET){
+    if(path=="/mira/wifi/scan"&&r->method()==AsyncWebRequestMethod::HTTP_GET){
         if(!authorized(r))return true;
         r->send(200,"application/json",
                 "{\"busy\":false,\"failed\":false,\"networks\":[]}");
         return true;
     }
-    if(path=="/mira/network"&&r->method()==HTTP_POST){
+    if(path=="/mira/network"&&r->method()==AsyncWebRequestMethod::HTTP_POST){
         if(!authorized(r))return true;
         String action=q(r,"action"),id=q(r,"network"),nonce=post(r,"nonce");
         const uint32_t key=(uint32_t)strtoul(nonce.c_str(),nullptr,16);
@@ -604,7 +608,7 @@ bool mira_async_handle_beta(AsyncWebServerRequest *r){
         r->send(200,"text/html; charset=utf-8",html);
         return true;
     }
-    if(path=="/save"&&r->method()==HTTP_POST){
+    if(path=="/save"&&r->method()==AsyncWebRequestMethod::HTTP_POST){
         if(!authorized(r))return true;
         String conf=q(r,"config"),update=q(r,"update");
         if(update=="wifi")return save_network(r,true);
@@ -625,22 +629,22 @@ bool mira_async_handle_beta(AsyncWebServerRequest *r){
         if(conf=="params")return save_urls(r);
         r->send(400,"text/plain","Formulaire inconnu");return true;
     }
-    if(path=="/display-save"&&r->method()==HTTP_POST){
+    if(path=="/display-save"&&r->method()==AsyncWebRequestMethod::HTTP_POST){
         if(!authorized(r))return true;
         return save_display(r);
     }
-    if(path=="/reboot"&&r->method()==HTTP_GET){
+    if(path=="/reboot"&&r->method()==AsyncWebRequestMethod::HTTP_GET){
         if(!authorized(r))return true;
         r->send(200,"text/plain","Mira Panel redemarre");
         queue_restart();return true;
     }
-    if(path=="/api/checkupdate"&&r->method()==HTTP_GET){
+    if(path=="/api/checkupdate"&&r->method()==AsyncWebRequestMethod::HTTP_GET){
         if(!authorized(r))return true;
         r->send(200,"application/json",
                 "{\"status\":\"manual\",\"message\":\"Utiliser le formulaire OTA\"}");
         return true;
     }
-    if(path=="/mira/clock/status"&&r->method()==HTTP_GET){
+    if(path=="/mira/clock/status"&&r->method()==AsyncWebRequestMethod::HTTP_GET){
         if(!authorized(r))return true;
         time_t now=time(nullptr);
         char msg[100];
