@@ -106,3 +106,7 @@ CONFIG_ESP_WIFI_RX_IRAM_OPT=n
 
 # Arduino is a library component; native app_main remains the only entrypoint.
 CONFIG_AUTOSTART_ARDUINO=n
+
+# Third-party esp-modbus pulled by Arduino 3.3.12 triggers GCC14
+# -Wstringop-truncation under -Werror; retain diagnostics, no -Werror.
+CONFIG_COMPILER_WARNINGS_AS_ERRORS=n
