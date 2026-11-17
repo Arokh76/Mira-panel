@@ -5640,3 +5640,88 @@ char *mira_jeedom_async_health_json(size_t *length){
     if(length)*length=(size_t)written;
     return result;
 }
+
+
+// Native Jeedom mapping diagnostics for ESPAsync-only builds.
+// Uses the same PSRAM resident action index and NVS generation as /getindex.
+char *mira_jeedom_async_status_json(size_t *length){
+    if(length)*length=0;
+    int total=0,valid=0,first_missing=-1;
+    uint32_t hash=0;unsigned cached=0;
+    int *ids=(int*)heap_caps_calloc(1280,sizeof(int),
+                                     MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!ids)return NULL;
+    if(!mira_index_mutex||
+       xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(250))!=pdTRUE){
+        heap_caps_free(ids);return NULL;
+    }
+    if(!mira_action_refs||mira_action_ref_count>640){
+        xSemaphoreGive(mira_index_mutex);heap_caps_free(ids);return NULL;
+    }
+    hash=mira_index_hash;
+    for(size_t i=0;i<mira_action_ref_count;i++){
+        const mira_action_ref_t *ref=&mira_action_refs[i];
+        if(!strcmp(ref->type,"toggle")){
+            ids[total++]=ref->id0;
+            ids[total++]=ref->id1;
+        }else ids[total++]=ref->id;
+    }
+    cached=mira_binding_cache?(unsigned)mira_binding_cache->valid_count:0;
+    bool mapping_valid=jeedom_mode_enabled&&total>0&&
+        mira_binding_cache&&mira_binding_cache->config_hash==hash&&
+        cached>=(unsigned)total;
+    xSemaphoreGive(mira_index_mutex);
+    nvs_handle_t map;
+    esp_err_t map_err=nvs_open("mira_idf_map",NVS_READONLY,&map);
+    char prefix[12];
+    snprintf(prefix,sizeof(prefix),"%08" PRIx32 ":",hash);
+    for(int i=0;i<total;i++){
+        char key[14],stored[48]={0};
+        snprintf(key,sizeof(key),"cmd%d",ids[i]);
+        if(map_err==ESP_OK&&ids[i]>=1&&ids[i]<=4096&&
+           nvs_read_string(map,key,stored,sizeof(stored))&&
+           !strncmp(stored,prefix,9)&&decimal_id(stored+9))valid++;
+        else if(first_missing<0)first_missing=ids[i];
+    }
+    if(map_err==ESP_OK)nvs_close(map);
+    heap_caps_free(ids);
+    nvs_stats_t stats={0};
+    esp_err_t stats_err=nvs_get_stats(NULL,&stats);
+    mira_full_state_diagnostics_t health={0};
+    mira_full_state_diagnostics(&health);
+    char *out=(char*)heap_caps_malloc(1152,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!out)return NULL;
+    int n=snprintf(out,1152,
+       "{\"jeedom_enabled\":%s,\"mapping_valid\":%s,"
+       "\"ids_valid\":%d,\"ids_expected\":%d,"
+       "\"mapping_first_missing_local_id\":%d,"
+       "\"mapping_persistent_valid\":%s,"
+       "\"mapping_nvs_read_error\":%d,\"nvs_stats_error\":%d,"
+       "\"nvs_used_entries\":%u,\"nvs_free_entries\":%u,"
+       "\"last_init_http\":%d,\"state_cache_used\":%u,"
+       "\"replay_pending\":%s,\"replay_attempts\":%u,\"replay_acks\":%u,"
+       "\"replay_last_http\":%d,\"index_builds\":%u,\"index_failures\":%u,"
+       "\"index_live_fields\":%u,\"index_responses\":%u,"
+       "\"http_bindings_cached\":%u,"
+       "\"http_clients_active\":0,\"http_clients_limit\":0,"
+       "\"http_passive_pending\":%u,\"http_passive_rejected\":%u}",
+       jeedom_mode_enabled?"true":"false",mapping_valid?"true":"false",
+       valid,total,first_missing,total>0&&valid==total?"true":"false",
+       (int)map_err,(int)stats_err,
+       (unsigned)stats.used_entries,(unsigned)stats.free_entries,
+       last_binding_sync_http,(unsigned)health.state_cache_used,
+       jeedom_state_replay_pending?"true":"false",
+       (unsigned)__atomic_load_n(&jeedom_replay_attempts,__ATOMIC_RELAXED),
+       (unsigned)__atomic_load_n(&jeedom_replay_acks,__ATOMIC_RELAXED),
+       jeedom_last_replay_http,
+       (unsigned)__atomic_load_n(&mira_index_builds,__ATOMIC_RELAXED),
+       (unsigned)__atomic_load_n(&mira_index_failures,__ATOMIC_RELAXED),
+       (unsigned)mira_index_fields_count,
+       (unsigned)__atomic_load_n(&mira_index_responses,__ATOMIC_RELAXED),
+       cached,
+       mira_passive_requests?(unsigned)uxQueueMessagesWaiting(mira_passive_requests):0u,
+       (unsigned)__atomic_load_n(&mira_passive_async_dropped,__ATOMIC_RELAXED));
+    if(n<0||n>=1152){heap_caps_free(out);return NULL;}
+    if(length)*length=(size_t)n;
+    return out;
+}
