@@ -60,3 +60,5 @@ bool mira_jeedom_async_param_get(const char *name,char *out,size_t capacity);
 int mira_jeedom_async_param_set(const char *name,const char *value);
 
 bool mira_jeedom_async_get_state(const char *kind,const char *selector,char *out,size_t capacity);
+
+int mira_jeedom_async_programui(const char *json,char *answer,size_t capacity);
