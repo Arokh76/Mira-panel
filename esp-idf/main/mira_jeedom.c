@@ -5565,3 +5565,78 @@ void mira_jeedom_register_http(httpd_handle_t server,unsigned max_open_sockets) 
         if(err!=ESP_OK)ESP_LOGE(TAG,"Route %s failed: %s",routes[i].uri,esp_err_to_name(err));
     }
 }
+
+// ESPAsyncWebServer native health JSON; identical counters to legacy.
+char *mira_jeedom_async_health_json(size_t *length){
+    if(length)*length=0;
+    wifi_ap_record_t ap={0};
+    const bool connected=esp_wifi_sta_get_ap_info(&ap)==ESP_OK;
+    uint32_t count=0,last_heap=0,lowest_heap=0;
+    mira_full_navigation_stats(&count,&last_heap,&lowest_heap);
+    mira_full_state_diagnostics_t diagnostic={0};
+    mira_full_state_diagnostics(&diagnostic);
+    mira_album_art_diag_t art={0};
+    mira_album_art_diagnostics(&art);
+    // Keep the HTTPD task's 7168B internal stack untouched; this potentially
+    // longer diagnostic response lives in PSRAM, not internal DMA memory.
+    const size_t cap=1536;
+    char *result=heap_caps_malloc(cap,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!result)return NULL;
+    const int written=snprintf(result,cap,
+        "{\"uptime_ms\":%llu,\"wifi\":%d,\"rssi_dbm\":%d,"
+        "\"heap_free\":%u,\"heap_min\":%u,\"heap_largest_block\":%u,"
+        "\"psram_free\":%u,\"nav_count\":%u,\"nav_last_heap\":%u,"
+        "\"nav_lowest_heap\":%u,\"internal_heap_free\":%u,"
+        "\"internal_largest_block\":%u,"
+        "\"internal_min_free\":%u,\"dma_min_free\":%u,"
+        "\"widget_table_psram\":%s,\"widget_table_bytes\":%u,"
+        "\"state_cache_used\":%u,\"state_cache_capacity\":%u,"
+        "\"state_unchanged\":%u,\"state_cache_evictions\":%u,"
+        "\"state_queue_dropped\":%u,\"state_queue_pending\":%u,"
+        "\"media_range_updates\":%u,\"media_range_overlays\":%u,"
+        "\"media_cover_received\":%u,\"media_cover_matched\":%u,"
+        "\"media_cover_unmatched\":%u,"
+        "\"media_art_requests\":%u,\"media_art_rejected\":%u,"
+        "\"media_art_started\":%u,\"media_art_worker_errors\":%u,"
+        "\"media_art_fetch_ok\":%u,\"media_art_fetch_failed\":%u,"
+        "\"media_art_frames_taken\":%u,"
+        "\"media_art_last_phase\":%ld,\"media_art_last_http_status\":%ld,"
+        "\"media_art_last_connect_error\":%ld,\"media_art_last_tls_error\":%ld,"
+        "\"media_art_last_tls_flags\":%ld,\"media_art_last_socket_errno\":%ld}",
+        (unsigned long long)(esp_timer_get_time()/1000),
+        connected?3:6,connected?(int)ap.rssi:0,
+        (unsigned)esp_get_free_heap_size(),
+        (unsigned)esp_get_minimum_free_heap_size(),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+        (unsigned)count,(unsigned)last_heap,(unsigned)lowest_heap,
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+        (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+        (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA),
+        mira_full_widget_table_in_psram()?"true":"false",
+        (unsigned)mira_full_widget_table_bytes(),
+        (unsigned)diagnostic.state_cache_used,
+        (unsigned)diagnostic.state_cache_capacity,
+        (unsigned)diagnostic.state_unchanged,
+        (unsigned)diagnostic.state_cache_evictions,
+        (unsigned)diagnostic.state_queue_dropped,
+        (unsigned)diagnostic.state_queue_pending,
+        (unsigned)__atomic_load_n(&mira_media_range_updates,__ATOMIC_RELAXED),
+        (unsigned)__atomic_load_n(&mira_media_range_overlays,__ATOMIC_RELAXED),
+        (unsigned)diagnostic.media_cover_received,
+        (unsigned)diagnostic.media_cover_matched,
+        (unsigned)diagnostic.media_cover_unmatched,
+        (unsigned)art.requests,(unsigned)art.rejected,
+        (unsigned)art.started,(unsigned)art.worker_errors,
+        (unsigned)art.fetch_ok,(unsigned)art.fetch_failed,
+        (unsigned)art.frames_taken,
+        (long)art.last_phase,(long)art.last_http_status,
+        (long)art.last_connect_error,(long)art.last_tls_error,
+        (long)art.last_tls_flags,(long)art.last_socket_errno);
+    if(written<0||(size_t)written>=cap){
+        heap_caps_free(result);return NULL;
+    }
+    if(length)*length=(size_t)written;
+    return result;
+}
