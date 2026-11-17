@@ -488,7 +488,7 @@ extern "C" void mira_async_web_emit_direct(int id,const char *value){
     // allow a Jeedom value to inject its own EventSource framing lines.
     char safe[160];size_t n=0;
     while(value[n]&&n<sizeof(safe)-1){
-        safe[n]=(value[n]=='\\r'||value[n]=='\\n')?' ':value[n];n++;
+        safe[n]=(value[n]=='\r'||value[n]=='\n')?' ':value[n];n++;
     }
     safe[n]=0;
     events.send(safe,event_name);
