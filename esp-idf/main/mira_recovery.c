@@ -167,7 +167,7 @@ static void mira_root_async_worker(void *argument){
     __atomic_sub_fetch(&mira_root_async_active,1u,__ATOMIC_RELAXED);
     vTaskDeleteWithCaps(NULL);
 }
-static esp_err_t mira_root_async_home(httpd_req_t *req){
+static esp_err_t __attribute__((unused)) mira_root_async_home(httpd_req_t *req){
     if(!mira_beta_web_authorized(req))return ESP_FAIL;
     uint32_t active=__atomic_load_n(&mira_root_async_active,__ATOMIC_RELAXED);
     do{
@@ -195,7 +195,7 @@ static esp_err_t mira_root_async_home(httpd_req_t *req){
     }
     return ESP_OK;
 }
-static esp_err_t index_get(httpd_req_t *req) {
+static esp_err_t __attribute__((unused)) index_get(httpd_req_t *req) {
     // Mirror the 0.7.37 first-run workflow: beta key page then Wi-Fi page.
     // The performance/recovery UI remains available after provisioning.
     if(mira_beta_setup_root(req))return ESP_OK;
@@ -225,43 +225,43 @@ static esp_err_t index_get(httpd_req_t *req) {
     }
     return mira_root_async_home(req);
 }
-static esp_err_t recovery_debug_get(httpd_req_t *req){
+static esp_err_t __attribute__((unused)) recovery_debug_get(httpd_req_t *req){
     if(!mira_beta_web_authorized(req))return ESP_FAIL;
     httpd_resp_set_type(req,"text/html; charset=utf-8");
     return httpd_resp_send(req,recovery_page,HTTPD_RESP_USE_STRLEN);
 }
-static esp_err_t shadow_on_get(httpd_req_t *req) {
+static esp_err_t __attribute__((unused)) shadow_on_get(httpd_req_t *req) {
     pending_shadow_request = 1;
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     return httpd_resp_sendstr(req, "<h2>OMBRES ON</h2><p>Commande envoyee au moteur LVGL.</p><a href='/'>Retour</a>");
 }
-static esp_err_t shadow_off_get(httpd_req_t *req) {
+static esp_err_t __attribute__((unused)) shadow_off_get(httpd_req_t *req) {
     pending_shadow_request = 0;
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     return httpd_resp_sendstr(req, "<h2>OMBRES OFF</h2><p>Commande envoyee au moteur LVGL.</p><a href='/'>Retour</a>");
 }
-static esp_err_t shadow_light_get(httpd_req_t *req) {
+static esp_err_t __attribute__((unused)) shadow_light_get(httpd_req_t *req) {
     pending_shadow_request = 2;
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     return httpd_resp_sendstr(req, "<h2>OMBRE 2PX</h2><p>Commande envoyee a LVGL.</p><a href='/'>Retour</a>");
 }
-static esp_err_t shadow_relief_get(httpd_req_t *req) {
+static esp_err_t __attribute__((unused)) shadow_relief_get(httpd_req_t *req) {
     pending_shadow_request = 3;
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     return httpd_resp_sendstr(req, "<h2>RELIEF SANS FLOU</h2><p>Commande envoyee a LVGL.</p><a href='/'>Retour</a>");
 }
-static esp_err_t scroll_classic_get(httpd_req_t *req) {
+static esp_err_t __attribute__((unused)) scroll_classic_get(httpd_req_t *req) {
     pending_scroll_request = 0;
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     return httpd_resp_sendstr(req, "<h2>MODE CLASSIQUE 35 CARTES</h2><a href='/'>Retour</a>");
 }
-static esp_err_t scroll_virtual_get(httpd_req_t *req) {
+static esp_err_t __attribute__((unused)) scroll_virtual_get(httpd_req_t *req) {
     pending_scroll_request = 1;
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     return httpd_resp_sendstr(req, "<h2>MODE VIRTUEL 8 CARTES - EXPERIMENTAL</h2>"
                                 "<p>En cas de reboot le mode classique est restaure.</p><a href='/'>Retour</a>");
 }
-static esp_err_t perf_get(httpd_req_t *req) {
+static esp_err_t __attribute__((unused)) perf_get(httpd_req_t *req) {
     mira_display_stats_t s;
     mira_display_stats(&s);
     char text[1280];
@@ -299,7 +299,7 @@ static esp_err_t perf_get(httpd_req_t *req) {
     return httpd_resp_sendstr(req, text);
 }
 // Consistent with Stage 3 /status: a tiny, read-only runtime memory endpoint.
-static esp_err_t web_rescue_page_get(httpd_req_t *req){
+static esp_err_t __attribute__((unused)) web_rescue_page_get(httpd_req_t *req){
     static const char *html=
         "<!doctype html><html lang='fr'><meta name='viewport' content='width=device-width,initial-scale=1'>"
         "<title>Mira Panel - mode secours</title><h2>Mira Panel : serveur HTTP allege</h2>"
@@ -308,7 +308,7 @@ static esp_err_t web_rescue_page_get(httpd_req_t *req){
     httpd_resp_set_type(req,"text/html; charset=utf-8");
     return httpd_resp_sendstr(req,html);
 }
-static esp_err_t full_status_get(httpd_req_t *req){
+static esp_err_t __attribute__((unused)) full_status_get(httpd_req_t *req){
     mira_display_stats_t d={0};
     mira_display_stats(&d);
     bool key_saved=false,wifi_saved=false;
@@ -353,7 +353,7 @@ static esp_err_t full_status_get(httpd_req_t *req){
     httpd_resp_set_hdr(req,"Cache-Control","no-store");
     return httpd_resp_send(req,out,n);
 }
-static esp_err_t update_post(httpd_req_t *req) {
+static esp_err_t __attribute__((unused)) update_post(httpd_req_t *req) {
     // Original beta browser POST /update?send=ID, /update?send_range, etc.
     // Only a local authenticated user can invoke this command route.
     char query[500]={0};
@@ -404,7 +404,7 @@ static esp_err_t update_post(httpd_req_t *req) {
 }
 
 // Optional UI routes must NEVER abort Mira if an HTTP registration fails.
-static void register_optional_route(httpd_handle_t server, const httpd_uri_t *route) {
+static void __attribute__((unused)) register_optional_route(httpd_handle_t server, const httpd_uri_t *route) {
     esp_err_t err = httpd_register_uri_handler(server, route);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Optional HTTP route %s unavailable: %s",
@@ -809,7 +809,7 @@ static void wifi_status_event(void *arg,esp_event_base_t base,int32_t id,void *d
         if(station_configured)esp_wifi_connect();
     }
 }
-static esp_err_t clock_status_get(httpd_req_t *req){
+static esp_err_t __attribute__((unused)) clock_status_get(httpd_req_t *req){
     const time_t now=time(NULL);
     const bool valid=now>1700000000;
     char local[48]="",dns_main[20]="",dns_backup[20]="",gateway[20]="";
@@ -855,7 +855,7 @@ static esp_err_t clock_status_get(httpd_req_t *req){
     httpd_resp_set_hdr(req,"Cache-Control","no-store");
     return httpd_resp_sendstr(req,body);
 }
-static esp_err_t wifi_info_get(httpd_req_t *req){
+static esp_err_t __attribute__((unused)) wifi_info_get(httpd_req_t *req){
     char status[180];
     const char *mode=legacy_ip_mode==PROFILE_MANUAL?"manual":
                      legacy_ip_mode==PROFILE_FIXED_AUTO?"fixed_auto":"auto";
@@ -869,7 +869,7 @@ static esp_err_t wifi_info_get(httpd_req_t *req){
 }
 // Explicit provisioning: never overwrite or decode Mira Arduino /reseau.json.
 // Wi-Fi STA profile is stored by ESP-IDF driver in NVS, AP remains available.
-static esp_err_t wifi_profile_post(httpd_req_t *req){
+static esp_err_t __attribute__((unused)) wifi_profile_post(httpd_req_t *req){
     if(!mira_setup_require_ap(req))return ESP_FAIL;
     if(req->content_len<2||req->content_len>320){
         httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"Invalid network JSON size");return ESP_FAIL;
