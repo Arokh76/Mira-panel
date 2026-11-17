@@ -209,6 +209,8 @@ static esp_err_t proxy_event(esp_http_client_event_t *e){
 static bool basic_auth(AsyncWebServerRequest *r);
 static bool native_jeedom_request(AsyncWebServerRequest *r){
     const String path=r->url();
+    const bool lvgl=path=="/getlvgl";
+    const bool display=path=="/displayinfo";
     const bool program=path=="/programui";
     const bool batch=path=="/actions/bindings";
     const bool single=path=="/setjeedomid";
@@ -221,7 +223,7 @@ static bool native_jeedom_request(AsyncWebServerRequest *r){
     const bool writeparam=path=="/updateparam"||path=="/addparam"||
                           path=="/addlistparam"||path=="/updatelistparam";
     const bool saveparam=path=="/savelistparam"||path=="/createlistparam";
-    if(!program&&!batch&&!single&&!toggle&&!init&&!readstate&&!readparam&&!writeparam&&!saveparam)
+    if(!lvgl&&!display&&!program&&!batch&&!single&&!toggle&&!init&&!readstate&&!readparam&&!writeparam&&!saveparam)
         return false;
     if(readstate){
         if(!public_key(r)){forbidden(r);return true;}
@@ -252,6 +254,37 @@ static bool native_jeedom_request(AsyncWebServerRequest *r){
         const int code=mira_jeedom_async_param_set(name.c_str(),value.c_str());
         r->send(code,"text/plain; charset=utf-8",
                 code==200?"OK":"Parametre Jeedom invalide");
+        return true;
+    }
+    if(lvgl||display){
+        if(!public_key(r)){forbidden(r);return true;}
+        if(display){
+            r->send(200,"application/json",
+                "{\"profile\":\"waveshare-esp32s3-touch-lcd-7\","
+                "\"width\":800,\"height\":480,"
+                "\"contentWidth\":800,\"contentHeight\":430,\"navHeight\":50,"
+                "\"rotation\":0,\"logicalWidth\":1000,\"logicalHeight\":1000,"
+                "\"httpPrimary\":true,\"mqttOptional\":true,\"freeLayout\":true,"
+                "\"widgetLabelModes\":\"auto,text,icon,both\","
+                "\"widgetIcons\":\"auto,temperature,humidity,pressure,light,energy,plug,door\"}");
+            return true;
+        }
+        size_t len=0;
+        char *buf=mira_jeedom_async_lvgl_snapshot(&len);
+        if(!buf){
+            r->send(404,"text/plain","Configuration Mira absente");return true;
+        }
+        auto owner=std::shared_ptr<char>(buf,[](char *p){free(p);});
+        AsyncWebServerResponse *resp=r->beginResponse(
+            "application/json",len,
+            [owner,len](uint8_t *out,size_t max,size_t offset)->size_t{
+                if(offset>=len)return 0;
+                size_t count=std::min(max,len-offset);
+                memcpy(out,owner.get()+offset,count);
+                return count;
+            });
+        resp->addHeader("Cache-Control","no-store");
+        r->send(resp);
         return true;
     }
     if(program){
@@ -508,6 +541,8 @@ extern "C" void mira_async_web_start(void){
     if(xTaskCreateWithCaps(sse_worker,"mira_async_sse",8192,NULL,3,
                            nullptr,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)!=pdPASS)
         ESP_LOGW(TAG,"ASYNC_SSE_REPLAY_TASK_FAILED (direct events still active)");
+    server.on("/getlvgl",AsyncWebRequestMethod::HTTP_GET,proxy_request);
+    server.on("/displayinfo",AsyncWebRequestMethod::HTTP_GET,proxy_request);
     server.on("/getindex",AsyncWebRequestMethod::HTTP_GET,index_get);
     server.on("/updatenr",AsyncWebRequestMethod::HTTP_GET,updatenr_get);
     server.on("/get",AsyncWebRequestMethod::HTTP_GET,proxy_request);
