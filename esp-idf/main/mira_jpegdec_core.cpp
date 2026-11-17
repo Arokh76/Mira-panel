@@ -35,6 +35,11 @@ void JPEG_setCropArea(JPEGIMAGE *pJPEG, int x, int y, int w, int h);
 void JPEG_getCropArea(JPEGIMAGE *pJPEG, int *x, int *y, int *w, int *h);
 void JPEG_setFramebuffer(JPEGIMAGE *pJPEG, void *pFramebuffer);
 
+// The native ESP-IDF JPEG fallback must not pick up Arduino's optional S3
+// SIMD path: our standalone jpeg.inl has no matching assembler symbols in
+// this mixed-IDF component build. Keep the validated portable fallback;
+// native esp_jpeg remains the faster primary decoder.
+#define NO_SIMD 1
 // Include the C code which does the actual work
 #include "jpeg.inl"
 
