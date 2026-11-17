@@ -55,3 +55,6 @@ int mira_jeedom_async_set_binding(const char *id,const char *value);
 int mira_jeedom_async_set_toggle_binding(const char *id,const char *off,const char *on);
 int mira_jeedom_async_set_init_id(const char *id);
 int mira_jeedom_async_bindings_json(const char *json,char *answer,size_t capacity);
+
+bool mira_jeedom_async_param_get(const char *name,char *out,size_t capacity);
+int mira_jeedom_async_param_set(const char *name,const char *value);
