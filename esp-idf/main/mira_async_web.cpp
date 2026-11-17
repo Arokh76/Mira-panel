@@ -734,6 +734,7 @@ static bool native_jeedom_request(AsyncWebServerRequest *r){
     return true;
 }
 
+bool mira_async_render_page(AsyncWebServerRequest *r);
 static void proxy_worker(void *unused){
     (void)unused;
     ProxyJob *job=nullptr;
@@ -743,6 +744,7 @@ static void proxy_worker(void *unused){
         auto request=job->request.lock();
         if(!request)continue; // client disconnected while queued
         if(native_jeedom_request(request.get()))continue;
+        if(mira_async_render_page(request.get()))continue;
         std::string url,body;
         if(!proxy_url(request.get(),url)){
             request->send(414,"text/plain","URI trop longue");continue;
