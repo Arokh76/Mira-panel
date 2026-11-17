@@ -4045,6 +4045,172 @@ bool mira_jeedom_async_get_state(const char *kind,const char *selector,
     return true;
 }
 
+
+// Remaining lightweight APIs run in the PSRAM-backed ESPAsync worker.
+// Authentication and method validation are performed before these calls.
+int mira_jeedom_async_nav_get(bool favorites,char *out,size_t cap){
+    if(!out||cap<96)return 500;
+    nvs_handle_t nv;
+    if(!favorites){
+        uint8_t mask=0x3f;
+        if(nvs_open("miraui",NVS_READONLY,&nv)==ESP_OK){
+            (void)nvs_get_u8(nv,"pageMask",&mask);
+            nvs_close(nv);
+        }
+        snprintf(out,cap,"{\"mask\":%u}",(unsigned)((mask&0x3f)|1));
+    }else{
+        uint8_t fav[3]={0,1,2};
+        if(nvs_open("miraui",NVS_READONLY,&nv)==ESP_OK){
+            for(uint8_t i=0;i<3;i++){
+                char key[8];
+                snprintf(key,sizeof(key),"fav%u",(unsigned)i);
+                (void)nvs_get_u8(nv,key,&fav[i]);
+            }
+            nvs_close(nv);
+        }
+        snprintf(out,cap,"{\"favorites\":[%u,%u,%u]}",
+             (unsigned)fav[0],(unsigned)fav[1],(unsigned)fav[2]);
+    }
+    return 200;
+}
+int mira_jeedom_async_nav_post(bool favorites,const char *value){
+    if(!value)return 400;
+    nvs_handle_t nv;
+    if(!favorites){
+        const size_t n=strlen(value);
+        if(n<1||n>2)return 400;
+        for(const char *p=value;*p;p++)
+            if(!isdigit((unsigned char)*p))return 400;
+        const long mask=strtol(value,NULL,10);
+        if(mask<1||mask>63||!(mask&1))return 400;
+        esp_err_t err=nvs_open("miraui",NVS_READWRITE,&nv);
+        if(err!=ESP_OK)return 503;
+        err=nvs_set_u8(nv,"pageMask",(uint8_t)mask);
+        if(err==ESP_OK)err=nvs_commit(nv);
+        nvs_close(nv);
+        return err==ESP_OK?200:503;
+    }
+    if(strlen(value)>479)return 400;
+    cJSON *doc=cJSON_Parse(value);
+    const cJSON *items=doc?cJSON_GetObjectItemCaseSensitive(doc,"favorites"):NULL;
+    bool valid=cJSON_IsArray(items)&&cJSON_GetArraySize(items)==3;
+    uint8_t fav[3]={0};
+    if(valid)for(int i=0;i<3;i++){
+        const cJSON *v=cJSON_GetArrayItem(items,i);
+        if(!cJSON_IsNumber(v)||v->valuedouble!=v->valueint||
+           (v->valueint!=255&&(v->valueint<0||v->valueint>5))){
+            valid=false;break;
+        }
+        fav[i]=(uint8_t)v->valueint;
+        for(int j=0;j<i;j++)
+            if(fav[i]!=255&&fav[i]==fav[j])valid=false;
+    }
+    cJSON_Delete(doc);
+    if(!valid)return 400;
+    esp_err_t err=nvs_open("miraui",NVS_READWRITE,&nv);
+    if(err!=ESP_OK)return 503;
+    for(uint8_t i=0;i<3&&err==ESP_OK;i++){
+        char key[8];snprintf(key,sizeof(key),"fav%u",(unsigned)i);
+        err=nvs_set_u8(nv,key,fav[i]);
+    }
+    if(err==ESP_OK)err=nvs_commit(nv);
+    nvs_close(nv);
+    return err==ESP_OK?200:503;
+}
+
+// Returns malloc/cJSON-allocated JSON. Caller releases with free() after its
+// asynchronous response is drained. Preserve legacy encrypted key fields.
+char *mira_jeedom_async_allparams(size_t *length){
+    if(length)*length=0;
+    cJSON *root=NULL,*entries=NULL;
+    FILE *fp=fopen("/spiffs/params.json","rb");
+    if(fp){
+        long n=-1;
+        if(fseek(fp,0,SEEK_END)==0)n=ftell(fp);
+        if(n>1&&n<=32768&&fseek(fp,0,SEEK_SET)==0){
+            char *buf=malloc((size_t)n+1);
+            if(buf){
+                if(fread(buf,1,(size_t)n,fp)==(size_t)n){
+                    buf[n]=0;
+                    root=cJSON_ParseWithLength(buf,(size_t)n);
+                    entries=root?cJSON_GetObjectItemCaseSensitive(root,"params"):NULL;
+                    if(!cJSON_IsArray(entries)){
+                        cJSON_Delete(root);root=NULL;entries=NULL;
+                    }
+                }
+                free(buf);
+            }
+        }
+        fclose(fp);
+    }
+    if(!root){
+        root=cJSON_CreateObject();
+        entries=root?cJSON_AddArrayToObject(root,"params"):NULL;
+        if(!entries){cJSON_Delete(root);return NULL;}
+    }
+    static const char *const reflected[]={
+        "Jeedom","Jeedom_IP","Jeedom_Refresh","Jeedom_Init_Cmd"
+    };
+    // Overlay current NVS values in the original params list, never replacing
+    // legacy encrypted key fields with secrets from NVS.
+    cJSON *entry=NULL;
+    cJSON_ArrayForEach(entry,entries){
+        const char *name=jstr(entry,"param","");
+        if(!*name||strstr(name,"Key"))continue;
+        char value[256]={0};
+        const mira_display_field_t *display=display_field(name);
+        const bool found=display?display_field_read(display,value,sizeof(value)):
+                            supported_jeedom_param(name)&&
+                            mira_jeedom_copy_param(name,value,sizeof(value));
+        if(found)cJSON_ReplaceItemInObjectCaseSensitive(
+            entry,"value",cJSON_CreateString(value));
+        memset(value,0,sizeof(value));
+    }
+    for(size_t i=0;i<sizeof(reflected)/sizeof(reflected[0]);i++){
+        bool exists=false;
+        const cJSON *item=NULL;
+        cJSON_ArrayForEach(item,entries)
+            if(!strcmp(jstr((cJSON *)item,"param",""),reflected[i])){
+                exists=true;break;
+            }
+        if(exists)continue;
+        char value[256]={0};
+        if(!mira_jeedom_copy_param(reflected[i],value,sizeof(value)))continue;
+        cJSON *row=cJSON_CreateObject();
+        if(row){
+            cJSON_AddStringToObject(row,"param",reflected[i]);
+            cJSON_AddStringToObject(row,"value",value);
+            cJSON_AddStringToObject(row,"type",
+                 !strcmp(reflected[i],"Jeedom")?"toggle":"text");
+            cJSON_AddItemToArray(entries,row);
+        }
+        memset(value,0,sizeof(value));
+    }
+    for(size_t i=0;i<sizeof(display_fields)/sizeof(display_fields[0]);i++){
+        const char *name=display_fields[i].legacy;
+        bool exists=false;
+        const cJSON *item=NULL;
+        cJSON_ArrayForEach(item,entries)
+            if(!strcmp(jstr((cJSON *)item,"param",""),name)){
+                exists=true;break;
+            }
+        if(exists)continue;
+        char value[48]={0};
+        if(!display_field_read(&display_fields[i],value,sizeof(value)))continue;
+        cJSON *row=cJSON_CreateObject();
+        if(row){
+            cJSON_AddStringToObject(row,"param",name);
+            cJSON_AddStringToObject(row,"value",value);
+            cJSON_AddStringToObject(row,"type","text");
+            cJSON_AddItemToArray(entries,row);
+        }
+    }
+    char *json=cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if(json&&length)*length=strlen(json);
+    return json;
+}
+
 // Native ESPAsyncWebServer Jeedom programming. Run these operations in the
 // dedicated PSRAM-backed HTTP worker, NEVER in the AsyncTCP callback.
 int mira_jeedom_async_set_binding(const char *id,const char *value){
