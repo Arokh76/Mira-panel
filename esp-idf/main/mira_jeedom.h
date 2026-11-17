@@ -48,3 +48,10 @@ int mira_jeedom_async_updatenr(const char *kind,const char *selector,
 // Browser replay on the async EventSource uses the same resident index/cache.
 size_t mira_jeedom_async_event_count(void);
 bool mira_jeedom_async_event_current(size_t ordinal,int *id,char *value,size_t capacity);
+
+// Native ESPAsyncWebServer programming routes. Invoke from a worker task,
+// never from AsyncTCP callbacks. Authentication is enforced by the caller.
+int mira_jeedom_async_set_binding(const char *id,const char *value);
+int mira_jeedom_async_set_toggle_binding(const char *id,const char *off,const char *on);
+int mira_jeedom_async_set_init_id(const char *id);
+int mira_jeedom_async_bindings_json(const char *json,char *answer,size_t capacity);
