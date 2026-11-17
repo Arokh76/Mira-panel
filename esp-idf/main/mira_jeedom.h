@@ -85,3 +85,8 @@ int mira_jeedom_async_camera_config(const char *name,const char *url);
 char *mira_jeedom_async_health_json(size_t *length);
 
 char *mira_jeedom_async_status_json(size_t *length); // heap_caps_free()
+
+// WT32 beta browser controls on POST /update (call from authenticated worker).
+int mira_jeedom_async_browser_action(const char *kind,const char *id,
+    const char *list,const char *value,
+    const char *red,const char *green,const char *blue);
