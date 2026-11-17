@@ -17,10 +17,20 @@
 #include <strings.h>
 #include <cstring>
 #include <algorithm>
+#include <esp_ota_ops.h>
+#include <esp_app_desc.h>
+#include <esp_system.h>
+#include <esp_wifi.h>
+#include <esp_netif.h>
+#include <nvs.h>
+#include "mira_beta_setup_pages.h"
+
 #include "mira_async_web.h"
 extern "C" {
 #include "mira_jeedom.h"
 #include "mira_beta_web.h"
+#include "mira_beta_setup.h"
+#include "mira_recovery.h"
 }
 
 static const char *TAG="mira7-async";
@@ -205,9 +215,121 @@ static esp_err_t proxy_event(esp_http_client_event_t *e){
     return ESP_OK;
 }
 
+
+// WT32-style first-run wizard on the same AsyncWebServer. Legacy native
+// HTTPD never binds port 80, including while the device is unconfigured.
+static bool setup_mode(){
+    return !mira_beta_setup_runtime_configured()&&mira_beta_setup_unconfigured();
+}
+static bool setup_client_allowed(AsyncWebServerRequest *r){
+    if(!setup_mode())return false;
+    esp_netif_t *sta=esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    esp_netif_ip_info_t sta_ip={};
+    if(sta&&esp_netif_get_ip_info(sta,&sta_ip)==ESP_OK&&
+       !sta_ip.ip.addr)return true; // Unrouted isolated first-run AP
+    esp_netif_t *ap=esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+    esp_netif_ip_info_t apinfo={};
+    if(!ap||esp_netif_get_ip_info(ap,&apinfo)!=ESP_OK)return false;
+    char local[20]={0};
+    snprintf(local,sizeof(local),IPSTR,IP2STR(&apinfo.ip));
+    String prefix(local),remote=r->client()->remoteIP().toString();
+    const int dot=prefix.lastIndexOf('.');
+    if(dot<0)return false;
+    prefix.remove(dot+1);
+    return remote.startsWith(prefix);
+}
+static void setup_wifi_page(AsyncWebServerRequest *r){
+    String html(mira_beta_wifi_page);
+    html.replace("MIRA_SCAN_SLOT",
+        "<label>Reseau Wi-Fi</label><p>Saisir le SSID ci-dessous</p>");
+    r->send(200,"text/html; charset=utf-8",html);
+}
+static void restart_after_response(void *){
+    vTaskDelay(pdMS_TO_TICKS(1500));
+    esp_restart();
+}
+static void schedule_restart(){
+    xTaskCreate(restart_after_response,"mira_async_restart",3072,NULL,2,NULL);
+}
+static bool async_first_run(AsyncWebServerRequest *r){
+    if(!setup_mode())return false;
+    const String path=r->url();
+    if(path=="/"||path=="/load"){
+        if(!setup_client_allowed(r)){forbidden(r);return true;}
+        String nav=param_or_empty(r,"nav");
+        if(nav=="reboot"){
+            int code=mira_beta_setup_async_keep_ap();
+            if(code==200){
+                r->send(200,"text/html; charset=utf-8",
+                        "<h2>Mira Panel</h2><p>Redemarrage du panneau...</p>");
+                schedule_restart();
+            }else r->send(code,"text/plain","Echec configuration AP");
+            return true;
+        }
+        if(nav=="key"){
+            r->send_P(200,"text/html; charset=utf-8",mira_beta_key_page);
+            return true;
+        }
+        if(mira_beta_web_auth_key_present()){
+            setup_wifi_page(r);
+        }else r->send_P(200,"text/html; charset=utf-8",mira_beta_key_page);
+        return true;
+    }
+    if(path=="/mira/wifi/scan"){
+        if(!setup_client_allowed(r)){forbidden(r);return true;}
+        r->send(200,"application/json",
+                "{\"networks\":[],\"busy\":false,\"failed\":false}");
+        return true;
+    }
+    if(path=="/save"&&r->method()==AsyncWebRequestMethod::HTTP_POST){
+        if(!setup_client_allowed(r)){forbidden(r);return true;}
+        String config=param_or_empty(r,"config");
+        auto field=[r](const char *name)->String {
+            const auto *p=r->getParam(name,true);
+            return p?p->value():String();
+        };
+        if(config=="key"){
+            String key=field("key"),confirm=field("ver");
+            int code=mira_beta_setup_async_key_save(key.c_str(),confirm.c_str());
+            key=String();confirm=String();
+            if(code!=200){r->send(code,"text/plain","Cle ou confirmation invalide");return true;}
+            wifi_config_t sta={};
+            if(esp_wifi_get_config(WIFI_IF_STA,&sta)==ESP_OK&&sta.sta.ssid[0]){
+                r->send(200,"text/html; charset=utf-8",
+                        "<h2>Cle Mira restauree</h2><p>Redemarre Mira Panel pour reprendre l'interface.</p>");
+                return true;
+            }
+            setup_wifi_page(r);
+            return true;
+        }
+        if(config=="wifi"){
+            String ssid=field("ssid"),password=field("pass");
+            String mode=field("ip_mode"),ip=field("ip"),mask=field("mask");
+            String gw=field("gateway"),dns1=field("dns1"),dns2=field("dns2");
+            if(!mode.length())mode=ip.length()?"fixed_auto":"auto";
+            int code=mira_beta_setup_async_wifi_save(
+               ssid.c_str(),password.c_str(),mode.c_str(),ip.c_str(),
+               mask.c_str(),gw.c_str(),dns1.c_str(),dns2.c_str());
+            password=String();
+            if(code==200){
+                r->send(200,"text/html; charset=utf-8",
+                        "<h2>Mira Panel</h2><p>Wi-Fi enregistre. Redemarrage...</p>");
+                schedule_restart();
+            }else r->send(code,"text/plain","Profil Wi-Fi invalide ou indisponible");
+            return true;
+        }
+        r->send(400,"text/plain","Configuration inconnue");
+        return true;
+    }
+    // Never expose configured pages or OTA on an unconfigured AP.
+    r->send(404,"text/plain","Configuration Mira en cours");
+    return true;
+}
+
 // Authenticated Jeedom programming: no HTTP loopback; processed in PSRAM worker.
 static bool basic_auth(AsyncWebServerRequest *r);
 static bool native_jeedom_request(AsyncWebServerRequest *r){
+    if(async_first_run(r))return true;
     const String path=r->url();
     const bool stage_clear=path=="/removelistlvgl"||path=="/screenformat";
     const bool stage_add=path=="/addlistlvgl"||path=="/screenadd";
