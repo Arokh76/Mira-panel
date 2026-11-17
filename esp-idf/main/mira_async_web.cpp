@@ -853,6 +853,7 @@ extern "C" void mira_async_web_start(void){
     server.on("/displayinfo",AsyncWebRequestMethod::HTTP_GET,proxy_request);
     server.on("/doUpdateFile",AsyncWebRequestMethod::HTTP_POST,
               ota_upload_complete,ota_upload);
+    server.on("/update",AsyncWebRequestMethod::HTTP_POST,proxy_request);
     server.on("/update",AsyncWebRequestMethod::HTTP_GET,[](AsyncWebServerRequest *r){
         if(r->hasParam("key"))updatenr_get(r);
         else ota_page(r);
