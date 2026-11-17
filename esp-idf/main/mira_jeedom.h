@@ -80,3 +80,6 @@ int mira_jeedom_async_screen_add(
 int mira_jeedom_async_screen_save(void);
 
 int mira_jeedom_async_camera_config(const char *name,const char *url);
+
+// Original /mira-health diagnostic from native Async worker. Free with heap_caps_free().
+char *mira_jeedom_async_health_json(size_t *length);
