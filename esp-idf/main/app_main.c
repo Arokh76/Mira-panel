@@ -103,7 +103,18 @@ void app_main(void){
     ESP_LOGI(TAG,"FULL_NET_READY: native Mira AP/STA + HTTP setup");
     // Parallel transport smoke-test ONLY: 8081 is AsyncTCP/ESPAsyncWebServer;
     // 80 remains native until full protocol, auth, SSE and OTA parity is proven.
-    if(!mira_beta_setup_unconfigured())mira_async_web_start();
+    if(!mira_beta_setup_unconfigured()){
+        mira_async_web_start();
+        if(!mira_async_web_ready()){
+            ESP_LOGE(TAG,"ASYNC_PORT80_FAILED: attempting native emergency HTTP rescue");
+            err=mira_recovery_start_emergency_http();
+            if(err!=ESP_OK){
+                ESP_LOGE(TAG,"EMERGENCY_HTTP_FAILED: %s",esp_err_to_name(err));
+                checkpoint("NETWORK_FAILED_HALT");
+                for(;;)vTaskDelay(pdMS_TO_TICKS(1000));
+            }
+        }
+    }
     progress(60);
     if(mira_recovery_web_fallback()){
         if(esp_lv_adapter_lock(-1)==ESP_OK){
