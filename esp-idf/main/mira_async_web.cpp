@@ -126,21 +126,17 @@ static bool setup_mode(){
     return !mira_beta_setup_runtime_configured()&&mira_beta_setup_unconfigured();
 }
 static bool setup_client_allowed(AsyncWebServerRequest *r){
+    (void)r;
     if(!setup_mode())return false;
+    // When the user key is absent, recovery.c starts Wi-Fi in AP-only
+    // mode. The STA interface therefore cannot expose the open wizard.
     esp_netif_t *sta=esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
     esp_netif_ip_info_t sta_ip={};
-    if(sta&&esp_netif_get_ip_info(sta,&sta_ip)==ESP_OK&&
-       !sta_ip.ip.addr)return true; // Unrouted isolated first-run AP
-    esp_netif_t *ap=esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
-    esp_netif_ip_info_t apinfo={};
-    if(!ap||esp_netif_get_ip_info(ap,&apinfo)!=ESP_OK)return false;
-    char local[20]={0};
-    snprintf(local,sizeof(local),IPSTR,IP2STR(&apinfo.ip));
-    String prefix(local),remote=r->client()->remoteIP().toString();
-    const int dot=prefix.lastIndexOf('.');
-    if(dot<0)return false;
-    prefix.remove(dot+1);
-    return remote.startsWith(prefix);
+    wifi_mode_t mode=WIFI_MODE_NULL;
+    return sta&&esp_wifi_get_mode(&mode)==ESP_OK&&
+           (mode==WIFI_MODE_AP||mode==WIFI_MODE_APSTA)&&
+           esp_netif_get_ip_info(sta,&sta_ip)==ESP_OK&&
+           sta_ip.ip.addr==0;
 }
 static void setup_wifi_page(AsyncWebServerRequest *r){
     String html(mira_beta_wifi_page);
