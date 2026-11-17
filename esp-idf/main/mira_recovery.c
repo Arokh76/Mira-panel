@@ -1266,142 +1266,15 @@ esp_err_t mira_recovery_init(void) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_connect());
     }
 
-    ESP_LOGI(TAG,"Startup stack available before HTTP: %u bytes",
-             (unsigned)uxTaskGetStackHighWaterMark(NULL));
-    httpd_config_t conf = HTTPD_DEFAULT_CONFIG();
-    // 9 routes are registered below; ESP-IDF defaults to 8 URI handlers.
-    // Exceeding that limit used to abort app_main() before LCD init, causing
-    // a black screen + Wi-Fi reboot loop (ESP_ERR_HTTPD_HANDLERS_FULL).
-    const bool setup_only=mira_beta_setup_unconfigured();
-    conf.max_uri_handlers = setup_only?12:96;
-    // In configured mode ESPAsyncWebServer handles port 80 (WT32 architecture).
-    // The native compatibility API remains on loopback-compatible 8081 only.
-    conf.server_port = setup_only?80:8081;
-    conf.uri_match_fn = httpd_uri_match_wildcard;
-    // IDF stock max_open_sockets=7 is shared with a persistent SSE browser,
-    // async /getindex, passive /updatenr and other HTTP clients. Under load,
-    // Jeedom's cURL requests may not even reach our handlers. Increase only
-    // the configured mode; keep the recovery/setup footprint unchanged.
-    // Requires CONFIG_LWIP_MAX_SOCKETS=18 (3 internal HTTPD sockets + 10
-    // sessions, leaving five FDs for MQTT, DNS and outbound connections).
-    conf.max_open_sockets = setup_only?7:5;
-    conf.backlog_conn = setup_only?5:8;
-    ESP_LOGI(TAG,"HTTPD_CONNECTION_BUDGET clients=%u backlog=%u lwip_max=%u",
-             (unsigned)conf.max_open_sockets,(unsigned)conf.backlog_conn,
-             (unsigned)CONFIG_LWIP_MAX_SOCKETS);
-    // Beta HTML templates, JSON status pages and multipart OTA need deeper
-    // handler call chains than the initial diagnostic web server.
-    // The configured 10KB HTTP task stack did not fit alongside RGB DMA
-    // and AP+STA. Keep stack INTERNAL: NVS and OTA handlers write flash.
-    // 7168 is a compromise; report its observed high-water mark via /status.
-    conf.stack_size = setup_only?6144:7168;
-    conf.task_caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
-    // The web UI and asynchronous SSE consumers share a bounded socket pool.
-    // Purge stale idle clients instead of letting abandoned browser connections
-    // make the entire HTTP interface intermittently unreachable.
-    conf.lru_purge_enable = true;
-    // Keep an unresponsive peer from occupying the single HTTP dispatcher
-    // for 15 seconds. OTA sends still have five seconds per socket operation.
-    conf.recv_wait_timeout = 5;
-    conf.send_wait_timeout = 5;
-    const uint32_t internal=MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT;
-    ESP_LOGI(TAG,"HTTPD_PREFLIGHT setup=%u stack=%u routes=%u internal_free=%u largest=%u dma_free=%u",
-        setup_only?1u:0u,(unsigned)conf.stack_size,(unsigned)conf.max_uri_handlers,
-        (unsigned)heap_caps_get_free_size(internal),
-        (unsigned)heap_caps_get_largest_free_block(internal),
-        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA));
-    httpd_handle_t httpd = NULL;
-    boot_stage="httpd_start";
-    http_stack_configured=conf.stack_size;
-    esp_err_t http_error=httpd_start(&httpd, &conf);
-    if(http_error!=ESP_OK && !setup_only &&
-       (http_error==ESP_ERR_HTTPD_TASK||http_error==ESP_ERR_HTTPD_ALLOC_MEM)){
-        ESP_LOGW(TAG,"Full HTTP server rejected (%s); using internal-RAM rescue server",
-                 esp_err_to_name(http_error));
-        // Last-resort small server keeps /status and Wi-Fi reachable and
-        // avoids a boot loop. No full API/UI task startup in this mode.
-        conf.max_uri_handlers=8;
-        conf.server_port=80; // emergency rescue remains reachable without the async front end
-        conf.stack_size=4096;
-        conf.max_open_sockets=2;
-        http_stack_configured=conf.stack_size;
-        boot_stage="httpd_rescue";
-        ESP_LOGW(TAG,"HTTPD_RESCUE preflight: free=%u largest=%u",
-                 (unsigned)heap_caps_get_free_size(internal),
-                 (unsigned)heap_caps_get_largest_free_block(internal));
-        http_error=httpd_start(&httpd,&conf);
-        if(http_error==ESP_OK)http_recovery_only=true;
-    }
-    ESP_RETURN_ON_ERROR(http_error,TAG,"HTTP task start");
-    httpd_uri_t root = {.uri="/", .method=HTTP_GET, .handler=index_get};
-    httpd_uri_t status = {.uri="/status", .method=HTTP_GET, .handler=full_status_get};
-    httpd_uri_t debug = {.uri="/recovery", .method=HTTP_GET, .handler=recovery_debug_get};
-    httpd_uri_t perf = {.uri="/perf", .method=HTTP_GET, .handler=perf_get};
-    httpd_uri_t scroll_classic = {.uri="/scroll/classic", .method=HTTP_GET, .handler=scroll_classic_get};
-    httpd_uri_t scroll_virtual = {.uri="/scroll/virtual", .method=HTTP_GET, .handler=scroll_virtual_get};
-    httpd_uri_t shadow_on = {.uri="/shadow/on", .method=HTTP_GET, .handler=shadow_on_get};
-    httpd_uri_t shadow_off = {.uri="/shadow/off", .method=HTTP_GET, .handler=shadow_off_get};
-    httpd_uri_t shadow_light = {.uri="/shadow/light", .method=HTTP_GET, .handler=shadow_light_get};
-    httpd_uri_t shadow_relief = {.uri="/shadow/relief", .method=HTTP_GET, .handler=shadow_relief_get};
-    httpd_uri_t ota = {.uri="/update", .method=HTTP_POST, .handler=update_post};
-    httpd_uri_t clock_get={.uri="/mira/clock/status",.method=HTTP_GET,.handler=clock_status_get};
-    httpd_uri_t wifi_get={.uri="/mira/wifi",.method=HTTP_GET,.handler=wifi_info_get};
-    httpd_uri_t wifi_post={.uri="/mira/wifi",.method=HTTP_POST,.handler=wifi_profile_post};
-    boot_stage="routes";
-    if(http_recovery_only){
-        const httpd_uri_t rescue_index={
-            .uri="/",.method=HTTP_GET,.handler=web_rescue_page_get
-        };
-        ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd,&rescue_index),TAG,"HTTP rescue root");
-        ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd,&status),TAG,"HTTP rescue status");
-        ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd,&perf),TAG,"HTTP rescue perf");
-        ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd,&wifi_get),TAG,"HTTP rescue Wi-Fi GET");
-        ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd,&wifi_post),TAG,"HTTP rescue Wi-Fi POST");
-        boot_stage="httpd_rescue_ready";
-        ESP_LOGW(TAG,"HTTPD_RESCUE_READY: /status and basic Wi-Fi, full Mira services deferred");
-        return ESP_OK;
-    }
-    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &root), TAG, "HTTP root");
-    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &perf), TAG, "HTTP perf");
-    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &status), TAG, "HTTP status");
-    if(setup_only){
-        // Original key/Wi-Fi wizard, captive fallback, status and perf.
-        // No OTA on an open first-run AP before the local password is chosen.
-        ESP_RETURN_ON_ERROR(mira_beta_setup_register_minimal(httpd),TAG,"Mira setup wizard");
-        ESP_RETURN_ON_ERROR(mira_beta_setup_register_captive(httpd),TAG,"Mira captive portal");
-        boot_stage="setup_ready";
-        ESP_LOGI(TAG,"MIRA_SETUP_READY: Mira Panel AP, http://192.168.4.1");
-        return ESP_OK;
-    }
-    // Only a boot-configured unit may latch the full authenticated mode.
-    // A later NVS read failure must never reopen the unprotected wizard.
-    mira_beta_setup_mark_configured_runtime();
-    register_optional_route(httpd,&debug);
-    // Prioritize OTA recovery: register it before experimental routes.
-    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(httpd, &ota), TAG, "HTTP OTA");
-    register_optional_route(httpd, &scroll_classic);
-    register_optional_route(httpd, &scroll_virtual);
-    register_optional_route(httpd, &shadow_on);
-    register_optional_route(httpd, &shadow_off);
-    register_optional_route(httpd, &shadow_light);
-    register_optional_route(httpd, &shadow_relief);
-    mira_full_register_http(httpd); // optional 0.7.37 SPIFFS config and upload
-    mira_mqtt_register_http(httpd); // optional native MQTT settings
-    mira_jeedom_register_http(httpd,conf.max_open_sockets); // beta Jeedom protocol compatibility
-    ESP_RETURN_ON_ERROR(mira_beta_setup_register(httpd),TAG,"Mira beta first-run setup");
-    ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_register_uri_handler(httpd,&clock_get));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_register_uri_handler(httpd,&wifi_get));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_register_uri_handler(httpd,&wifi_post));
-    // Catch Android/iOS/Windows captive-portal probe paths only after all
-    // explicit Jeedom/API/OTA handlers have been registered.
-    ESP_ERROR_CHECK_WITHOUT_ABORT(mira_beta_setup_register_captive(httpd));
-    boot_stage="full_ready";
-    // This task is optional. Start only after the 7KB HTTP task has reserved
-    // its internal stack, otherwise it starves HTTP with a 3KB stack.
-    if(heap_caps_get_largest_free_block(internal)>=4096){
-        if(xTaskCreate(recovery_ap_supervisor,"mira_ap_guard",3072,NULL,3,NULL)!=pdPASS)
-            ESP_LOGW(TAG,"AP guard task unavailable (deferred)");
-    }else ESP_LOGW(TAG,"AP guard deferred: low internal heap");
-    ESP_LOGI(TAG, "Mira 0.7.37 configured AP SSID Mira Panel; http://192.168.4.1");
+    // WT32 architecture: all HTTP, initial setup, emergency pages and OTA
+    // use ESPAsyncWebServer. ESP-IDF HTTPD is never started here.
+    // Keep the Wi-Fi/AP supervisor independent of any web implementation.
+    if(!mira_beta_setup_unconfigured())
+        mira_beta_setup_mark_configured_runtime();
+    if(xTaskCreate(recovery_ap_supervisor,"mira_ap_guard",3072,
+                   NULL,3,NULL)!=pdPASS)
+        ESP_LOGW(TAG,"Recovery AP supervisor unavailable; STA reconnect remains active");
+    boot_stage="async_network_ready";
+    ESP_LOGI(TAG,"ASYNC_ONLY_NETWORK_READY: no ESP-IDF HTTPD allocated");
     return ESP_OK;
 }
