@@ -80,3 +80,6 @@ int mira_jeedom_async_screen_add(
 int mira_jeedom_async_screen_save(void);
 
 int mira_jeedom_async_camera_config(const char *name,const char *url);
+
+// Clear the diagnostic HTTPD handle before an idle legacy server is stopped.
+void mira_jeedom_http_detach(void);
