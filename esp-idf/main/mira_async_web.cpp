@@ -18,8 +18,10 @@
 #include <cstring>
 #include <algorithm>
 #include "mira_async_web.h"
+extern "C" {
 #include "mira_jeedom.h"
 #include "mira_beta_web.h"
+}
 
 static const char *TAG="mira7-async";
 static AsyncWebServer server(80);
