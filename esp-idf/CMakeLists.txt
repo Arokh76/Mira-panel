@@ -21,3 +21,11 @@ idf_component_get_property(mira_jpegdec_lib bitbank2__jpegdec COMPONENT_LIB)
 if(mira_jpegdec_lib)
   target_compile_definitions(${mira_jpegdec_lib} PRIVATE ARDUINO_ARCH_ESP32)
 endif()
+
+# Only AsyncTCP's persistent event task gets an 8KB PSRAM stack. This does
+# not alter the Wi-Fi, RGB, HTTPD or Arduino core task allocation policies.
+idf_component_get_property(mira_asynctcp_lib esp32async__asynctcp COMPONENT_LIB)
+if(mira_asynctcp_lib)
+  target_compile_options(${mira_asynctcp_lib} PRIVATE
+    "-include" "${CMAKE_CURRENT_LIST_DIR}/main/mira_asynctcp_psram.h")
+endif()
