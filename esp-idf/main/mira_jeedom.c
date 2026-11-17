@@ -2238,13 +2238,13 @@ int mira_jeedom_async_updatenr(const char *kind,const char *selector,
         snprintf(value,sizeof(value),"%s",match.name);
     }else if((!strcmp(kind,"toggle")||!strcmp(kind,"toogle"))&&
              !strcmp(match.type,"toggle")){
-        snprintf(name,sizeof(name),"%s",match.name);
+        snprintf(name,sizeof(name),"%.95s",match.name);
         snprintf(value,sizeof(value),"%s",id==match.id1?"1":"0");
     }else if(!strcmp(match.type,"list")){
         snprintf(name,sizeof(name),"%s",match.list_name);
         snprintf(value,sizeof(value),"%s",match.name);
     }else{
-        snprintf(name,sizeof(name),"%s",match.name);
+        snprintf(name,sizeof(name),"%.95s",match.name);
         if(!strcmp(match.type,"info")||!strcmp(match.type,"range")){
             if(!incoming){snprintf(answer,cap,"Valeur absente");return 400;}
             snprintf(value,sizeof(value),"%s",incoming);
