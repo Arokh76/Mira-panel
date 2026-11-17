@@ -19,6 +19,9 @@
 #include <algorithm>
 #include "mira_async_web.h"
 extern "C" {
+#include "mira_recovery.h"
+}
+extern "C" {
 #include "mira_jeedom.h"
 #include "mira_beta_web.h"
 }
@@ -480,6 +483,28 @@ static void proxy_worker(void *unused){
         auto request=job->request.lock();
         if(!request)continue; // client disconnected while queued
         if(native_jeedom_request(request.get()))continue;
+        // The IDF compatibility HTTPD is not running during normal usage.
+        // Allocate it only for old browser routes and OTA; no flash writes
+        // are ever performed inside the AsyncTCP task.
+        const esp_err_t legacy=mira_recovery_compat_http_start();
+        if(legacy!=ESP_OK){
+            request->send(503,"text/plain; charset=utf-8",
+                          "Serveur maintenance non disponible (RAM)");
+            continue;
+        }
+        const String path=request->url();
+        if(request->method()==AsyncWebRequestMethod::HTTP_GET &&
+           (path=="/update"||path=="/updatemodule")){
+            // Keep multipart OTA entirely on IDF's proven :8081, not through
+            // a browser cross-origin 307 redirect of the firmware POST.
+            String host=request->host();
+            int port=host.indexOf(':');
+            if(port>=0)host=host.substring(0,port);
+            String destination="http://"+host+":8081"+path;
+            request->redirect(destination);
+            continue;
+        }
+        mira_recovery_compat_touch();
         std::string url,body;
         if(!proxy_url(request.get(),url)){
             request->send(414,"text/plain","URI trop longue");continue;
@@ -564,19 +589,13 @@ static void proxy_worker(void *unused){
 static void proxy_request(AsyncWebServerRequest *r){
     if(!proxy_queue){r->send(503,"text/plain","Proxy non initialise");return;}
     if(r->contentLength()>MIRA_PROXY_MAX_BODY){
-        // Huge firmware uploads cannot be buffered behind a reverse proxy.
-        // Preserve native OTA through explicit legacy URL on :8081.
-        String host=r->host();
-        int port=host.indexOf(':');
-        if(port>=0)host=host.substring(0,port);
-        std::string legacy;
-        if(!proxy_url(r,legacy)){r->send(414,"text/plain","URI trop longue");return;}
-        const std::string prefix="http://127.0.0.1:8081";
-        String target="http://"+host+":8081"+String(legacy.c_str()+prefix.size());
-        AsyncWebServerResponse *resp=r->beginResponse(307,"text/plain",
-                "OTA sur serveur de compatibilite :8081");
-        resp->addHeader("Location",target);
-        r->send(resp);return;
+        // Never buffer a multi-megabyte firmware in PSRAM and never redirect
+        // an already-uploaded POST to a port that may still be dormant.
+        // First open /update on :80 to activate maintenance and redirect
+        // the browser to :8081; upload from that page directly.
+        r->send(413,"text/plain; charset=utf-8",
+                "Ouvrir /update pour l'OTA native sur :8081");
+        return;
     }
     ProxyJob *job=new(std::nothrow) ProxyJob;
     if(!job){r->send(503,"text/plain","Memoire proxy epuisee");return;}
@@ -607,6 +626,7 @@ static bool basic_auth(AsyncWebServerRequest *r){
     memset(password,0,sizeof(password));
     return match;
 }
+extern "C" bool mira_async_web_ready(void){return started;}
 extern "C" void mira_async_web_emit_direct(int id,const char *value){
     if(!started||id<1||id>4096||!value)return;
     char event_name[16];
@@ -704,7 +724,9 @@ extern "C" void mira_async_web_start(void){
         char msg[160];
         snprintf(msg,sizeof(msg),
            "{\"transport\":\"ESPAsyncWebServer\",\"port\":80,\"legacy\":8081,"
+           "\"compat_active\":%s,"
            "\"internal_free\":%lu,\"psram_free\":%lu,\"sse_clients\":%u}",
+           mira_recovery_compat_http_active()?"true":"false",
            (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
            (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
            (unsigned)events.count());
@@ -722,5 +744,5 @@ extern "C" void mira_async_web_start(void){
     server.onRequestBody(body_receive);
     server.begin();
     started=true;
-    ESP_LOGI(TAG,"ASYNC_HTTP_PORT80_READY: direct /getindex /updatenr /events, proxy :8081");
+    ESP_LOGI(TAG,"ASYNC_ONLY_PORT80_READY: no IDF HTTPD until maintenance request");
 }
