@@ -3959,6 +3959,11 @@ static esp_err_t mira_bindings_direct_post(httpd_req_t *req){
 
 
 
+// Authenticated raw LVGL programming snapshot; free() the returned buffer.
+char *mira_jeedom_async_lvgl_snapshot(size_t *length){
+    return read_config(length);
+}
+
 // Native async /programui. JSON was already form-decoded and authenticated;
 // the worker validates before atomically replacing the programmed LVGL file.
 int mira_jeedom_async_programui(const char *json,char *answer,size_t cap){
