@@ -5,6 +5,7 @@
 #include "mira_beta_setup_pages.h"
 #include "mira_beta_web.h"
 #include "mira_beta_networks.h"
+#include "mira_recovery.h"
 #include "mira_beta_ota.h"
 #include "mira_beta_update.h"
 #include "mira_beta_data.h"
