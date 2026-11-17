@@ -3906,6 +3906,147 @@ static esp_err_t mira_bindings_direct_post(httpd_req_t *req){
     return httpd_resp_sendstr(req,"OK");
 }
 
+
+// Native ESPAsyncWebServer Jeedom programming. Run these operations in the
+// dedicated PSRAM-backed HTTP worker, NEVER in the AsyncTCP callback.
+int mira_jeedom_async_set_binding(const char *id,const char *value){
+    if(!decimal_id(id)||!decimal_id(value))return 400;
+    return put_remote_binding(strtol(id,NULL,10),value)?200:400;
+}
+int mira_jeedom_async_set_toggle_binding(const char *id,
+                                          const char *off,const char *on){
+    if(!decimal_id(id)||!decimal_id(off)||!decimal_id(on))return 400;
+    long local=strtol(id,NULL,10);
+    if(local<1||local>=4096)return 400;
+    return put_remote_binding(local,off)&&put_remote_binding(local+1,on)?200:500;
+}
+int mira_jeedom_async_set_init_id(const char *id){
+    if(!decimal_id(id)||strlen(id)>=24)return 400;
+    nvs_handle_t nv;
+    esp_err_t err=nvs_open("mira_idf_jeed",NVS_READWRITE,&nv);
+    if(err==ESP_OK){
+        err=nvs_set_str(nv,"Jeedom_Init_Cmd",id);
+        if(err==ESP_OK)err=nvs_commit(nv);
+        nvs_close(nv);
+    }
+    if(err!=ESP_OK)return 500;
+    mira_http_param_written("Jeedom_Init_Cmd",id);
+    request_binding_sync();
+    return 200;
+}
+int mira_jeedom_async_bindings_json(const char *json,char *answer,size_t cap){
+    if(!answer||cap<48)return 500;
+    snprintf(answer,cap,"JSON associations invalide");
+    if(!json||strlen(json)>10000u)return 400;
+    cJSON *root=cJSON_Parse(json);
+    const cJSON *actions=root?cJSON_GetObjectItemCaseSensitive(root,"actions"):NULL;
+    const int count=cJSON_IsArray(actions)?cJSON_GetArraySize(actions):0;
+    if(count<1||count>256){
+        cJSON_Delete(root);
+        return 400;
+    }
+    mira_binding_cache_t *staged=heap_caps_calloc(1,sizeof(*staged),
+                                                  MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    mira_binding_update_t *updates=heap_caps_calloc(512,sizeof(*updates),
+                                                    MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!staged||!updates){
+        heap_caps_free(staged);heap_caps_free(updates);cJSON_Delete(root);
+        snprintf(answer,cap,"Memoire associations absente");
+        return 503;
+    }
+    size_t updated=0;
+    const bool lookup_ready=mira_index_mutex&&
+            xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(1000))==pdTRUE;
+    uint32_t generation=0;
+    if(lookup_ready){
+        generation=mira_index_hash;
+        if(mira_binding_cache&&mira_binding_cache->config_hash==generation)
+            memcpy(staged,mira_binding_cache,sizeof(*staged));
+        else staged->config_hash=generation;
+        const cJSON *incoming=NULL;
+        cJSON_ArrayForEach(incoming,actions){
+            const char *name=jstr((cJSON*)incoming,"nom","");
+            const char *type=jstr((cJSON*)incoming,"type","");
+            if(!*name||!*type)continue;
+            const bool toggle=!strcmp(type,"toggle");
+            const int id0=jint((cJSON*)incoming,toggle?"id0":"id",-1);
+            const int id1=toggle?jint((cJSON*)incoming,"id1",-1):-1;
+            for(size_t i=0;i<mira_action_ref_count;i++){
+                const mira_action_ref_t *ref=&mira_action_refs[i];
+                if(strcmp(ref->name,name)||strcmp(ref->type,type))continue;
+                if((toggle&&(id0!=ref->id0||id1!=ref->id1))||
+                   (!toggle&&id0!=ref->id))continue;
+                const int remote0=jint((cJSON*)incoming,
+                                       toggle?"jeedom0":"jeedom",-1);
+                const int remote1=toggle?jint((cJSON*)incoming,"jeedom1",-1):-1;
+                const int ids[]={id0,id1},remotes[]={remote0,remote1};
+                for(int j=0;j<(toggle?2:1);j++){
+                    if(ids[j]<1||ids[j]>4096||remotes[j]<1||updated>=512)continue;
+                    updates[updated].local=(uint16_t)ids[j];
+                    updates[updated].remote=(uint32_t)remotes[j];
+                    updated++;
+                    if(!staged->remote[ids[j]])staged->valid_count++;
+                    staged->remote[ids[j]]=(uint32_t)remotes[j];
+                }
+                break;
+            }
+        }
+        xSemaphoreGive(mira_index_mutex);
+    }
+    cJSON_Delete(root);
+    if(!lookup_ready||!generation||!updated){
+        heap_caps_free(staged);heap_caps_free(updates);
+        snprintf(answer,cap,"Aucun ID Jeedom correspondant");
+        return 409;
+    }
+    nvs_handle_t nv;
+    esp_err_t err=nvs_open("mira_idf_map",NVS_READWRITE,&nv);
+    if(err==ESP_OK){
+        char key[14],value[48],existing[48];
+        bool changed=false;
+        for(size_t i=0;i<updated&&err==ESP_OK;i++){
+            snprintf(key,sizeof(key),"cmd%u",(unsigned)updates[i].local);
+            snprintf(value,sizeof(value),"%08" PRIx32 ":%" PRIu32,
+                     generation,updates[i].remote);
+            existing[0]=0;
+            if(nvs_read_string(nv,key,existing,sizeof(existing))&&
+               !strcmp(existing,value))continue;
+            err=nvs_set_str(nv,key,value);
+            if(err==ESP_OK)changed=true;
+        }
+        if(err==ESP_OK&&changed)err=nvs_commit(nv);
+        nvs_close(nv);
+    }
+    heap_caps_free(updates);
+    if(err!=ESP_OK){
+        heap_caps_free(staged);
+        snprintf(answer,cap,"Sauvegarde associations impossible");
+        return 503;
+    }
+    bool published=false;
+    if(mira_index_mutex&&
+       xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(1000))==pdTRUE){
+        if(mira_index_hash==generation){
+            mira_binding_cache_t *previous=mira_binding_cache;
+            mira_binding_cache=staged;
+            staged=NULL;
+            xSemaphoreGive(mira_index_mutex);
+            heap_caps_free(previous);
+            published=true;
+        }else xSemaphoreGive(mira_index_mutex);
+    }
+    heap_caps_free(staged);
+    if(!published){
+        snprintf(answer,cap,"Programmation modifiee, relancer la synchro");
+        return 409;
+    }
+    last_binding_sync_http=200;
+    mira_mapping_last_ok_ms=(uint32_t)(esp_timer_get_time()/1000);
+    ESP_LOGI(TAG,"ESPAsync direct bindings accepted: %u entries",(unsigned)updated);
+    snprintf(answer,cap,"OK");
+    return 200;
+}
+
 static esp_err_t jeedom_status_get(httpd_req_t *req) {
     if(!require_key(req))return ESP_FAIL;
     // WT32-style diagnostics: read the already published PSRAM index,
