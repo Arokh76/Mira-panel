@@ -234,7 +234,8 @@ static bool action_rows(PsramPage& out){
         }else if(!strcmp(type,"range")&&id>0){
             int lo=number(item,"min"),hi=number(item,"max"),val=number(item,"value");
             if(lo>=hi||hi>100000||lo<-100000)continue;
-            if(val<lo)val=lo;if(val>hi)val=hi;
+            if(val<lo)val=lo;
+            if(val>hi)val=hi;
             char cached[160]={0};
             if(mira_full_cached_state(name,cached,sizeof(cached))){
                 char *tail=nullptr;long n=strtol(cached,&tail,10);
