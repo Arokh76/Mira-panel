@@ -5518,6 +5518,7 @@ static esp_err_t legacy_reboot_get(httpd_req_t *req){
     esp_restart();
     return ESP_OK;
 }
+void mira_jeedom_http_detach(void){mira_http_server=NULL;}
 void mira_jeedom_register_http(httpd_handle_t server,unsigned max_open_sockets) {
     mira_http_server=server;
     mira_http_session_capacity=max_open_sockets;
