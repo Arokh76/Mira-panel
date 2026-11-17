@@ -595,10 +595,10 @@ extern "C" void mira_async_web_start(void){
                            nullptr,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)!=pdPASS)
         ESP_LOGW(TAG,"ASYNC_SSE_REPLAY_TASK_FAILED (direct events still active)");
     server.on("/getallparams",AsyncWebRequestMethod::HTTP_GET,proxy_request);
-    server.on("/navpages",AsyncWebRequestMethod::HTTP_GET |
-                            AsyncWebRequestMethod::HTTP_POST,proxy_request);
-    server.on("/navfavorites",AsyncWebRequestMethod::HTTP_GET |
-                                AsyncWebRequestMethod::HTTP_POST,proxy_request);
+    server.on("/navpages",AsyncWebRequestMethod::HTTP_GET,proxy_request);
+    server.on("/navpages",AsyncWebRequestMethod::HTTP_POST,proxy_request);
+    server.on("/navfavorites",AsyncWebRequestMethod::HTTP_GET,proxy_request);
+    server.on("/navfavorites",AsyncWebRequestMethod::HTTP_POST,proxy_request);
     server.on("/sync/toggle",AsyncWebRequestMethod::HTTP_GET,proxy_request);
     server.on("/getlvgl",AsyncWebRequestMethod::HTTP_GET,proxy_request);
     server.on("/displayinfo",AsyncWebRequestMethod::HTTP_GET,proxy_request);
