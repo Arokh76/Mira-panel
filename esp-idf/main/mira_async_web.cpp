@@ -143,7 +143,7 @@ static bool proxy_url(AsyncWebServerRequest *r,std::string& url){
     bool first=true;
     for(size_t i=0;i<r->params();i++){
         const auto *p=r->getParam(i);
-        if(!p||!p->isGet())continue;
+        if(!p||(p->isPost()||p->isFile()))continue;
         url.push_back(first?'?':'&');first=false;
         append_encoded(url,p->name());url.push_back('=');
         append_encoded(url,p->value());
@@ -165,7 +165,8 @@ static bool proxy_body(AsyncWebServerRequest *r,std::string& body){
     for(size_t i=0;i<r->params();i++){
         const auto *p=r->getParam(i);
         if(!p||!p->isPost())continue;
-        if(!first)body.push_back('&');first=false;
+        if(!first)body.push_back('&');
+        first=false;
         append_encoded(body,p->name());body.push_back('=');
         append_encoded(body,p->value());
         if(body.length()>MIRA_PROXY_MAX_BODY)return false;
@@ -213,9 +214,9 @@ static void proxy_worker(void *unused){
         if(!proxy_url(request.get(),url)){
             request->send(414,"text/plain","URI trop longue");continue;
         }
-        bool is_body=request->method()==HTTP_POST||
-                     request->method()==HTTP_PUT||
-                     request->method()==HTTP_PATCH;
+        bool is_body=request->method()==AsyncWebRequestMethod::HTTP_POST||
+                     request->method()==AsyncWebRequestMethod::HTTP_PUT||
+                     request->method()==AsyncWebRequestMethod::HTTP_PATCH;
         if(is_body&&!proxy_body(request.get(),body)){
             request->send(413,"text/plain","Contenu trop volumineux");continue;
         }
@@ -231,10 +232,10 @@ static void proxy_worker(void *unused){
             request->send(503,"text/plain","Proxy HTTP indisponible");continue;
         }
         esp_http_client_method_t method=HTTP_METHOD_GET;
-        if(request->method()==HTTP_POST)method=HTTP_METHOD_POST;
-        else if(request->method()==HTTP_PUT)method=HTTP_METHOD_PUT;
-        else if(request->method()==HTTP_DELETE)method=HTTP_METHOD_DELETE;
-        else if(request->method()==HTTP_PATCH)method=HTTP_METHOD_PATCH;
+        if(request->method()==AsyncWebRequestMethod::HTTP_POST)method=HTTP_METHOD_POST;
+        else if(request->method()==AsyncWebRequestMethod::HTTP_PUT)method=HTTP_METHOD_PUT;
+        else if(request->method()==AsyncWebRequestMethod::HTTP_DELETE)method=HTTP_METHOD_DELETE;
+        else if(request->method()==AsyncWebRequestMethod::HTTP_PATCH)method=HTTP_METHOD_PATCH;
         esp_http_client_set_method(h,method);
         for(const char *key:{"Authorization","Content-Type","X-Mira-GPIO","Cookie"}){
             if(request->hasHeader(key)){
@@ -390,11 +391,11 @@ extern "C" void mira_async_web_start(void){
     if(xTaskCreateWithCaps(sse_worker,"mira_async_sse",8192,NULL,3,
                            nullptr,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)!=pdPASS)
         ESP_LOGW(TAG,"ASYNC_SSE_REPLAY_TASK_FAILED (direct events still active)");
-    server.on("/getindex",HTTP_GET,index_get);
-    server.on("/updatenr",HTTP_GET,updatenr_get);
-    server.on("/getmodule",HTTP_GET,getmodule_get);
-    server.on("/testmodule",HTTP_GET,testmodule_get);
-    server.on("/mira/async-health",HTTP_GET,[](AsyncWebServerRequest *r){
+    server.on("/getindex",AsyncWebRequestMethod::HTTP_GET,index_get);
+    server.on("/updatenr",AsyncWebRequestMethod::HTTP_GET,updatenr_get);
+    server.on("/getmodule",AsyncWebRequestMethod::HTTP_GET,getmodule_get);
+    server.on("/testmodule",AsyncWebRequestMethod::HTTP_GET,testmodule_get);
+    server.on("/mira/async-health",AsyncWebRequestMethod::HTTP_GET,[](AsyncWebServerRequest *r){
         char msg[160];
         snprintf(msg,sizeof(msg),
            "{\"transport\":\"ESPAsyncWebServer\",\"port\":80,\"legacy\":8081,"
