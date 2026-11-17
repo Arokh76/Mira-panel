@@ -68,3 +68,13 @@ char *mira_jeedom_async_lvgl_snapshot(size_t *length); // free() by caller
 int mira_jeedom_async_nav_get(bool favorites,char *out,size_t capacity);
 int mira_jeedom_async_nav_post(bool favorites,const char *value);
 char *mira_jeedom_async_allparams(size_t *length); // caller free()
+
+int mira_jeedom_async_screen_clear(void);
+int mira_jeedom_async_screen_add(
+      const char *type,const char *name,const char *loc,
+      const char *min,const char *max,const char *value,const char *unit,
+      const char *style,const char *layout,const char *label,
+      const char *icon,const char *display_name,
+      const char *lx,const char *ly,const char *lw,const char *lh,
+      char **preview);
+int mira_jeedom_async_screen_save(void);
