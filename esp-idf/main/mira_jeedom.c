@@ -4170,6 +4170,29 @@ int mira_jeedom_async_screen_save(void){
     return 200;
 }
 
+
+// Save an authenticated camera URL with the same validation as /camera/config.
+int mira_jeedom_async_camera_config(const char *name,const char *url){
+    if(!name||!url||strlen(name)<1||strlen(name)>100||
+       !mira_camera_url_valid(url))return 400;
+    char *program=read_config(NULL);
+    if(!program)return 404;
+    cJSON *root=cJSON_Parse(program);
+    free(program);
+    const cJSON *arr=root?cJSON_GetObjectItemCaseSensitive(root,"lvgl"):NULL;
+    const cJSON *entry=NULL;
+    bool found=false;
+    cJSON_ArrayForEach(entry,arr){
+        if(!strcmp(jstr((cJSON *)entry,"type",""),"camera")&&
+           !strcmp(jstr((cJSON *)entry,"name",""),name)){
+            found=true;break;
+        }
+    }
+    cJSON_Delete(root);
+    if(!found)return 404;
+    return mira_camera_save_url(name,url)?200:503;
+}
+
 // Remaining lightweight APIs run in the PSRAM-backed ESPAsync worker.
 // Authentication and method validation are performed before these calls.
 int mira_jeedom_async_nav_get(bool favorites,char *out,size_t cap){
