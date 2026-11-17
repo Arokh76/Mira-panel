@@ -2877,6 +2877,46 @@ static esp_err_t param_set(httpd_req_t *req){
     request_binding_sync();
     return httpd_resp_sendstr(req,"OK");
 }
+
+// Async transport for legacy WT32 /getparam and /updateparam family.
+// Authentication is checked by the ESPAsync worker before calling these.
+bool mira_jeedom_async_param_get(const char *name,char *out,size_t cap){
+    if(!out||cap<2)return false;
+    out[0]=0;
+    if(!name||!supported_jeedom_param(name))return false;
+    const mira_display_field_t *df=display_field(name);
+    if(df)return display_field_read(df,out,cap);
+    return mira_jeedom_copy_param(name,out,cap);
+}
+int mira_jeedom_async_param_set(const char *name,const char *value){
+    if(!name||!value||strlen(name)>=32||strlen(value)>=256||
+       !supported_jeedom_param(name)||
+       (!strcmp(name,"Jeedom")&&strcmp(value,"0")&&strcmp(value,"1")))
+        return 400;
+    const mira_display_field_t *display=display_field(name);
+    if(display)return display_field_write(display,value)?200:400;
+    nvs_handle_t nv;
+    int stage=1;
+    esp_err_t err=nvs_open("mira_idf_jeed",NVS_READWRITE,&nv);
+    if(err==ESP_OK){
+        stage=2;
+        err=nvs_set_str(nv,name,value);
+        if(err==ESP_OK){stage=3;err=nvs_commit(nv);}
+        nvs_close(nv);
+    }
+    __atomic_store_n(&jeedom_nvs_last_write_error,(int)err,__ATOMIC_RELAXED);
+    __atomic_store_n(&jeedom_nvs_last_write_stage,
+                     err==ESP_OK?0:stage,__ATOMIC_RELAXED);
+    if(err!=ESP_OK)return 500;
+    if(!strcmp(name,"Jeedom")){
+        jeedom_mode_enabled=!strcmp(value,"1");
+        jeedom_mode_known=true;
+    }
+    mira_http_param_written(name,value);
+    request_binding_sync();
+    return 200;
+}
+
 static esp_err_t param_saved(httpd_req_t *req){
     if(!require_key(req))return ESP_FAIL;
     // nvs_commit() already called by param_set().
