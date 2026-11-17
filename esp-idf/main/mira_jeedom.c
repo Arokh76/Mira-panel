@@ -865,14 +865,6 @@ static esp_err_t beta_html_escape(httpd_req_t *req,const char *s){
     }
     return ESP_OK;
 }
-static esp_err_t beta_html_id(httpd_req_t *req,int id){
-    char str[20];snprintf(str,sizeof(str),"%d",id);
-    return beta_html(req,str);
-}
-static esp_err_t beta_html_value(httpd_req_t *req,const char *name,const char *fallback){
-    char cached[160]={0};
-    return beta_html_escape(req,mira_full_cached_state(name,cached,sizeof(cached))?cached:fallback);
-}
 // Source-of-truth: the original HTTPD home-page command renderer from
 // fae6263. The *same function* below writes to legacy HTTPD (if ever used)
 // or a bounded PSRAM buffer for sole ESPAsyncWebServer. Never maintain
