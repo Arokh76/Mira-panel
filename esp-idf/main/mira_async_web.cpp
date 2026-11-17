@@ -45,6 +45,9 @@ struct ProxyResult {
     bool failed=false;
     char type[96]="text/plain; charset=utf-8";
     char location[256]={0};
+    char authenticate[192]={0};
+    char cache_control[96]={0};
+    char retry_after[32]={0};
 };
 struct SsePrevious {int id;char value[160];};
 static SsePrevious *previous=nullptr;
@@ -177,6 +180,12 @@ static esp_err_t proxy_event(esp_http_client_event_t *e){
             snprintf(p->type,sizeof(p->type),"%s",e->header_value);
         if(!strcasecmp(e->header_key,"Location"))
             snprintf(p->location,sizeof(p->location),"%s",e->header_value);
+        if(!strcasecmp(e->header_key,"WWW-Authenticate"))
+            snprintf(p->authenticate,sizeof(p->authenticate),"%s",e->header_value);
+        if(!strcasecmp(e->header_key,"Cache-Control"))
+            snprintf(p->cache_control,sizeof(p->cache_control),"%s",e->header_value);
+        if(!strcasecmp(e->header_key,"Retry-After"))
+            snprintf(p->retry_after,sizeof(p->retry_after),"%s",e->header_value);
     }else if(e->event_id==HTTP_EVENT_ON_DATA&&e->data_len>0){
         size_t n=(size_t)e->data_len;
         if(p->size+n>MIRA_PROXY_MAX_RESPONSE){p->failed=true;return ESP_FAIL;}
@@ -256,6 +265,9 @@ static void proxy_worker(void *unused){
             AsyncWebServerResponse *resp=request->beginResponse(
                 status,result.type,"");
             if(result.location[0])resp->addHeader("Location",result.location);
+            if(result.authenticate[0])resp->addHeader("WWW-Authenticate",result.authenticate);
+            if(result.cache_control[0])resp->addHeader("Cache-Control",result.cache_control);
+            if(result.retry_after[0])resp->addHeader("Retry-After",result.retry_after);
             request->send(resp);continue;
         }
         // Keep bytes alive until the async response has completely drained.
@@ -272,6 +284,9 @@ static void proxy_worker(void *unused){
             });
         resp->setCode(status);
         if(result.location[0])resp->addHeader("Location",result.location);
+        if(result.authenticate[0])resp->addHeader("WWW-Authenticate",result.authenticate);
+        if(result.cache_control[0])resp->addHeader("Cache-Control",result.cache_control);
+        if(result.retry_after[0])resp->addHeader("Retry-After",result.retry_after);
         request->send(resp);
     }
 }
@@ -280,7 +295,13 @@ static void proxy_request(AsyncWebServerRequest *r){
     if(r->contentLength()>MIRA_PROXY_MAX_BODY){
         // Huge firmware uploads cannot be buffered behind a reverse proxy.
         // Preserve native OTA through explicit legacy URL on :8081.
-        String target="http://"+r->host()+":8081"+r->url();
+        String host=r->host();
+        int port=host.indexOf(':');
+        if(port>=0)host=host.substring(0,port);
+        std::string legacy;
+        if(!proxy_url(r,legacy)){r->send(414,"text/plain","URI trop longue");return;}
+        const std::string prefix="http://127.0.0.1:8081";
+        String target="http://"+host+":8081"+String(legacy.c_str()+prefix.size());
         AsyncWebServerResponse *resp=r->beginResponse(307,"text/plain",
                 "OTA sur serveur de compatibilite :8081");
         resp->addHeader("Location",target);
