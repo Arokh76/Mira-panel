@@ -5,6 +5,8 @@
 extern "C" {
 #endif
 void mira_async_web_start(void);
+// True only after ESPAsyncWebServer has been started on port 80.
+bool mira_async_web_ready(void);
 // Direct passive Jeedom changes are published to WT32-compatible EventSource.
 void mira_async_web_emit_direct(int id,const char *value);
 #ifdef __cplusplus
