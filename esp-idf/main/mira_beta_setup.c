@@ -471,6 +471,83 @@ esp_err_t mira_beta_setup_register_minimal(httpd_handle_t server){
     if(err!=ESP_OK)return err;
     return httpd_register_uri_handler(server,&save);
 }
+
+// First-run procedures shared with the WT32-style ESPAsyncWebServer route.
+// No httpd_req_t and no extra server task are required.
+int mira_beta_setup_async_key_save(const char *key,const char *confirm){
+    if(!key||!confirm||strlen(key)<8||strlen(key)>96||
+       strcmp(key,confirm))return 400;
+    if(has_local_key()&&has_wifi_station())return 403;
+    nvs_handle_t nv;
+    esp_err_t err=nvs_open("mira_idf_auth",NVS_READWRITE,&nv);
+    if(err!=ESP_OK)return 503;
+    err=nvs_set_str(nv,"jeedom_key",key);
+    if(err==ESP_OK)err=nvs_commit(nv);
+    nvs_close(nv);
+    if(err!=ESP_OK)return 503;
+    mira_beta_web_auth_key_set(key);
+    return 200;
+}
+int mira_beta_setup_async_wifi_save(const char *ssid,const char *password,
+   const char *mode,const char *ip,const char *mask,const char *gateway,
+   const char *dns1,const char *dns2){
+    if(!ssid||!password||!mode||!ip||!mask||!gateway||!dns1||!dns2||
+       !has_local_key()||has_wifi_station())return 403;
+    const size_t ssidlen=strlen(ssid),passlen=strlen(password);
+    if(!ssidlen||ssidlen>32||passlen>63||
+       (passlen>0&&passlen<8))return 400;
+    if(strcmp(mode,"auto")&&strcmp(mode,"manual")&&
+       strcmp(mode,"fixed_auto"))return 400;
+    if(!strcmp(mode,"manual")&&!setup_manual_ip_valid(
+         ip,mask,gateway,dns1,dns2))return 400;
+    if(!strcmp(mode,"fixed_auto")){
+        ip4_addr_t requested={0};
+        if(!setup_ipv4(ip,&requested))return 400;
+    }
+    mira_beta_network_t *profiles=calloc(MIRA_NET_MAX,sizeof(*profiles));
+    if(!profiles)return 503;
+    size_t count=0;
+    esp_err_t err=mira_beta_networks_list(profiles,&count,MIRA_NET_MAX);
+    int id=-1;
+    if(err==ESP_OK){
+        for(size_t i=0;i<count;i++)
+            if(!strcmp(profiles[i].ssid,ssid)){id=profiles[i].id;break;}
+        if(id<0&&count>=MIRA_NET_MAX)err=ESP_ERR_INVALID_SIZE;
+        if(id<0&&err==ESP_OK)
+            for(int candidate=0;candidate<=999;candidate++){
+                bool used=false;
+                for(size_t i=0;i<count;i++)
+                    if(profiles[i].id==candidate){used=true;break;}
+                if(!used){id=candidate;break;}
+            }
+    }
+    free(profiles);
+    if(err!=ESP_OK||id<0)return 503;
+    mira_beta_network_t profile={0};
+    profile.id=id;
+    snprintf(profile.ssid,sizeof(profile.ssid),"%s",ssid);
+    snprintf(profile.ip_mode,sizeof(profile.ip_mode),"%s",mode);
+    snprintf(profile.ip,sizeof(profile.ip),"%s",ip);
+    snprintf(profile.mask,sizeof(profile.mask),"%s",mask);
+    snprintf(profile.gateway,sizeof(profile.gateway),"%s",gateway);
+    snprintf(profile.dns1,sizeof(profile.dns1),"%s",dns1);
+    snprintf(profile.dns2,sizeof(profile.dns2),"%s",dns2);
+    // The native Wi-Fi helper writes the atomic profile and STA credentials.
+    // Upsert the same network-list entry so restart cannot discard the SSID.
+    err=mira_recovery_save_beta_wifi(ssid,password,mode,ip,mask,gateway,dns1,dns2);
+    if(err==ESP_OK)err=mira_beta_networks_upsert(&profile,password);
+    return err==ESP_OK?200:503;
+}
+int mira_beta_setup_async_keep_ap(void){
+    nvs_handle_t nv;
+    esp_err_t err=nvs_open("mira_idf_net",NVS_READWRITE,&nv);
+    if(err!=ESP_OK)return 503;
+    err=nvs_set_u8(nv,"ap_enabled",1);
+    if(err==ESP_OK)err=nvs_commit(nv);
+    nvs_close(nv);
+    return err==ESP_OK?200:503;
+}
+
 esp_err_t mira_beta_setup_register(httpd_handle_t server){
     const httpd_uri_t scan={.uri="/mira/wifi/scan",.method=HTTP_GET,.handler=wifi_scan_get};
     esp_err_t err=httpd_register_uri_handler(server,&scan);
