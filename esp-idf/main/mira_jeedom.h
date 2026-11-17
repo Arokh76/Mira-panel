@@ -78,3 +78,5 @@ int mira_jeedom_async_screen_add(
       const char *lx,const char *ly,const char *lw,const char *lh,
       char **preview);
 int mira_jeedom_async_screen_save(void);
+
+int mira_jeedom_async_camera_config(const char *name,const char *url);
