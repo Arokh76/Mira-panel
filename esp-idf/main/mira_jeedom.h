@@ -64,3 +64,7 @@ bool mira_jeedom_async_get_state(const char *kind,const char *selector,char *out
 int mira_jeedom_async_programui(const char *json,char *answer,size_t capacity);
 
 char *mira_jeedom_async_lvgl_snapshot(size_t *length); // free() by caller
+
+int mira_jeedom_async_nav_get(bool favorites,char *out,size_t capacity);
+int mira_jeedom_async_nav_post(bool favorites,const char *value);
+char *mira_jeedom_async_allparams(size_t *length); // caller free()
