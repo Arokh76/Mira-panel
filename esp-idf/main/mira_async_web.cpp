@@ -124,6 +124,7 @@ static void testmodule_get(AsyncWebServerRequest *r){
 
 // WT32-style first-run wizard on the same AsyncWebServer. Legacy native
 // HTTPD never binds port 80, including while the device is unconfigured.
+void mira_async_wifi_scan(AsyncWebServerRequest *r);
 static bool setup_mode(){
     return !mira_beta_setup_runtime_configured()&&mira_beta_setup_unconfigured();
 }
@@ -179,8 +180,7 @@ static bool async_first_run(AsyncWebServerRequest *r){
     }
     if(path=="/mira/wifi/scan"){
         if(!setup_client_allowed(r)){forbidden(r);return true;}
-        r->send(200,"application/json",
-                "{\"networks\":[],\"busy\":false,\"failed\":false}");
+        mira_async_wifi_scan(r);
         return true;
     }
     if(path=="/save"&&r->method()==AsyncWebRequestMethod::HTTP_POST){
