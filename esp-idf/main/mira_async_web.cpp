@@ -272,7 +272,10 @@ static void ota_upload(AsyncWebServerRequest *r,const String& filename,
             ctx->failed=true;ota_last_status=400;
             return;
         }
-        esp_err_t err=esp_ota_begin(ctx->target,OTA_SIZE_UNKNOWN,&ctx->handle);
+        // AsyncTCP must not wait for a whole 3 MiB partition erase.
+        // Erase sectors as chunks arrive, equivalent to WT32 Update.write.
+        esp_err_t err=esp_ota_begin(ctx->target,OTA_WITH_SEQUENTIAL_WRITES,
+                                    &ctx->handle);
         if(err!=ESP_OK){
             ctx->failed=true;ota_last_status=503;
             ESP_LOGW(TAG,"ASYNC_OTA_BEGIN_FAILED: %s",esp_err_to_name(err));
