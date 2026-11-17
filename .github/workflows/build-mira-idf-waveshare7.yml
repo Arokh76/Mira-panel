@@ -35,10 +35,6 @@ jobs:
           grep -Fq 'NETWORK_FAILED_HALT' "$ROOT/main/app_main.c"
           grep -Fq 'FIRST_SETUP_READY' "$ROOT/main/app_main.c"
           grep -Fq 'mira_splash_set_message' "$ROOT/main/mira_splash.c"
-          grep -Fq 'conf.stack_size = setup_only?6144:7168' "$ROOT/main/mira_recovery.c"
-          grep -Fq 'HTTPD_RESCUE_READY' "$ROOT/main/mira_recovery.c"
-          grep -Fq 'HTTPD_PREFLIGHT' "$ROOT/main/mira_recovery.c"
-          grep -Fq 'mira_recovery_web_fallback()' "$ROOT/main/app_main.c"
           grep -Fq 'MIRA_NO_WIDGETS_IDLE' "$ROOT/main/app_main.c"
           grep -Fq 'MIRA_WIDGET_CONFIG_FOUND' "$ROOT/main/app_main.c"
           grep -Fq 'stat("/spiffs/miralvgl.json"' "$ROOT/main/app_main.c"
@@ -57,6 +53,10 @@ jobs:
           grep -Fq 'xTaskCreateWithCaps(jeedom_action_worker' "$ROOT/main/mira_jeedom.c"
           grep -Fq 'xQueueCreateWithCaps(12,sizeof(mira_action_msg_t)' "$ROOT/main/mira_jeedom.c"
           grep -Fq 'MIRA_JEEDOM_ACTIONS_READY' "$ROOT/main/app_main.c"
+          ! grep -Fq 'httpd_start(' "$ROOT/main/mira_recovery.c"
+          grep -Fq 'mira_async_web_start();' "$ROOT/main/app_main.c"
+          grep -Fq 'server.on("/doUpdateFile"' "$ROOT/main/mira_async_web.cpp"
+          grep -Fq 'mira_beta_setup_async_wifi_save' "$ROOT/main/mira_async_web.cpp"
           grep -Fq 'jeedom_actions_ready' "$ROOT/main/mira_recovery.c"
           ! grep -Eq '[[:space:]]mira_mqtt_init\\(' "$ROOT/main/app_main.c"
           ! grep -Eq '[[:space:]]mira_jeedom_action_init\\(' "$ROOT/main/app_main.c"
@@ -66,8 +66,6 @@ jobs:
           ! grep -Eq 'mira_mqtt_init\\(' "$ROOT/main/app_main.c"
           grep -Fq 'mira_recovery_init()' "$ROOT/main/app_main.c"
           grep -Fq 'mira_full_storage_prepare()' "$ROOT/main/app_main.c"
-          grep -Fq 'mira_beta_setup_register_minimal(httpd)' "$ROOT/main/mira_recovery.c"
-          grep -Fq 'MIRA_SETUP_READY' "$ROOT/main/mira_recovery.c"
           grep -Fq 'CONFIG_SPIRAM_XIP_FROM_PSRAM=y' "$ROOT/sdkconfig.defaults"
           grep -Fq 'CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y' "$ROOT/sdkconfig.defaults"
           grep -Fq '#define LCD_BOUNCE_BUFFER_PIXELS (WIDTH * LCD_BOUNCE_BUFFER_LINES)' "$ROOT/main/mira_display.c"
@@ -90,6 +88,8 @@ jobs:
           assert 'mira_beta_setup_mark_configured_runtime();' in net
           assert 'consecutive_setup_failures>=3u' in net
           assert 'setup_runtime_configured' in net and 'auth_read_failures' in net
+          assert 'ASYNC_ONLY_NETWORK_READY' in net
+          assert 'httpd_start(' not in net
           assert 'mira_beta_web_auth_key_init();' in net
           auth=web[web.index('bool mira_beta_web_authorized(httpd_req_t *req)'):web.index('static int hexval(')]
           assert 'nvs_open(' not in auth and 'nvs_get_str(' not in auth

@@ -3,6 +3,7 @@
 // Reads/writes the existing LVGL JSON without erasing or formatting SPIFFS.
 // Incoming state updates are PASSIVE, never forwarded to MQTT or an actuator.
 #include "mira_jeedom.h"
+#include "mira_async_web.h"
 #include "freertos/idf_additions.h" // PSRAM task/queue memory-capability APIs
 #include "mira_full.h"
 #include "mira_camera.h"
@@ -187,6 +188,8 @@ static bool require_key(httpd_req_t *req) {
     httpd_resp_sendstr(req,"Cle Mira invalide (provisionner la meme cle que dans Jeedom via l'AP)");
     return false;
 }
+// Reuse the WT32-equivalent cached key for Arduino async HTTP routes.
+bool mira_jeedom_async_key_valid(const char *key){return correct_key(key);}
 static char *read_config(size_t *out_length) {
     FILE *f=fopen(MIRA_JSON_PATH,"rb");
     if(!f)return NULL;
@@ -768,6 +771,55 @@ static esp_err_t mira_index_send_snapshot(httpd_req_t *req){
     return result;
 }
 
+// Direct AsyncWebServer response: return a short-lived PSRAM copy of the
+// *same* index that native /getindex returns. No socket held under the lock.
+// AsyncTCP's filler callback owns/free()s this snapshot after the response.
+esp_err_t mira_jeedom_async_index_snapshot(char **body,size_t *body_length){
+    if(!body||!body_length)return ESP_ERR_INVALID_ARG;
+    *body=NULL;*body_length=0;
+    if(!mira_index_template && !mira_index_rebuild())return ESP_ERR_NOT_FOUND;
+    if(!mira_index_mutex||
+       xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(25))!=pdTRUE)
+        return ESP_ERR_TIMEOUT;
+    const char *payload=mira_index_template;
+    size_t length=mira_index_template_len;
+    if(payload&&mira_index_response&&mira_index_response_cap){
+        char *output=mira_index_response;
+        size_t n=0,cursor=0;
+        bool complete=true;
+        for(size_t i=0;i<mira_index_fields_count;i++){
+            const mira_index_field_t *field=&mira_index_fields[i];
+            if(field->start<cursor||field->end>length){complete=false;break;}
+            const size_t literal=(size_t)field->start-cursor;
+            char token[160*6+4];
+            bool live=mira_index_live_token(field,token,sizeof(token));
+            const char *part=live?token:payload+field->start;
+            const size_t part_len=live?strlen(token):(size_t)field->end-field->start;
+            if(n+literal+part_len>=mira_index_response_cap){complete=false;break;}
+            memcpy(output+n,payload+cursor,literal);n+=literal;
+            memcpy(output+n,part,part_len);n+=part_len;
+            cursor=field->end;
+        }
+        if(complete&&n+(length-cursor)<mira_index_response_cap){
+            memcpy(output+n,payload+cursor,length-cursor);
+            n+=length-cursor;output[n]=0;
+            payload=output;length=n;
+        }
+    }
+    // Always copy while the index lock is held; programming can replace it.
+    char *snapshot=payload?heap_caps_malloc(length+1u,
+                               MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT):NULL;
+    if(snapshot){
+        memcpy(snapshot,payload,length);
+        snapshot[length]=0;
+    }
+    xSemaphoreGive(mira_index_mutex);
+    if(!snapshot)return ESP_ERR_NO_MEM;
+    *body=snapshot;*body_length=length;
+    __atomic_fetch_add(&mira_index_responses,1u,__ATOMIC_RELAXED);
+    return ESP_OK;
+}
+
 // Reuse the already-built Jeedom action index for browser SSE sessions.
 // Only copy the stable, serialized PSRAM snapshot under its mutex; parsing
 // happens after unlocking and never rereads/rebuilds the SPIFFS widget file.
@@ -813,19 +865,71 @@ static esp_err_t beta_html_escape(httpd_req_t *req,const char *s){
     }
     return ESP_OK;
 }
-static esp_err_t beta_html_id(httpd_req_t *req,int id){
-    char str[20];snprintf(str,sizeof(str),"%d",id);
-    return beta_html(req,str);
+// Source-of-truth: the original HTTPD home-page command renderer from
+// fae6263. The *same function* below writes to legacy HTTPD (if ever used)
+// or a bounded PSRAM buffer for sole ESPAsyncWebServer. Never maintain
+// another approximate renderer for the asynchronous home page.
+typedef struct {
+    httpd_req_t *request;
+    char *data;
+    size_t len,capacity;
+} mira_action_writer_t;
+static esp_err_t beta_action_write(mira_action_writer_t *w,const char *s,size_t n){
+    if(!w||!s)return ESP_FAIL;
+    if(w->request)return httpd_resp_send_chunk(w->request,s,n);
+    if(n>196608u||w->len>196608u-n)return ESP_ERR_NO_MEM;
+    size_t need=w->len+n+1u;
+    if(need>w->capacity){
+        size_t next=w->capacity?w->capacity*2u:8192u;
+        if(next<need)next=need;
+        if(next>196609u)next=196609u;
+        char *newbuf=heap_caps_realloc(w->data,next,
+                                  MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+        if(!newbuf)return ESP_ERR_NO_MEM;
+        w->data=newbuf;w->capacity=next;
+    }
+    if(n)memcpy(w->data+w->len,s,n);
+    w->len+=n;
+    w->data[w->len]=0;
+    return ESP_OK;
 }
-static esp_err_t beta_html_value(httpd_req_t *req,const char *name,const char *fallback){
-    char cached[160]={0};
-    return beta_html_escape(req,mira_full_cached_state(name,cached,sizeof(cached))?cached:fallback);
+static esp_err_t beta_action_html(mira_action_writer_t *w,const char *s){
+    return s?beta_action_write(w,s,strlen(s)):ESP_OK;
 }
-esp_err_t mira_jeedom_render_beta_actions(httpd_req_t *req){
+static esp_err_t beta_action_escape(mira_action_writer_t *w,const char *s){
+    if(!s)return ESP_OK;
+    const char *start=s;
+    for(const char *p=s;;p++){
+        const char *entity=NULL;
+        if(*p=='&')entity="&amp;";
+        else if(*p=='<')entity="&lt;";
+        else if(*p=='>')entity="&gt;";
+        else if(*p=='"')entity="&quot;";
+        else if(*p=='\'')entity="&#39;";
+        if(entity||!*p){
+            if(p>start&&beta_action_write(w,start,(size_t)(p-start))!=ESP_OK)return ESP_FAIL;
+            if(!*p)break;
+            if(beta_action_html(w,entity)!=ESP_OK)return ESP_FAIL;
+            start=p+1;
+        }
+    }
+    return ESP_OK;
+}
+static esp_err_t beta_action_id(mira_action_writer_t *w,int id){
+    char tmp[20];snprintf(tmp,sizeof(tmp),"%d",id);
+    return beta_action_html(w,tmp);
+}
+static esp_err_t beta_action_value(mira_action_writer_t *w,
+                                   const char *name,const char *fallback){
+    char state[160]={0};
+    return beta_action_escape(w,mira_full_cached_state(name,state,sizeof(state))?state:fallback);
+}
+
+static esp_err_t render_original_beta_actions(mira_action_writer_t *writer){
     char *raw=read_config(NULL);
     cJSON *index=raw?index_from_config(raw):NULL;
     free(raw);
-    if(!index)return beta_html(req,"<p>Aucune programmation Mira Panel.</p>");
+    if(!index)return beta_action_html(writer,"<p>Aucune programmation Mira Panel.</p>");
     const cJSON *actions=cJSON_GetObjectItemCaseSensitive(index,"actions");
     const cJSON *item=NULL;
     bool any=false;
@@ -839,12 +943,12 @@ esp_err_t mira_jeedom_render_beta_actions(httpd_req_t *req){
         if(!*name)continue;
         if((!strcmp(type,"button")||!strcmp(type,"little_button"))&&id>0){
             any=true;
-            if((status=beta_html(req,!strcmp(type,"little_button")?
+            if((status=beta_action_html(writer,!strcmp(type,"little_button")?
                  "<button class=\"LittleBouton\" id=\"":"<button class=\"Bouton\" id=\""))!=ESP_OK||
-               (status=beta_html_id(req,id))!=ESP_OK||
-               (status=beta_html(req,"\" onclick=\"Click(this)\">"))!=ESP_OK||
-               (status=beta_html_escape(req,name))!=ESP_OK||
-               (status=beta_html(req,"</button>"))!=ESP_OK)break;
+               (status=beta_action_id(writer,id))!=ESP_OK||
+               (status=beta_action_html(writer,"\" onclick=\"Click(this)\">"))!=ESP_OK||
+               (status=beta_action_escape(writer,name))!=ESP_OK||
+               (status=beta_action_html(writer,"</button>"))!=ESP_OK)break;
         }else if((!strcmp(type,"title")||!strcmp(type,"text_index"))){
             int size=jint((cJSON*)item,"size",20);
             if(size<10)size=10;
@@ -853,39 +957,39 @@ esp_err_t mira_jeedom_render_beta_actions(httpd_req_t *req){
             snprintf(style,sizeof(style),
                      "<div style=\"padding:10px 0;font-size:%dpx\">",size);
             any=true;
-            if((status=beta_html(req,style))!=ESP_OK||
-               (status=beta_html_escape(req,name))!=ESP_OK||
-               (status=beta_html(req,"</div>"))!=ESP_OK)break;
+            if((status=beta_action_html(writer,style))!=ESP_OK||
+               (status=beta_action_escape(writer,name))!=ESP_OK||
+               (status=beta_action_html(writer,"</div>"))!=ESP_OK)break;
         }else if(!strcmp(type,"inputbox")&&id>0){
             any=true;
-            if((status=beta_html(req,"<label>"))!=ESP_OK||
-               (status=beta_html_escape(req,name))!=ESP_OK||
-               (status=beta_html(req,"</label><input class=\"inputbox\" type=\"text\" id=\""))!=ESP_OK||
-               (status=beta_html_id(req,id))!=ESP_OK||
-               (status=beta_html(req,"\" value=\""))!=ESP_OK||
-               (status=beta_html_value(req,name,jstr((cJSON*)item,"value","")))!=ESP_OK||
-               (status=beta_html(req,"\" onblur=\"InputBoxValidate(this)\"><br>"))!=ESP_OK)break;
+            if((status=beta_action_html(writer,"<label>"))!=ESP_OK||
+               (status=beta_action_escape(writer,name))!=ESP_OK||
+               (status=beta_action_html(writer,"</label><input class=\"inputbox\" type=\"text\" id=\""))!=ESP_OK||
+               (status=beta_action_id(writer,id))!=ESP_OK||
+               (status=beta_action_html(writer,"\" value=\""))!=ESP_OK||
+               (status=beta_action_value(writer,name,jstr((cJSON*)item,"value","")))!=ESP_OK||
+               (status=beta_action_html(writer,"\" onblur=\"InputBoxValidate(this)\"><br>"))!=ESP_OK)break;
         }else if(!strcmp(type,"infofa")&&id>0){
             any=true;
-            if((status=beta_html(req,"<div class=\"mira-info\">"))!=ESP_OK||
-               (status=beta_html_escape(req,name))!=ESP_OK||
-               (status=beta_html(req,": <i id=\""))!=ESP_OK||
-               (status=beta_html_id(req,id))!=ESP_OK||
-               (status=beta_html(req,"\" class=\""))!=ESP_OK||
-               (status=beta_html_value(req,name,jstr((cJSON*)item,"value","")))!=ESP_OK||
-               (status=beta_html(req,"\"></i></div>"))!=ESP_OK)break;
+            if((status=beta_action_html(writer,"<div class=\"mira-info\">"))!=ESP_OK||
+               (status=beta_action_escape(writer,name))!=ESP_OK||
+               (status=beta_action_html(writer,": <i id=\""))!=ESP_OK||
+               (status=beta_action_id(writer,id))!=ESP_OK||
+               (status=beta_action_html(writer,"\" class=\""))!=ESP_OK||
+               (status=beta_action_value(writer,name,jstr((cJSON*)item,"value","")))!=ESP_OK||
+               (status=beta_action_html(writer,"\"></i></div>"))!=ESP_OK)break;
         }else if(!strcmp(type,"color")&&id>0){
             int red=jint((cJSON*)item,"r",0),green=jint((cJSON*)item,"g",0),blue=jint((cJSON*)item,"b",0);
             if(red<0||red>255||green<0||green>255||blue<0||blue>255)continue;
             char color[16];snprintf(color,sizeof(color),"#%02x%02x%02x",red,green,blue);
             any=true;
-            if((status=beta_html(req,"<div class=\"FondBlanc_Color\">"))!=ESP_OK||
-               (status=beta_html_escape(req,name))!=ESP_OK||
-               (status=beta_html(req,"<br><input class=\"input_color\" type=\"color\" id=\""))!=ESP_OK||
-               (status=beta_html_id(req,id))!=ESP_OK||
-               (status=beta_html(req,"\" value=\""))!=ESP_OK||
-               (status=beta_html(req,color))!=ESP_OK||
-               (status=beta_html(req,"\" onchange=\"printColor(this,event)\"></div>"))!=ESP_OK)break;
+            if((status=beta_action_html(writer,"<div class=\"FondBlanc_Color\">"))!=ESP_OK||
+               (status=beta_action_escape(writer,name))!=ESP_OK||
+               (status=beta_action_html(writer,"<br><input class=\"input_color\" type=\"color\" id=\""))!=ESP_OK||
+               (status=beta_action_id(writer,id))!=ESP_OK||
+               (status=beta_action_html(writer,"\" value=\""))!=ESP_OK||
+               (status=beta_action_html(writer,color))!=ESP_OK||
+               (status=beta_action_html(writer,"\" onchange=\"printColor(this,event)\"></div>"))!=ESP_OK)break;
         }else if(!strcmp(type,"toggle")){
             int off=jint((cJSON*)item,"id0",-1),on=jint((cJSON*)item,"id1",-1);
             if(off<1||on<1)continue;
@@ -894,42 +998,42 @@ esp_err_t mira_jeedom_render_beta_actions(httpd_req_t *req){
             bool checked=known&&(!strcasecmp(current,"On")||!strcmp(current,"1")||
                                   !strcasecmp(current,"true"));
             any=true;
-            if((status=beta_html(req,"<div class=\"div_toogle\"><div class=\"div_toogle_name\">"))!=ESP_OK||
-               (status=beta_html_escape(req,name))!=ESP_OK||
-               (status=beta_html(req,"</div><label class=\"switch\"><input type=\"checkbox\" id=\""))!=ESP_OK||
-               (status=beta_html_id(req,off))!=ESP_OK||
-               (status=beta_html(req,"\" onclick=\"ClickToogle(this,'Off','On','"))!=ESP_OK||
-               (status=beta_html_id(req,off))!=ESP_OK||
-               (status=beta_html(req,"','"))!=ESP_OK||
-               (status=beta_html_id(req,on))!=ESP_OK||
-               (status=beta_html(req,"')\""))!=ESP_OK||
-               (checked&&(status=beta_html(req," checked"))!=ESP_OK)||
-               (status=beta_html(req,"><span class=\"slider round\"></span></label></div>"))!=ESP_OK)break;
+            if((status=beta_action_html(writer,"<div class=\"div_toogle\"><div class=\"div_toogle_name\">"))!=ESP_OK||
+               (status=beta_action_escape(writer,name))!=ESP_OK||
+               (status=beta_action_html(writer,"</div><label class=\"switch\"><input type=\"checkbox\" id=\""))!=ESP_OK||
+               (status=beta_action_id(writer,off))!=ESP_OK||
+               (status=beta_action_html(writer,"\" onclick=\"ClickToogle(this,'Off','On','"))!=ESP_OK||
+               (status=beta_action_id(writer,off))!=ESP_OK||
+               (status=beta_action_html(writer,"','"))!=ESP_OK||
+               (status=beta_action_id(writer,on))!=ESP_OK||
+               (status=beta_action_html(writer,"')\""))!=ESP_OK||
+               (checked&&(status=beta_action_html(writer," checked"))!=ESP_OK)||
+               (status=beta_action_html(writer,"><span class=\"slider round\"></span></label></div>"))!=ESP_OK)break;
         }else if(!strcmp(type,"info")&&id>0){
             any=true;
-            if((status=beta_html(req,"<div class=\"mira-info\">"))!=ESP_OK||
-               (status=beta_html_escape(req,name))!=ESP_OK||
-               (status=beta_html(req,": <b><span id=\""))!=ESP_OK||
-               (status=beta_html_id(req,id))!=ESP_OK||
-               (status=beta_html(req,"\">"))!=ESP_OK||
-               (status=beta_html_value(req,name,jstr((cJSON*)item,"value","--")))!=ESP_OK||
-               (status=beta_html(req,"</span></b> "))!=ESP_OK||
-               (status=beta_html_escape(req,jstr((cJSON*)item,"unit","")))!=ESP_OK||
-               (status=beta_html(req,"</div>"))!=ESP_OK)break;
+            if((status=beta_action_html(writer,"<div class=\"mira-info\">"))!=ESP_OK||
+               (status=beta_action_escape(writer,name))!=ESP_OK||
+               (status=beta_action_html(writer,": <b><span id=\""))!=ESP_OK||
+               (status=beta_action_id(writer,id))!=ESP_OK||
+               (status=beta_action_html(writer,"\">"))!=ESP_OK||
+               (status=beta_action_value(writer,name,jstr((cJSON*)item,"value","--")))!=ESP_OK||
+               (status=beta_action_html(writer,"</span></b> "))!=ESP_OK||
+               (status=beta_action_escape(writer,jstr((cJSON*)item,"unit","")))!=ESP_OK||
+               (status=beta_action_html(writer,"</div>"))!=ESP_OK)break;
         }else if(!strcmp(type,"range")&&id>0){
             any=true;
             int lo=jint((cJSON*)item,"min",0),hi=jint((cJSON*)item,"max",100);
             if(lo>=hi||hi>100000||lo<-100000)continue;
             char bound[160];
-            if((status=beta_html(req,"<div><label for=\""))!=ESP_OK||
-               (status=beta_html_id(req,id))!=ESP_OK||
-               (status=beta_html(req,"\">"))!=ESP_OK||
-               (status=beta_html_escape(req,name))!=ESP_OK||
-               (status=beta_html(req,"</label><input type=\"range\" id=\""))!=ESP_OK||
-               (status=beta_html_id(req,id))!=ESP_OK)break;
+            if((status=beta_action_html(writer,"<div><label for=\""))!=ESP_OK||
+               (status=beta_action_id(writer,id))!=ESP_OK||
+               (status=beta_action_html(writer,"\">"))!=ESP_OK||
+               (status=beta_action_escape(writer,name))!=ESP_OK||
+               (status=beta_action_html(writer,"</label><input type=\"range\" id=\""))!=ESP_OK||
+               (status=beta_action_id(writer,id))!=ESP_OK)break;
             snprintf(bound,sizeof(bound),"\" min=\"%d\" max=\"%d\" value=\"%d\" onchange=\"ValidRange(this)\"></div>",
                      lo,hi,jint((cJSON*)item,"value",lo));
-            if((status=beta_html(req,bound))!=ESP_OK)break;
+            if((status=beta_action_html(writer,bound))!=ESP_OK)break;
         }else if(!strcmp(type,"list")&&id>0){
             const char *group=jstr((cJSON*)item,"nomliste","");
             if(!*group)continue;
@@ -938,29 +1042,29 @@ esp_err_t mira_jeedom_render_beta_actions(httpd_req_t *req){
             if(seen||group_count>=16)continue;
             snprintf(seen_groups[group_count++],sizeof(seen_groups[0]),"%s",group);
             any=true;
-            if((status=beta_html(req,"<div><label>"))!=ESP_OK||
-               (status=beta_html_escape(req,group))!=ESP_OK||
-               (status=beta_html(req,"</label><select class=\"box\" id=\""))!=ESP_OK||
-               (status=beta_html_escape(req,group))!=ESP_OK||
-               (status=beta_html(req,"\" onchange=\"Liste(this)\">"))!=ESP_OK)break;
+            if((status=beta_action_html(writer,"<div><label>"))!=ESP_OK||
+               (status=beta_action_escape(writer,group))!=ESP_OK||
+               (status=beta_action_html(writer,"</label><select class=\"box\" id=\""))!=ESP_OK||
+               (status=beta_action_escape(writer,group))!=ESP_OK||
+               (status=beta_action_html(writer,"\" onchange=\"Liste(this)\">"))!=ESP_OK)break;
             const cJSON *opt=NULL;
             cJSON_ArrayForEach(opt,actions){
                 if(strcmp(jstr((cJSON*)opt,"type",""),"list")||
                    strcmp(jstr((cJSON*)opt,"nomliste",""),group))continue;
                 int option_id=jint((cJSON*)opt,"id",-1);
                 if(option_id<1)continue;
-                if((status=beta_html(req,"<option value=\""))!=ESP_OK||
-                   (status=beta_html_id(req,option_id))!=ESP_OK||
-                   (status=beta_html(req,"\">"))!=ESP_OK||
-                   (status=beta_html_escape(req,jstr((cJSON*)opt,"nom","")))!=ESP_OK||
-                   (status=beta_html(req,"</option>"))!=ESP_OK)break;
+                if((status=beta_action_html(writer,"<option value=\""))!=ESP_OK||
+                   (status=beta_action_id(writer,option_id))!=ESP_OK||
+                   (status=beta_action_html(writer,"\">"))!=ESP_OK||
+                   (status=beta_action_escape(writer,jstr((cJSON*)opt,"nom","")))!=ESP_OK||
+                   (status=beta_action_html(writer,"</option>"))!=ESP_OK)break;
             }
-            if(status!=ESP_OK|| (status=beta_html(req,"</select></div>"))!=ESP_OK)break;
+            if(status!=ESP_OK|| (status=beta_action_html(writer,"</select></div>"))!=ESP_OK)break;
         }
     }
     cJSON_Delete(index);
     if(status!=ESP_OK)return status;
-    if(!any)return beta_html(req,"<p>Aucune commande programmée.</p>");
+    if(!any)return beta_action_html(writer,"<p>Aucune commande programmée.</p>");
     // The beta's live states are delivered by /events, which sends a bounded
     // snapshot and lets EventSource reconnect. No HTTP worker remains blocked.
     // Regenerate listeners from the same command index, never from the DOM.
@@ -969,7 +1073,7 @@ esp_err_t mira_jeedom_render_beta_actions(httpd_req_t *req){
     free(raw);
     if(!index)return ESP_OK;
     actions=cJSON_GetObjectItemCaseSensitive(index,"actions");
-    status=beta_html(req,"<script>(function(){if(!window.EventSource)return;"
+    status=beta_action_html(writer,"<script>(function(){if(!window.EventSource)return;"
                               "var source=new EventSource('/events');");
     cJSON_ArrayForEach(item,actions){
         if(status!=ESP_OK)break;
@@ -999,12 +1103,30 @@ esp_err_t mira_jeedom_render_beta_actions(httpd_req_t *req){
                 "source.addEventListener('%d',function(){var o=document.querySelector('option[value=\"%d\"]');"
                 "if(o&&o.parentElement)o.parentElement.value='%d';});",id,id,id);
         }else continue;
-        status=beta_html(req,js);
+        status=beta_action_html(writer,js);
     }
-    if(status==ESP_OK)status=beta_html(req,"})();</script>");
+    if(status==ESP_OK)status=beta_action_html(writer,"})();</script>");
     cJSON_Delete(index);
     return status;
 }
+
+esp_err_t mira_jeedom_render_beta_actions(httpd_req_t *req){
+    mira_action_writer_t writer={0};
+    writer.request=req;
+    return render_original_beta_actions(&writer);
+}
+char *mira_jeedom_async_original_actions(size_t *length){
+    if(length)*length=0;
+    mira_action_writer_t writer={0};
+    const esp_err_t err=render_original_beta_actions(&writer);
+    if(err!=ESP_OK||!writer.data){
+        heap_caps_free(writer.data);
+        return NULL;
+    }
+    if(length)*length=writer.len;
+    return writer.data;
+}
+
 /* ESP-IDF HTTPD asynchronous request: keep /events open like Arduino
  * AsyncEventSource. One worker per browser (maximum two), no socket writes
  * from LVGL, the MQTT callback, or the HTTP server's main task. A client
@@ -1048,6 +1170,44 @@ static void mira_sse_record_direct(int id,const char *value){
     slot->value[n]=0;
     portEXIT_CRITICAL(&mira_sse_lock);
     mira_jeedom_sse_notify();
+    mira_async_web_emit_direct(id,value);
+}
+
+// One resident action at a time, with a short non-blocking index lock.
+// The AsyncTCP SSE worker owns its previous-value table and never parses SPIFFS.
+size_t mira_jeedom_async_event_count(void){
+    if(!mira_index_mutex||xSemaphoreTake(mira_index_mutex,0)!=pdTRUE)return 0;
+    size_t count=mira_action_ref_count;
+    xSemaphoreGive(mira_index_mutex);
+    return count;
+}
+bool mira_jeedom_async_event_current(size_t ordinal,int *id,char *value,size_t cap){
+    if(!id||!value||cap<2||!mira_index_mutex)return false;
+    mira_action_ref_t ref={0};
+    if(xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(5))!=pdTRUE)return false;
+    bool known=mira_action_refs&&ordinal<mira_action_ref_count;
+    if(known)ref=mira_action_refs[ordinal];
+    xSemaphoreGive(mira_index_mutex);
+    if(!known||!ref.name[0])return false;
+    const char *name=ref.name;
+    if(!strcmp(ref.type,"list")){
+        name=ref.list_name;
+        if(!*name||ref.id<1)return false;
+    }else if(strcmp(ref.type,"toggle")&&strcmp(ref.type,"info")&&
+             strcmp(ref.type,"range")&&strcmp(ref.type,"infofa")&&
+             strcmp(ref.type,"inputbox"))return false;
+    if(!mira_full_cached_state(name,value,cap))return false;
+    if(!strcmp(ref.type,"list")){
+        if(strcmp(value,ref.name))return false;
+        *id=ref.id;
+    }else if(!strcmp(ref.type,"toggle")){
+        bool on=!strcmp(value,"1")||!strcasecmp(value,"on")||
+                !strcasecmp(value,"true");
+        *id=on?ref.id1:ref.id0;
+    }else *id=ref.id;
+    if(*id<1||*id>4096)return false;
+    for(char *p=value;*p;p++)if(*p=='\r'||*p=='\n')*p=' ';
+    return true;
 }
 
 static esp_err_t mira_sse_changed(mira_sse_client_t *client){
@@ -2084,6 +2244,109 @@ static esp_err_t updatenr_process(httpd_req_t *req) {
     }
     return httpd_resp_sendstr(req,"OK");
 }
+// Direct ESPAsyncWebServer /updatenr implementation: same indexed action table,
+// decoding, bounds and PASSIVE semantics as the native handler above. The HTTP
+// callback supplies already URL-decoded parameters; no Jeedom command is sent.
+int mira_jeedom_async_updatenr(const char *kind,const char *selector,
+        const char *incoming,const char *red,const char *green,const char *blue,
+        char *answer,size_t cap){
+    if(!answer||cap<20)return 500;
+    snprintf(answer,cap,"%s","OK");
+    if(!kind||!selector){snprintf(answer,cap,"Type d'action absent");return 400;}
+    const char *types[]={"info","toggle","toogle","range","list","listvalue","color","button"};
+    bool known_type=false;
+    for(size_t i=0;i<sizeof(types)/sizeof(types[0]);i++)
+        if(!strcmp(kind,types[i])){known_type=true;break;}
+    if(!known_type||strlen(selector)>=128){
+        snprintf(answer,cap,"Type ou ID invalide");return 400;
+    }
+    const bool by_value=!strcmp(kind,"listvalue");
+    const bool by_id=!strcmp(kind,"list");
+    const bool list_group=by_value||by_id;
+    long id=-1;
+    if(list_group){
+        if(!*selector||strlen(selector)>=96||!incoming||!*incoming){
+            snprintf(answer,cap,"Etat de liste invalide");return 400;
+        }
+        if(by_id){
+            char *end=NULL;id=strtol(incoming,&end,10);
+            if(end==incoming||*end||id<1||id>4096){
+                snprintf(answer,cap,"ID option invalide");return 400;
+            }
+        }
+    }else{
+        char *end=NULL;id=strtol(selector,&end,10);
+        if(end==selector||*end||id<1||id>4096){
+            snprintf(answer,cap,"ID invalide");return 400;
+        }
+    }
+    if(!mira_index_mutex||!mira_action_refs){
+        snprintf(answer,cap,"Index non initialise");return 503;
+    }
+    if(xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(15))!=pdTRUE){
+        snprintf(answer,cap,"Index occupe");return 503;
+    }
+    mira_action_ref_t match={0};bool found=false;
+    for(size_t i=0;i<mira_action_ref_count;i++){
+        const mira_action_ref_t *ref=&mira_action_refs[i];
+        if(list_group){
+            if(strcmp(ref->type,"list")||strcmp(ref->list_name,selector)||
+               (by_value?strcmp(ref->name,incoming):ref->id!=id))continue;
+        }else if((!strcmp(kind,"toggle")||!strcmp(kind,"toogle"))&&
+                 !strcmp(ref->type,"toggle")){
+            if(id!=ref->id0&&id!=ref->id1)continue;
+        }else{
+            if(strcmp(ref->type,kind)||id!=ref->id)continue;
+        }
+        match=*ref;found=true;break;
+    }
+    xSemaphoreGive(mira_index_mutex);
+    if(!found){snprintf(answer,cap,"Commande inconnue");return 404;}
+    char name[96]={0},value[769]={0};
+    if(list_group){
+        snprintf(name,sizeof(name),"%s",selector);
+        snprintf(value,sizeof(value),"%s",match.name);
+    }else if((!strcmp(kind,"toggle")||!strcmp(kind,"toogle"))&&
+             !strcmp(match.type,"toggle")){
+        snprintf(name,sizeof(name),"%.95s",match.name);
+        snprintf(value,sizeof(value),"%s",id==match.id1?"1":"0");
+    }else if(!strcmp(match.type,"list")){
+        snprintf(name,sizeof(name),"%s",match.list_name);
+        snprintf(value,sizeof(value),"%s",match.name);
+    }else{
+        snprintf(name,sizeof(name),"%.95s",match.name);
+        if(!strcmp(match.type,"info")||!strcmp(match.type,"range")){
+            if(!incoming){snprintf(answer,cap,"Valeur absente");return 400;}
+            snprintf(value,sizeof(value),"%s",incoming);
+        }else if(!strcmp(match.type,"color")){
+            if(!red||!green||!blue){snprintf(answer,cap,"Couleur invalide");return 400;}
+            unsigned ri=0,gi=0,bi=0;char trailing=0;
+            if(sscanf(red,"%u %c",&ri,&trailing)!=1||
+               sscanf(green,"%u %c",&gi,&trailing)!=1||
+               sscanf(blue,"%u %c",&bi,&trailing)!=1||
+               ri>255||gi>255||bi>255){
+                snprintf(answer,cap,"Couleur invalide");return 400;
+            }
+            snprintf(value,sizeof(value),"#%02x%02x%02x",ri,gi,bi);
+        }else if(!strcmp(match.type,"button"))snprintf(value,sizeof(value),"1");
+    }
+    if(!*name){snprintf(answer,cap,"Commande inconnue");return 404;}
+    if(strcmp(kind,"button")){
+        size_t n=strlen(name);
+        bool cover=n>=7&&!strcmp(name+n-7,"__cover");
+        if(strlen(value)>(cover?768u:159u)){
+            snprintf(answer,cap,"Valeur d'info trop longue");return 400;
+        }
+        if(!mira_full_enqueue_state(name,value)){
+            snprintf(answer,cap,"File d'etats pleine");return 503;
+        }
+        int event_id=list_group?match.id:(int)id;
+        if(event_id>0&&event_id<=4096)mira_sse_record_direct(event_id,value);
+    }
+    if(list_group)snprintf(answer,cap,"%d",match.id);
+    return 200;
+}
+
 // WT32 AsyncWebServer parity: /updatenr must never monopolize the IDF
 // dispatch task while resolving the widget cache or sending a TCP reply.
 // Keep a small fixed set of PSRAM workers rather than spawning a task per
@@ -2684,6 +2947,46 @@ static esp_err_t param_set(httpd_req_t *req){
     request_binding_sync();
     return httpd_resp_sendstr(req,"OK");
 }
+
+// Async transport for legacy WT32 /getparam and /updateparam family.
+// Authentication is checked by the ESPAsync worker before calling these.
+bool mira_jeedom_async_param_get(const char *name,char *out,size_t cap){
+    if(!out||cap<2)return false;
+    out[0]=0;
+    if(!name||!supported_jeedom_param(name))return false;
+    const mira_display_field_t *df=display_field(name);
+    if(df)return display_field_read(df,out,cap);
+    return mira_jeedom_copy_param(name,out,cap);
+}
+int mira_jeedom_async_param_set(const char *name,const char *value){
+    if(!name||!value||strlen(name)>=32||strlen(value)>=256||
+       !supported_jeedom_param(name)||
+       (!strcmp(name,"Jeedom")&&strcmp(value,"0")&&strcmp(value,"1")))
+        return 400;
+    const mira_display_field_t *display=display_field(name);
+    if(display)return display_field_write(display,value)?200:400;
+    nvs_handle_t nv;
+    int stage=1;
+    esp_err_t err=nvs_open("mira_idf_jeed",NVS_READWRITE,&nv);
+    if(err==ESP_OK){
+        stage=2;
+        err=nvs_set_str(nv,name,value);
+        if(err==ESP_OK){stage=3;err=nvs_commit(nv);}
+        nvs_close(nv);
+    }
+    __atomic_store_n(&jeedom_nvs_last_write_error,(int)err,__ATOMIC_RELAXED);
+    __atomic_store_n(&jeedom_nvs_last_write_stage,
+                     err==ESP_OK?0:stage,__ATOMIC_RELAXED);
+    if(err!=ESP_OK)return 500;
+    if(!strcmp(name,"Jeedom")){
+        jeedom_mode_enabled=!strcmp(value,"1");
+        jeedom_mode_known=true;
+    }
+    mira_http_param_written(name,value);
+    request_binding_sync();
+    return 200;
+}
+
 static esp_err_t param_saved(httpd_req_t *req){
     if(!require_key(req))return ESP_FAIL;
     // nvs_commit() already called by param_set().
@@ -2694,10 +2997,20 @@ static esp_err_t param_saved(httpd_req_t *req){
 static bool put_remote_binding(long id,const char *value){
     if(id<1||id>4096||!value||!decimal_id(value)||
        strlen(value)>30)return false;
-    char *config=read_config(NULL);
-    if(!config)return false;
-    const uint32_t hash=ui_config_hash(config);
-    free(config);
+    // The live index already carries the authoritative UI generation hash.
+    // Avoid reading SPIFFS once for every ID during a Jeedom synchronization.
+    uint32_t hash=0;
+    if(mira_index_mutex &&
+       xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(100))==pdTRUE){
+        hash=mira_index_hash;
+        xSemaphoreGive(mira_index_mutex);
+    }
+    if(!hash){
+        char *config=read_config(NULL);
+        if(!config)return false;
+        hash=ui_config_hash(config);
+        free(config);
+    }
     char key[14],binding[48];
     snprintf(key,sizeof(key),"cmd%ld",id);
     int n=snprintf(binding,sizeof(binding),"%08" PRIx32 ":%s",hash,value);
@@ -3711,6 +4024,668 @@ static esp_err_t mira_bindings_direct_post(httpd_req_t *req){
     ESP_LOGI(TAG,"WT32 direct HTTP bindings accepted: %u entries",(unsigned)updated);
     httpd_resp_set_type(req,"text/plain; charset=utf-8");
     return httpd_resp_sendstr(req,"OK");
+}
+
+
+
+
+// Authenticated raw LVGL programming snapshot; free() the returned buffer.
+char *mira_jeedom_async_lvgl_snapshot(size_t *length){
+    return read_config(length);
+}
+
+// Native async /programui. JSON was already form-decoded and authenticated;
+// the worker validates before atomically replacing the programmed LVGL file.
+int mira_jeedom_async_programui(const char *json,char *answer,size_t cap){
+    if(!answer||cap<32)return 500;
+    snprintf(answer,cap,"Programmation Mira invalide");
+    if(!json)return 400;
+    const size_t len=strlen(json);
+    if(len<2||len>MIRA_JSON_MAX)return 400;
+    cJSON *root=cJSON_ParseWithLength(json,len);
+    const cJSON *widgets=root?cJSON_GetObjectItemCaseSensitive(root,"lvgl"):NULL;
+    bool valid=cJSON_IsArray(widgets);
+    const int count=valid?cJSON_GetArraySize(widgets):0;
+    if(count>MIRA_WIDGET_LIMIT)valid=false;
+    if(valid){
+        const cJSON *entry=NULL;
+        cJSON_ArrayForEach(entry,widgets){
+            if(!cJSON_IsObject(entry)){valid=false;break;}
+        }
+    }
+    if(root)cJSON_Delete(root);
+    if(!valid)return 400;
+    FILE *out=fopen(MIRA_JSON_TMP,"wb");
+    if(!out){
+        snprintf(answer,cap,"SPIFFS non accessible");
+        return 500;
+    }
+    size_t written=fwrite(json,1,len,out);
+    int closed=fclose(out);
+    if(written!=len||closed!=0||!replace_lvgl_file_safely()){
+        remove(MIRA_JSON_TMP);
+        snprintf(answer,cap,"Enregistrement Mira echoue");
+        return 500;
+    }
+    cJSON_Delete(beta_lvgl_stage);beta_lvgl_stage=NULL;beta_lvgl_dirty=false;
+    if(!mira_index_rebuild())
+        ESP_LOGW(TAG,"Jeedom index cache rebuild failed after native programming");
+    mira_full_request_reload();
+    jeedom_state_replay_pending=true;
+    request_binding_sync();
+    ESP_LOGI(TAG,"ESPAsync /programui accepted (%u bytes)",(unsigned)len);
+    snprintf(answer,cap,"OK");
+    return 200;
+}
+
+// Fast read-only /get?toggle=, info= or infofa=, preserving WT32 labels.
+// Other /get selectors still go through the compatibility route.
+bool mira_jeedom_async_get_state(const char *kind,const char *selector,
+                                 char *out,size_t cap){
+    if(!out||cap<2||!kind||!selector)return false;
+    if(strcmp(kind,"toggle")&&strcmp(kind,"toogle")&&
+       strcmp(kind,"info")&&strcmp(kind,"infofa"))return false;
+    snprintf(out,cap,"Null");
+    if(!mira_index_mutex||!mira_action_refs)return false;
+    char *end=NULL;
+    long local=strtol(selector,&end,10);
+    if(!*selector||end==selector||*end||local<1||local>4096)return true;
+    bool is_toggle=!strcmp(kind,"toggle")||!strcmp(kind,"toogle");
+    bool match=false;
+    char name[96]={0};
+    if(xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(60))!=pdTRUE)
+        return false;
+    for(size_t i=0;i<mira_action_ref_count;i++){
+        const mira_action_ref_t *ref=&mira_action_refs[i];
+        bool same=is_toggle?(!strcmp(ref->type,"toggle")&&
+                (local==ref->id0||local==ref->id1)):
+                ((!strcmp(ref->type,kind))&&local==ref->id);
+        if(same){snprintf(name,sizeof(name),"%.95s",ref->name);match=true;break;}
+    }
+    xSemaphoreGive(mira_index_mutex);
+    if(!match)return true;
+    char value[160]={0};
+    const bool found=mira_full_cached_state(name,value,sizeof(value));
+    if(is_toggle){
+        const bool on=found&&(!strcasecmp(value,"On")||
+               !strcasecmp(value,"true")||!strcasecmp(value,"oui")||
+               !strcasecmp(value,"actif")||!strcmp(value,"1"));
+        snprintf(out,cap,"%s",on?"On":"Off");
+    }else if(found)snprintf(out,cap,"%s",value);
+    return true;
+}
+
+
+
+// Old beta staged widget editor, now callable without an HTTP loopback.
+// These routines do no networking and must run in the serialized worker.
+int mira_jeedom_async_screen_clear(void){
+    if(!beta_lvgl_ensure_stage())return 500;
+    cJSON_DeleteItemFromObjectCaseSensitive(beta_lvgl_stage,"lvgl");
+    if(!cJSON_AddArrayToObject(beta_lvgl_stage,"lvgl")){
+        cJSON_Delete(beta_lvgl_stage);
+        beta_lvgl_stage=NULL;
+        return 500;
+    }
+    beta_lvgl_dirty=true;
+    return 200;
+}
+static bool mira_async_field_valid(const char *s,size_t max,bool required){
+    return s&&strlen(s)<max&&(!required||*s);
+}
+int mira_jeedom_async_screen_add(
+      const char *type,const char *name,const char *loc,
+      const char *min,const char *max,const char *value,const char *unit,
+      const char *style,const char *layout,const char *label,
+      const char *icon,const char *display_name,
+      const char *lx,const char *ly,const char *lw,const char *lh,
+      char **preview){
+    if(preview)*preview=NULL;
+    if(!mira_async_field_valid(type,40,true)||
+       !mira_async_field_valid(name,97,false)||
+       !mira_async_field_valid(loc,24,false)||
+       !mira_async_field_valid(min,40,false)||
+       !mira_async_field_valid(max,40,false)||
+       !mira_async_field_valid(value,160,false)||
+       !mira_async_field_valid(unit,64,false))return 400;
+    if(!mira_async_field_valid(style,32,false)||
+       !mira_async_field_valid(layout,16,false)||
+       !mira_async_field_valid(label,12,false)||
+       !mira_async_field_valid(icon,32,false)||
+       !mira_async_field_valid(display_name,97,false))return 400;
+    const char *use_style=*style?style:"standard";
+    const char *use_layout=*layout?layout:"auto";
+    if(strcmp(use_layout,"tile")&&strcmp(use_layout,"wide")&&
+       strcmp(use_layout,"hero")&&strcmp(use_layout,"free"))
+        use_layout="auto";
+    const char *use_label=label;
+    if(strcmp(use_label,"text")&&strcmp(use_label,"icon")&&
+       strcmp(use_label,"both"))use_label="auto";
+    const char *use_icon=strlen(icon)>24?"auto":(*icon?icon:"auto");
+    int coords[4]={0};
+    if(!strcmp(use_layout,"free")){
+        const char *parts[]={lx,ly,lw,lh};
+        bool valid=true;
+        for(int i=0;i<4;i++){
+            if(!parts[i]||!parts[i][0]||strlen(parts[i])>19){
+                valid=false;break;
+            }
+            char *tail=NULL;
+            long n=strtol(parts[i],&tail,10);
+            if(*tail||n<0||n>1000){valid=false;break;}
+            coords[i]=(int)n;
+        }
+        if(coords[2]<=0||coords[3]<=0)valid=false;
+        if(!valid)use_layout="auto";
+    }
+    if(!beta_lvgl_ensure_stage())return 500;
+    cJSON *array=cJSON_GetObjectItemCaseSensitive(beta_lvgl_stage,"lvgl");
+    if(!cJSON_IsArray(array))return 500;
+    if(cJSON_GetArraySize(array)>=MIRA_WIDGET_LIMIT)return 400;
+    cJSON *item=cJSON_CreateObject();
+    if(!item)return 503;
+    bool valid=beta_lvgl_put(item,"type",type)&&
+               beta_lvgl_put(item,"name",name)&&
+               beta_lvgl_put(item,"emplacement",loc)&&
+               beta_lvgl_put(item,"min",min)&&beta_lvgl_put(item,"max",max)&&
+               beta_lvgl_put(item,"value",value)&&beta_lvgl_put(item,"unit",unit)&&
+               beta_lvgl_put(item,"style",use_style)&&
+               beta_lvgl_put(item,"layout",use_layout)&&
+               beta_lvgl_put(item,"labelMode",use_label)&&
+               beta_lvgl_put(item,"icon",use_icon)&&
+               beta_lvgl_put(item,"displayName",display_name);
+    if(valid&&!strcmp(use_layout,"free")){
+        const char *const keys[]={"lx","ly","lw","lh"};
+        for(int i=0;i<4&&valid;i++)
+            valid=cJSON_AddNumberToObject(item,keys[i],coords[i])!=NULL;
+    }
+    if(valid&&strcmp(type,"info")&&strcmp(type,"datetime"))
+        valid=beta_lvgl_put(item,"url","");
+    if(!valid){
+        cJSON_Delete(item);return 503;
+    }
+    cJSON_AddItemToArray(array,item);
+    beta_lvgl_dirty=true;
+    if(preview){
+        *preview=cJSON_Print(beta_lvgl_stage);
+        if(!*preview)return 503;
+    }
+    return 200;
+}
+int mira_jeedom_async_screen_save(void){
+    if(!beta_lvgl_dirty)return 200;
+    if(!beta_lvgl_stage)return 503;
+    const cJSON *pending=cJSON_GetObjectItemCaseSensitive(beta_lvgl_stage,"lvgl");
+    if(!cJSON_IsArray(pending)||cJSON_GetArraySize(pending)>MIRA_WIDGET_LIMIT)
+        return 400;
+    char *out=cJSON_PrintUnformatted(beta_lvgl_stage);
+    if(!out)return 503;
+    size_t len=strlen(out);
+    if(len>MIRA_JSON_MAX){cJSON_free(out);return 400;}
+    FILE *fp=fopen(MIRA_JSON_TMP,"wb");
+    if(!fp){cJSON_free(out);return 503;}
+    size_t bytes=fwrite(out,1,len,fp);
+    int closed=fclose(fp);
+    cJSON_free(out);
+    if(bytes!=len||closed!=0||!replace_lvgl_file_safely()){
+        remove(MIRA_JSON_TMP);return 503;
+    }
+    cJSON_Delete(beta_lvgl_stage);
+    beta_lvgl_stage=NULL;beta_lvgl_dirty=false;
+    if(!mira_index_rebuild())
+        ESP_LOGW(TAG,"Jeedom index rebuild failed after native screen save");
+    mira_full_request_reload();
+    jeedom_state_replay_pending=true;
+    request_binding_sync();
+    return 200;
+}
+
+
+// Save an authenticated camera URL with the same validation as /camera/config.
+int mira_jeedom_async_camera_config(const char *name,const char *url){
+    if(!name||!url||strlen(name)<1||strlen(name)>100||
+       !mira_camera_url_valid(url))return 400;
+    char *program=read_config(NULL);
+    if(!program)return 404;
+    cJSON *root=cJSON_Parse(program);
+    free(program);
+    const cJSON *arr=root?cJSON_GetObjectItemCaseSensitive(root,"lvgl"):NULL;
+    const cJSON *entry=NULL;
+    bool found=false;
+    cJSON_ArrayForEach(entry,arr){
+        if(!strcmp(jstr((cJSON *)entry,"type",""),"camera")&&
+           !strcmp(jstr((cJSON *)entry,"name",""),name)){
+            found=true;break;
+        }
+    }
+    cJSON_Delete(root);
+    if(!found)return 404;
+    return mira_camera_save_url(name,url)?200:503;
+}
+
+// Remaining lightweight APIs run in the PSRAM-backed ESPAsync worker.
+// Authentication and method validation are performed before these calls.
+int mira_jeedom_async_nav_get(bool favorites,char *out,size_t cap){
+    if(!out||cap<96)return 500;
+    nvs_handle_t nv;
+    if(!favorites){
+        uint8_t mask=0x3f;
+        if(nvs_open("miraui",NVS_READONLY,&nv)==ESP_OK){
+            (void)nvs_get_u8(nv,"pageMask",&mask);
+            nvs_close(nv);
+        }
+        snprintf(out,cap,"{\"mask\":%u}",(unsigned)((mask&0x3f)|1));
+    }else{
+        uint8_t fav[3]={0,1,2};
+        if(nvs_open("miraui",NVS_READONLY,&nv)==ESP_OK){
+            for(uint8_t i=0;i<3;i++){
+                char key[8];
+                snprintf(key,sizeof(key),"fav%u",(unsigned)i);
+                (void)nvs_get_u8(nv,key,&fav[i]);
+            }
+            nvs_close(nv);
+        }
+        snprintf(out,cap,"{\"favorites\":[%u,%u,%u]}",
+             (unsigned)fav[0],(unsigned)fav[1],(unsigned)fav[2]);
+    }
+    return 200;
+}
+int mira_jeedom_async_nav_post(bool favorites,const char *value){
+    if(!value)return 400;
+    nvs_handle_t nv;
+    if(!favorites){
+        const size_t n=strlen(value);
+        if(n<1||n>2)return 400;
+        for(const char *p=value;*p;p++)
+            if(!isdigit((unsigned char)*p))return 400;
+        const long mask=strtol(value,NULL,10);
+        if(mask<1||mask>63||!(mask&1))return 400;
+        esp_err_t err=nvs_open("miraui",NVS_READWRITE,&nv);
+        if(err!=ESP_OK)return 503;
+        err=nvs_set_u8(nv,"pageMask",(uint8_t)mask);
+        if(err==ESP_OK)err=nvs_commit(nv);
+        nvs_close(nv);
+        return err==ESP_OK?200:503;
+    }
+    if(strlen(value)>479)return 400;
+    cJSON *doc=cJSON_Parse(value);
+    const cJSON *items=doc?cJSON_GetObjectItemCaseSensitive(doc,"favorites"):NULL;
+    bool valid=cJSON_IsArray(items)&&cJSON_GetArraySize(items)==3;
+    uint8_t fav[3]={0};
+    if(valid)for(int i=0;i<3;i++){
+        const cJSON *v=cJSON_GetArrayItem(items,i);
+        if(!cJSON_IsNumber(v)||v->valuedouble!=v->valueint||
+           (v->valueint!=255&&(v->valueint<0||v->valueint>5))){
+            valid=false;break;
+        }
+        fav[i]=(uint8_t)v->valueint;
+        for(int j=0;j<i;j++)
+            if(fav[i]!=255&&fav[i]==fav[j])valid=false;
+    }
+    cJSON_Delete(doc);
+    if(!valid)return 400;
+    esp_err_t err=nvs_open("miraui",NVS_READWRITE,&nv);
+    if(err!=ESP_OK)return 503;
+    for(uint8_t i=0;i<3&&err==ESP_OK;i++){
+        char key[8];snprintf(key,sizeof(key),"fav%u",(unsigned)i);
+        err=nvs_set_u8(nv,key,fav[i]);
+    }
+    if(err==ESP_OK)err=nvs_commit(nv);
+    nvs_close(nv);
+    return err==ESP_OK?200:503;
+}
+
+// Returns malloc/cJSON-allocated JSON. Caller releases with free() after its
+// asynchronous response is drained. Preserve legacy encrypted key fields.
+char *mira_jeedom_async_allparams(size_t *length){
+    if(length)*length=0;
+    cJSON *root=NULL,*entries=NULL;
+    FILE *fp=fopen("/spiffs/params.json","rb");
+    if(fp){
+        long n=-1;
+        if(fseek(fp,0,SEEK_END)==0)n=ftell(fp);
+        if(n>1&&n<=32768&&fseek(fp,0,SEEK_SET)==0){
+            char *buf=malloc((size_t)n+1);
+            if(buf){
+                if(fread(buf,1,(size_t)n,fp)==(size_t)n){
+                    buf[n]=0;
+                    root=cJSON_ParseWithLength(buf,(size_t)n);
+                    entries=root?cJSON_GetObjectItemCaseSensitive(root,"params"):NULL;
+                    if(!cJSON_IsArray(entries)){
+                        cJSON_Delete(root);root=NULL;entries=NULL;
+                    }
+                }
+                free(buf);
+            }
+        }
+        fclose(fp);
+    }
+    if(!root){
+        root=cJSON_CreateObject();
+        entries=root?cJSON_AddArrayToObject(root,"params"):NULL;
+        if(!entries){cJSON_Delete(root);return NULL;}
+    }
+    static const char *const reflected[]={
+        "Jeedom","Jeedom_IP","Jeedom_Refresh","Jeedom_Init_Cmd"
+    };
+    // Overlay current NVS values in the original params list, never replacing
+    // legacy encrypted key fields with secrets from NVS.
+    cJSON *entry=NULL;
+    cJSON_ArrayForEach(entry,entries){
+        const char *name=jstr(entry,"param","");
+        if(!*name||strstr(name,"Key"))continue;
+        char value[256]={0};
+        const mira_display_field_t *display=display_field(name);
+        const bool found=display?display_field_read(display,value,sizeof(value)):
+                            supported_jeedom_param(name)&&
+                            mira_jeedom_copy_param(name,value,sizeof(value));
+        if(found)cJSON_ReplaceItemInObjectCaseSensitive(
+            entry,"value",cJSON_CreateString(value));
+        memset(value,0,sizeof(value));
+    }
+    for(size_t i=0;i<sizeof(reflected)/sizeof(reflected[0]);i++){
+        bool exists=false;
+        const cJSON *item=NULL;
+        cJSON_ArrayForEach(item,entries)
+            if(!strcmp(jstr((cJSON *)item,"param",""),reflected[i])){
+                exists=true;break;
+            }
+        if(exists)continue;
+        char value[256]={0};
+        if(!mira_jeedom_copy_param(reflected[i],value,sizeof(value)))continue;
+        cJSON *row=cJSON_CreateObject();
+        if(row){
+            cJSON_AddStringToObject(row,"param",reflected[i]);
+            cJSON_AddStringToObject(row,"value",value);
+            cJSON_AddStringToObject(row,"type",
+                 !strcmp(reflected[i],"Jeedom")?"toggle":"text");
+            cJSON_AddItemToArray(entries,row);
+        }
+        memset(value,0,sizeof(value));
+    }
+    for(size_t i=0;i<sizeof(display_fields)/sizeof(display_fields[0]);i++){
+        const char *name=display_fields[i].legacy;
+        bool exists=false;
+        const cJSON *item=NULL;
+        cJSON_ArrayForEach(item,entries)
+            if(!strcmp(jstr((cJSON *)item,"param",""),name)){
+                exists=true;break;
+            }
+        if(exists)continue;
+        char value[48]={0};
+        if(!display_field_read(&display_fields[i],value,sizeof(value)))continue;
+        cJSON *row=cJSON_CreateObject();
+        if(row){
+            cJSON_AddStringToObject(row,"param",name);
+            cJSON_AddStringToObject(row,"value",value);
+            cJSON_AddStringToObject(row,"type","text");
+            cJSON_AddItemToArray(entries,row);
+        }
+    }
+    char *json=cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if(json&&length)*length=strlen(json);
+    return json;
+}
+
+
+// WT32 Web controls: authenticated POST /update?send=..., send_range=...,
+// send_list=..., send_color=..., send_textbox=... . Transport is the same
+// queued asynchronous Jeedom/MQTT/GenericCmd path as local LVGL touches.
+// Never let an untrusted HTTP command invent a widget or execute an
+// actuator from a passive state update.
+int mira_jeedom_async_browser_action(const char *kind,const char *idtext,
+      const char *list,const char *value,
+      const char *red,const char *green,const char *blue){
+    if(!kind||!decimal_id(idtext))return 400;
+    long id=strtol(idtext,NULL,10);
+    if(id<1||id>4096)return 400;
+    const bool button=!strcmp(kind,"send");
+    const bool range=!strcmp(kind,"send_range");
+    const bool color=!strcmp(kind,"send_color");
+    const bool selection=!strcmp(kind,"send_list");
+    const bool input=!strcmp(kind,"send_textbox");
+    if(!button&&!range&&!color&&!selection&&!input)return 400;
+    // Read the existing resident action index, never regenerate it from
+    // SPIFFS on each button press.
+    char *raw=NULL;size_t length=0;
+    esp_err_t err=mira_jeedom_async_index_snapshot(&raw,&length);
+    if(err!=ESP_OK||!raw)return 503;
+    cJSON *doc=cJSON_ParseWithLength(raw,length);
+    heap_caps_free(raw);
+    if(!doc)return 503;
+    const cJSON *actions=cJSON_GetObjectItemCaseSensitive(doc,"actions");
+    const cJSON *item=NULL;
+    char action_name[96]={0},action_type[24]={0},payload[160]="1";
+    bool match=false;
+    cJSON_ArrayForEach(item,actions){
+        const char *type=jstr((cJSON *)item,"type","");
+        const char *name=jstr((cJSON *)item,"nom","");
+        if(!*name)continue;
+        if(button&&!strcmp(type,"toggle")&&
+           (jint((cJSON *)item,"id0",-1)==id||
+            jint((cJSON *)item,"id1",-1)==id)){
+            snprintf(action_name,sizeof(action_name),"%s",name);
+            snprintf(action_type,sizeof(action_type),"toggle");
+            snprintf(payload,sizeof(payload),"%d",
+                     jint((cJSON *)item,"id1",-1)==id);
+            match=true;break;
+        }
+        if(jint((cJSON *)item,"id",-1)!=id)continue;
+        if(button&&(!strcmp(type,"button")||!strcmp(type,"little_button"))){
+            snprintf(action_name,sizeof(action_name),"%s",name);
+            snprintf(action_type,sizeof(action_type),"button");
+            match=true;break;
+        }
+        if(selection&&!strcmp(type,"list")){
+            if(!list||strcmp(list,jstr((cJSON *)item,"nomliste","")))break;
+            snprintf(action_name,sizeof(action_name),"%s",list);
+            snprintf(action_type,sizeof(action_type),"list");
+            snprintf(payload,sizeof(payload),"%s",name);
+            match=true;break;
+        }
+        if(input&&!strcmp(type,"inputbox")){
+            if(!value||strlen(value)>=sizeof(payload))break;
+            snprintf(action_name,sizeof(action_name),"%s",name);
+            snprintf(action_type,sizeof(action_type),"inputbox");
+            snprintf(payload,sizeof(payload),"%s",value);
+            match=true;break;
+        }
+        if(range&&!strcmp(type,"range")){
+            if(!value||strlen(value)>=sizeof(payload))break;
+            char *tail=NULL;errno=0;
+            long n=strtol(value,&tail,10);
+            if(!*value||tail==value||*tail||errno==ERANGE||
+               n<jint((cJSON *)item,"min",0)||
+               n>jint((cJSON *)item,"max",100))break;
+            snprintf(action_name,sizeof(action_name),"%s",name);
+            snprintf(action_type,sizeof(action_type),"range");
+            snprintf(payload,sizeof(payload),"%s",value);
+            match=true;break;
+        }
+        if(color&&!strcmp(type,"color")){
+            const char *parts[]={red,green,blue};
+            int channels[3]={0};
+            bool valid=true;
+            for(int i=0;i<3;i++){
+                if(!parts[i]||!*parts[i]||strlen(parts[i])>3){
+                    valid=false;break;
+                }
+                char *tail=NULL;errno=0;
+                long n=strtol(parts[i],&tail,10);
+                if(tail==parts[i]||*tail||errno==ERANGE||n<0||n>255){
+                    valid=false;break;
+                }
+                channels[i]=(int)n;
+            }
+            if(!valid)break;
+            snprintf(action_name,sizeof(action_name),"%s",name);
+            snprintf(action_type,sizeof(action_type),"color");
+            snprintf(payload,sizeof(payload),"%d,%d,%d",
+                     channels[0],channels[1],channels[2]);
+            match=true;break;
+        }
+    }
+    cJSON_Delete(doc);
+    if(!match||!*action_name)return 404;
+    bool queued=mira_jeedom_actions_enabled()?
+        mira_jeedom_queue_local_action(action_name,action_type,payload):
+        mira_other_transport(action_name,action_type,payload);
+    if(!queued)return 503;
+    // Keep the WT32's live browser feedback separate from actuator sends.
+    char text[160]={0};
+    const char *sse=NULL;
+    if(range||input)sse=payload;
+    else if(selection)sse=action_name;
+    else if(color){
+        unsigned rr=0,gg=0,bb=0;
+        if(sscanf(payload,"%u,%u,%u",&rr,&gg,&bb)==3){
+            snprintf(text,sizeof(text),"#%02x%02x%02x",rr,gg,bb);
+            sse=text;
+        }
+    }
+    if(sse)mira_sse_record_direct((int)id,sse);
+    return 200;
+}
+
+// Native ESPAsyncWebServer Jeedom programming. Run these operations in the
+// dedicated PSRAM-backed HTTP worker, NEVER in the AsyncTCP callback.
+int mira_jeedom_async_set_binding(const char *id,const char *value){
+    if(!decimal_id(id)||!decimal_id(value))return 400;
+    return put_remote_binding(strtol(id,NULL,10),value)?200:400;
+}
+int mira_jeedom_async_set_toggle_binding(const char *id,
+                                          const char *off,const char *on){
+    if(!decimal_id(id)||!decimal_id(off)||!decimal_id(on))return 400;
+    long local=strtol(id,NULL,10);
+    if(local<1||local>=4096)return 400;
+    return put_remote_binding(local,off)&&put_remote_binding(local+1,on)?200:500;
+}
+int mira_jeedom_async_set_init_id(const char *id){
+    if(!decimal_id(id)||strlen(id)>=24)return 400;
+    nvs_handle_t nv;
+    esp_err_t err=nvs_open("mira_idf_jeed",NVS_READWRITE,&nv);
+    if(err==ESP_OK){
+        err=nvs_set_str(nv,"Jeedom_Init_Cmd",id);
+        if(err==ESP_OK)err=nvs_commit(nv);
+        nvs_close(nv);
+    }
+    if(err!=ESP_OK)return 500;
+    mira_http_param_written("Jeedom_Init_Cmd",id);
+    request_binding_sync();
+    return 200;
+}
+int mira_jeedom_async_bindings_json(const char *json,char *answer,size_t cap){
+    if(!answer||cap<48)return 500;
+    snprintf(answer,cap,"JSON associations invalide");
+    if(!json||strlen(json)>10000u)return 400;
+    cJSON *root=cJSON_Parse(json);
+    const cJSON *actions=root?cJSON_GetObjectItemCaseSensitive(root,"actions"):NULL;
+    const int count=cJSON_IsArray(actions)?cJSON_GetArraySize(actions):0;
+    if(count<1||count>256){
+        cJSON_Delete(root);
+        return 400;
+    }
+    mira_binding_cache_t *staged=heap_caps_calloc(1,sizeof(*staged),
+                                                  MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    mira_binding_update_t *updates=heap_caps_calloc(512,sizeof(*updates),
+                                                    MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!staged||!updates){
+        heap_caps_free(staged);heap_caps_free(updates);cJSON_Delete(root);
+        snprintf(answer,cap,"Memoire associations absente");
+        return 503;
+    }
+    size_t updated=0;
+    const bool lookup_ready=mira_index_mutex&&
+            xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(1000))==pdTRUE;
+    uint32_t generation=0;
+    if(lookup_ready){
+        generation=mira_index_hash;
+        if(mira_binding_cache&&mira_binding_cache->config_hash==generation)
+            memcpy(staged,mira_binding_cache,sizeof(*staged));
+        else staged->config_hash=generation;
+        const cJSON *incoming=NULL;
+        cJSON_ArrayForEach(incoming,actions){
+            const char *name=jstr((cJSON*)incoming,"nom","");
+            const char *type=jstr((cJSON*)incoming,"type","");
+            if(!*name||!*type)continue;
+            const bool toggle=!strcmp(type,"toggle");
+            const int id0=jint((cJSON*)incoming,toggle?"id0":"id",-1);
+            const int id1=toggle?jint((cJSON*)incoming,"id1",-1):-1;
+            for(size_t i=0;i<mira_action_ref_count;i++){
+                const mira_action_ref_t *ref=&mira_action_refs[i];
+                if(strcmp(ref->name,name)||strcmp(ref->type,type))continue;
+                if((toggle&&(id0!=ref->id0||id1!=ref->id1))||
+                   (!toggle&&id0!=ref->id))continue;
+                const int remote0=jint((cJSON*)incoming,
+                                       toggle?"jeedom0":"jeedom",-1);
+                const int remote1=toggle?jint((cJSON*)incoming,"jeedom1",-1):-1;
+                const int ids[]={id0,id1},remotes[]={remote0,remote1};
+                for(int j=0;j<(toggle?2:1);j++){
+                    if(ids[j]<1||ids[j]>4096||remotes[j]<1||updated>=512)continue;
+                    updates[updated].local=(uint16_t)ids[j];
+                    updates[updated].remote=(uint32_t)remotes[j];
+                    updated++;
+                    if(!staged->remote[ids[j]])staged->valid_count++;
+                    staged->remote[ids[j]]=(uint32_t)remotes[j];
+                }
+                break;
+            }
+        }
+        xSemaphoreGive(mira_index_mutex);
+    }
+    cJSON_Delete(root);
+    if(!lookup_ready||!generation||!updated){
+        heap_caps_free(staged);heap_caps_free(updates);
+        snprintf(answer,cap,"Aucun ID Jeedom correspondant");
+        return 409;
+    }
+    nvs_handle_t nv;
+    esp_err_t err=nvs_open("mira_idf_map",NVS_READWRITE,&nv);
+    if(err==ESP_OK){
+        char key[14],value[48],existing[48];
+        bool changed=false;
+        for(size_t i=0;i<updated&&err==ESP_OK;i++){
+            snprintf(key,sizeof(key),"cmd%u",(unsigned)updates[i].local);
+            snprintf(value,sizeof(value),"%08" PRIx32 ":%" PRIu32,
+                     generation,updates[i].remote);
+            existing[0]=0;
+            if(nvs_read_string(nv,key,existing,sizeof(existing))&&
+               !strcmp(existing,value))continue;
+            err=nvs_set_str(nv,key,value);
+            if(err==ESP_OK)changed=true;
+        }
+        if(err==ESP_OK&&changed)err=nvs_commit(nv);
+        nvs_close(nv);
+    }
+    heap_caps_free(updates);
+    if(err!=ESP_OK){
+        heap_caps_free(staged);
+        snprintf(answer,cap,"Sauvegarde associations impossible");
+        return 503;
+    }
+    bool published=false;
+    if(mira_index_mutex&&
+       xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(1000))==pdTRUE){
+        if(mira_index_hash==generation){
+            mira_binding_cache_t *previous=mira_binding_cache;
+            mira_binding_cache=staged;
+            staged=NULL;
+            xSemaphoreGive(mira_index_mutex);
+            heap_caps_free(previous);
+            published=true;
+        }else xSemaphoreGive(mira_index_mutex);
+    }
+    heap_caps_free(staged);
+    if(!published){
+        snprintf(answer,cap,"Programmation modifiee, relancer la synchro");
+        return 409;
+    }
+    last_binding_sync_http=200;
+    mira_mapping_last_ok_ms=(uint32_t)(esp_timer_get_time()/1000);
+    ESP_LOGI(TAG,"ESPAsync direct bindings accepted: %u entries",(unsigned)updated);
+    snprintf(answer,cap,"OK");
+    return 200;
 }
 
 static esp_err_t jeedom_status_get(httpd_req_t *req) {
@@ -4779,4 +5754,164 @@ void mira_jeedom_register_http(httpd_handle_t server,unsigned max_open_sockets) 
         esp_err_t err=httpd_register_uri_handler(server,&routes[i]);
         if(err!=ESP_OK)ESP_LOGE(TAG,"Route %s failed: %s",routes[i].uri,esp_err_to_name(err));
     }
+}
+
+// ESPAsyncWebServer native health JSON; identical counters to legacy.
+char *mira_jeedom_async_health_json(size_t *length){
+    if(length)*length=0;
+    wifi_ap_record_t ap={0};
+    const bool connected=esp_wifi_sta_get_ap_info(&ap)==ESP_OK;
+    uint32_t count=0,last_heap=0,lowest_heap=0;
+    mira_full_navigation_stats(&count,&last_heap,&lowest_heap);
+    mira_full_state_diagnostics_t diagnostic={0};
+    mira_full_state_diagnostics(&diagnostic);
+    mira_album_art_diag_t art={0};
+    mira_album_art_diagnostics(&art);
+    // Keep the HTTPD task's 7168B internal stack untouched; this potentially
+    // longer diagnostic response lives in PSRAM, not internal DMA memory.
+    const size_t cap=1536;
+    char *result=heap_caps_malloc(cap,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!result)return NULL;
+    const int written=snprintf(result,cap,
+        "{\"uptime_ms\":%llu,\"wifi\":%d,\"rssi_dbm\":%d,"
+        "\"heap_free\":%u,\"heap_min\":%u,\"heap_largest_block\":%u,"
+        "\"psram_free\":%u,\"nav_count\":%u,\"nav_last_heap\":%u,"
+        "\"nav_lowest_heap\":%u,\"internal_heap_free\":%u,"
+        "\"internal_largest_block\":%u,"
+        "\"internal_min_free\":%u,\"dma_min_free\":%u,"
+        "\"widget_table_psram\":%s,\"widget_table_bytes\":%u,"
+        "\"state_cache_used\":%u,\"state_cache_capacity\":%u,"
+        "\"state_unchanged\":%u,\"state_cache_evictions\":%u,"
+        "\"state_queue_dropped\":%u,\"state_queue_pending\":%u,"
+        "\"media_range_updates\":%u,\"media_range_overlays\":%u,"
+        "\"media_cover_received\":%u,\"media_cover_matched\":%u,"
+        "\"media_cover_unmatched\":%u,"
+        "\"media_art_requests\":%u,\"media_art_rejected\":%u,"
+        "\"media_art_started\":%u,\"media_art_worker_errors\":%u,"
+        "\"media_art_fetch_ok\":%u,\"media_art_fetch_failed\":%u,"
+        "\"media_art_frames_taken\":%u,"
+        "\"media_art_last_phase\":%ld,\"media_art_last_http_status\":%ld,"
+        "\"media_art_last_connect_error\":%ld,\"media_art_last_tls_error\":%ld,"
+        "\"media_art_last_tls_flags\":%ld,\"media_art_last_socket_errno\":%ld}",
+        (unsigned long long)(esp_timer_get_time()/1000),
+        connected?3:6,connected?(int)ap.rssi:0,
+        (unsigned)esp_get_free_heap_size(),
+        (unsigned)esp_get_minimum_free_heap_size(),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+        (unsigned)count,(unsigned)last_heap,(unsigned)lowest_heap,
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+        (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+        (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA),
+        mira_full_widget_table_in_psram()?"true":"false",
+        (unsigned)mira_full_widget_table_bytes(),
+        (unsigned)diagnostic.state_cache_used,
+        (unsigned)diagnostic.state_cache_capacity,
+        (unsigned)diagnostic.state_unchanged,
+        (unsigned)diagnostic.state_cache_evictions,
+        (unsigned)diagnostic.state_queue_dropped,
+        (unsigned)diagnostic.state_queue_pending,
+        (unsigned)__atomic_load_n(&mira_media_range_updates,__ATOMIC_RELAXED),
+        (unsigned)__atomic_load_n(&mira_media_range_overlays,__ATOMIC_RELAXED),
+        (unsigned)diagnostic.media_cover_received,
+        (unsigned)diagnostic.media_cover_matched,
+        (unsigned)diagnostic.media_cover_unmatched,
+        (unsigned)art.requests,(unsigned)art.rejected,
+        (unsigned)art.started,(unsigned)art.worker_errors,
+        (unsigned)art.fetch_ok,(unsigned)art.fetch_failed,
+        (unsigned)art.frames_taken,
+        (long)art.last_phase,(long)art.last_http_status,
+        (long)art.last_connect_error,(long)art.last_tls_error,
+        (long)art.last_tls_flags,(long)art.last_socket_errno);
+    if(written<0||(size_t)written>=cap){
+        heap_caps_free(result);return NULL;
+    }
+    if(length)*length=(size_t)written;
+    return result;
+}
+
+
+// Native Jeedom mapping diagnostics for ESPAsync-only builds.
+// Uses the same PSRAM resident action index and NVS generation as /getindex.
+char *mira_jeedom_async_status_json(size_t *length){
+    if(length)*length=0;
+    int total=0,valid=0,first_missing=-1;
+    uint32_t hash=0;unsigned cached=0;
+    int *ids=(int*)heap_caps_calloc(1280,sizeof(int),
+                                     MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!ids)return NULL;
+    if(!mira_index_mutex||
+       xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(250))!=pdTRUE){
+        heap_caps_free(ids);return NULL;
+    }
+    if(!mira_action_refs||mira_action_ref_count>640){
+        xSemaphoreGive(mira_index_mutex);heap_caps_free(ids);return NULL;
+    }
+    hash=mira_index_hash;
+    for(size_t i=0;i<mira_action_ref_count;i++){
+        const mira_action_ref_t *ref=&mira_action_refs[i];
+        if(!strcmp(ref->type,"toggle")){
+            ids[total++]=ref->id0;
+            ids[total++]=ref->id1;
+        }else ids[total++]=ref->id;
+    }
+    cached=mira_binding_cache?(unsigned)mira_binding_cache->valid_count:0;
+    bool mapping_valid=jeedom_mode_enabled&&total>0&&
+        mira_binding_cache&&mira_binding_cache->config_hash==hash&&
+        cached>=(unsigned)total;
+    xSemaphoreGive(mira_index_mutex);
+    nvs_handle_t map;
+    esp_err_t map_err=nvs_open("mira_idf_map",NVS_READONLY,&map);
+    char prefix[12];
+    snprintf(prefix,sizeof(prefix),"%08" PRIx32 ":",hash);
+    for(int i=0;i<total;i++){
+        char key[14],stored[48]={0};
+        snprintf(key,sizeof(key),"cmd%d",ids[i]);
+        if(map_err==ESP_OK&&ids[i]>=1&&ids[i]<=4096&&
+           nvs_read_string(map,key,stored,sizeof(stored))&&
+           !strncmp(stored,prefix,9)&&decimal_id(stored+9))valid++;
+        else if(first_missing<0)first_missing=ids[i];
+    }
+    if(map_err==ESP_OK)nvs_close(map);
+    heap_caps_free(ids);
+    nvs_stats_t stats={0};
+    esp_err_t stats_err=nvs_get_stats(NULL,&stats);
+    mira_full_state_diagnostics_t health={0};
+    mira_full_state_diagnostics(&health);
+    char *out=(char*)heap_caps_malloc(1152,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!out)return NULL;
+    int n=snprintf(out,1152,
+       "{\"jeedom_enabled\":%s,\"mapping_valid\":%s,"
+       "\"ids_valid\":%d,\"ids_expected\":%d,"
+       "\"mapping_first_missing_local_id\":%d,"
+       "\"mapping_persistent_valid\":%s,"
+       "\"mapping_nvs_read_error\":%d,\"nvs_stats_error\":%d,"
+       "\"nvs_used_entries\":%u,\"nvs_free_entries\":%u,"
+       "\"last_init_http\":%d,\"state_cache_used\":%u,"
+       "\"replay_pending\":%s,\"replay_attempts\":%u,\"replay_acks\":%u,"
+       "\"replay_last_http\":%d,\"index_builds\":%u,\"index_failures\":%u,"
+       "\"index_live_fields\":%u,\"index_responses\":%u,"
+       "\"http_bindings_cached\":%u,"
+       "\"http_clients_active\":0,\"http_clients_limit\":0,"
+       "\"http_passive_pending\":%u,\"http_passive_rejected\":%u}",
+       jeedom_mode_enabled?"true":"false",mapping_valid?"true":"false",
+       valid,total,first_missing,total>0&&valid==total?"true":"false",
+       (int)map_err,(int)stats_err,
+       (unsigned)stats.used_entries,(unsigned)stats.free_entries,
+       last_binding_sync_http,(unsigned)health.state_cache_used,
+       jeedom_state_replay_pending?"true":"false",
+       (unsigned)__atomic_load_n(&jeedom_replay_attempts,__ATOMIC_RELAXED),
+       (unsigned)__atomic_load_n(&jeedom_replay_acks,__ATOMIC_RELAXED),
+       jeedom_last_replay_http,
+       (unsigned)__atomic_load_n(&mira_index_builds,__ATOMIC_RELAXED),
+       (unsigned)__atomic_load_n(&mira_index_failures,__ATOMIC_RELAXED),
+       (unsigned)mira_index_fields_count,
+       (unsigned)__atomic_load_n(&mira_index_responses,__ATOMIC_RELAXED),
+       cached,
+       mira_passive_requests?(unsigned)uxQueueMessagesWaiting(mira_passive_requests):0u,
+       (unsigned)__atomic_load_n(&mira_passive_async_dropped,__ATOMIC_RELAXED));
+    if(n<0||n>=1152){heap_caps_free(out);return NULL;}
+    if(length)*length=(size_t)n;
+    return out;
 }
