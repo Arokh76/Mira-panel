@@ -5,7 +5,6 @@
 // First-run and low-memory rescue stay on native :80 (no async front end).
 #include <Arduino.h>
 #include <ESPAsyncWebServer.h>
-#include <esp_http_client.h>
 #include <esp_heap_caps.h>
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
@@ -43,23 +42,8 @@ static QueueHandle_t proxy_queue=nullptr;
 #define MIRA_SSE_LIMIT 640u
 #define MIRA_SSE_BURST 20u
 
-struct ProxyBody {
-    size_t used;
-    size_t total;
-    uint8_t data[1];
-};
 struct ProxyJob {
     AsyncWebServerRequestPtr request;
-};
-struct ProxyResult {
-    uint8_t *bytes=nullptr;
-    size_t size=0,capacity=0;
-    bool failed=false;
-    char type[96]="text/plain; charset=utf-8";
-    char location[256]={0};
-    char authenticate[192]={0};
-    char cache_control[96]={0};
-    char retry_after[32]={0};
 };
 struct SsePrevious {int id;char value[160];};
 static SsePrevious *previous=nullptr;
@@ -135,86 +119,6 @@ static void testmodule_get(AsyncWebServerRequest *r){
     if(!public_key(r)){forbidden(r);return;}
     r->send(200,"text/plain","Tout est OK");
 }
-
-// The following helpers keep all other HTTP routes (including browser /,
-// /get, /programui, /update, setup, media and controls) reachable from :80.
-// Network IO is NEVER performed in AsyncTCP's callback thread.
-static void append_encoded(std::string& out,const String& str){
-    static const char *hex="0123456789ABCDEF";
-    for(size_t i=0;i<str.length();i++){
-        unsigned char v=(unsigned char)str[i];
-        if((v>='A'&&v<='Z')||(v>='a'&&v<='z')||
-           (v>='0'&&v<='9')||v=='-'||v=='_'||v=='.'||v=='~')
-            out.push_back((char)v);
-        else {out.push_back('%');out.push_back(hex[v>>4]);out.push_back(hex[v&15]);}
-    }
-}
-static bool proxy_url(AsyncWebServerRequest *r,std::string& url){
-    url="http://127.0.0.1:8081";
-    url+=r->url().c_str();
-    bool first=true;
-    for(size_t i=0;i<r->params();i++){
-        const auto *p=r->getParam(i);
-        if(!p||(p->isPost()||p->isFile()))continue;
-        url.push_back(first?'?':'&');first=false;
-        append_encoded(url,p->name());url.push_back('=');
-        append_encoded(url,p->value());
-        if(url.length()>3500)return false;
-    }
-    return true;
-}
-static bool proxy_body(AsyncWebServerRequest *r,std::string& body){
-    if(r->contentLength()>MIRA_PROXY_MAX_BODY)return false;
-    auto *captured=(ProxyBody *)r->_tempObject;
-    if(captured&&captured->total==r->contentLength()&&
-       captured->used==captured->total){
-        body.assign((const char *)captured->data,captured->used);
-        return true;
-    }
-    // ESPAsyncWebServer parses application/x-www-form-urlencoded into
-    // request params itself and does not fire onBody for those POSTs.
-    bool first=true;
-    for(size_t i=0;i<r->params();i++){
-        const auto *p=r->getParam(i);
-        if(!p||!p->isPost())continue;
-        if(!first)body.push_back('&');
-        first=false;
-        append_encoded(body,p->name());body.push_back('=');
-        append_encoded(body,p->value());
-        if(body.length()>MIRA_PROXY_MAX_BODY)return false;
-    }
-    return !r->contentLength()||!body.empty();
-}
-static esp_err_t proxy_event(esp_http_client_event_t *e){
-    ProxyResult *p=(ProxyResult *)e->user_data;
-    if(!p)return ESP_FAIL;
-    if(e->event_id==HTTP_EVENT_ON_HEADER&&e->header_key&&e->header_value){
-        if(!strcasecmp(e->header_key,"Content-Type"))
-            snprintf(p->type,sizeof(p->type),"%s",e->header_value);
-        if(!strcasecmp(e->header_key,"Location"))
-            snprintf(p->location,sizeof(p->location),"%s",e->header_value);
-        if(!strcasecmp(e->header_key,"WWW-Authenticate"))
-            snprintf(p->authenticate,sizeof(p->authenticate),"%s",e->header_value);
-        if(!strcasecmp(e->header_key,"Cache-Control"))
-            snprintf(p->cache_control,sizeof(p->cache_control),"%s",e->header_value);
-        if(!strcasecmp(e->header_key,"Retry-After"))
-            snprintf(p->retry_after,sizeof(p->retry_after),"%s",e->header_value);
-    }else if(e->event_id==HTTP_EVENT_ON_DATA&&e->data_len>0){
-        size_t n=(size_t)e->data_len;
-        if(p->size+n>MIRA_PROXY_MAX_RESPONSE){p->failed=true;return ESP_FAIL;}
-        if(p->size+n>p->capacity){
-            size_t cap=std::max(p->size+n,p->capacity?p->capacity*2u:4096u);
-            cap=std::min(cap,(size_t)MIRA_PROXY_MAX_RESPONSE);
-            uint8_t *expanded=(uint8_t *)heap_caps_realloc(p->bytes,cap,
-                                      MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
-            if(!expanded){p->failed=true;return ESP_FAIL;}
-            p->bytes=expanded;p->capacity=cap;
-        }
-        memcpy(p->bytes+p->size,e->data,n);p->size+=n;
-    }
-    return ESP_OK;
-}
-
 
 // WT32-style first-run wizard on the same AsyncWebServer. Legacy native
 // HTTPD never binds port 80, including while the device is unconfigured.
@@ -735,135 +639,39 @@ static bool native_jeedom_request(AsyncWebServerRequest *r){
 }
 
 bool mira_async_render_page(AsyncWebServerRequest *r);
+bool mira_async_handle_beta(AsyncWebServerRequest *r);
+bool mira_async_render_page(AsyncWebServerRequest *r);
 static void proxy_worker(void *unused){
     (void)unused;
     ProxyJob *job=nullptr;
     for(;;){
-        if(xQueueReceive(proxy_queue,&job,portMAX_DELAY)!=pdTRUE||!job)continue;
+        if(xQueueReceive(proxy_queue,&job,portMAX_DELAY)!=pdTRUE||!job)
+            continue;
         std::unique_ptr<ProxyJob> owner(job);
         auto request=job->request.lock();
-        if(!request)continue; // client disconnected while queued
+        if(!request)continue;
+        // All work runs here in a PSRAM-backed task, not AsyncTCP callbacks.
         if(native_jeedom_request(request.get()))continue;
+        if(mira_async_handle_beta(request.get()))continue;
         if(mira_async_render_page(request.get()))continue;
-        std::string url,body;
-        if(!proxy_url(request.get(),url)){
-            request->send(414,"text/plain","URI trop longue");continue;
-        }
-        bool is_body=request->method()==AsyncWebRequestMethod::HTTP_POST||
-                     request->method()==AsyncWebRequestMethod::HTTP_PUT||
-                     request->method()==AsyncWebRequestMethod::HTTP_PATCH;
-        if(is_body&&!proxy_body(request.get(),body)){
-            request->send(413,"text/plain","Contenu trop volumineux");continue;
-        }
-        ProxyResult result;
-        esp_http_client_config_t conf={};
-        conf.url=url.c_str();
-        conf.timeout_ms=3500;
-        conf.event_handler=proxy_event;
-        conf.user_data=&result;
-        conf.disable_auto_redirect=true;
-        esp_http_client_handle_t h=esp_http_client_init(&conf);
-        if(!h){
-            request->send(503,"text/plain","Proxy HTTP indisponible");continue;
-        }
-        esp_http_client_method_t method=HTTP_METHOD_GET;
-        if(request->method()==AsyncWebRequestMethod::HTTP_POST)method=HTTP_METHOD_POST;
-        else if(request->method()==AsyncWebRequestMethod::HTTP_PUT)method=HTTP_METHOD_PUT;
-        else if(request->method()==AsyncWebRequestMethod::HTTP_DELETE)method=HTTP_METHOD_DELETE;
-        else if(request->method()==AsyncWebRequestMethod::HTTP_PATCH)method=HTTP_METHOD_PATCH;
-        esp_http_client_set_method(h,method);
-        for(const char *key:{"Authorization","Content-Type","X-Mira-GPIO","Cookie"}){
-            if(request->hasHeader(key)){
-                String value=request->header(key);
-                esp_http_client_set_header(h,key,value.c_str());
-            }
-        }
-        if(is_body){
-            if(!request->hasHeader("Content-Type"))
-                esp_http_client_set_header(h,"Content-Type",
-                                           "application/x-www-form-urlencoded");
-            esp_http_client_set_post_field(h,body.data(),(int)body.size());
-        }
-        esp_err_t err=esp_http_client_perform(h);
-        int status=esp_http_client_get_status_code(h);
-        esp_http_client_cleanup(h);
-        // A remote browser may close before the worker completes.
-        if(!request->client()||!request->client()->connected()){
-            heap_caps_free(result.bytes);continue;
-        }
-        if(err!=ESP_OK||result.failed||status<100){
-            heap_caps_free(result.bytes);
-            request->send(504,"text/plain","Mira legacy route indisponible");
-            continue;
-        }
-        if(result.size==0){
-            heap_caps_free(result.bytes);
-            AsyncWebServerResponse *resp=request->beginResponse(
-                status,result.type,"");
-            if(result.location[0])resp->addHeader("Location",result.location);
-            if(result.authenticate[0])resp->addHeader("WWW-Authenticate",result.authenticate);
-            if(result.cache_control[0])resp->addHeader("Cache-Control",result.cache_control);
-            if(result.retry_after[0])resp->addHeader("Retry-After",result.retry_after);
-            request->send(resp);continue;
-        }
-        // Keep bytes alive until the async response has completely drained.
-        auto response_owner=std::shared_ptr<uint8_t>(
-            result.bytes,[](uint8_t *p){heap_caps_free(p);});
-        size_t length=result.size;
-        AsyncWebServerResponse *resp=request->beginResponse(
-            result.type,length,
-            [response_owner,length](uint8_t *out,size_t max,size_t offset)->size_t{
-                if(offset>=length)return 0;
-                size_t n=std::min(max,length-offset);
-                memcpy(out,response_owner.get()+offset,n);
-                return n;
-            });
-        resp->setCode(status);
-        if(result.location[0])resp->addHeader("Location",result.location);
-        if(result.authenticate[0])resp->addHeader("WWW-Authenticate",result.authenticate);
-        if(result.cache_control[0])resp->addHeader("Cache-Control",result.cache_control);
-        if(result.retry_after[0])resp->addHeader("Retry-After",result.retry_after);
-        request->send(resp);
+        request->send(404,"text/plain; charset=utf-8",
+            "Route Mira absente sur ESPAsyncWebServer");
     }
 }
 static void proxy_request(AsyncWebServerRequest *r){
-    if(!proxy_queue){r->send(503,"text/plain","Proxy non initialise");return;}
+    if(!proxy_queue){r->send(503,"text/plain","Serveur Mira indisponible");return;}
     if(r->contentLength()>MIRA_PROXY_MAX_BODY){
-        // Huge firmware uploads cannot be buffered behind a reverse proxy.
-        // Preserve native OTA through explicit legacy URL on :8081.
-        String host=r->host();
-        int port=host.indexOf(':');
-        if(port>=0)host=host.substring(0,port);
-        std::string legacy;
-        if(!proxy_url(r,legacy)){r->send(414,"text/plain","URI trop longue");return;}
-        const std::string prefix="http://127.0.0.1:8081";
-        String target="http://"+host+":8081"+String(legacy.c_str()+prefix.size());
-        AsyncWebServerResponse *resp=r->beginResponse(307,"text/plain",
-                "OTA sur serveur de compatibilite :8081");
-        resp->addHeader("Location",target);
-        r->send(resp);return;
+        r->send(413,"text/plain","Formulaire trop volumineux");return;
     }
     ProxyJob *job=new(std::nothrow) ProxyJob;
-    if(!job){r->send(503,"text/plain","Memoire proxy epuisee");return;}
+    if(!job){r->send(503,"text/plain","Memoire HTTP epuisee");return;}
     job->request=r->pause();
     if(xQueueSend(proxy_queue,&job,0)!=pdTRUE){
         r->send(503,"text/plain","File HTTP occupee");
         delete job;
     }
 }
-static void body_receive(AsyncWebServerRequest *r,uint8_t *data,
-                         size_t len,size_t index,size_t total){
-    if(!total||total>MIRA_PROXY_MAX_BODY||index>total||len>total-index)return;
-    ProxyBody *buf=(ProxyBody *)r->_tempObject;
-    if(index==0&&!buf){
-        buf=(ProxyBody *)heap_caps_malloc(sizeof(ProxyBody)+total,
-                                           MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
-        if(!buf)return;
-        buf->used=0;buf->total=total;r->_tempObject=buf;
-    }
-    if(!buf||buf->total!=total||buf->used!=index)return;
-    memcpy(buf->data+index,data,len);buf->used+=len;
-}
+
 static bool basic_auth(AsyncWebServerRequest *r){
     char password[97]={0};
     bool ok=mira_beta_web_auth_key_copy(password,sizeof(password));
@@ -951,7 +759,10 @@ extern "C" void mira_async_web_start(void){
     server.on("/displayinfo",AsyncWebRequestMethod::HTTP_GET,proxy_request);
     server.on("/doUpdateFile",AsyncWebRequestMethod::HTTP_POST,
               ota_upload_complete,ota_upload);
-    server.on("/update",AsyncWebRequestMethod::HTTP_GET,ota_page);
+    server.on("/update",AsyncWebRequestMethod::HTTP_GET,[](AsyncWebServerRequest *r){
+        if(r->hasParam("key"))updatenr_get(r);
+        else ota_page(r);
+    });
     server.on("/updatemodule",AsyncWebRequestMethod::HTTP_GET,ota_page);
     server.on("/api/otastatus",AsyncWebRequestMethod::HTTP_GET,[](AsyncWebServerRequest *r){
         if(!basic_auth(r)){r->requestAuthentication();return;}
@@ -995,11 +806,9 @@ extern "C" void mira_async_web_start(void){
         __atomic_add_fetch(&replay_epoch,1u,__ATOMIC_RELAXED);
     });
     server.addHandler(&events);
-    // Native 8081 continues to host configuration, file OTA and legacy APIs,
-    // but the Jeedom client and browser stay on :80 (no redirect).
+    // WT32 architecture: a single ESPAsyncWebServer handles every public route.
     server.onNotFound(proxy_request);
-    server.onRequestBody(body_receive);
     server.begin();
     started=true;
-    ESP_LOGI(TAG,"ASYNC_HTTP_PORT80_READY: direct /getindex /updatenr /events, proxy :8081");
+    ESP_LOGI(TAG,"ASYNC_ONLY_PORT80_READY: Jeedom, SSE, setup, UI and OTA; no HTTPD");
 }
