@@ -1131,13 +1131,13 @@ static void configure_beta_ap_profile(void){
 // 7168B internal task stack is returned after idle clients have disconnected.
 static httpd_handle_t compat_httpd;
 static SemaphoreHandle_t compat_http_gate;
-static volatile int64_t compat_last_used_ms;
+static volatile uint32_t compat_last_used_ms;
 static volatile uint32_t compat_start_count,compat_stop_count;
 static esp_err_t start_native_http(bool setup_only,bool emergency_port80);
 static void compat_http_maybe_stop(void);
 void mira_recovery_compat_touch(void){
     __atomic_store_n(&compat_last_used_ms,
-                     (int64_t)(esp_timer_get_time()/1000),__ATOMIC_RELEASE);
+                     (uint32_t)(esp_timer_get_time()/1000),__ATOMIC_RELEASE);
 }
 static esp_err_t start_native_http(bool setup_only,bool emergency_port80) {
     ESP_LOGI(TAG,"Startup stack available before HTTP: %u bytes",
@@ -1272,7 +1272,7 @@ static esp_err_t start_native_http(bool setup_only,bool emergency_port80) {
     if(!emergency_port80&&!setup_only){
         compat_httpd=httpd;
         __atomic_store_n(&compat_last_used_ms,
-                         (int64_t)(esp_timer_get_time()/1000),__ATOMIC_RELEASE);
+                         (uint32_t)(esp_timer_get_time()/1000),__ATOMIC_RELEASE);
         ESP_LOGI(TAG,"COMPAT_HTTP_LAZY_READY: temporary legacy routes on port 8081");
     }else if(emergency_port80){
         http_recovery_only=true;
@@ -1468,18 +1468,18 @@ esp_err_t mira_recovery_start_emergency_http(void){
 bool mira_recovery_compat_http_active(void){return compat_httpd!=NULL;}
 static void compat_http_maybe_stop(void){
     if(!compat_http_gate||!compat_httpd)return;
-    const int64_t now=esp_timer_get_time()/1000;
-    const int64_t last=__atomic_load_n(&compat_last_used_ms,__ATOMIC_ACQUIRE);
+    const uint32_t now=(uint32_t)(esp_timer_get_time()/1000);
+    const uint32_t last=__atomic_load_n(&compat_last_used_ms,__ATOMIC_ACQUIRE);
     // The legacy browser is an occasional maintenance path. Keep it alive
     // for five minutes after the last proxied request, never while connected.
-    if(now-last<300000)return;
+    if((uint32_t)(now-last)<300000u)return;
     if(xSemaphoreTake(compat_http_gate,0)!=pdTRUE)return;
     if(compat_httpd){
         size_t clients=12;
         int fds[12]={0};
         const esp_err_t err=httpd_get_client_list(compat_httpd,&clients,fds);
         if(err==ESP_OK&&clients==0 &&
-           now-__atomic_load_n(&compat_last_used_ms,__ATOMIC_ACQUIRE)>=300000){
+           (uint32_t)(now-__atomic_load_n(&compat_last_used_ms,__ATOMIC_ACQUIRE))>=300000u){
             httpd_handle_t old=compat_httpd;
             compat_httpd=NULL;
             mira_jeedom_http_detach();
