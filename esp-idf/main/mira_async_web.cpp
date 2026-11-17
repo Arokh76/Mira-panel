@@ -22,6 +22,7 @@
 #include <esp_wifi.h>
 #include <esp_netif.h>
 #include <nvs.h>
+#include <cJSON.h>
 #include "mira_beta_setup_pages.h"
 
 #include "mira_async_web.h"
@@ -30,6 +31,7 @@ extern "C" {
 #include "mira_beta_web.h"
 #include "mira_beta_setup.h"
 #include "mira_recovery.h"
+#include "mira_full.h"
 }
 
 static const char *TAG="mira7-async";
@@ -367,6 +369,67 @@ x.send(new FormData(document.getElementById("ota")));}</script></html>)HTML";
     r->send_P(200,"text/html; charset=utf-8",html);
 }
 
+
+// JSON imports and passive test states are accepted as bounded raw bodies,
+// unlike the multi-megabyte file upload. Copy to PSRAM on AsyncTCP, process
+// the complete object only on the HTTP worker. No second HTTP server.
+struct AsyncJsonBody {size_t used,total;char data[1];};
+static void native_json_body(AsyncWebServerRequest *r,uint8_t *data,
+                             size_t len,size_t index,size_t total){
+    const String path=r->url();
+    size_t limit=path=="/mira/state"?512u:49152u;
+    if(path!="/mira/state"&&path!="/mira/import")return;
+    if(!total||total>limit||index>total||len>total-index)return;
+    auto *buf=(AsyncJsonBody*)r->_tempObject;
+    if(index==0&&!buf){
+        buf=(AsyncJsonBody*)heap_caps_malloc(sizeof(AsyncJsonBody)+total,
+                                              MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+        if(!buf)return;
+        buf->used=0;buf->total=total;r->_tempObject=buf;
+    }
+    if(!buf||buf->total!=total||buf->used!=index)return;
+    memcpy(buf->data+index,data,len);
+    buf->used+=len;
+    if(buf->used==buf->total)buf->data[buf->used]=0;
+}
+static bool native_json_request(AsyncWebServerRequest *r){
+    const String path=r->url();
+    if(path!="/mira/state"&&path!="/mira/import")return false;
+    if(!basic_auth(r)){r->requestAuthentication();return true;}
+    auto *raw=(AsyncJsonBody*)r->_tempObject;
+    if(!raw||!raw->total||raw->used!=raw->total){
+        r->send(400,"text/plain","JSON incomplet ou trop volumineux");
+        return true;
+    }
+    r->_tempObject=nullptr;
+    auto owner=std::unique_ptr<AsyncJsonBody,void(*)(AsyncJsonBody*)>(
+        raw,[](AsyncJsonBody *p){heap_caps_free(p);});
+    if(path=="/mira/import"){
+        char answer[112]={0};
+        int code=mira_jeedom_async_programui(raw->data,answer,sizeof(answer));
+        r->send(code,"text/plain; charset=utf-8",
+                code==200?"Configuration Mira importee. Redemarrer si les widgets ne sont pas affiches.":answer);
+        return true;
+    }
+    cJSON *doc=cJSON_Parse(raw->data);
+    const cJSON *name=doc?cJSON_GetObjectItemCaseSensitive(doc,"name"):nullptr;
+    const cJSON *value=doc?cJSON_GetObjectItemCaseSensitive(doc,"value"):nullptr;
+    const char *val=cJSON_IsString(value)?value->valuestring:nullptr;
+    char scalar[48]={0};
+    if(cJSON_IsNumber(value)){
+        snprintf(scalar,sizeof(scalar),"%.9g",value->valuedouble);val=scalar;
+    }else if(cJSON_IsBool(value))val=cJSON_IsTrue(value)?"1":"0";
+    bool valid=cJSON_IsString(name)&&name->valuestring&&
+        strlen(name->valuestring)>0&&strlen(name->valuestring)<96&&
+        val&&strlen(val)<160;
+    bool queued=valid&&mira_full_enqueue_state(name->valuestring,val);
+    cJSON_Delete(doc);
+    if(!valid){r->send(400,"text/plain","Etat JSON invalide");return true;}
+    if(!queued){r->send(503,"text/plain","File d'etats pleine");return true;}
+    r->send(200,"application/json","{\"queued\":true,\"action\":false}");
+    return true;
+}
+
 // Authenticated Jeedom programming: no HTTP loopback; processed in PSRAM worker.
 static bool basic_auth(AsyncWebServerRequest *r);
 static bool native_jeedom_request(AsyncWebServerRequest *r){
@@ -679,6 +742,7 @@ static void proxy_worker(void *unused){
         if(!request)continue;
         // All work runs here in a PSRAM-backed task, not AsyncTCP callbacks.
         if(native_jeedom_request(request.get()))continue;
+        if(native_json_request(request.get()))continue;
         if(mira_async_handle_beta(request.get()))continue;
         if(mira_async_render_page(request.get()))continue;
         request->send(404,"text/plain; charset=utf-8",
@@ -800,6 +864,8 @@ extern "C" void mira_async_web_start(void){
             __atomic_load_n(&ota_busy,__ATOMIC_ACQUIRE)?"true":"false");
         r->send(200,"application/json",answer);
     });
+    server.on("/mira/import",AsyncWebRequestMethod::HTTP_POST,proxy_request);
+    server.on("/mira/state",AsyncWebRequestMethod::HTTP_POST,proxy_request);
     server.on("/mira-health",AsyncWebRequestMethod::HTTP_GET,proxy_request);
     server.on("/mira/jeedom/status",AsyncWebRequestMethod::HTTP_GET,proxy_request);
     server.on("/getindex",AsyncWebRequestMethod::HTTP_GET,index_get);
@@ -841,6 +907,7 @@ extern "C" void mira_async_web_start(void){
     });
     server.addHandler(&events);
     // WT32 architecture: a single ESPAsyncWebServer handles every public route.
+    server.onRequestBody(native_json_body);
     server.onNotFound(proxy_request);
     server.begin();
     started=true;
