@@ -16,6 +16,7 @@
 #include "mira_display.h"
 #include "mira_full.h"
 #include "mira_recovery.h"
+#include "mira_async_web.h"
 #include "mira_beta_setup.h"
 #include "mira_jeedom.h"
 #include "mira_mqtt.h"
@@ -100,6 +101,9 @@ void app_main(void){
         for(;;)vTaskDelay(pdMS_TO_TICKS(1000));
     }
     ESP_LOGI(TAG,"FULL_NET_READY: native Mira AP/STA + HTTP setup");
+    // Parallel transport smoke-test ONLY: 8081 is AsyncTCP/ESPAsyncWebServer;
+    // 80 remains native until full protocol, auth, SSE and OTA parity is proven.
+    mira_async_web_start();
     progress(60);
     if(mira_recovery_web_fallback()){
         if(esp_lv_adapter_lock(-1)==ESP_OK){
