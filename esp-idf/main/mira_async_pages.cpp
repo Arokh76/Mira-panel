@@ -768,6 +768,29 @@ static volatile uint32_t network_nonce=0;
 static volatile int64_t network_nonce_started=0;
 bool mira_async_handle_beta(AsyncWebServerRequest *r){
     const String path=r->url();
+    if(path=="/update"&&r->method()==AsyncWebRequestMethod::HTTP_POST){
+        if(!authorized(r))return true;
+        static const char *const kinds[]={
+            "send","send_range","send_list","send_color","send_textbox"
+        };
+        for(const char *kind:kinds){
+            if(!r->hasParam(kind))continue;
+            const String target=q(r,kind);
+            const String list=q(r,"list"),value=q(r,"value");
+            const String text=q(r,"text");
+            const String red=q(r,"r"),green=q(r,"g"),blue=q(r,"b");
+            const int status=mira_jeedom_async_browser_action(
+                kind,target.c_str(),list.c_str(),
+                !strcmp(kind,"send_textbox")?text.c_str():value.c_str(),
+                red.c_str(),green.c_str(),blue.c_str());
+            r->send(status,"text/plain; charset=utf-8",
+                    status==200?"OK":"Commande Mira indisponible");
+            return true;
+        }
+        r->send(400,"text/plain","Type de commande historique absent");
+        return true;
+    }
+
     if(path=="/mira/wifi/scan"&&r->method()==AsyncWebRequestMethod::HTTP_GET){
         if(!authorized(r))return true;
         r->send(200,"application/json",
