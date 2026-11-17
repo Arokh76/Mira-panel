@@ -3958,6 +3958,51 @@ static esp_err_t mira_bindings_direct_post(httpd_req_t *req){
 
 
 
+
+// Native async /programui. JSON was already form-decoded and authenticated;
+// the worker validates before atomically replacing the programmed LVGL file.
+int mira_jeedom_async_programui(const char *json,char *answer,size_t cap){
+    if(!answer||cap<32)return 500;
+    snprintf(answer,cap,"Programmation Mira invalide");
+    if(!json)return 400;
+    const size_t len=strlen(json);
+    if(len<2||len>MIRA_JSON_MAX)return 400;
+    cJSON *root=cJSON_ParseWithLength(json,len);
+    const cJSON *widgets=root?cJSON_GetObjectItemCaseSensitive(root,"lvgl"):NULL;
+    bool valid=cJSON_IsArray(widgets);
+    const int count=valid?cJSON_GetArraySize(widgets):0;
+    if(count>MIRA_WIDGET_LIMIT)valid=false;
+    if(valid){
+        const cJSON *entry=NULL;
+        cJSON_ArrayForEach(entry,widgets){
+            if(!cJSON_IsObject(entry)){valid=false;break;}
+        }
+    }
+    if(root)cJSON_Delete(root);
+    if(!valid)return 400;
+    FILE *out=fopen(MIRA_JSON_TMP,"wb");
+    if(!out){
+        snprintf(answer,cap,"SPIFFS non accessible");
+        return 500;
+    }
+    size_t written=fwrite(json,1,len,out);
+    int closed=fclose(out);
+    if(written!=len||closed!=0||!replace_lvgl_file_safely()){
+        remove(MIRA_JSON_TMP);
+        snprintf(answer,cap,"Enregistrement Mira echoue");
+        return 500;
+    }
+    cJSON_Delete(beta_lvgl_stage);beta_lvgl_stage=NULL;beta_lvgl_dirty=false;
+    if(!mira_index_rebuild())
+        ESP_LOGW(TAG,"Jeedom index cache rebuild failed after native programming");
+    mira_full_request_reload();
+    jeedom_state_replay_pending=true;
+    request_binding_sync();
+    ESP_LOGI(TAG,"ESPAsync /programui accepted (%u bytes)",(unsigned)len);
+    snprintf(answer,cap,"OK");
+    return 200;
+}
+
 // Fast read-only /get?toggle=, info= or infofa=, preserving WT32 labels.
 // Other /get selectors still go through the compatibility route.
 bool mira_jeedom_async_get_state(const char *kind,const char *selector,
