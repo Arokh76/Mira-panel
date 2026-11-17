@@ -564,6 +564,75 @@ static bool save_display(AsyncWebServerRequest *r){
     mira_full_request_settings_reload();
     redirect(r,"/load?nav=params");return true;
 }
+
+// Same nonblocking Wi-Fi selector behavior as the WT32 web manager.
+// The scan runs in a temporary task and never blocks the AsyncTCP thread.
+static portMUX_TYPE wifi_scan_lock=portMUX_INITIALIZER_UNLOCKED;
+static bool wifi_scan_busy=false,wifi_scan_ready=false,wifi_scan_failed=false;
+static int64_t wifi_scan_finished_us=0;
+static char wifi_scan_ssids[12][33]={{0}};
+static uint16_t wifi_scan_count=0;
+static void async_wifi_scan_task(void *){
+    wifi_ap_record_t records[12]={};
+    uint16_t count=12;
+    const esp_err_t result=esp_wifi_scan_start(nullptr,true);
+    esp_err_t read=result;
+    if(result==ESP_OK)read=esp_wifi_scan_get_ap_records(&count,records);
+    if(read!=ESP_OK)count=0;
+    portENTER_CRITICAL(&wifi_scan_lock);
+    wifi_scan_count=count;
+    for(uint16_t i=0;i<count;i++){
+        memcpy(wifi_scan_ssids[i],records[i].ssid,32);
+        wifi_scan_ssids[i][32]=0;
+    }
+    wifi_scan_failed=read!=ESP_OK;
+    wifi_scan_finished_us=esp_timer_get_time();
+    wifi_scan_ready=true;
+    wifi_scan_busy=false;
+    portEXIT_CRITICAL(&wifi_scan_lock);
+    vTaskDelete(nullptr);
+}
+void mira_async_wifi_scan(AsyncWebServerRequest *r){
+    bool start=false;
+    char names[12][33]={{0}};
+    uint16_t count=0;
+    bool busy=false,failed=false;
+    const int64_t now=esp_timer_get_time();
+    portENTER_CRITICAL(&wifi_scan_lock);
+    if(!wifi_scan_busy&&
+       (!wifi_scan_ready||now-wifi_scan_finished_us>60000000LL)){
+        wifi_scan_busy=true;
+        start=true;
+    }
+    busy=wifi_scan_busy;
+    failed=wifi_scan_failed;
+    if(wifi_scan_ready&&!busy){
+        count=wifi_scan_count;
+        for(uint16_t i=0;i<count;i++)memcpy(names[i],wifi_scan_ssids[i],33);
+    }
+    portEXIT_CRITICAL(&wifi_scan_lock);
+    if(start&&xTaskCreate(async_wifi_scan_task,"mira_scan_wifi",4096,
+                          NULL,2,NULL)!=pdPASS){
+        portENTER_CRITICAL(&wifi_scan_lock);
+        wifi_scan_busy=false;wifi_scan_failed=true;wifi_scan_ready=true;
+        wifi_scan_finished_us=now;
+        portEXIT_CRITICAL(&wifi_scan_lock);
+        busy=false;failed=true;
+    }
+    cJSON *root=cJSON_CreateObject();
+    cJSON *array=root?cJSON_AddArrayToObject(root,"networks"):nullptr;
+    if(!array){cJSON_Delete(root);r->send(503,"text/plain","Scan impossible");return;}
+    cJSON_AddBoolToObject(root,"busy",busy);
+    cJSON_AddBoolToObject(root,"failed",!busy&&failed);
+    for(uint16_t i=0;i<count;i++)
+        if(names[i][0])cJSON_AddItemToArray(array,cJSON_CreateString(names[i]));
+    char *json=cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if(!json){r->send(503,"text/plain","JSON scan indisponible");return;}
+    r->send(200,"application/json",json);
+    cJSON_free(json);
+}
+
 static volatile uint32_t network_nonce=0;
 static volatile int64_t network_nonce_started=0;
 bool mira_async_handle_beta(AsyncWebServerRequest *r){
