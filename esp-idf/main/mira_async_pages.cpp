@@ -456,11 +456,92 @@ static const char* choose_template(AsyncWebServerRequest *r){
     if(nav=="configAP")return mira_beta_config_ap_html;
     if(nav=="listnetwork")return mira_beta_known_networks_html;
     if(nav=="update")return mira_beta_edit_network_html;
-    if(nav=="id")return mira_beta_params_html;
+    // /load?nav=id is rendered by render_http_reference().
     if(nav=="checkupdate")return mira_beta_system_html;
     return nullptr;
 }
+// Preserve the historic WT32 "Requetes HTTP" command-reference page.
+// Previously /load?nav=id accidentally displayed the Parameters page.
+static bool render_http_reference(AsyncWebServerRequest *r){
+    if(r->url()!="/load"||q(r,"nav")!="id")return false;
+    char pass[97]={0};
+    bool authenticated=mira_beta_web_auth_key_copy(pass,sizeof(pass))&&
+                       r->authenticate("admin",pass);
+    memset(pass,0,sizeof(pass));
+    if(!authenticated){r->requestAuthentication();return true;}
+    PsramPage out;
+    bool ok=out.add(R"HTML(<!doctype html><html lang="fr"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mira Panel - Requêtes HTTP</title>
+<style>body{margin:0;background:#7193A0;font-family:Arial,sans-serif;color:#263238}
+header{background:#1E5064;color:white;padding:20px;font-size:22px;font-weight:700}
+main{max-width:900px;margin:30px auto;padding:20px;background:white;border-radius:18px}
+article{padding:14px 0;border-bottom:1px solid #d9e2e6}
+code{overflow-wrap:anywhere;background:#f5f8f9;padding:5px}
+a{color:#1E5064}p{line-height:1.5}</style>
+<header>Mira Panel · Requêtes HTTP</header><main>
+<p><a href="/load?nav=params">Retour aux paramètres</a></p>
+<p>Identifiants issus de la programmation Mira active. Remplace
+<code>VOTRE_CLE</code> dans les exemples par la clé locale ; elle n'est jamais affichée ici.</p>)HTML");
+    char *raw=nullptr;size_t len=0;
+    const bool index_ok=mira_jeedom_async_index_snapshot(&raw,&len)==ESP_OK&&raw;
+    cJSON *doc=index_ok?cJSON_ParseWithLength(raw,len):nullptr;
+    heap_caps_free(raw);
+    const cJSON *actions=doc?cJSON_GetObjectItemCaseSensitive(doc,"actions"):nullptr;
+    bool any=false;
+    const cJSON *action=nullptr;
+    cJSON_ArrayForEach(action,actions){
+        if(!ok)break;
+        const char *type=field(action,"type"),*name=field(action,"nom");
+        if(!*name)continue;
+        int id=number(action,"id");
+        char example[300]={0};
+        if(!strcmp(type,"toggle")){
+            int off=number(action,"id0"),on=number(action,"id1");
+            if(off<1||on<1)continue;
+            snprintf(example,sizeof(example),
+                     "/update?key=VOTRE_CLE&amp;toggle=%d (OFF) / %d (ON)",off,on);
+        }else if((!strcmp(type,"button")||!strcmp(type,"little_button"))&&id>0)
+            snprintf(example,sizeof(example),"/update?key=VOTRE_CLE&amp;button=%d",id);
+        else if(!strcmp(type,"info")&&id>0)
+            snprintf(example,sizeof(example),"/update?key=VOTRE_CLE&amp;info=%d&amp;value=25",id);
+        else if(!strcmp(type,"range")&&id>0)
+            snprintf(example,sizeof(example),"/update?key=VOTRE_CLE&amp;range=%d&amp;value=50",id);
+        else if(!strcmp(type,"color")&&id>0)
+            snprintf(example,sizeof(example),
+                     "/update?key=VOTRE_CLE&amp;color=%d&amp;r=255&amp;g=0&amp;b=0",id);
+        else if(!strcmp(type,"list")&&id>0)
+            snprintf(example,sizeof(example),
+                     "/update?key=VOTRE_CLE&amp;listvalue=...&amp;value=...");
+        else continue;
+        ok=out.add("<article><strong>")&&out.escaped(name)&&
+           out.add("</strong> · ")&&out.escaped(type)&&
+           out.add("<p><code>")&&out.add(example)&&
+           out.add("</code></p></article>");
+        any=true;
+    }
+    cJSON_Delete(doc);
+    if(ok&&!any)ok=out.add("<p>Aucune commande HTTP programmée.</p>");
+    if(ok)ok=out.add("</main></html>");
+    if(!ok||!out.data){
+        r->send(503,"text/plain","Memoire HTML insuffisante");return true;
+    }
+    size_t size=out.len;
+    auto owner=std::shared_ptr<char>(out.release(),[](char *p){heap_caps_free(p);});
+    auto *response=r->beginResponse("text/html; charset=utf-8",size,
+       [owner,size](uint8_t *dst,size_t max,size_t offset)->size_t{
+           if(offset>=size)return 0;
+           size_t n=std::min(max,size-offset);
+           memcpy(dst,owner.get()+offset,n);
+           return n;
+       });
+    response->addHeader("Cache-Control","no-store");
+    r->send(response);
+    return true;
+}
+
 bool mira_async_render_page(AsyncWebServerRequest *r){
+    if(render_http_reference(r))return true;
     const char *page=choose_template(r);
     if(!page)return false;
     char key[97]={0};
