@@ -6,3 +6,9 @@ dependencies:
   # remains the fast primary decoder; JPEGDEC is only used after a failure.
   bitbank2/jpegdec: "1.6.2"
   espressif/esp-dsp: "1.6.0"
+
+  # Same event-driven HTTP/TCP implementation as Mira WT32.
+  # Pinned versions: do not pull unreviewed library updates into OTA builds.
+  espressif/arduino-esp32: "3.3.12"
+  esp32async/asynctcp: "3.6.1"
+  esp32async/espasyncwebserver: "3.12.1"
