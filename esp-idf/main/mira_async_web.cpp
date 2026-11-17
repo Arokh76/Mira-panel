@@ -339,6 +339,7 @@ struct AsyncOtaState {
     bool failed=false;
     bool completed=false;
     bool verified=false;
+    bool owns_slot=false;
 };
 static bool ota_busy=false;
 static volatile unsigned ota_last_status=0;
@@ -354,12 +355,15 @@ static void ota_upload(AsyncWebServerRequest *r,const String& filename,
         r->_tempObject=ctx;
         if(!basic_auth(r)||filename.length()<5||
            !filename.endsWith(".bin")||
-           !r->contentLength()||r->contentLength()<65536 ||
-           __atomic_exchange_n(&ota_busy,true,__ATOMIC_ACQ_REL)){
+           !r->contentLength()||r->contentLength()<65536){
             ctx->failed=true;
             ota_last_status=403;
             return;
         }
+        if(__atomic_exchange_n(&ota_busy,true,__ATOMIC_ACQ_REL)){
+            ctx->failed=true;ota_last_status=409;return;
+        }
+        ctx->owns_slot=true;
         ctx->target=esp_ota_get_next_update_partition(NULL);
         if(!ctx->target||r->contentLength()>ctx->target->size+4096u||
            !len||!data||data[0]!=0xe9){
@@ -427,8 +431,9 @@ static void ota_upload_complete(AsyncWebServerRequest *r){
     if(ctx->begun)esp_ota_abort(ctx->handle);
     ctx->begun=false;
     r->_tempObject=nullptr;
+    const bool owned=ctx->owns_slot;
     heap_caps_free(ctx);
-    __atomic_store_n(&ota_busy,false,__ATOMIC_RELEASE);
+    if(owned)__atomic_store_n(&ota_busy,false,__ATOMIC_RELEASE);
     if(!basic_auth(r)){r->requestAuthentication();return;}
     if(!ok){
         r->send(400,"text/plain; charset=utf-8",
@@ -865,6 +870,7 @@ static bool basic_auth(AsyncWebServerRequest *r){
     memset(password,0,sizeof(password));
     return match;
 }
+extern "C" bool mira_async_web_ready(void){return started;}
 extern "C" void mira_async_web_emit_direct(int id,const char *value){
     if(!started||id<1||id>4096||!value)return;
     char event_name[16];
