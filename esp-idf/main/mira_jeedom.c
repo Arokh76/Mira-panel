@@ -2927,10 +2927,20 @@ static esp_err_t param_saved(httpd_req_t *req){
 static bool put_remote_binding(long id,const char *value){
     if(id<1||id>4096||!value||!decimal_id(value)||
        strlen(value)>30)return false;
-    char *config=read_config(NULL);
-    if(!config)return false;
-    const uint32_t hash=ui_config_hash(config);
-    free(config);
+    // The live index already carries the authoritative UI generation hash.
+    // Avoid reading SPIFFS once for every ID during a Jeedom synchronization.
+    uint32_t hash=0;
+    if(mira_index_mutex &&
+       xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(100))==pdTRUE){
+        hash=mira_index_hash;
+        xSemaphoreGive(mira_index_mutex);
+    }
+    if(!hash){
+        char *config=read_config(NULL);
+        if(!config)return false;
+        hash=ui_config_hash(config);
+        free(config);
+    }
     char key[14],binding[48];
     snprintf(key,sizeof(key),"cmd%ld",id);
     int n=snprintf(binding,sizeof(binding),"%08" PRIx32 ":%s",hash,value);
