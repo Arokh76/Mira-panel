@@ -204,6 +204,59 @@ static esp_err_t proxy_event(esp_http_client_event_t *e){
     }
     return ESP_OK;
 }
+
+// Authenticated Jeedom programming: no HTTP loopback; processed in PSRAM worker.
+static bool basic_auth(AsyncWebServerRequest *r);
+static bool native_jeedom_request(AsyncWebServerRequest *r){
+    const String path=r->url();
+    const bool batch=path=="/actions/bindings";
+    const bool single=path=="/setjeedomid";
+    const bool toggle=path=="/setjeedomtoggleid";
+    const bool init=path=="/sendjeedomorderid";
+    if(!batch&&!single&&!toggle&&!init)return false;
+    if(batch){
+        if(!mira_beta_web_auth_key_present()){
+            r->send(503,"text/plain; charset=utf-8","Cle Mira indisponible");
+            return true;
+        }
+        if(!basic_auth(r)){
+            AsyncWebServerResponse *resp=r->beginResponse(
+                401,"text/plain; charset=utf-8","Authentification Mira Panel requise");
+            resp->addHeader("WWW-Authenticate",
+                            "Basic realm=\"Mira Panel\", charset=\"UTF-8\"");
+            r->send(resp);
+            return true;
+        }
+        if(!r->hasHeader("X-Mira-Bindings")||
+           r->header("X-Mira-Bindings")!="1"){
+            r->send(400,"text/plain","En-tete bindings absent");
+            return true;
+        }
+        const auto *param=r->getParam("json",true);
+        // Unknown body formats retain the original compatible native handler.
+        if(!param)return false;
+        const String json=param->value();
+        char answer[112]={0};
+        const int code=mira_jeedom_async_bindings_json(json.c_str(),
+                                                       answer,sizeof(answer));
+        r->send(code,"text/plain; charset=utf-8",answer);
+        return true;
+    }
+    if(!public_key(r)){forbidden(r);return true;}
+    const String id=param_or_empty(r,"id");
+    const String value=param_or_empty(r,"value");
+    int code=400;
+    if(single)code=mira_jeedom_async_set_binding(id.c_str(),value.c_str());
+    else if(toggle){
+        const String off=param_or_empty(r,"value0");
+        const String on=param_or_empty(r,"value1");
+        code=mira_jeedom_async_set_toggle_binding(id.c_str(),off.c_str(),on.c_str());
+    }else if(init)code=mira_jeedom_async_set_init_id(value.c_str());
+    r->send(code,"text/plain; charset=utf-8",
+            code==200?"OK":"Association Jeedom impossible");
+    return true;
+}
+
 static void proxy_worker(void *unused){
     (void)unused;
     ProxyJob *job=nullptr;
@@ -212,6 +265,7 @@ static void proxy_worker(void *unused){
         std::unique_ptr<ProxyJob> owner(job);
         auto request=job->request.lock();
         if(!request)continue; // client disconnected while queued
+        if(native_jeedom_request(request.get()))continue;
         std::string url,body;
         if(!proxy_url(request.get(),url)){
             request->send(414,"text/plain","URI trop longue");continue;
@@ -402,6 +456,10 @@ extern "C" void mira_async_web_start(void){
         ESP_LOGW(TAG,"ASYNC_SSE_REPLAY_TASK_FAILED (direct events still active)");
     server.on("/getindex",AsyncWebRequestMethod::HTTP_GET,index_get);
     server.on("/updatenr",AsyncWebRequestMethod::HTTP_GET,updatenr_get);
+    server.on("/actions/bindings",AsyncWebRequestMethod::HTTP_POST,proxy_request);
+    server.on("/setjeedomid",AsyncWebRequestMethod::HTTP_GET,proxy_request);
+    server.on("/setjeedomtoggleid",AsyncWebRequestMethod::HTTP_GET,proxy_request);
+    server.on("/sendjeedomorderid",AsyncWebRequestMethod::HTTP_GET,proxy_request);
     server.on("/getmodule",AsyncWebRequestMethod::HTTP_GET,getmodule_get);
     server.on("/testmodule",AsyncWebRequestMethod::HTTP_GET,testmodule_get);
     server.on("/mira/async-health",AsyncWebRequestMethod::HTTP_GET,[](AsyncWebServerRequest *r){
