@@ -1168,7 +1168,12 @@ esp_err_t mira_recovery_init(void) {
         }
     };
     boot_stage="wifi_mode";
-    ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_APSTA), TAG, "wifi mode");
+    // WT32-style safe key recovery: when the key is missing, use AP-only
+    // mode so the unauthenticated first-run wizard is never reachable
+    // through the user's LAN/STA address. Saved Wi-Fi stays in NVS.
+    const bool key_ready=mira_beta_web_auth_key_present();
+    ESP_RETURN_ON_ERROR(esp_wifi_set_mode(
+        key_ready?WIFI_MODE_APSTA:WIFI_MODE_AP), TAG, "wifi mode");
     boot_stage="ap_config";
     ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_AP, &ap), TAG, "wifi config");
     configure_beta_ap_profile();
@@ -1263,7 +1268,7 @@ esp_err_t mira_recovery_init(void) {
         }
         station_configured=true;
         legacy_apply_manual_ip();
-        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_connect());
+        if(key_ready)ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_connect());
     }
 
     // WT32 architecture: all HTTP, initial setup, emergency pages and OTA
