@@ -3957,6 +3957,44 @@ static esp_err_t mira_bindings_direct_post(httpd_req_t *req){
 }
 
 
+
+// Fast read-only /get?toggle=, info= or infofa=, preserving WT32 labels.
+// Other /get selectors still go through the compatibility route.
+bool mira_jeedom_async_get_state(const char *kind,const char *selector,
+                                 char *out,size_t cap){
+    if(!out||cap<2||!kind||!selector)return false;
+    if(strcmp(kind,"toggle")&&strcmp(kind,"toogle")&&
+       strcmp(kind,"info")&&strcmp(kind,"infofa"))return false;
+    snprintf(out,cap,"Null");
+    if(!mira_index_mutex||!mira_action_refs)return false;
+    char *end=NULL;
+    long local=strtol(selector,&end,10);
+    if(!*selector||end==selector||*end||local<1||local>4096)return true;
+    bool is_toggle=!strcmp(kind,"toggle")||!strcmp(kind,"toogle");
+    bool match=false;
+    char name[96]={0};
+    if(xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(60))!=pdTRUE)
+        return false;
+    for(size_t i=0;i<mira_action_ref_count;i++){
+        const mira_action_ref_t *ref=&mira_action_refs[i];
+        bool same=is_toggle?(!strcmp(ref->type,"toggle")&&
+                (local==ref->id0||local==ref->id1)):
+                ((!strcmp(ref->type,kind))&&local==ref->id);
+        if(same){snprintf(name,sizeof(name),"%s",ref->name);match=true;break;}
+    }
+    xSemaphoreGive(mira_index_mutex);
+    if(!match)return true;
+    char value[160]={0};
+    const bool found=mira_full_cached_state(name,value,sizeof(value));
+    if(is_toggle){
+        const bool on=found&&(!strcasecmp(value,"On")||
+               !strcasecmp(value,"true")||!strcasecmp(value,"oui")||
+               !strcasecmp(value,"actif")||!strcmp(value,"1"));
+        snprintf(out,cap,"%s",on?"On":"Off");
+    }else if(found)snprintf(out,cap,"%s",value);
+    return true;
+}
+
 // Native ESPAsyncWebServer Jeedom programming. Run these operations in the
 // dedicated PSRAM-backed HTTP worker, NEVER in the AsyncTCP callback.
 int mira_jeedom_async_set_binding(const char *id,const char *value){
