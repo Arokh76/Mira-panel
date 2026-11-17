@@ -138,52 +138,182 @@ static bool widget_rows(PsramPage& out,bool mqtt){
                            "<div class='empty'>Aucun widget programme</div>");
     return true;
 }
+// Accueil uniquement : restaurer à l'identique les commandes HTML de
+// experiment/espasync-finish-7std (ancien moteur beta), avec la PSRAM Async.
 static bool action_rows(PsramPage& out){
-    char *json=nullptr;size_t len=0;
-    if(mira_jeedom_async_index_snapshot(&json,&len)!=ESP_OK||!json)
+    char *raw=nullptr;size_t length=0;
+    if(mira_jeedom_async_index_snapshot(&raw,&length)!=ESP_OK||!raw)
         return out.add("<p>Aucune programmation Mira Panel.</p>");
-    cJSON *root=cJSON_ParseWithLength(json,len);
-    heap_caps_free(json);
-    const cJSON *actions=root?cJSON_GetObjectItemCaseSensitive(root,"actions"):nullptr;
+    cJSON *index=cJSON_ParseWithLength(raw,length);
+    heap_caps_free(raw);
+    const cJSON *actions=index?cJSON_GetObjectItemCaseSensitive(index,"actions"):nullptr;
+    if(!cJSON_IsArray(actions)){
+        cJSON_Delete(index);
+        return out.add("<p>Aucune programmation Mira Panel.</p>");
+    }
+    const auto jnum=[](const cJSON *obj,const char *key,int fallback)->int{
+        const cJSON *v=cJSON_GetObjectItemCaseSensitive(obj,key);
+        if(cJSON_IsNumber(v))return v->valueint;
+        if(cJSON_IsString(v)&&v->valuestring)return atoi(v->valuestring);
+        return fallback;
+    };
+    const auto html_id=[&out](int id)->bool{
+        char buffer[24];
+        snprintf(buffer,sizeof(buffer),"%d",id);
+        return out.add(buffer);
+    };
+    const auto html_value=[&out](const char *name,const char *fallback)->bool{
+        char cached[160]={0};
+        return out.escaped(mira_full_cached_state(name,cached,sizeof(cached))?
+                           cached:fallback);
+    };
     const cJSON *item=nullptr;
     bool ok=true,any=false;
+    char seen_groups[16][96]={{0}};
+    unsigned group_count=0;
     cJSON_ArrayForEach(item,actions){
-        const char *name=field(item,"nom"),*type=field(item,"type");
-        const int id=number(item,"id");
+        const char *type=field(item,"type"),*name=field(item,"nom");
+        const int id=jnum(item,"id",-1);
         if(!*name)continue;
-        char local[256];
         if((!strcmp(type,"button")||!strcmp(type,"little_button"))&&id>0){
-            snprintf(local,sizeof(local),"<button class=\"Bouton\" id=\"%d\" onclick=\"Click(this)\">",id);
-            ok=out.add(local)&&out.escaped(name)&&out.add("</button>");
             any=true;
+            ok=out.add(!strcmp(type,"little_button")?
+                        "<button class=\"LittleBouton\" id=\"":
+                        "<button class=\"Bouton\" id=\"")&&
+               html_id(id)&&out.add("\" onclick=\"Click(this)\">")&&
+               out.escaped(name)&&out.add("</button>");
         }else if(!strcmp(type,"title")||!strcmp(type,"text_index")){
-            ok=out.add("<div style='padding:10px 0'>")&&out.escaped(name)&&out.add("</div>");
+            int size=jnum(item,"size",20);
+            if(size<10)size=10;
+            if(size>72)size=72;
+            char style[90];
+            snprintf(style,sizeof(style),
+                     "<div style=\"padding:10px 0;font-size:%dpx\">",size);
             any=true;
-        }else if(!strcmp(type,"info")&&id>0){
-            snprintf(local,sizeof(local),"<div class='mira-info'>%d : ",id);
-            char cached[160]={0};
-            (void)mira_full_cached_state(name,cached,sizeof(cached));
-            ok=out.add(local)&&out.escaped(name)&&out.add(" <span id='");
-            if(ok){
-                snprintf(local,sizeof(local),"%d",id);
-                ok=out.add(local)&&out.add("'>")&&out.escaped(cached)&&
-                   out.add("</span></div>");
-            }
+            ok=out.add(style)&&out.escaped(name)&&out.add("</div>");
+        }else if(!strcmp(type,"inputbox")&&id>0){
             any=true;
+            ok=out.add("<label>")&&out.escaped(name)&&
+               out.add("</label><input class=\"inputbox\" type=\"text\" id=\"")&&
+               html_id(id)&&out.add("\" value=\"")&&
+               html_value(name,field(item,"value"))&&
+               out.add("\" onblur=\"InputBoxValidate(this)\"><br>");
+        }else if(!strcmp(type,"infofa")&&id>0){
+            any=true;
+            ok=out.add("<div class=\"mira-info\">")&&out.escaped(name)&&
+               out.add(": <i id=\"")&&html_id(id)&&out.add("\" class=\"")&&
+               html_value(name,field(item,"value"))&&out.add("\"></i></div>");
+        }else if(!strcmp(type,"color")&&id>0){
+            int red=jnum(item,"r",0),green=jnum(item,"g",0),blue=jnum(item,"b",0);
+            if(red<0||red>255||green<0||green>255||blue<0||blue>255)continue;
+            char color[16];
+            snprintf(color,sizeof(color),"#%02x%02x%02x",red,green,blue);
+            any=true;
+            ok=out.add("<div class=\"FondBlanc_Color\">")&&out.escaped(name)&&
+               out.add("<br><input class=\"input_color\" type=\"color\" id=\"")&&
+               html_id(id)&&out.add("\" value=\"")&&out.add(color)&&
+               out.add("\" onchange=\"printColor(this,event)\"></div>");
         }else if(!strcmp(type,"toggle")){
-            int off=number(item,"id0"),on=number(item,"id1");
-            if(off<=0||on<=0)continue;
-            snprintf(local,sizeof(local),
-                "<div><button class='Bouton' id='%d' onclick='Click(this)'>OFF</button> "
-                "<button class='Bouton' id='%d' onclick='Click(this)'>ON</button> ",off,on);
-            ok=out.add(local)&&out.escaped(name)&&out.add("</div>");
+            const int off=jnum(item,"id0",-1),on=jnum(item,"id1",-1);
+            if(off<1||on<1)continue;
+            char current[160]={0};
+            const bool known=mira_full_cached_state(name,current,sizeof(current));
+            const bool checked=known&&(!strcasecmp(current,"On")||
+                          !strcmp(current,"1")||!strcasecmp(current,"true"));
             any=true;
+            ok=out.add("<div class=\"div_toogle\"><div class=\"div_toogle_name\">")&&
+               out.escaped(name)&&
+               out.add("</div><label class=\"switch\"><input type=\"checkbox\" id=\"")&&
+               html_id(off)&&
+               out.add("\" onclick=\"ClickToogle(this,'Off','On','")&&
+               html_id(off)&&out.add("','")&&html_id(on)&&out.add("')\"")&&
+               (!checked||out.add(" checked"))&&
+               out.add("><span class=\"slider round\"></span></label></div>");
+        }else if(!strcmp(type,"info")&&id>0){
+            any=true;
+            ok=out.add("<div class=\"mira-info\">")&&out.escaped(name)&&
+               out.add(": <b><span id=\"")&&html_id(id)&&out.add("\">")&&
+               html_value(name,*field(item,"value")?field(item,"value"):"--")&&
+               out.add("</span></b> ")&&out.escaped(field(item,"unit"))&&
+               out.add("</div>");
+        }else if(!strcmp(type,"range")&&id>0){
+            int lo=jnum(item,"min",0),hi=jnum(item,"max",100);
+            if(lo>=hi||hi>100000||lo<-100000)continue;
+            char bound[160];
+            snprintf(bound,sizeof(bound),
+                     "\" min=\"%d\" max=\"%d\" value=\"%d\" onchange=\"ValidRange(this)\"></div>",
+                     lo,hi,jnum(item,"value",lo));
+            any=true;
+            ok=out.add("<div><label for=\"")&&html_id(id)&&out.add("\">")&&
+               out.escaped(name)&&out.add("</label><input type=\"range\" id=\"")&&
+               html_id(id)&&out.add(bound);
+        }else if(!strcmp(type,"list")&&id>0){
+            const char *group=field(item,"nomliste");
+            if(!*group)continue;
+            bool seen=false;
+            for(unsigned k=0;k<group_count;k++)
+                if(!strcmp(seen_groups[k],group)){seen=true;break;}
+            if(seen||group_count>=16)continue;
+            snprintf(seen_groups[group_count++],sizeof(seen_groups[0]),"%s",group);
+            any=true;
+            ok=out.add("<div><label>")&&out.escaped(group)&&
+               out.add("</label><select class=\"box\" id=\"")&&
+               out.escaped(group)&&out.add("\" onchange=\"Liste(this)\">");
+            const cJSON *opt=nullptr;
+            cJSON_ArrayForEach(opt,actions){
+                if(strcmp(field(opt,"type"),"list")||
+                   strcmp(field(opt,"nomliste"),group))continue;
+                int option_id=jnum(opt,"id",-1);
+                if(option_id<1)continue;
+                ok=out.add("<option value=\"")&&html_id(option_id)&&
+                   out.add("\">")&&out.escaped(field(opt,"nom"))&&
+                   out.add("</option>");
+                if(!ok)break;
+            }
+            if(ok)ok=out.add("</select></div>");
         }
         if(!ok)break;
     }
-    cJSON_Delete(root);
-    return ok&&(any||out.add("<p>Aucune commande Web programmee.</p>"));
+    if(ok&&!any)ok=out.add("<p>Aucune commande programmée.</p>");
+    // Conserver les écouteurs EventSource du rendu d'origine pour les états.
+    if(ok&&any){
+        ok=out.add("<script>(function(){if(!window.EventSource)return;"
+                   "var source=new EventSource('/events');");
+        cJSON_ArrayForEach(item,actions){
+            if(!ok)break;
+            const char *type=field(item,"type");
+            char js[640];
+            if(!strcmp(type,"toggle")){
+                int off=jnum(item,"id0",-1),on=jnum(item,"id1",-1);
+                if(off<1||on<1)continue;
+                snprintf(js,sizeof(js),
+                    "source.addEventListener('%d',function(){var e=document.getElementById('%d');if(e)e.checked=false;});"
+                    "source.addEventListener('%d',function(){var e=document.getElementById('%d');if(e)e.checked=true;});",
+                    off,off,on,off);
+            }else if(!strcmp(type,"info")||!strcmp(type,"range")||
+                      !strcmp(type,"inputbox")||!strcmp(type,"infofa")){
+                int id=jnum(item,"id",-1);
+                if(id<1)continue;
+                snprintf(js,sizeof(js),
+                    "source.addEventListener('%d',function(v){var e=document.getElementById('%d');"
+                    "if(e)e.%s=v.data;});",id,id,
+                    !strcmp(type,"info")?"textContent":
+                    (!strcmp(type,"infofa")?"className":"value"));
+            }else if(!strcmp(type,"list")){
+                int id=jnum(item,"id",-1);
+                if(id<1)continue;
+                snprintf(js,sizeof(js),
+                    "source.addEventListener('%d',function(){var o=document.querySelector('option[value=\"%d\"]');"
+                    "if(o&&o.parentElement)o.parentElement.value='%d';});",id,id,id);
+            }else continue;
+            ok=out.add(js);
+        }
+        if(ok)ok=out.add("})();</script>");
+    }
+    cJSON_Delete(index);
+    return ok;
 }
+
 static bool network_rows(PsramPage& out){
     mira_beta_network_t *entries=(mira_beta_network_t *)heap_caps_calloc(
         MIRA_NET_MAX,sizeof(mira_beta_network_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
