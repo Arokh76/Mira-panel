@@ -209,6 +209,9 @@ static esp_err_t proxy_event(esp_http_client_event_t *e){
 static bool basic_auth(AsyncWebServerRequest *r);
 static bool native_jeedom_request(AsyncWebServerRequest *r){
     const String path=r->url();
+    const bool stage_clear=path=="/removelistlvgl"||path=="/screenformat";
+    const bool stage_add=path=="/addlistlvgl"||path=="/screenadd";
+    const bool stage_save=path=="/savelistlvgl"||path=="/screensave";
     const bool allparams=path=="/getallparams";
     const bool navpages=path=="/navpages";
     const bool navfavorites=path=="/navfavorites";
@@ -227,8 +230,63 @@ static bool native_jeedom_request(AsyncWebServerRequest *r){
     const bool writeparam=path=="/updateparam"||path=="/addparam"||
                           path=="/addlistparam"||path=="/updatelistparam";
     const bool saveparam=path=="/savelistparam"||path=="/createlistparam";
-    if(!allparams&&!navpages&&!navfavorites&&!sync_toggle&&!lvgl&&!display&&!program&&!batch&&!single&&!toggle&&!init&&!readstate&&!readparam&&!writeparam&&!saveparam)
+    if(!stage_clear&&!stage_add&&!stage_save&&!allparams&&!navpages&&!navfavorites&&!sync_toggle&&!lvgl&&!display&&!program&&!batch&&!single&&!toggle&&!init&&!readstate&&!readparam&&!writeparam&&!saveparam)
         return false;
+    if(stage_clear||stage_add||stage_save){
+        if(!public_key(r)){forbidden(r);return true;}
+        int code=400;
+        if(stage_clear){
+            code=mira_jeedom_async_screen_clear();
+            r->send(code,"text/plain; charset=utf-8",
+                    code==200?(path=="/screenformat"?"Liste vidée!":"OK"):
+                    "Impossible de vider la liste");
+            return true;
+        }
+        if(stage_save){
+            code=mira_jeedom_async_screen_save();
+            r->send(code,"text/plain; charset=utf-8",
+                    code==200?(path=="/screensave"?"Liste sauvegardée!":"OK"):
+                    "Sauvegarde de liste impossible");
+            return true;
+        }
+        static const char *const fields[]={
+            "type","name","loc","min","max","value","unit",
+            "style","layout","labelMode","icon","displayName",
+            "lx","ly","lw","lh"
+        };
+        String v[16];
+        for(unsigned i=0;i<16;i++){
+            if(i<7&&!r->hasParam(fields[i])){
+                r->send(400,"text/plain","Champs widget manquants");
+                return true;
+            }
+            v[i]=param_or_empty(r,fields[i]);
+        }
+        char *preview=nullptr;
+        code=mira_jeedom_async_screen_add(
+             v[0].c_str(),v[1].c_str(),v[2].c_str(),
+             v[3].c_str(),v[4].c_str(),v[5].c_str(),v[6].c_str(),
+             v[7].c_str(),v[8].c_str(),v[9].c_str(),v[10].c_str(),
+             v[11].c_str(),v[12].c_str(),v[13].c_str(),v[14].c_str(),
+             v[15].c_str(),path=="/screenadd"?&preview:nullptr);
+        if(code!=200||!preview){
+            if(preview)free(preview);
+            r->send(code,"text/plain; charset=utf-8",
+                    code==200?"OK":"Programmation widget invalide");
+            return true;
+        }
+        const size_t length=strlen(preview);
+        auto owner=std::shared_ptr<char>(preview,[](char *p){free(p);});
+        auto *resp=r->beginResponse("text/plain; charset=utf-8",length,
+            [owner,length](uint8_t *out,size_t max,size_t off)->size_t{
+                if(off>=length)return 0;
+                size_t n=std::min(max,length-off);
+                memcpy(out,owner.get()+off,n);
+                return n;
+            });
+        r->send(resp);
+        return true;
+    }
     if(allparams){
         if(!public_key(r)){forbidden(r);return true;}
         size_t len=0;
@@ -594,6 +652,12 @@ extern "C" void mira_async_web_start(void){
     if(xTaskCreateWithCaps(sse_worker,"mira_async_sse",8192,NULL,3,
                            nullptr,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)!=pdPASS)
         ESP_LOGW(TAG,"ASYNC_SSE_REPLAY_TASK_FAILED (direct events still active)");
+    server.on("/addlistlvgl",AsyncWebRequestMethod::HTTP_GET,proxy_request);
+    server.on("/screenadd",AsyncWebRequestMethod::HTTP_GET,proxy_request);
+    server.on("/removelistlvgl",AsyncWebRequestMethod::HTTP_GET,proxy_request);
+    server.on("/screenformat",AsyncWebRequestMethod::HTTP_GET,proxy_request);
+    server.on("/savelistlvgl",AsyncWebRequestMethod::HTTP_GET,proxy_request);
+    server.on("/screensave",AsyncWebRequestMethod::HTTP_GET,proxy_request);
     server.on("/getallparams",AsyncWebRequestMethod::HTTP_GET,proxy_request);
     server.on("/navpages",AsyncWebRequestMethod::HTTP_GET,proxy_request);
     server.on("/navpages",AsyncWebRequestMethod::HTTP_POST,proxy_request);
