@@ -209,6 +209,7 @@ static esp_err_t proxy_event(esp_http_client_event_t *e){
 static bool basic_auth(AsyncWebServerRequest *r);
 static bool native_jeedom_request(AsyncWebServerRequest *r){
     const String path=r->url();
+    const bool program=path=="/programui";
     const bool batch=path=="/actions/bindings";
     const bool single=path=="/setjeedomid";
     const bool toggle=path=="/setjeedomtoggleid";
@@ -220,7 +221,7 @@ static bool native_jeedom_request(AsyncWebServerRequest *r){
     const bool writeparam=path=="/updateparam"||path=="/addparam"||
                           path=="/addlistparam"||path=="/updatelistparam";
     const bool saveparam=path=="/savelistparam"||path=="/createlistparam";
-    if(!batch&&!single&&!toggle&&!init&&!readstate&&!readparam&&!writeparam&&!saveparam)
+    if(!program&&!batch&&!single&&!toggle&&!init&&!readstate&&!readparam&&!writeparam&&!saveparam)
         return false;
     if(readstate){
         if(!public_key(r)){forbidden(r);return true;}
@@ -251,6 +252,20 @@ static bool native_jeedom_request(AsyncWebServerRequest *r){
         const int code=mira_jeedom_async_param_set(name.c_str(),value.c_str());
         r->send(code,"text/plain; charset=utf-8",
                 code==200?"OK":"Parametre Jeedom invalide");
+        return true;
+    }
+    if(program){
+        const auto *key=r->getParam("key",true);
+        const auto *json=r->getParam("json",true);
+        if(!key||!mira_jeedom_async_key_valid(key->value().c_str())){
+            forbidden(r);return true;
+        }
+        // Only supported x-www-form-urlencoded data is consumed natively.
+        if(!json)return false;
+        char answer[112]={0};
+        const int code=mira_jeedom_async_programui(json->value().c_str(),
+                                                   answer,sizeof(answer));
+        r->send(code,"text/plain; charset=utf-8",answer);
         return true;
     }
     if(batch){
@@ -503,6 +518,7 @@ extern "C" void mira_async_web_start(void){
     server.on("/updatelistparam",AsyncWebRequestMethod::HTTP_GET,proxy_request);
     server.on("/savelistparam",AsyncWebRequestMethod::HTTP_GET,proxy_request);
     server.on("/createlistparam",AsyncWebRequestMethod::HTTP_GET,proxy_request);
+    server.on("/programui",AsyncWebRequestMethod::HTTP_POST,proxy_request);
     server.on("/actions/bindings",AsyncWebRequestMethod::HTTP_POST,proxy_request);
     server.on("/setjeedomid",AsyncWebRequestMethod::HTTP_GET,proxy_request);
     server.on("/setjeedomtoggleid",AsyncWebRequestMethod::HTTP_GET,proxy_request);
