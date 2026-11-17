@@ -1,5 +1,6 @@
 #pragma once
 #include <stdbool.h>
+#include <stddef.h>
 #include "esp_err.h"
 #include "esp_http_server.h"
 // Read-only and authenticated Jeedom plugin protocol + safe programming and state commands.
@@ -36,3 +37,14 @@ esp_err_t mira_jeedom_beta_web_action(httpd_req_t *req);
 // Read-only page of historic HTTP IDs and authenticated beta GET /update.
 esp_err_t mira_jeedom_render_http_reference(httpd_req_t *req);
 esp_err_t mira_jeedom_beta_legacy_get_update(httpd_req_t *req);
+
+// ESPAsyncWebServer transport bridge: UTF-8 query values are already decoded.
+// Buffer returned by index_snapshot is PSRAM allocated; caller must free().
+bool mira_jeedom_async_key_valid(const char *key);
+esp_err_t mira_jeedom_async_index_snapshot(char **body,size_t *length);
+int mira_jeedom_async_updatenr(const char *kind,const char *selector,
+    const char *incoming,const char *red,const char *green,const char *blue,
+    char *answer,size_t answer_capacity);
+// Browser replay on the async EventSource uses the same resident index/cache.
+size_t mira_jeedom_async_event_count(void);
+bool mira_jeedom_async_event_current(size_t ordinal,int *id,char *value,size_t capacity);
