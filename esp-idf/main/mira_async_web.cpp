@@ -326,6 +326,142 @@ static bool async_first_run(AsyncWebServerRequest *r){
     return true;
 }
 
+
+static bool basic_auth(AsyncWebServerRequest *r);
+// WT32 manual OTA contract: POST /doUpdateFile, multipart part "update".
+// Each firmware block is streamed to the inactive ESP-IDF OTA partition;
+// the full binary is NEVER buffered in RAM, and no HTTPD task is involved.
+struct AsyncOtaState {
+    esp_ota_handle_t handle=0;
+    const esp_partition_t *target=nullptr;
+    size_t written=0;
+    bool begun=false;
+    bool failed=false;
+    bool completed=false;
+    bool verified=false;
+};
+static bool ota_busy=false;
+static volatile unsigned ota_last_status=0;
+static volatile size_t ota_last_bytes=0;
+static void ota_upload(AsyncWebServerRequest *r,const String& filename,
+                       size_t index,uint8_t *data,size_t len,bool final){
+    AsyncOtaState *ctx=(AsyncOtaState *)r->_tempObject;
+    if(index==0){
+        if(ctx){ctx->failed=true;return;}
+        ctx=(AsyncOtaState *)heap_caps_calloc(1,sizeof(*ctx),
+                                            MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+        if(!ctx)return;
+        r->_tempObject=ctx;
+        if(!basic_auth(r)||filename.length()<5||
+           !filename.endsWith(".bin")||
+           !r->contentLength()||r->contentLength()<65536 ||
+           __atomic_exchange_n(&ota_busy,true,__ATOMIC_ACQ_REL)){
+            ctx->failed=true;
+            ota_last_status=403;
+            return;
+        }
+        ctx->target=esp_ota_get_next_update_partition(NULL);
+        if(!ctx->target||r->contentLength()>ctx->target->size+4096u||
+           !len||!data||data[0]!=0xe9){
+            ctx->failed=true;ota_last_status=400;
+            return;
+        }
+        esp_err_t err=esp_ota_begin(ctx->target,OTA_SIZE_UNKNOWN,&ctx->handle);
+        if(err!=ESP_OK){
+            ctx->failed=true;ota_last_status=503;
+            ESP_LOGW(TAG,"ASYNC_OTA_BEGIN_FAILED: %s",esp_err_to_name(err));
+            return;
+        }
+        ctx->begun=true;
+        ESP_LOGI(TAG,"ASYNC_OTA_STARTED: partition=%s",ctx->target->label);
+    }
+    if(!ctx||ctx->failed)return;
+    if(len>0){
+        if(index!=ctx->written||ctx->written+len>ctx->target->size||
+           esp_ota_write(ctx->handle,data,len)!=ESP_OK){
+            ctx->failed=true;ota_last_status=500;
+            return;
+        }
+        ctx->written+=len;
+    }
+    if(!final)return;
+    if(!ctx->begun||ctx->written<65536||ctx->written>ctx->target->size){
+        ctx->failed=true;ota_last_status=400;return;
+    }
+    esp_err_t err=esp_ota_end(ctx->handle);
+    ctx->begun=false;
+    if(err!=ESP_OK){
+        ctx->failed=true;ota_last_status=400;
+        ESP_LOGW(TAG,"ASYNC_OTA_IMAGE_INVALID: %s",esp_err_to_name(err));
+        return;
+    }
+    esp_app_desc_t descriptor={};
+    const esp_app_desc_t *running=esp_app_get_description();
+    if(!running||
+       esp_ota_get_partition_description(ctx->target,&descriptor)!=ESP_OK||
+       strcmp(descriptor.project_name,running->project_name)||
+       strcmp(descriptor.project_name,"mira_idf_7std")){
+        ctx->failed=true;ota_last_status=400;
+        ESP_LOGW(TAG,"ASYNC_OTA_REJECTED: not a Mira 7 STD application");
+        return;
+    }
+    err=esp_ota_set_boot_partition(ctx->target);
+    if(err!=ESP_OK){
+        ctx->failed=true;ota_last_status=500;
+        ESP_LOGE(TAG,"ASYNC_OTA_SET_BOOT_FAILED: %s",esp_err_to_name(err));
+        return;
+    }
+    ctx->verified=true;
+    ctx->completed=true;
+    ota_last_bytes=ctx->written;
+    ota_last_status=200;
+    ESP_LOGI(TAG,"ASYNC_OTA_VERIFIED: %u bytes",(unsigned)ctx->written);
+}
+static void ota_upload_complete(AsyncWebServerRequest *r){
+    auto *ctx=(AsyncOtaState *)r->_tempObject;
+    if(!ctx){
+        r->send(503,"text/plain; charset=utf-8","OTA non initialise");
+        return;
+    }
+    bool ok=ctx->completed&&ctx->verified&&!ctx->failed;
+    if(ctx->begun)esp_ota_abort(ctx->handle);
+    ctx->begun=false;
+    r->_tempObject=nullptr;
+    heap_caps_free(ctx);
+    __atomic_store_n(&ota_busy,false,__ATOMIC_RELEASE);
+    if(!basic_auth(r)){r->requestAuthentication();return;}
+    if(!ok){
+        r->send(400,"text/plain; charset=utf-8",
+                "UPDATE_FAILED - firmware precedent conserve");
+        return;
+    }
+    r->send(200,"text/plain; charset=utf-8","OK - Mira redemarre");
+    schedule_restart();
+}
+static void ota_page(AsyncWebServerRequest *r){
+    if(!basic_auth(r)){r->requestAuthentication();return;}
+    static const char html[]=R"HTML(<!doctype html><html lang="fr">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mira Panel - Firmware</title>
+<style>body{background:#7193A0;color:#263238;font-family:Arial,sans-serif;padding:24px}
+main{max-width:680px;margin:auto;background:#fff;border-radius:18px;padding:26px}
+button{background:#D39E55;border:0;border-radius:10px;padding:12px;cursor:pointer}
+progress{width:100%}</style>
+<main><h2>Mira Panel — mise a jour OTA</h2>
+<p>Firmware OTA <code>.bin</code> pour Waveshare 7 STD uniquement. Les parametres sont conserves.</p>
+<form id="ota" method="post" action="/doUpdateFile" enctype="multipart/form-data">
+<input type="file" name="update" accept=".bin" required>
+<button type="submit">Installer le firmware</button></form>
+<progress id="p" max="100" value="0"></progress><p id="status">Pret</p></main>
+<script>document.getElementById("ota").onsubmit=function(e){
+e.preventDefault();const x=new XMLHttpRequest();x.open("POST","/doUpdateFile");
+x.upload.onprogress=function(v){if(v.lengthComputable)document.getElementById("p").value=100*v.loaded/v.total};
+x.onload=function(){document.getElementById("status").textContent=x.status+" "+x.responseText};
+x.onerror=function(){document.getElementById("status").textContent="Connexion perdue"};
+x.send(new FormData(document.getElementById("ota")));}</script></html>)HTML";
+    r->send_P(200,"text/html; charset=utf-8",html);
+}
+
 // Authenticated Jeedom programming: no HTTP loopback; processed in PSRAM worker.
 static bool basic_auth(AsyncWebServerRequest *r);
 static bool native_jeedom_request(AsyncWebServerRequest *r){
@@ -805,6 +941,19 @@ extern "C" void mira_async_web_start(void){
     server.on("/sync/toggle",AsyncWebRequestMethod::HTTP_GET,proxy_request);
     server.on("/getlvgl",AsyncWebRequestMethod::HTTP_GET,proxy_request);
     server.on("/displayinfo",AsyncWebRequestMethod::HTTP_GET,proxy_request);
+    server.on("/doUpdateFile",AsyncWebRequestMethod::HTTP_POST,
+              ota_upload_complete,ota_upload);
+    server.on("/update",AsyncWebRequestMethod::HTTP_GET,ota_page);
+    server.on("/updatemodule",AsyncWebRequestMethod::HTTP_GET,ota_page);
+    server.on("/api/otastatus",AsyncWebRequestMethod::HTTP_GET,[](AsyncWebServerRequest *r){
+        if(!basic_auth(r)){r->requestAuthentication();return;}
+        char answer[120];
+        snprintf(answer,sizeof(answer),
+            "{\"last_status\":%u,\"last_bytes\":%u,\"active\":%s}",
+            ota_last_status,(unsigned)ota_last_bytes,
+            __atomic_load_n(&ota_busy,__ATOMIC_ACQUIRE)?"true":"false");
+        r->send(200,"application/json",answer);
+    });
     server.on("/getindex",AsyncWebRequestMethod::HTTP_GET,index_get);
     server.on("/updatenr",AsyncWebRequestMethod::HTTP_GET,updatenr_get);
     server.on("/get",AsyncWebRequestMethod::HTTP_GET,proxy_request);
