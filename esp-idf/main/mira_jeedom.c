@@ -4046,6 +4046,130 @@ bool mira_jeedom_async_get_state(const char *kind,const char *selector,
 }
 
 
+
+// Old beta staged widget editor, now callable without an HTTP loopback.
+// These routines do no networking and must run in the serialized worker.
+int mira_jeedom_async_screen_clear(void){
+    if(!beta_lvgl_ensure_stage())return 500;
+    cJSON_DeleteItemFromObjectCaseSensitive(beta_lvgl_stage,"lvgl");
+    if(!cJSON_AddArrayToObject(beta_lvgl_stage,"lvgl")){
+        cJSON_Delete(beta_lvgl_stage);
+        beta_lvgl_stage=NULL;
+        return 500;
+    }
+    beta_lvgl_dirty=true;
+    return 200;
+}
+static bool mira_async_field_valid(const char *s,size_t max,bool required){
+    return s&&strlen(s)<max&&(!required||*s);
+}
+int mira_jeedom_async_screen_add(
+      const char *type,const char *name,const char *loc,
+      const char *min,const char *max,const char *value,const char *unit,
+      const char *style,const char *layout,const char *label,
+      const char *icon,const char *display_name,
+      const char *lx,const char *ly,const char *lw,const char *lh,
+      char **preview){
+    if(preview)*preview=NULL;
+    if(!mira_async_field_valid(type,40,true)||
+       !mira_async_field_valid(name,97,false)||
+       !mira_async_field_valid(loc,24,false)||
+       !mira_async_field_valid(min,40,false)||
+       !mira_async_field_valid(max,40,false)||
+       !mira_async_field_valid(value,160,false)||
+       !mira_async_field_valid(unit,64,false))return 400;
+    if(!mira_async_field_valid(style,32,false)||
+       !mira_async_field_valid(layout,16,false)||
+       !mira_async_field_valid(label,12,false)||
+       !mira_async_field_valid(icon,32,false)||
+       !mira_async_field_valid(display_name,97,false))return 400;
+    const char *use_style=*style?style:"standard";
+    const char *use_layout=*layout?layout:"auto";
+    if(strcmp(use_layout,"tile")&&strcmp(use_layout,"wide")&&
+       strcmp(use_layout,"hero")&&strcmp(use_layout,"free"))
+        use_layout="auto";
+    const char *use_label=label;
+    if(strcmp(use_label,"text")&&strcmp(use_label,"icon")&&
+       strcmp(use_label,"both"))use_label="auto";
+    const char *use_icon=strlen(icon)>24?"auto":(*icon?icon:"auto");
+    int coords[4]={0};
+    if(!strcmp(use_layout,"free")){
+        const char *parts[]={lx,ly,lw,lh};
+        bool valid=true;
+        for(int i=0;i<4;i++){
+            if(!parts[i]||!parts[i][0]||strlen(parts[i])>19){
+                valid=false;break;
+            }
+            char *tail=NULL;
+            long n=strtol(parts[i],&tail,10);
+            if(*tail||n<0||n>1000){valid=false;break;}
+            coords[i]=(int)n;
+        }
+        if(coords[2]<=0||coords[3]<=0)valid=false;
+        if(!valid)use_layout="auto";
+    }
+    if(!beta_lvgl_ensure_stage())return 500;
+    cJSON *array=cJSON_GetObjectItemCaseSensitive(beta_lvgl_stage,"lvgl");
+    if(!cJSON_IsArray(array))return 500;
+    if(cJSON_GetArraySize(array)>=MIRA_WIDGET_LIMIT)return 400;
+    cJSON *item=cJSON_CreateObject();
+    if(!item)return 503;
+    bool valid=beta_lvgl_put(item,"type",type)&&
+               beta_lvgl_put(item,"name",name)&&
+               beta_lvgl_put(item,"emplacement",loc)&&
+               beta_lvgl_put(item,"min",min)&&beta_lvgl_put(item,"max",max)&&
+               beta_lvgl_put(item,"value",value)&&beta_lvgl_put(item,"unit",unit)&&
+               beta_lvgl_put(item,"style",use_style)&&
+               beta_lvgl_put(item,"layout",use_layout)&&
+               beta_lvgl_put(item,"labelMode",use_label)&&
+               beta_lvgl_put(item,"icon",use_icon)&&
+               beta_lvgl_put(item,"displayName",display_name);
+    if(valid&&!strcmp(use_layout,"free")){
+        const char *const keys[]={"lx","ly","lw","lh"};
+        for(int i=0;i<4&&valid;i++)
+            valid=cJSON_AddNumberToObject(item,keys[i],coords[i])!=NULL;
+    }
+    if(valid&&strcmp(type,"info")&&strcmp(type,"datetime"))
+        valid=beta_lvgl_put(item,"url","");
+    if(!valid){
+        cJSON_Delete(item);return 503;
+    }
+    cJSON_AddItemToArray(array,item);
+    beta_lvgl_dirty=true;
+    if(preview){
+        *preview=cJSON_Print(beta_lvgl_stage);
+        if(!*preview)return 503;
+    }
+    return 200;
+}
+int mira_jeedom_async_screen_save(void){
+    if(!beta_lvgl_dirty)return 200;
+    if(!beta_lvgl_stage)return 503;
+    const cJSON *pending=cJSON_GetObjectItemCaseSensitive(beta_lvgl_stage,"lvgl");
+    if(!cJSON_IsArray(pending)||cJSON_GetArraySize(pending)>MIRA_WIDGET_LIMIT)
+        return 400;
+    char *out=cJSON_PrintUnformatted(beta_lvgl_stage);
+    if(!out)return 503;
+    size_t len=strlen(out);
+    if(len>MIRA_JSON_MAX){cJSON_free(out);return 400;}
+    FILE *fp=fopen(MIRA_JSON_TMP,"wb");
+    if(!fp){cJSON_free(out);return 503;}
+    size_t bytes=fwrite(out,1,len,fp);
+    int closed=fclose(fp);
+    cJSON_free(out);
+    if(bytes!=len||closed!=0||!replace_lvgl_file_safely()){
+        remove(MIRA_JSON_TMP);return 503;
+    }
+    cJSON_Delete(beta_lvgl_stage);
+    beta_lvgl_stage=NULL;beta_lvgl_dirty=false;
+    if(!mira_index_rebuild())
+        ESP_LOGW(TAG,"Jeedom index rebuild failed after native screen save");
+    mira_full_request_reload();
+    jeedom_state_replay_pending=true;
+    request_binding_sync();
+    return 200;
+}
+
 // Remaining lightweight APIs run in the PSRAM-backed ESPAsync worker.
 // Authentication and method validation are performed before these calls.
 int mira_jeedom_async_nav_get(bool favorites,char *out,size_t cap){
