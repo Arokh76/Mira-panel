@@ -212,6 +212,7 @@ static bool native_jeedom_request(AsyncWebServerRequest *r){
     const bool stage_clear=path=="/removelistlvgl"||path=="/screenformat";
     const bool stage_add=path=="/addlistlvgl"||path=="/screenadd";
     const bool stage_save=path=="/savelistlvgl"||path=="/screensave";
+    const bool camera_config=path=="/camera/config";
     const bool allparams=path=="/getallparams";
     const bool navpages=path=="/navpages";
     const bool navfavorites=path=="/navfavorites";
@@ -230,8 +231,23 @@ static bool native_jeedom_request(AsyncWebServerRequest *r){
     const bool writeparam=path=="/updateparam"||path=="/addparam"||
                           path=="/addlistparam"||path=="/updatelistparam";
     const bool saveparam=path=="/savelistparam"||path=="/createlistparam";
-    if(!stage_clear&&!stage_add&&!stage_save&&!allparams&&!navpages&&!navfavorites&&!sync_toggle&&!lvgl&&!display&&!program&&!batch&&!single&&!toggle&&!init&&!readstate&&!readparam&&!writeparam&&!saveparam)
+    if(!camera_config&&!stage_clear&&!stage_add&&!stage_save&&!allparams&&!navpages&&!navfavorites&&!sync_toggle&&!lvgl&&!display&&!program&&!batch&&!single&&!toggle&&!init&&!readstate&&!readparam&&!writeparam&&!saveparam)
         return false;
+    if(camera_config){
+        if(r->method()!=AsyncWebRequestMethod::HTTP_POST)return false;
+        const auto *key=r->getParam("key",true);
+        const auto *name=r->getParam("name",true);
+        const auto *url=r->getParam("url",true);
+        if(!key||!mira_jeedom_async_key_valid(key->value().c_str())){
+            forbidden(r);return true;
+        }
+        if(!name||!url){r->send(400,"text/plain","Champs camera absents");return true;}
+        int code=mira_jeedom_async_camera_config(name->value().c_str(),
+                                                 url->value().c_str());
+        r->send(code,"text/plain; charset=utf-8",
+                code==200?"OK":"Configuration camera invalide");
+        return true;
+    }
     if(stage_clear||stage_add||stage_save){
         if(!public_key(r)){forbidden(r);return true;}
         int code=400;
@@ -652,6 +668,7 @@ extern "C" void mira_async_web_start(void){
     if(xTaskCreateWithCaps(sse_worker,"mira_async_sse",8192,NULL,3,
                            nullptr,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)!=pdPASS)
         ESP_LOGW(TAG,"ASYNC_SSE_REPLAY_TASK_FAILED (direct events still active)");
+    server.on("/camera/config",AsyncWebRequestMethod::HTTP_POST,proxy_request);
     server.on("/addlistlvgl",AsyncWebRequestMethod::HTTP_GET,proxy_request);
     server.on("/screenadd",AsyncWebRequestMethod::HTTP_GET,proxy_request);
     server.on("/removelistlvgl",AsyncWebRequestMethod::HTTP_GET,proxy_request);
