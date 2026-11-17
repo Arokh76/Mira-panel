@@ -209,6 +209,10 @@ static esp_err_t proxy_event(esp_http_client_event_t *e){
 static bool basic_auth(AsyncWebServerRequest *r);
 static bool native_jeedom_request(AsyncWebServerRequest *r){
     const String path=r->url();
+    const bool allparams=path=="/getallparams";
+    const bool navpages=path=="/navpages";
+    const bool navfavorites=path=="/navfavorites";
+    const bool sync_toggle=path=="/sync/toggle";
     const bool lvgl=path=="/getlvgl";
     const bool display=path=="/displayinfo";
     const bool program=path=="/programui";
@@ -223,8 +227,57 @@ static bool native_jeedom_request(AsyncWebServerRequest *r){
     const bool writeparam=path=="/updateparam"||path=="/addparam"||
                           path=="/addlistparam"||path=="/updatelistparam";
     const bool saveparam=path=="/savelistparam"||path=="/createlistparam";
-    if(!lvgl&&!display&&!program&&!batch&&!single&&!toggle&&!init&&!readstate&&!readparam&&!writeparam&&!saveparam)
+    if(!allparams&&!navpages&&!navfavorites&&!sync_toggle&&!lvgl&&!display&&!program&&!batch&&!single&&!toggle&&!init&&!readstate&&!readparam&&!writeparam&&!saveparam)
         return false;
+    if(allparams){
+        if(!public_key(r)){forbidden(r);return true;}
+        size_t len=0;
+        char *json=mira_jeedom_async_allparams(&len);
+        if(!json){r->send(503,"text/plain","Parametres indisponibles");return true;}
+        auto owner=std::shared_ptr<char>(json,[](char *p){free(p);});
+        auto *resp=r->beginResponse("application/json",len,
+            [owner,len](uint8_t *out,size_t max,size_t offset)->size_t{
+                if(offset>=len)return 0;
+                size_t n=std::min(max,len-offset);
+                memcpy(out,owner.get()+offset,n);return n;
+            });
+        resp->addHeader("Cache-Control","no-store");
+        r->send(resp);
+        return true;
+    }
+    if(navpages||navfavorites){
+        const bool favorites=navfavorites;
+        if(r->method()==AsyncWebRequestMethod::HTTP_GET){
+            if(!public_key(r)){forbidden(r);return true;}
+            char body[96]={0};
+            int status=mira_jeedom_async_nav_get(favorites,body,sizeof(body));
+            r->send(status,"application/json",body);
+            return true;
+        }
+        // The legacy browser POST sends an authenticated form, not a JSON
+        // request body. Do not silently weaken this authentication rule.
+        if(r->method()!=AsyncWebRequestMethod::HTTP_POST)return false;
+        const auto *key=r->getParam("key",true);
+        const auto *value=r->getParam(favorites?"json":"mask",true);
+        if(!key||!mira_jeedom_async_key_valid(key->value().c_str())){
+            forbidden(r);return true;
+        }
+        if(!value){r->send(400,"text/plain","Formulaire absent");return true;}
+        int status=mira_jeedom_async_nav_post(favorites,value->value().c_str());
+        r->send(status,"text/plain; charset=utf-8",
+                status==200?"OK":"Parametre navigation invalide");
+        return true;
+    }
+    if(sync_toggle){
+        if(!public_key(r)){forbidden(r);return true;}
+        const String id=param_or_empty(r,"id");
+        char answer[64]={0};
+        int code=mira_jeedom_async_updatenr("toggle",id.c_str(),
+                                             nullptr,nullptr,nullptr,nullptr,
+                                             answer,sizeof(answer));
+        r->send(code,"text/plain; charset=utf-8",answer);
+        return true;
+    }
     if(readstate){
         if(!public_key(r)){forbidden(r);return true;}
         static const char *types[]={"toggle","toogle","info","infofa"};
@@ -541,6 +594,12 @@ extern "C" void mira_async_web_start(void){
     if(xTaskCreateWithCaps(sse_worker,"mira_async_sse",8192,NULL,3,
                            nullptr,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)!=pdPASS)
         ESP_LOGW(TAG,"ASYNC_SSE_REPLAY_TASK_FAILED (direct events still active)");
+    server.on("/getallparams",AsyncWebRequestMethod::HTTP_GET,proxy_request);
+    server.on("/navpages",AsyncWebRequestMethod::HTTP_GET |
+                            AsyncWebRequestMethod::HTTP_POST,proxy_request);
+    server.on("/navfavorites",AsyncWebRequestMethod::HTTP_GET |
+                                AsyncWebRequestMethod::HTTP_POST,proxy_request);
+    server.on("/sync/toggle",AsyncWebRequestMethod::HTTP_GET,proxy_request);
     server.on("/getlvgl",AsyncWebRequestMethod::HTTP_GET,proxy_request);
     server.on("/displayinfo",AsyncWebRequestMethod::HTTP_GET,proxy_request);
     server.on("/getindex",AsyncWebRequestMethod::HTTP_GET,index_get);
