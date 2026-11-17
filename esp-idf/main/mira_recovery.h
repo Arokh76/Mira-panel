@@ -33,3 +33,11 @@ esp_err_t mira_recovery_save_beta_wifi(const char *ssid,const char *password,
 
 // Beta ConfigAP form, stored in native NVS; settings applied on next boot.
 esp_err_t mira_recovery_save_beta_ap(const char *password,const char *ip,bool active);
+
+// Single-server mode: IDF's full 8081 stack is allocated only when a
+// legacy browser/OTA route is actually used, then released after idle.
+esp_err_t mira_recovery_compat_http_start(void);
+void mira_recovery_compat_touch(void);
+bool mira_recovery_compat_http_active(void);
+// If ESPAsyncWebServer allocation fails at boot, recover on port 80.
+esp_err_t mira_recovery_start_emergency_http(void);
