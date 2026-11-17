@@ -10,6 +10,12 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <cctype>
+#include <ctime>
+#include <esp_timer.h>
+#include <esp_system.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <memory>
 #include <algorithm>
 #include "mira_beta_web_pages.h"
@@ -18,6 +24,8 @@ extern "C" {
 #include "mira_beta_networks.h"
 #include "mira_jeedom.h"
 #include "mira_full.h"
+#include "mira_recovery.h"
+#include "mira_mqtt.h"
 }
 
 struct PsramPage {
@@ -368,4 +376,278 @@ bool mira_async_render_page(AsyncWebServerRequest *r){
     response->addHeader("Cache-Control","no-store");
     r->send(response);
     return true;
+}
+
+
+// Native configured beta form handlers. Existing NVS keys and validation
+// contracts are retained; flash writes run off the AsyncTCP event callbacks.
+static bool authorized(AsyncWebServerRequest *r){
+    char key[97]={0};
+    bool ok=mira_beta_web_auth_key_copy(key,sizeof(key))&&
+            r->authenticate("admin",key);
+    memset(key,0,sizeof(key));
+    if(!ok)r->requestAuthentication();
+    return ok;
+}
+static String post(AsyncWebServerRequest *r,const char *name){
+    const auto *p=r->getParam(name,true);
+    return p?p->value():String();
+}
+static bool param_exists(AsyncWebServerRequest *r,const char *name){
+    return r->hasParam(name,true);
+}
+static void redirect(AsyncWebServerRequest *r,const char *url){
+    r->redirect(url);
+}
+static void delayed_restart(void *){
+    vTaskDelay(pdMS_TO_TICKS(1350));esp_restart();
+}
+static void queue_restart(){
+    xTaskCreate(delayed_restart,"mira_web_restart",3072,NULL,2,NULL);
+}
+static bool save_network(AsyncWebServerRequest *r,bool editing){
+    String ssid=post(r,"ssid"),pass=post(r,"pass");
+    String mode=post(r,"ip_mode"),ip=post(r,"ip"),mask=post(r,"mask");
+    String gateway=post(r,"gateway"),dns1=post(r,"dns1"),dns2=post(r,"dns2");
+    if(!ssid.length()||ssid.length()>32||pass.length()>63||
+       (pass.length()&&pass.length()<8)||
+       (mode!="auto"&&mode!="manual"&&mode!="fixed_auto")){
+        r->send(400,"text/plain","Configuration Wi-Fi invalide");return true;
+    }
+    mira_beta_network_t *known=(mira_beta_network_t*)heap_caps_calloc(
+        MIRA_NET_MAX,sizeof(mira_beta_network_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!known){r->send(503,"text/plain","Memoire Wi-Fi indisponible");return true;}
+    size_t count=0;esp_err_t err=mira_beta_networks_list(known,&count,MIRA_NET_MAX);
+    int id=-1;
+    if(editing){
+        String network=q(r,"network");
+        id=network.length()?network.toInt():-1;
+        mira_beta_network_t found={};
+        if(id<0||mira_beta_networks_get(id,&found)!=ESP_OK)err=ESP_ERR_NOT_FOUND;
+    }else if(err==ESP_OK){
+        for(size_t i=0;i<count;i++)
+            if(ssid==known[i].ssid){id=known[i].id;break;}
+    }
+    if(id<0&&err==ESP_OK&&!editing){
+        if(count==MIRA_NET_MAX)err=ESP_ERR_INVALID_SIZE;
+        for(int candidate=0;err==ESP_OK&&candidate<=999;candidate++){
+            bool found=false;
+            for(size_t i=0;i<count;i++)
+                if(candidate==known[i].id){found=true;break;}
+            if(!found){id=candidate;break;}
+        }
+    }
+    heap_caps_free(known);
+    if(err!=ESP_OK||id<0){r->send(400,"text/plain","Profil Wi-Fi indisponible");return true;}
+    mira_beta_network_t profile={};
+    profile.id=id;
+    snprintf(profile.ssid,sizeof(profile.ssid),"%s",ssid.c_str());
+    snprintf(profile.ip_mode,sizeof(profile.ip_mode),"%s",mode.c_str());
+    snprintf(profile.ip,sizeof(profile.ip),"%s",ip.c_str());
+    snprintf(profile.mask,sizeof(profile.mask),"%s",mask.c_str());
+    snprintf(profile.gateway,sizeof(profile.gateway),"%s",gateway.c_str());
+    snprintf(profile.dns1,sizeof(profile.dns1),"%s",dns1.c_str());
+    snprintf(profile.dns2,sizeof(profile.dns2),"%s",dns2.c_str());
+    // Editing a saved profile does not immediately change the live Wi-Fi.
+    if(!editing){
+        err=mira_recovery_save_beta_wifi(ssid.c_str(),pass.c_str(),mode.c_str(),
+             ip.c_str(),mask.c_str(),gateway.c_str(),dns1.c_str(),dns2.c_str());
+    }
+    if(err==ESP_OK)err=mira_beta_networks_upsert(&profile,pass.c_str());
+    pass=String();
+    if(err!=ESP_OK){r->send(503,"text/plain","Sauvegarde Wi-Fi impossible");return true;}
+    redirect(r,"/load?nav=listnetwork");return true;
+}
+static bool save_mqtt(AsyncWebServerRequest *r){
+    String name=post(r,"MQTT_Nom"),host=post(r,"MQTT_Serveur");
+    String user=post(r,"MQTT_Utilisateur"),pass=post(r,"MQTT_Mot_de_passe");
+    String port=post(r,"MQTT_Port"),active=post(r,"MQTT_Actif");
+    long p=port.toInt();
+    if(name.length()>=48||host.length()>=128||user.length()>=64||
+       pass.length()>=96||p<1||p>65535||
+       (active!="0"&&active!="1")){
+        r->send(400,"text/plain","Configuration MQTT invalide");return true;
+    }
+    nvs_handle_t nv;
+    esp_err_t err=nvs_open("mira_idf_mqtt",NVS_READWRITE,&nv);
+    if(err==ESP_OK){
+        err=nvs_set_str(nv,"screen",name.c_str());
+        if(err==ESP_OK)err=nvs_set_str(nv,"host",host.c_str());
+        if(err==ESP_OK)err=nvs_set_str(nv,"username",user.c_str());
+        if(err==ESP_OK&&pass.length())err=nvs_set_str(nv,"secret",pass.c_str());
+        if(err==ESP_OK)err=nvs_set_u16(nv,"port",(uint16_t)p);
+        if(err==ESP_OK)err=nvs_set_u8(nv,"enabled",active=="1"?1:0);
+        if(err==ESP_OK)err=nvs_commit(nv);
+        nvs_close(nv);
+    }
+    pass=String();
+    if(err!=ESP_OK){r->send(503,"text/plain","MQTT non sauvegarde");return true;}
+    (void)mira_mqtt_init();
+    redirect(r,"/load?nav=mqtt");return true;
+}
+static bool save_urls(AsyncWebServerRequest *r){
+    size_t len=0;
+    char *raw=mira_jeedom_async_lvgl_snapshot(&len);
+    if(!raw){r->send(404,"text/plain","Widgets absents");return true;}
+    cJSON *root=cJSON_ParseWithLength(raw,len);
+    free(raw);
+    if(!root){r->send(400,"text/plain","JSON widgets invalide");return true;}
+    cJSON *arr=cJSON_GetObjectItemCaseSensitive(root,"lvgl");
+    cJSON *item=nullptr;
+    cJSON_ArrayForEach(item,arr){
+        const char *name=field(item,"name"),*type=field(item,"type");
+        if(!*name||!strcmp(type,"info")||!strcmp(type,"datetime")||
+           !param_exists(r,name))continue;
+        String url=post(r,name);
+        cJSON *value=cJSON_CreateString(url.c_str());
+        if(value)cJSON_ReplaceItemInObjectCaseSensitive(item,"url",value);
+    }
+    char *json=cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if(!json){r->send(503,"text/plain","Memoire configuration insuffisante");return true;}
+    char answer[112]={0};
+    int code=mira_jeedom_async_programui(json,answer,sizeof(answer));
+    cJSON_free(json);
+    if(code!=200){r->send(code,"text/plain",answer);return true;}
+    redirect(r,"/load?nav=params");return true;
+}
+static bool save_display(AsyncWebServerRequest *r){
+    static const struct {const char *form,*key;unsigned min,max;} keys[]={
+        {"DISPLAY_Jour","day_pct",1,100},
+        {"DISPLAY_Nuit","night_pct",1,100},
+        {"DISPLAY_Delai","sleep_delay",0,86400},
+        {"DISPLAY_Veille","sleep_light",0,100}
+    };
+    unsigned values[4]={0};
+    for(int i=0;i<4;i++){
+        String raw=post(r,keys[i].form);
+        if(!raw.length()){r->send(400,"text/plain","Reglage affichage absent");return true;}
+        for(unsigned j=0;j<raw.length();j++)if(!isdigit((unsigned char)raw[j])){
+            r->send(400,"text/plain","Reglage affichage non numerique");return true;
+        }
+        long v=raw.toInt();
+        if(v<(long)keys[i].min||v>(long)keys[i].max){
+            r->send(400,"text/plain","Reglage affichage hors limites");return true;
+        }
+        values[i]=(unsigned)v;
+    }
+    String start=post(r,"DISPLAY_DebutNuit"),end=post(r,"DISPLAY_FinNuit");
+    auto time_valid=[](const String& s)->bool{
+        if(s.length()!=5||s[2]!=':')return false;
+        for(int i:{0,1,3,4})if(!isdigit((unsigned char)s[i]))return false;
+        return s.substring(0,2).toInt()<24&&s.substring(3).toInt()<60;
+    };
+    if(!time_valid(start)||!time_valid(end)){
+        r->send(400,"text/plain","Horaire jour/nuit invalide");return true;
+    }
+    bool night=param_exists(r,"DISPLAY_NuitAuto_Check");
+    bool clock=param_exists(r,"DISPLAY_HorlogeVeille_Check");
+    nvs_handle_t nv;
+    esp_err_t err=nvs_open("mira_idf_ui",NVS_READWRITE,&nv);
+    if(err==ESP_OK){
+        for(int i=0;i<4&&err==ESP_OK;i++)
+            err=i==2?nvs_set_u32(nv,keys[i].key,values[i]):
+                     nvs_set_u8(nv,keys[i].key,(uint8_t)values[i]);
+        if(err==ESP_OK)err=nvs_set_u8(nv,"sleep_enabled",values[2]?1:0);
+        if(err==ESP_OK)err=nvs_set_u8(nv,"night_auto",night?1:0);
+        if(err==ESP_OK)err=nvs_set_u8(nv,"sleep_clock",clock?1:0);
+        if(err==ESP_OK)err=nvs_set_str(nv,"night_start",start.c_str());
+        if(err==ESP_OK)err=nvs_set_str(nv,"night_end",end.c_str());
+        if(err==ESP_OK)err=nvs_commit(nv);
+        nvs_close(nv);
+    }
+    if(err!=ESP_OK){r->send(503,"text/plain","Reglages non sauvegardes");return true;}
+    mira_full_request_settings_reload();
+    redirect(r,"/load?nav=params");return true;
+}
+static volatile uint32_t network_nonce=0;
+static volatile int64_t network_nonce_started=0;
+bool mira_async_handle_beta(AsyncWebServerRequest *r){
+    const String path=r->url();
+    if(path=="/mira/wifi/scan"&&r->method()==HTTP_GET){
+        if(!authorized(r))return true;
+        r->send(200,"application/json",
+                "{\"busy\":false,\"failed\":false,\"networks\":[]}");
+        return true;
+    }
+    if(path=="/mira/network"&&r->method()==HTTP_POST){
+        if(!authorized(r))return true;
+        String action=q(r,"action"),id=q(r,"network"),nonce=post(r,"nonce");
+        const uint32_t key=(uint32_t)strtoul(nonce.c_str(),nullptr,16);
+        if((action!="remove"&&action!="activate")||!id.length()||
+           !network_nonce||key!=network_nonce||
+           esp_timer_get_time()-network_nonce_started>180000000LL){
+            r->send(403,"text/plain","Confirmation reseau absente ou expiree");return true;
+        }
+        network_nonce=0;
+        esp_err_t err=action=="remove"?
+            mira_beta_networks_remove(id.toInt()):
+            mira_beta_networks_activate(id.toInt());
+        if(err!=ESP_OK){r->send(503,"text/plain","Operation reseau impossible");return true;}
+        redirect(r,"/load?nav=listnetwork");return true;
+    }
+    if(path=="/load"&&q(r,"nav")=="removenetwork"){
+        if(!authorized(r))return true;
+        String id=q(r,"network");
+        mira_beta_network_t p={};
+        if(!id.length()||mira_beta_networks_get(id.toInt(),&p)!=ESP_OK){
+            r->send(404,"text/plain","Reseau inconnu");return true;
+        }
+        network_nonce=esp_random()|1u;network_nonce_started=esp_timer_get_time();
+        char html[780]={0};
+        snprintf(html,sizeof(html),
+          "<!doctype html><meta charset='utf-8'><h2>Confirmer la suppression du reseau %.32s</h2>"
+          "<form method='post' action='/mira/network?action=remove&amp;network=%d'>"
+          "<input type='hidden' name='nonce' value='%08x'>"
+          "<button type='submit'>Supprimer</button></form>",
+          p.ssid,p.id,(unsigned)network_nonce);
+        r->send(200,"text/html; charset=utf-8",html);
+        return true;
+    }
+    if(path=="/save"&&r->method()==HTTP_POST){
+        if(!authorized(r))return true;
+        String conf=q(r,"config"),update=q(r,"update");
+        if(update=="wifi")return save_network(r,true);
+        if(conf=="wifi")return save_network(r,false);
+        if(conf=="AP"){
+            String pass=post(r,"pass"),ip=post(r,"ip"),active=post(r,"actif");
+            if(active!="0"&&active!="1"){
+                r->send(400,"text/plain","Point d'acces invalide");return true;
+            }
+            esp_err_t err=mira_recovery_save_beta_ap(pass.c_str(),ip.c_str(),active=="1");
+            pass=String();
+            if(err!=ESP_OK){r->send(400,"text/plain","Configuration AP invalide");return true;}
+            r->send(200,"text/html","<h2>Point d'acces enregistre. Redemarrage...</h2>");
+            queue_restart();
+            return true;
+        }
+        if(conf=="params"&&param_exists(r,"MQTT_Actif"))return save_mqtt(r);
+        if(conf=="params")return save_urls(r);
+        r->send(400,"text/plain","Formulaire inconnu");return true;
+    }
+    if(path=="/display-save"&&r->method()==HTTP_POST){
+        if(!authorized(r))return true;
+        return save_display(r);
+    }
+    if(path=="/reboot"&&r->method()==HTTP_GET){
+        if(!authorized(r))return true;
+        r->send(200,"text/plain","Mira Panel redemarre");
+        queue_restart();return true;
+    }
+    if(path=="/api/checkupdate"&&r->method()==HTTP_GET){
+        if(!authorized(r))return true;
+        r->send(200,"application/json",
+                "{\"status\":\"manual\",\"message\":\"Utiliser le formulaire OTA\"}");
+        return true;
+    }
+    if(path=="/mira/clock/status"&&r->method()==HTTP_GET){
+        if(!authorized(r))return true;
+        time_t now=time(nullptr);
+        char msg[100];
+        snprintf(msg,sizeof(msg),"{\"epoch\":%lld,\"valid\":%s}",
+                 (long long)now,now>1700000000?"true":"false");
+        r->send(200,"application/json",msg);
+        return true;
+    }
+    return false;
 }
