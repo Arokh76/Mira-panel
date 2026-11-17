@@ -341,7 +341,14 @@ extern "C" void mira_async_web_emit_direct(int id,const char *value){
     if(!started||id<1||id>4096||!value)return;
     char event_name[16];
     snprintf(event_name,sizeof(event_name),"%d",id);
-    events.send(value,event_name);
+    // Same CR/LF stripping and 160-byte state limit as native SSE. Never
+    // allow a Jeedom value to inject its own EventSource framing lines.
+    char safe[160];size_t n=0;
+    while(value[n]&&n<sizeof(safe)-1){
+        safe[n]=(value[n]=='\\r'||value[n]=='\\n')?' ':value[n];n++;
+    }
+    safe[n]=0;
+    events.send(safe,event_name);
 }
 static void sse_worker(void *unused){
     (void)unused;
