@@ -4030,7 +4030,7 @@ bool mira_jeedom_async_get_state(const char *kind,const char *selector,
         bool same=is_toggle?(!strcmp(ref->type,"toggle")&&
                 (local==ref->id0||local==ref->id1)):
                 ((!strcmp(ref->type,kind))&&local==ref->id);
-        if(same){snprintf(name,sizeof(name),"%s",ref->name);match=true;break;}
+        if(same){snprintf(name,sizeof(name),"%.95s",ref->name);match=true;break;}
     }
     xSemaphoreGive(mira_index_mutex);
     if(!match)return true;
