@@ -820,11 +820,16 @@ extern "C" void mira_async_web_start(void){
     server.on("/getmodule",AsyncWebRequestMethod::HTTP_GET,getmodule_get);
     server.on("/testmodule",AsyncWebRequestMethod::HTTP_GET,testmodule_get);
     server.on("/mira/async-health",AsyncWebRequestMethod::HTTP_GET,[](AsyncWebServerRequest *r){
-        char msg[160];
+        char msg[256];
         snprintf(msg,sizeof(msg),
-           "{\"transport\":\"ESPAsyncWebServer\",\"port\":80,\"legacy\":8081,"
-           "\"internal_free\":%lu,\"psram_free\":%lu,\"sse_clients\":%u}",
+           "{\"transport\":\"ESPAsyncWebServer\",\"port\":80,\"httpd_active\":false,"
+           "\"internal_free\":%lu,\"internal_min_free\":%lu,"
+           "\"internal_largest_block\":%lu,\"dma_min_free\":%lu,"
+           "\"psram_free\":%lu,\"sse_clients\":%u}",
            (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+           (unsigned long)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+           (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+           (unsigned long)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA),
            (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
            (unsigned)events.count());
         r->send(200,"application/json",msg);
