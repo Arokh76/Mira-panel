@@ -3,6 +3,7 @@
 // Reads/writes the existing LVGL JSON without erasing or formatting SPIFFS.
 // Incoming state updates are PASSIVE, never forwarded to MQTT or an actuator.
 #include "mira_jeedom.h"
+#include "mira_async_web.h"
 #include "freertos/idf_additions.h" // PSRAM task/queue memory-capability APIs
 #include "mira_full.h"
 #include "mira_camera.h"
@@ -187,6 +188,8 @@ static bool require_key(httpd_req_t *req) {
     httpd_resp_sendstr(req,"Cle Mira invalide (provisionner la meme cle que dans Jeedom via l'AP)");
     return false;
 }
+// Reuse the WT32-equivalent cached key for Arduino async HTTP routes.
+bool mira_jeedom_async_key_valid(const char *key){return correct_key(key);}
 static char *read_config(size_t *out_length) {
     FILE *f=fopen(MIRA_JSON_PATH,"rb");
     if(!f)return NULL;
@@ -768,6 +771,55 @@ static esp_err_t mira_index_send_snapshot(httpd_req_t *req){
     return result;
 }
 
+// Direct AsyncWebServer response: return a short-lived PSRAM copy of the
+// *same* index that native /getindex returns. No socket held under the lock.
+// AsyncTCP's filler callback owns/free()s this snapshot after the response.
+esp_err_t mira_jeedom_async_index_snapshot(char **body,size_t *body_length){
+    if(!body||!body_length)return ESP_ERR_INVALID_ARG;
+    *body=NULL;*body_length=0;
+    if(!mira_index_template && !mira_index_rebuild())return ESP_ERR_NOT_FOUND;
+    if(!mira_index_mutex||
+       xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(25))!=pdTRUE)
+        return ESP_ERR_TIMEOUT;
+    const char *payload=mira_index_template;
+    size_t length=mira_index_template_len;
+    if(payload&&mira_index_response&&mira_index_response_cap){
+        char *output=mira_index_response;
+        size_t n=0,cursor=0;
+        bool complete=true;
+        for(size_t i=0;i<mira_index_fields_count;i++){
+            const mira_index_field_t *field=&mira_index_fields[i];
+            if(field->start<cursor||field->end>length){complete=false;break;}
+            const size_t literal=(size_t)field->start-cursor;
+            char token[160*6+4];
+            bool live=mira_index_live_token(field,token,sizeof(token));
+            const char *part=live?token:payload+field->start;
+            const size_t part_len=live?strlen(token):(size_t)field->end-field->start;
+            if(n+literal+part_len>=mira_index_response_cap){complete=false;break;}
+            memcpy(output+n,payload+cursor,literal);n+=literal;
+            memcpy(output+n,part,part_len);n+=part_len;
+            cursor=field->end;
+        }
+        if(complete&&n+(length-cursor)<mira_index_response_cap){
+            memcpy(output+n,payload+cursor,length-cursor);
+            n+=length-cursor;output[n]=0;
+            payload=output;length=n;
+        }
+    }
+    // Always copy while the index lock is held; programming can replace it.
+    char *snapshot=payload?heap_caps_malloc(length+1u,
+                               MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT):NULL;
+    if(snapshot){
+        memcpy(snapshot,payload,length);
+        snapshot[length]=0;
+    }
+    xSemaphoreGive(mira_index_mutex);
+    if(!snapshot)return ESP_ERR_NO_MEM;
+    *body=snapshot;*body_length=length;
+    __atomic_fetch_add(&mira_index_responses,1u,__ATOMIC_RELAXED);
+    return ESP_OK;
+}
+
 // Reuse the already-built Jeedom action index for browser SSE sessions.
 // Only copy the stable, serialized PSRAM snapshot under its mutex; parsing
 // happens after unlocking and never rereads/rebuilds the SPIFFS widget file.
@@ -1048,6 +1100,44 @@ static void mira_sse_record_direct(int id,const char *value){
     slot->value[n]=0;
     portEXIT_CRITICAL(&mira_sse_lock);
     mira_jeedom_sse_notify();
+    mira_async_web_emit_direct(id,value);
+}
+
+// One resident action at a time, with a short non-blocking index lock.
+// The AsyncTCP SSE worker owns its previous-value table and never parses SPIFFS.
+size_t mira_jeedom_async_event_count(void){
+    if(!mira_index_mutex||xSemaphoreTake(mira_index_mutex,0)!=pdTRUE)return 0;
+    size_t count=mira_action_ref_count;
+    xSemaphoreGive(mira_index_mutex);
+    return count;
+}
+bool mira_jeedom_async_event_current(size_t ordinal,int *id,char *value,size_t cap){
+    if(!id||!value||cap<2||!mira_index_mutex)return false;
+    mira_action_ref_t ref={0};
+    if(xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(5))!=pdTRUE)return false;
+    bool known=mira_action_refs&&ordinal<mira_action_ref_count;
+    if(known)ref=mira_action_refs[ordinal];
+    xSemaphoreGive(mira_index_mutex);
+    if(!known||!ref.name[0])return false;
+    const char *name=ref.name;
+    if(!strcmp(ref.type,"list")){
+        name=ref.list_name;
+        if(!*name||ref.id<1)return false;
+    }else if(strcmp(ref.type,"toggle")&&strcmp(ref.type,"info")&&
+             strcmp(ref.type,"range")&&strcmp(ref.type,"infofa")&&
+             strcmp(ref.type,"inputbox"))return false;
+    if(!mira_full_cached_state(name,value,cap))return false;
+    if(!strcmp(ref.type,"list")){
+        if(strcmp(value,ref.name))return false;
+        *id=ref.id;
+    }else if(!strcmp(ref.type,"toggle")){
+        bool on=!strcmp(value,"1")||!strcasecmp(value,"on")||
+                !strcasecmp(value,"true");
+        *id=on?ref.id1:ref.id0;
+    }else *id=ref.id;
+    if(*id<1||*id>4096)return false;
+    for(char *p=value;*p;p++)if(*p=='\r'||*p=='\n')*p=' ';
+    return true;
 }
 
 static esp_err_t mira_sse_changed(mira_sse_client_t *client){
@@ -2084,6 +2174,109 @@ static esp_err_t updatenr_process(httpd_req_t *req) {
     }
     return httpd_resp_sendstr(req,"OK");
 }
+// Direct ESPAsyncWebServer /updatenr implementation: same indexed action table,
+// decoding, bounds and PASSIVE semantics as the native handler above. The HTTP
+// callback supplies already URL-decoded parameters; no Jeedom command is sent.
+int mira_jeedom_async_updatenr(const char *kind,const char *selector,
+        const char *incoming,const char *red,const char *green,const char *blue,
+        char *answer,size_t cap){
+    if(!answer||cap<20)return 500;
+    snprintf(answer,cap,"%s","OK");
+    if(!kind||!selector){snprintf(answer,cap,"Type d'action absent");return 400;}
+    const char *types[]={"info","toggle","toogle","range","list","listvalue","color","button"};
+    bool known_type=false;
+    for(size_t i=0;i<sizeof(types)/sizeof(types[0]);i++)
+        if(!strcmp(kind,types[i])){known_type=true;break;}
+    if(!known_type||strlen(selector)>=128){
+        snprintf(answer,cap,"Type ou ID invalide");return 400;
+    }
+    const bool by_value=!strcmp(kind,"listvalue");
+    const bool by_id=!strcmp(kind,"list");
+    const bool list_group=by_value||by_id;
+    long id=-1;
+    if(list_group){
+        if(!*selector||strlen(selector)>=96||!incoming||!*incoming){
+            snprintf(answer,cap,"Etat de liste invalide");return 400;
+        }
+        if(by_id){
+            char *end=NULL;id=strtol(incoming,&end,10);
+            if(end==incoming||*end||id<1||id>4096){
+                snprintf(answer,cap,"ID option invalide");return 400;
+            }
+        }
+    }else{
+        char *end=NULL;id=strtol(selector,&end,10);
+        if(end==selector||*end||id<1||id>4096){
+            snprintf(answer,cap,"ID invalide");return 400;
+        }
+    }
+    if(!mira_index_mutex||!mira_action_refs){
+        snprintf(answer,cap,"Index non initialise");return 503;
+    }
+    if(xSemaphoreTake(mira_index_mutex,pdMS_TO_TICKS(15))!=pdTRUE){
+        snprintf(answer,cap,"Index occupe");return 503;
+    }
+    mira_action_ref_t match={0};bool found=false;
+    for(size_t i=0;i<mira_action_ref_count;i++){
+        const mira_action_ref_t *ref=&mira_action_refs[i];
+        if(list_group){
+            if(strcmp(ref->type,"list")||strcmp(ref->list_name,selector)||
+               (by_value?strcmp(ref->name,incoming):ref->id!=id))continue;
+        }else if((!strcmp(kind,"toggle")||!strcmp(kind,"toogle"))&&
+                 !strcmp(ref->type,"toggle")){
+            if(id!=ref->id0&&id!=ref->id1)continue;
+        }else{
+            if(strcmp(ref->type,kind)||id!=ref->id)continue;
+        }
+        match=*ref;found=true;break;
+    }
+    xSemaphoreGive(mira_index_mutex);
+    if(!found){snprintf(answer,cap,"Commande inconnue");return 404;}
+    char name[96]={0},value[769]={0};
+    if(list_group){
+        snprintf(name,sizeof(name),"%s",selector);
+        snprintf(value,sizeof(value),"%s",match.name);
+    }else if((!strcmp(kind,"toggle")||!strcmp(kind,"toogle"))&&
+             !strcmp(match.type,"toggle")){
+        snprintf(name,sizeof(name),"%s",match.name);
+        snprintf(value,sizeof(value),"%s",id==match.id1?"1":"0");
+    }else if(!strcmp(match.type,"list")){
+        snprintf(name,sizeof(name),"%s",match.list_name);
+        snprintf(value,sizeof(value),"%s",match.name);
+    }else{
+        snprintf(name,sizeof(name),"%s",match.name);
+        if(!strcmp(match.type,"info")||!strcmp(match.type,"range")){
+            if(!incoming){snprintf(answer,cap,"Valeur absente");return 400;}
+            snprintf(value,sizeof(value),"%s",incoming);
+        }else if(!strcmp(match.type,"color")){
+            if(!red||!green||!blue){snprintf(answer,cap,"Couleur invalide");return 400;}
+            unsigned ri=0,gi=0,bi=0;char trailing=0;
+            if(sscanf(red,"%u %c",&ri,&trailing)!=1||
+               sscanf(green,"%u %c",&gi,&trailing)!=1||
+               sscanf(blue,"%u %c",&bi,&trailing)!=1||
+               ri>255||gi>255||bi>255){
+                snprintf(answer,cap,"Couleur invalide");return 400;
+            }
+            snprintf(value,sizeof(value),"#%02x%02x%02x",ri,gi,bi);
+        }else if(!strcmp(match.type,"button"))snprintf(value,sizeof(value),"1");
+    }
+    if(!*name){snprintf(answer,cap,"Commande inconnue");return 404;}
+    if(strcmp(kind,"button")){
+        size_t n=strlen(name);
+        bool cover=n>=7&&!strcmp(name+n-7,"__cover");
+        if(strlen(value)>(cover?768u:159u)){
+            snprintf(answer,cap,"Valeur d'info trop longue");return 400;
+        }
+        if(!mira_full_enqueue_state(name,value)){
+            snprintf(answer,cap,"File d'etats pleine");return 503;
+        }
+        int event_id=list_group?match.id:(int)id;
+        if(event_id>0&&event_id<=4096)mira_sse_record_direct(event_id,value);
+    }
+    if(list_group)snprintf(answer,cap,"%d",match.id);
+    return 200;
+}
+
 // WT32 AsyncWebServer parity: /updatenr must never monopolize the IDF
 // dispatch task while resolving the widget cache or sending a TCP reply.
 // Keep a small fixed set of PSRAM workers rather than spawning a task per
