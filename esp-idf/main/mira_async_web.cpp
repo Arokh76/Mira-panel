@@ -213,13 +213,28 @@ static bool native_jeedom_request(AsyncWebServerRequest *r){
     const bool single=path=="/setjeedomid";
     const bool toggle=path=="/setjeedomtoggleid";
     const bool init=path=="/sendjeedomorderid";
+    const bool readstate=path=="/get"&&(r->hasParam("toggle")||
+         r->hasParam("toogle")||r->hasParam("info")||r->hasParam("infofa"));
     const bool readparam=path=="/getparam"||
                          (path=="/get"&&r->hasParam("param"));
     const bool writeparam=path=="/updateparam"||path=="/addparam"||
                           path=="/addlistparam"||path=="/updatelistparam";
     const bool saveparam=path=="/savelistparam"||path=="/createlistparam";
-    if(!batch&&!single&&!toggle&&!init&&!readparam&&!writeparam&&!saveparam)
+    if(!batch&&!single&&!toggle&&!init&&!readstate&&!readparam&&!writeparam&&!saveparam)
         return false;
+    if(readstate){
+        if(!public_key(r)){forbidden(r);return true;}
+        static const char *types[]={"toggle","toogle","info","infofa"};
+        for(const char *type:types){
+            const auto *p=r->getParam(type);
+            if(!p)continue;
+            char value[160]={0};
+            if(!mira_jeedom_async_get_state(type,p->value().c_str(),
+                                            value,sizeof(value)))return false;
+            r->send(200,"text/plain; charset=utf-8",value);
+            return true;
+        }
+    }
     if(readparam||writeparam||saveparam){
         if(!public_key(r)){forbidden(r);return true;}
         if(saveparam){r->send(200,"text/plain","OK");return true;}
@@ -480,6 +495,7 @@ extern "C" void mira_async_web_start(void){
         ESP_LOGW(TAG,"ASYNC_SSE_REPLAY_TASK_FAILED (direct events still active)");
     server.on("/getindex",AsyncWebRequestMethod::HTTP_GET,index_get);
     server.on("/updatenr",AsyncWebRequestMethod::HTTP_GET,updatenr_get);
+    server.on("/get",AsyncWebRequestMethod::HTTP_GET,proxy_request);
     server.on("/getparam",AsyncWebRequestMethod::HTTP_GET,proxy_request);
     server.on("/updateparam",AsyncWebRequestMethod::HTTP_GET,proxy_request);
     server.on("/addparam",AsyncWebRequestMethod::HTTP_GET,proxy_request);
