@@ -5,7 +5,7 @@ dependencies:
   # Keep the same JPEG decoder family as the working WT32. Native esp_jpeg
   # remains the fast primary decoder; JPEGDEC is only used after a failure.
   bitbank2/jpegdec: "1.6.2"
-  espressif/esp-dsp: "1.6.0"
+  espressif/esp-dsp: "^1.8.0"
 
   # Same event-driven HTTP/TCP implementation as Mira WT32.
   # Pinned versions: do not pull unreviewed library updates into OTA builds.
