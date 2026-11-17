@@ -4358,6 +4358,126 @@ char *mira_jeedom_async_allparams(size_t *length){
     return json;
 }
 
+
+// WT32 Web controls: authenticated POST /update?send=..., send_range=...,
+// send_list=..., send_color=..., send_textbox=... . Transport is the same
+// queued asynchronous Jeedom/MQTT/GenericCmd path as local LVGL touches.
+// Never let an untrusted HTTP command invent a widget or execute an
+// actuator from a passive state update.
+int mira_jeedom_async_browser_action(const char *kind,const char *idtext,
+      const char *list,const char *value,
+      const char *red,const char *green,const char *blue){
+    if(!kind||!decimal_id(idtext))return 400;
+    long id=strtol(idtext,NULL,10);
+    if(id<1||id>4096)return 400;
+    const bool button=!strcmp(kind,"send");
+    const bool range=!strcmp(kind,"send_range");
+    const bool color=!strcmp(kind,"send_color");
+    const bool selection=!strcmp(kind,"send_list");
+    const bool input=!strcmp(kind,"send_textbox");
+    if(!button&&!range&&!color&&!selection&&!input)return 400;
+    // Read the existing resident action index, never regenerate it from
+    // SPIFFS on each button press.
+    char *raw=NULL;size_t length=0;
+    esp_err_t err=mira_jeedom_async_index_snapshot(&raw,&length);
+    if(err!=ESP_OK||!raw)return 503;
+    cJSON *doc=cJSON_ParseWithLength(raw,length);
+    heap_caps_free(raw);
+    if(!doc)return 503;
+    const cJSON *actions=cJSON_GetObjectItemCaseSensitive(doc,"actions");
+    const cJSON *item=NULL;
+    char action_name[96]={0},action_type[24]={0},payload[160]="1";
+    bool match=false;
+    cJSON_ArrayForEach(item,actions){
+        const char *type=jstr((cJSON *)item,"type","");
+        const char *name=jstr((cJSON *)item,"nom","");
+        if(!*name)continue;
+        if(button&&!strcmp(type,"toggle")&&
+           (jint((cJSON *)item,"id0",-1)==id||
+            jint((cJSON *)item,"id1",-1)==id)){
+            snprintf(action_name,sizeof(action_name),"%s",name);
+            snprintf(action_type,sizeof(action_type),"toggle");
+            snprintf(payload,sizeof(payload),"%d",
+                     jint((cJSON *)item,"id1",-1)==id);
+            match=true;break;
+        }
+        if(jint((cJSON *)item,"id",-1)!=id)continue;
+        if(button&&(!strcmp(type,"button")||!strcmp(type,"little_button"))){
+            snprintf(action_name,sizeof(action_name),"%s",name);
+            snprintf(action_type,sizeof(action_type),"button");
+            match=true;break;
+        }
+        if(selection&&!strcmp(type,"list")){
+            if(!list||strcmp(list,jstr((cJSON *)item,"nomliste","")))break;
+            snprintf(action_name,sizeof(action_name),"%s",list);
+            snprintf(action_type,sizeof(action_type),"list");
+            snprintf(payload,sizeof(payload),"%s",name);
+            match=true;break;
+        }
+        if(input&&!strcmp(type,"inputbox")){
+            if(!value||strlen(value)>=sizeof(payload))break;
+            snprintf(action_name,sizeof(action_name),"%s",name);
+            snprintf(action_type,sizeof(action_type),"inputbox");
+            snprintf(payload,sizeof(payload),"%s",value);
+            match=true;break;
+        }
+        if(range&&!strcmp(type,"range")){
+            if(!value||strlen(value)>=sizeof(payload))break;
+            char *tail=NULL;errno=0;
+            long n=strtol(value,&tail,10);
+            if(!*value||tail==value||*tail||errno==ERANGE||
+               n<jint((cJSON *)item,"min",0)||
+               n>jint((cJSON *)item,"max",100))break;
+            snprintf(action_name,sizeof(action_name),"%s",name);
+            snprintf(action_type,sizeof(action_type),"range");
+            snprintf(payload,sizeof(payload),"%s",value);
+            match=true;break;
+        }
+        if(color&&!strcmp(type,"color")){
+            const char *parts[]={red,green,blue};
+            int channels[3]={0};
+            bool valid=true;
+            for(int i=0;i<3;i++){
+                if(!parts[i]||!*parts[i]||strlen(parts[i])>3){
+                    valid=false;break;
+                }
+                char *tail=NULL;errno=0;
+                long n=strtol(parts[i],&tail,10);
+                if(tail==parts[i]||*tail||errno==ERANGE||n<0||n>255){
+                    valid=false;break;
+                }
+                channels[i]=(int)n;
+            }
+            if(!valid)break;
+            snprintf(action_name,sizeof(action_name),"%s",name);
+            snprintf(action_type,sizeof(action_type),"color");
+            snprintf(payload,sizeof(payload),"%d,%d,%d",
+                     channels[0],channels[1],channels[2]);
+            match=true;break;
+        }
+    }
+    cJSON_Delete(doc);
+    if(!match||!*action_name)return 404;
+    bool queued=mira_jeedom_actions_enabled()?
+        mira_jeedom_queue_local_action(action_name,action_type,payload):
+        mira_other_transport(action_name,action_type,payload);
+    if(!queued)return 503;
+    // Keep the WT32's live browser feedback separate from actuator sends.
+    char text[160]={0};
+    const char *sse=NULL;
+    if(range||input)sse=payload;
+    else if(selection)sse=action_name;
+    else if(color){
+        unsigned rr=0,gg=0,bb=0;
+        if(sscanf(payload,"%u,%u,%u",&rr,&gg,&bb)==3){
+            snprintf(text,sizeof(text),"#%02x%02x%02x",rr,gg,bb);
+            sse=text;
+        }
+    }
+    if(sse)mira_sse_record_direct((int)id,sse);
+    return 200;
+}
+
 // Native ESPAsyncWebServer Jeedom programming. Run these operations in the
 // dedicated PSRAM-backed HTTP worker, NEVER in the AsyncTCP callback.
 int mira_jeedom_async_set_binding(const char *id,const char *value){
