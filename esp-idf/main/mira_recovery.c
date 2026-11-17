@@ -1168,12 +1168,11 @@ esp_err_t mira_recovery_init(void) {
         }
     };
     boot_stage="wifi_mode";
-    // WT32-style safe key recovery: when the key is missing, use AP-only
-    // mode so the unauthenticated first-run wizard is never reachable
-    // through the user's LAN/STA address. Saved Wi-Fi stays in NVS.
+    // Retain STA flash credentials for key recovery, but never connect STA
+    // while the local key is absent. The first-run wizard is reachable only
+    // through the isolated Mira AP; no LAN station address is assigned.
     const bool key_ready=mira_beta_web_auth_key_present();
-    ESP_RETURN_ON_ERROR(esp_wifi_set_mode(
-        key_ready?WIFI_MODE_APSTA:WIFI_MODE_AP), TAG, "wifi mode");
+    ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_APSTA), TAG, "wifi mode");
     boot_stage="ap_config";
     ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_AP, &ap), TAG, "wifi config");
     configure_beta_ap_profile();
