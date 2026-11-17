@@ -1274,6 +1274,9 @@ esp_err_t mira_recovery_init(void) {
     // a black screen + Wi-Fi reboot loop (ESP_ERR_HTTPD_HANDLERS_FULL).
     const bool setup_only=mira_beta_setup_unconfigured();
     conf.max_uri_handlers = setup_only?12:96;
+    // In configured mode ESPAsyncWebServer handles port 80 (WT32 architecture).
+    // The native compatibility API remains on loopback-compatible 8081 only.
+    conf.server_port = setup_only?80:8081;
     conf.uri_match_fn = httpd_uri_match_wildcard;
     // IDF stock max_open_sockets=7 is shared with a persistent SSE browser,
     // async /getindex, passive /updatenr and other HTTP clients. Under load,
@@ -1281,7 +1284,7 @@ esp_err_t mira_recovery_init(void) {
     // the configured mode; keep the recovery/setup footprint unchanged.
     // Requires CONFIG_LWIP_MAX_SOCKETS=18 (3 internal HTTPD sockets + 10
     // sessions, leaving five FDs for MQTT, DNS and outbound connections).
-    conf.max_open_sockets = setup_only?7:10;
+    conf.max_open_sockets = setup_only?7:5;
     conf.backlog_conn = setup_only?5:8;
     ESP_LOGI(TAG,"HTTPD_CONNECTION_BUDGET clients=%u backlog=%u lwip_max=%u",
              (unsigned)conf.max_open_sockets,(unsigned)conf.backlog_conn,
@@ -1318,6 +1321,7 @@ esp_err_t mira_recovery_init(void) {
         // Last-resort small server keeps /status and Wi-Fi reachable and
         // avoids a boot loop. No full API/UI task startup in this mode.
         conf.max_uri_handlers=8;
+        conf.server_port=80; // emergency rescue remains reachable without the async front end
         conf.stack_size=4096;
         conf.max_open_sockets=2;
         http_stack_configured=conf.stack_size;
