@@ -1,4 +1,4 @@
-name: Tamagotchi - compiler T-Display V1.1
+name: Tamagotchi V2 - compiler T-Display V1.1
 on:
   push:
     branches: [main]
@@ -23,37 +23,43 @@ jobs:
         run: python -m pip install "platformio==6.1.18" "esptool==4.8.1"
       - name: Compiler pour LilyGO T-Display V1.1
         run: pio run --project-dir "projet tamagotshi" -e tdisplay_v11
-      - name: Construire le firmware complet pour Flash Download Tools (0x0000)
+      - name: Construire les firmwares pour Flash Download Tools
         shell: bash
         run: |
           set -euo pipefail
           BUILD="projet tamagotshi/.pio/build/tdisplay_v11"
+          OUT="projet tamagotshi/firmware"
           BOOT_APP0="$(find "$HOME/.platformio/packages/framework-arduinoespressif32" -name boot_app0.bin -print -quit)"
           test -s "$BOOT_APP0"
           test -s "$BUILD/firmware.bin"
-          mkdir -p "projet tamagotshi/firmware"
+          mkdir -p "$OUT"
           python -m esptool --chip esp32 merge_bin \
             --flash_mode dio --flash_freq 40m --flash_size 4MB \
-            -o "projet tamagotshi/firmware/TamaTest_TDisplay_V11_full.bin" \
+            -o "$OUT/Tamagotchi_V2_TDisplay_V11_full.bin" \
             0x1000 "$BUILD/bootloader.bin" \
             0x8000 "$BUILD/partitions.bin" \
             0xe000 "$BOOT_APP0" \
             0x10000 "$BUILD/firmware.bin"
-          ls -lh "projet tamagotshi/firmware/TamaTest_TDisplay_V11_full.bin"
-      - name: Mettre le BIN dans les fichiers du projet GitHub
+          cp "$BUILD/firmware.bin" "$OUT/Tamagotchi_V2_TDisplay_V11_app.bin"
+          ls -lh "$OUT/Tamagotchi_V2_TDisplay_V11_"*.bin
+      - name: Publier les BIN dans le projet GitHub
         if: github.ref == 'refs/heads/main'
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "projet tamagotshi/firmware/TamaTest_TDisplay_V11_full.bin"
+          git add "projet tamagotshi/firmware/Tamagotchi_V2_TDisplay_V11_full.bin" "projet tamagotshi/firmware/Tamagotchi_V2_TDisplay_V11_app.bin"
           if ! git diff --cached --quiet; then
-            git commit -m "Tamagotchi: publier le firmware complet ESP32"
-            git push
+            git commit -m "Tamagotchi V2: publier les firmwares ESP32"
+            for attempt in 1 2 3; do
+              if git push; then exit 0; fi
+              git pull --rebase origin main
+            done
+            exit 1
           fi
-      - name: Archiver le BIN compilé
+      - name: Archiver les firmwares
         uses: actions/upload-artifact@v4
         with:
-          name: TamaTest-TDisplay-V11-Firmware
-          path: "projet tamagotshi/firmware/TamaTest_TDisplay_V11_full.bin"
+          name: Tamagotchi-V2-TDisplay-V11-Firmware
+          path: "projet tamagotshi/firmware/Tamagotchi_V2_TDisplay_V11_*.bin"
           if-no-files-found: error
