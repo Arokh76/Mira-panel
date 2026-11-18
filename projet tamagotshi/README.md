@@ -1,35 +1,28 @@
-# Projet Tamagotshi – V2 🐣
+# Projet Tamagotshi 🐣 — V3 grand écran
 
-Firmware autonome pour le **LilyGO T-Display V1.1 original** (ESP32, ST7789, portrait **135 × 240**).
+**Matériel :** LilyGO **T-Display original V1.1**, ESP32 classique, LCD ST7789 135 × 240 en portrait, deux boutons intégrés.
 
-## Nouveautés V2
-- Interface portrait, personnage anime et clignement des yeux
-- Cinq jauges : faim (**F**), joie (**J**), energie (**E**), proprete (**P**), sante (**S**)
-- Deux boutons integres : **GPIO35 = menu suivant**, **GPIO0 (BOOT) = valider**
-- Actions : MANGER, JOUER, DODO, LAVER, INFOS
-- Cycle de vie accelere pour les tests : **oeuf pendant 1 minute**, **bebe jusqu'a 7 minutes**, puis **enfant**
-- Besoins et humeur qui evoluent automatiquement
-- Sauvegarde dans la NVS (memoire flash) sur les actions, l'evolution et toutes les 60 secondes
-- 100 % hors ligne : ni Wi-Fi, ni MQTT, ni Jeedom, ni IA
+## Interface et comportement
+- Scène principale sans barres ni jauges : personnage bien plus grand, expressions animées et réactions.
+- **4 stades** : œuf (0–1 minute), bébé (1–7 minutes), enfant (7–30 minutes), adulte ensuite. Durées volontairement accélérées pour le test.
+- Clignements, regards, petits sauts, déplacements, bras qui saluent, larmes, sommeil avec Zzz et effets visuels lors des actions.
+- États selon les besoins : content, neutre, triste, malade, endormi.
+- Menu 7 actions : **MANGER, JOUER, DODO, BAIN, SOINS, CADEAU, INFOS**.
+- Mini-jeu d'adresse **Attrape l'étoile** : valider quand l'étoile est au centre, 3 tentatives, points de joie.
+- Les cinq jauges sont **uniquement sur la page INFOS**, ainsi que l'âge et le score de jeu.
+- Sauvegarde régulière en NVS et après les actions. Données compatibles avec la V2.
 
-**Important** : l'age avance uniquement quand l'ESP32 reste alimente (pas de RTC ni de NTP). La sauvegarde conserve l'etat lors d'un redemarrage normal, mais le flash complet peut reinitialiser les donnees.
+### Commandes
+- Bouton **GPIO35** : action suivante ; depuis INFOS, retour ; pendant le mini-jeu, quitter.
+- Bouton **GPIO0 (BOOT)** : valider ; depuis INFOS, retour ; pendant le mini-jeu, attraper l'étoile.
 
-## BIN a flasher (Espressif Flash Download Tools)
+Aucune connexion Wi-Fi, aucun câble supplémentaire. Pas de temps réel pendant une coupure électrique (pas de RTC) : l'âge progresse uniquement lorsque la carte reste alimentée.
 
-Le workflow [Tamagotchi V2](../../actions/workflows/tamagotchi-build.yml) compile les firmwares :
+## Flasher
+La compilation GitHub Actions crée deux images :
+- **[Tamagotchi_V3_TDisplay_V11_full.bin](firmware/Tamagotchi_V3_TDisplay_V11_full.bin)** : pour Flash Download Tools à l'adresse **0x0000**, installation complète.
+- **[Tamagotchi_V3_TDisplay_V11_app.bin](firmware/Tamagotchi_V3_TDisplay_V11_app.bin)** : application seule à **0x10000**, à privilégier pour une mise à jour depuis V2 afin de conserver les paramètres NVS si le flash n'est pas effacé.
 
-- [`Tamagotchi_V2_TDisplay_V11_full.bin`](firmware/Tamagotchi_V2_TDisplay_V11_full.bin) : image complete, a l'adresse **`0x0000`**. A utiliser pour installer cette V2.
-- [`Tamagotchi_V2_TDisplay_V11_app.bin`](firmware/Tamagotchi_V2_TDisplay_V11_app.bin) : application seule, a l'adresse **`0x10000`**. Pour des mises a jour ulterieures avec la meme table de partitions, en preservant la NVS.
+Sélectionner **ESP32**, UART, DIO, 40 MHz, 32 Mbit (4MB), 115200 bauds.
 
-Reglages : puce **ESP32**, **DIO**, **40 MHz**, **32 Mbit (4 Mo)**, **UART**. Baud 115200.
-
-Le fichier V1 est conserve dans ce dossier pour revenir a la version de test precedent si besoin.
-
-**Attention** : ce firmware ne convient pas aux T-Display S3.
-
-## Structure
-- `src/main.cpp` : logique de la bestiole, graphiques, menus, sauvegarde
-- `platformio.ini` : configuration de la carte et de l'ecran
-- `.github/workflows/tamagotchi-build.yml` : compilation automatique
-
-Projet independant de Mira Panel.
+Les firmwares V1 et V2 restent disponibles dans le dossier firmware. Projet indépendant de Mira Panel.

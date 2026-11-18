@@ -1,89 +1,93 @@
-// TAMAGOTCHI V2 - LilyGO T-Display V1.1 (ESP32 original, ST7789).
-// Portrait 135x240, boutons: GPIO35 = suivant, GPIO0 = selection.
-// Wi-Fi desactive ; etat conserve via NVS (Preferences) apres un redemarrage.
-// Temps et evolution comptes uniquement pendant que l'ESP32 est allume.
+// Tamagotchi V3 — LilyGO T-Display V1.1 ORIGINAL (ESP32/ST7789, 135x240).
+// Portrait, creature grand format, jauges uniquement dans INFOS, mini-jeu.
+ // GPIO35 : menu suivant / retour; GPIO0 : valider.
+ // Stockage compatible V2 : namespace "tama_v2", magic 0x54414D32.
 #include <Arduino.h>
 #include <Preferences.h>
 #include <TFT_eSPI.h>
+#include <math.h>
 
-static TFT_eSPI tft;
-static TFT_eSprite screen(&tft);
+static TFT_eSPI lcd;
+static TFT_eSprite gfx(&lcd);
 static Preferences prefs;
-
-static const uint8_t PIN_NEXT = 35;
-static const uint8_t PIN_OK = 0;
-static const uint8_t PIN_BACKLIGHT = 4;
+static const uint8_t PIN_NEXT = 35, PIN_OK = 0, PIN_LIGHT = 4;
 static const uint32_t MAGIC = 0x54414D32UL;
-static const int W = 135;
-static const int H = 240;
+static const int SW = 135, SH = 240;
+static const char* const MENU[] = {
+  "MANGER", "JOUER", "DODO", "BAIN", "SOINS", "CADEAU", "INFOS"
+};
+static const uint8_t MENU_COUNT = sizeof(MENU) / sizeof(MENU[0]);
 
 struct Pet {
-  uint8_t faim;
-  uint8_t joie;
-  uint8_t energie;
-  uint8_t proprete;
-  uint8_t sante;
+  uint8_t faim, joie, energie, proprete, sante;
   uint32_t ageSec;
   bool dort;
 };
+static Pet pet = {80,80,82,85,90,0,false};
 
-static Pet pet = {80, 80, 82, 85, 90, 0, false};
-static const char* MENU[] = {"MANGER", "JOUER", "DODO", "LAVER", "INFOS"};
-static uint8_t menuIndex = 0;
-static char notification[30] = "BONJOUR !";
-static uint32_t notifUntil = 0;
-static uint32_t lastSecond = 0;
-static uint32_t lastDraw = 0;
-static uint32_t lastSave = 0;
-
-struct Button {
-  uint8_t pin;
+struct Key {
+  uint8_t pin = 0;
   bool raw = false;
   bool stable = false;
-  uint32_t lastChange = 0;
-  bool justPressed(uint32_t now) {
-    const bool reading = (digitalRead(pin) == LOW);
-    if (reading != raw) {
-      raw = reading;
-      lastChange = now;
-    }
-    if (now - lastChange >= 35 && reading != stable) {
-      stable = reading;
-      if (stable) return true;
+  uint32_t changedAt = 0;
+  bool readPress(uint32_t now) {
+    const bool r = (digitalRead(pin) == LOW);
+    if (r != raw) { raw = r; changedAt = now; }
+    if (r != stable && (uint32_t)(now - changedAt) >= 35) {
+      stable = r;
+      return stable;
     }
     return false;
   }
 };
+static Key nextKey, okKey;
 
-static Button nextButton;
-static Button okButton;
+enum Page : uint8_t { HOME, INFOS, MINIGAME };
+enum Mood : uint8_t { HAPPY, NORMAL, SAD, SICK, ASLEEP };
+enum Effect : uint8_t { FX_NONE, FX_FOOD, FX_CLEAN, FX_HEAL, FX_GIFT, FX_GROW, FX_WAKE, FX_PLAY };
+static Page page = HOME;
+static Effect effect = FX_NONE;
+static uint8_t selected = 0;
+static uint16_t gameWins = 0, gamePlayed = 0;
+static uint8_t gameRound = 0, gameHits = 0;
+static uint32_t gameStarted = 0, gamePauseUntil = 0;
+static bool lastHit = false;
+static char speech[30] = "";
+static uint32_t speechUntil = 0, effectUntil = 0;
+static uint32_t lastFrame = 0, lastSecond = 0, lastSave = 0, lastGift = 0;
 
-static uint8_t bounded(int value) {
-  if (value < 0) return 0;
-  if (value > 100) return 100;
-  return static_cast<uint8_t>(value);
+static uint8_t clip100(int v) {
+  return static_cast<uint8_t>(v < 0 ? 0 : v > 100 ? 100 : v);
 }
-
 static uint8_t stage() {
-  if (pet.ageSec < 60) return 0;    // Oeuf : 1 minute (demo)
-  if (pet.ageSec < 420) return 1;   // Bebe : jusqu'a 7 minutes
-  return 2;                         // Enfant : ensuite
+  if (pet.ageSec < 60) return 0;        // OEUF 1 minute : test accelere
+  if (pet.ageSec < 420) return 1;       // BEBE 7 minutes
+  if (pet.ageSec < 1800) return 2;      // ENFANT 30 minutes
+  return 3;                             // ADULTE
 }
-
-static const char* stageName() {
+static const char* stageLabel() {
   switch (stage()) {
     case 0: return "OEUF";
     case 1: return "BEBE";
-    default: return "ENFANT";
+    case 2: return "ENFANT";
+    default: return "ADULTE";
   }
 }
-
-static void showMessage(const char* msg, uint32_t duration = 1900) {
-  snprintf(notification, sizeof(notification), "%s", msg);
-  notifUntil = millis() + duration;
+static Mood mood() {
+  if (pet.dort) return ASLEEP;
+  if (pet.sante < 25) return SICK;
+  if (pet.faim < 22 || pet.joie < 25 || pet.proprete < 17) return SAD;
+  if (pet.joie > 68 && pet.sante > 65 && pet.faim > 40) return HAPPY;
+  return NORMAL;
 }
-
-static void savePet() {
+static void say(const char* msg, Effect fx=FX_NONE, uint32_t time=2000) {
+  snprintf(speech, sizeof(speech), "%s", msg);
+  const uint32_t now = millis();
+  speechUntil = now + time;
+  effect = fx;
+  effectUntil = now + time;
+}
+static void save() {
   prefs.putUChar("faim", pet.faim);
   prefs.putUChar("joie", pet.joie);
   prefs.putUChar("energie", pet.energie);
@@ -91,276 +95,430 @@ static void savePet() {
   prefs.putUChar("sante", pet.sante);
   prefs.putUInt("age", pet.ageSec);
   prefs.putBool("dort", pet.dort);
-  prefs.putUInt("magic", MAGIC);  // En dernier, sert de validation du profil.
+  prefs.putUShort("wins", gameWins);
+  prefs.putUShort("games", gamePlayed);
+  prefs.putUInt("magic", MAGIC);
   lastSave = millis();
 }
-
-static void loadPet() {
+static void load() {
   prefs.begin("tama_v2", false);
   if (prefs.getUInt("magic", 0) == MAGIC) {
-    pet.faim = bounded(prefs.getUChar("faim", 80));
-    pet.joie = bounded(prefs.getUChar("joie", 80));
-    pet.energie = bounded(prefs.getUChar("energie", 82));
-    pet.proprete = bounded(prefs.getUChar("proprete", 85));
-    pet.sante = bounded(prefs.getUChar("sante", 90));
+    pet.faim = clip100(prefs.getUChar("faim", 80));
+    pet.joie = clip100(prefs.getUChar("joie", 80));
+    pet.energie = clip100(prefs.getUChar("energie", 82));
+    pet.proprete = clip100(prefs.getUChar("proprete", 85));
+    pet.sante = clip100(prefs.getUChar("sante", 90));
     pet.ageSec = prefs.getUInt("age", 0);
     pet.dort = prefs.getBool("dort", false);
+    gameWins = prefs.getUShort("wins", 0);
+    gamePlayed = prefs.getUShort("games", 0);
   } else {
-    savePet();
+    save();
   }
 }
-
-static void doAction() {
-  switch (menuIndex) {
+static void tickSecond() {
+  const uint8_t oldStage = stage();
+  ++pet.ageSec;
+  if (pet.ageSec % 42 == 0) pet.faim = clip100(pet.faim-1);
+  if (pet.ageSec % 55 == 0) pet.joie = clip100(pet.joie-1);
+  if (pet.ageSec % 75 == 0) pet.proprete = clip100(pet.proprete-1);
+  if (pet.dort) {
+    if (pet.ageSec % 7 == 0) pet.energie = clip100(pet.energie+1);
+    if (pet.energie >= 100) {
+      pet.dort = false;
+      say("BIEN DORMI !", FX_WAKE);
+    }
+  } else if (pet.ageSec % 50 == 0) {
+    pet.energie = clip100(pet.energie-1);
+  }
+  if (pet.ageSec % 60 == 0) {
+    if (pet.faim < 15 || pet.proprete < 15 || pet.energie < 10) {
+      pet.sante = clip100(pet.sante-2);
+    } else if (pet.faim > 65 && pet.proprete > 65 &&
+               pet.energie > 50 && pet.joie > 55) {
+      pet.sante = clip100(pet.sante+1);
+    }
+  }
+  if (stage() != oldStage) {
+    say(stage() == 1 ? "JE SUIS NE !" : "J'AI GRANDI !", FX_GROW, 3400);
+    save();
+  }
+}
+static void startGame() {
+  page = MINIGAME;
+  pet.dort = false;
+  gameRound = 0;
+  gameHits = 0;
+  gameStarted = millis();
+  gamePauseUntil = 0;
+  lastHit = false;
+}
+static int starX(uint32_t now) {
+  // Triangulaire sur 2 secondes : 18..116.
+  const uint32_t p = ((now - gameStarted) % 2000UL);
+  const int dist = static_cast<int>(p <= 1000 ? p : 2000UL-p);
+  return 18 + (dist * 98) / 1000;
+}
+static void gamePress(uint32_t now) {
+  if (static_cast<int32_t>(now - gamePauseUntil) < 0) return;
+  const bool hit = abs(starX(now) - 67) <= 13;
+  lastHit = hit;
+  if (hit) ++gameHits;
+  ++gameRound;
+  gamePauseUntil = now + 520;
+  if (gameRound >= 3) {
+    pet.joie = clip100(pet.joie + 8 + 9 * gameHits);
+    pet.energie = clip100(pet.energie - 7);
+    pet.faim = clip100(pet.faim - 3);
+    ++gamePlayed;
+    if (gameHits == 3) ++gameWins;
+    page = HOME;
+    say(gameHits == 3 ? "CHAMPION !" : gameHits ? "BIEN JOUE !" : "ON REESSAIE ?", FX_PLAY, 2700);
+    save();
+  }
+}
+static void chooseAction(uint32_t now) {
+  switch(selected) {
     case 0:
       pet.dort = false;
-      pet.faim = bounded(pet.faim + 26);
-      pet.proprete = bounded(pet.proprete - 4);
-      pet.sante = bounded(pet.sante + 2);
-      showMessage("MIAM MIAM !");
+      pet.faim = clip100(pet.faim + 26);
+      pet.proprete = clip100(pet.proprete - 3);
+      pet.sante = clip100(pet.sante + 2);
+      say("MIAM MIAM !", FX_FOOD);
       break;
     case 1:
-      pet.dort = false;
-      pet.joie = bounded(pet.joie + 27);
-      pet.energie = bounded(pet.energie - 8);
-      pet.faim = bounded(pet.faim - 3);
-      showMessage("YOUPI !");
-      break;
+      startGame();
+      return;
     case 2:
       pet.dort = !pet.dort;
-      showMessage(pet.dort ? "ZZZ... DODO" : "REVEILLE !");
+      say(pet.dort ? "BONNE NUIT..." : "BONJOUR !", pet.dort ? FX_NONE : FX_WAKE);
       break;
     case 3:
       pet.dort = false;
-      pet.proprete = bounded(pet.proprete + 35);
-      pet.joie = bounded(pet.joie + 4);
-      showMessage("TOUT PROPRE !");
+      pet.proprete = clip100(pet.proprete + 34);
+      pet.joie = clip100(pet.joie + 4);
+      say("TOUT PROPRE !", FX_CLEAN);
       break;
-    case 4: {
-      char txt[30];
-      if (pet.ageSec < 60) {
-        snprintf(txt, sizeof(txt), "AGE %lus", static_cast<unsigned long>(pet.ageSec));
-      } else {
-        snprintf(txt, sizeof(txt), "AGE %lum", static_cast<unsigned long>(pet.ageSec / 60));
+    case 4:
+      pet.sante = clip100(pet.sante + 25);
+      pet.joie = clip100(pet.joie - 2);
+      say("CA VA MIEUX !", FX_HEAL);
+      break;
+    case 5:
+      if (static_cast<int32_t>(now - lastGift) < 25000 && lastGift != 0) {
+        say("PATIENCE !", FX_NONE, 1100);
+        return;
       }
-      showMessage(txt, 2500);
+      lastGift = now;
+      pet.joie = clip100(pet.joie + 18);
+      say("OH MERCI !", FX_GIFT);
+      break;
+    case 6:
+      page = INFOS;
       return;
-    }
   }
-  savePet();
+  save();
 }
 
-static void tickOneSecond() {
-  const uint8_t oldStage = stage();
-  ++pet.ageSec;
-  if ((pet.ageSec % 42) == 0) pet.faim = bounded(pet.faim - 1);
-  if ((pet.ageSec % 55) == 0) pet.joie = bounded(pet.joie - 1);
-  if ((pet.ageSec % 75) == 0) pet.proprete = bounded(pet.proprete - 1);
-
-  if (pet.dort) {
-    if ((pet.ageSec % 7) == 0) pet.energie = bounded(pet.energie + 1);
-    if (pet.energie == 100) {
-      pet.dort = false;
-      showMessage("BIEN DORMI !");
-    }
-  } else if ((pet.ageSec % 50) == 0) {
-    pet.energie = bounded(pet.energie - 1);
-  }
-
-  if ((pet.ageSec % 60) == 0) {
-    if (pet.faim < 15 || pet.proprete < 15 || pet.energie < 10) {
-      pet.sante = bounded(pet.sante - 2);
-    } else if (pet.faim > 65 && pet.proprete > 65 &&
-               pet.energie > 50 && pet.joie > 55) {
-      pet.sante = bounded(pet.sante + 1);
-    }
-  }
-
-  if (stage() != oldStage) {
-    showMessage(stage() == 1 ? "JE SUIS NE !" : "J'AI GRANDI !", 3500);
-    savePet();
-  }
+static void cross(int x, int y, uint16_t color) {
+  gfx.drawFastHLine(x-3, y, 7, color);
+  gfx.drawFastVLine(x, y-3, 7, color);
 }
-
-static uint16_t valueColor(uint8_t value) {
-  if (value <= 24) return TFT_RED;
-  if (value <= 55) return TFT_ORANGE;
-  return TFT_GREEN;
+static void heart(int x, int y, uint16_t col) {
+  gfx.fillCircle(x-4,y-3,5,col);
+  gfx.fillCircle(x+4,y-3,5,col);
+  gfx.fillTriangle(x-9,y-2,x+9,y-2,x,y+12,col);
 }
-
-static void drawStat(int y, const char* label, uint8_t value) {
-  screen.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  screen.drawString(label, 6, y - 1, 1);
-
-  const int bx = 18;
-  const int bw = 75;
-  screen.drawRoundRect(bx, y, bw, 8, 2, TFT_DARKGREY);
-  const int fill = (static_cast<int>(value) * (bw - 4)) / 100;
-  if (fill > 0) screen.fillRect(bx + 2, y + 2, fill, 4, valueColor(value));
-
-  char number[6];
-  snprintf(number, sizeof(number), "%3u%%", static_cast<unsigned>(value));
-  screen.setTextColor(TFT_WHITE, TFT_BLACK);
-  screen.drawString(number, 99, y - 1, 1);
-}
-
-static void drawFace(int cx, int eyeY, int bob, bool happy, bool sad) {
-  const bool blink = pet.dort || ((millis() % 3700) < 170);
+static void drawFace(int cx, int cy, uint32_t now, Mood m) {
+  const bool blink = (m == ASLEEP) || (now % 3800 < 155);
+  const int look = ((now/4400)%3 == 0) ? -2 : ((now/4400)%3==1) ? 2 : 0;
   if (blink) {
-    screen.drawFastHLine(cx - 18, eyeY + bob, 11, TFT_BLACK);
-    screen.drawFastHLine(cx + 8, eyeY + bob, 11, TFT_BLACK);
+    gfx.drawFastHLine(cx-24,cy,15,TFT_BLACK);
+    gfx.drawFastHLine(cx+9,cy,15,TFT_BLACK);
+  } else if (m == SICK) {
+    gfx.drawLine(cx-23,cy-5,cx-12,cy+6,TFT_BLACK);
+    gfx.drawLine(cx-23,cy+6,cx-12,cy-5,TFT_BLACK);
+    gfx.drawLine(cx+12,cy-5,cx+23,cy+6,TFT_BLACK);
+    gfx.drawLine(cx+12,cy+6,cx+23,cy-5,TFT_BLACK);
   } else {
-    screen.fillRoundRect(cx - 17, eyeY - 3 + bob, 8, 11, 3, TFT_BLACK);
-    screen.fillRoundRect(cx + 10, eyeY - 3 + bob, 8, 11, 3, TFT_BLACK);
+    gfx.fillRoundRect(cx-23+look,cy-6,13,17,5,TFT_BLACK);
+    gfx.fillRoundRect(cx+10+look,cy-6,13,17,5,TFT_BLACK);
+    gfx.fillCircle(cx-18+look,cy-2,2,TFT_WHITE);
+    gfx.fillCircle(cx+15+look,cy-2,2,TFT_WHITE);
   }
-  if (pet.dort) {
-    screen.drawFastHLine(cx - 6, eyeY + 17 + bob, 12, TFT_BLACK);
-  } else if (sad) {
-    screen.drawLine(cx - 7, eyeY + 23 + bob, cx, eyeY + 18 + bob, TFT_BLACK);
-    screen.drawLine(cx, eyeY + 18 + bob, cx + 7, eyeY + 23 + bob, TFT_BLACK);
-  } else if (happy) {
-    screen.drawLine(cx - 9, eyeY + 16 + bob, cx, eyeY + 23 + bob, TFT_BLACK);
-    screen.drawLine(cx, eyeY + 23 + bob, cx + 9, eyeY + 16 + bob, TFT_BLACK);
-  } else {
-    screen.drawLine(cx - 7, eyeY + 20 + bob, cx + 7, eyeY + 20 + bob, TFT_BLACK);
-  }
-}
-
-static void drawPet(uint32_t now) {
-  const int cx = 67;
-  const uint8_t evolution = stage();
-  const bool happy = (pet.joie > 45 && pet.faim > 30 && pet.sante > 30);
-  const bool sad = !happy;
-  const int bob = (pet.dort || evolution == 0) ? 0 : ((now / 380) % 2 ? 0 : 3);
-  const int wobble = (now / 540) % 2 ? -2 : 2;
-
-  screen.drawFastHLine(24, 179, 87, TFT_DARKGREY);
-  screen.drawFastHLine(cx - 19, 181, 38, TFT_DARKGREY);
-
-  if (evolution == 0) {
-    // Oeuf : une petite coquille qui oscille.
-    screen.fillRoundRect(cx - 28 + wobble, 106, 56, 70, 26, TFT_WHITE);
-    screen.fillRoundRect(cx - 22 + wobble, 112, 44, 59, 23, TFT_LIGHTGREY);
-    screen.fillCircle(cx - 10 + wobble, 140, 4, TFT_BLACK);
-    screen.fillCircle(cx + 10 + wobble, 140, 4, TFT_BLACK);
-    screen.drawFastHLine(cx - 4 + wobble, 151, 8, TFT_BLACK);
-    screen.drawFastHLine(cx - 17 + wobble, 166, 34, TFT_CYAN);
-    screen.drawFastHLine(cx - 10 + wobble, 169, 20, TFT_CYAN);
-  } else {
-    const bool child = evolution == 2;
-    const uint16_t mainColor = child ? TFT_GREEN : TFT_CYAN;
-    const int bodyW = child ? 73 : 58;
-    const int bodyH = child ? 65 : 58;
-    const int x = cx - bodyW / 2;
-    const int y = child ? 107 + bob : 115 + bob;
-
-    if (child) {
-      screen.fillRoundRect(cx - 29, y - 15, 19, 26, 6, mainColor);
-      screen.fillRoundRect(cx + 10, y - 15, 19, 26, 6, mainColor);
+  if (m == ASLEEP) {
+    gfx.drawFastHLine(cx-7,cy+26,14,TFT_BLACK);
+  } else if (m == SAD || m == SICK) {
+    gfx.drawLine(cx-11,cy+31,cx,cy+23,TFT_BLACK);
+    gfx.drawLine(cx,cy+23,cx+11,cy+31,TFT_BLACK);
+    if (m == SAD && (now % 2300 < 700)) {
+      gfx.fillCircle(cx+24,cy+18,3,TFT_BLUE);
     }
-    screen.fillRoundRect(x, y, bodyW, bodyH, 23, mainColor);
-    screen.fillRoundRect(cx - 30, y + bodyH - 6, 21, 10, 4, mainColor);
-    screen.fillRoundRect(cx + 9, y + bodyH - 6, 21, 10, 4, mainColor);
-    screen.fillCircle(cx - (child ? 26 : 21), y + 34, 5, TFT_PINK);
-    screen.fillCircle(cx + (child ? 26 : 21), y + 34, 5, TFT_PINK);
-    drawFace(cx, y + 23 - bob, bob, happy, sad);
-  }
-
-  if (pet.dort) {
-    screen.setTextColor(TFT_WHITE, TFT_BLACK);
-    screen.drawString("Zzz", 99, 101, 2);
-  } else if (pet.sante < 20) {
-    screen.setTextColor(TFT_RED, TFT_BLACK);
-    screen.drawString("!", 105, 105, 2);
-  }
-
-  screen.setTextColor(TFT_WHITE, TFT_BLACK);
-  if ((int32_t)(now - notifUntil) < 0) {
-    screen.drawCentreString(notification, cx, 185, 1);
+  } else if (m == HAPPY) {
+    gfx.drawLine(cx-12,cy+20,cx,cy+33,TFT_BLACK);
+    gfx.drawLine(cx,cy+33,cx+12,cy+20,TFT_BLACK);
   } else {
-    const char* state = pet.dort ? "IL DORT..." :
-                        pet.sante < 25 ? "MALADE..." :
-                        pet.faim < 20 ? "J'AI FAIM !" :
-                        pet.joie < 25 ? "JE M'ENNUIE" :
-                        "TOUT VA BIEN !";
-    screen.drawCentreString(state, cx, 185, 1);
+    gfx.drawFastHLine(cx-9,cy+26,18,TFT_BLACK);
   }
 }
-
-static void render(uint32_t now) {
-  screen.fillSprite(TFT_BLACK);
-  screen.setTextColor(TFT_CYAN, TFT_BLACK);
-  screen.drawString("TAMA V2", 6, 5, 2);
-  char clock[16];
-  const uint32_t minutes = pet.ageSec / 60;
-  snprintf(clock, sizeof(clock), "%lu:%02lu",
-           static_cast<unsigned long>(minutes),
-           static_cast<unsigned long>(pet.ageSec % 60));
-  screen.setTextColor(TFT_WHITE, TFT_BLACK);
-  screen.drawRightString(clock, 129, 8, 1);
-
-  screen.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  screen.drawCentreString(stageName(), 67, 22, 1);
-
-  drawStat(37, "F", pet.faim);
-  drawStat(48, "J", pet.joie);
-  drawStat(59, "E", pet.energie);
-  drawStat(70, "P", pet.proprete);
-  drawStat(81, "S", pet.sante);
-  screen.drawFastHLine(4, 94, W - 8, TFT_DARKGREY);
-
-  drawPet(now);
-
-  screen.drawRoundRect(3, 199, W - 6, 27, 6, TFT_CYAN);
-  screen.setTextColor(TFT_CYAN, TFT_BLACK);
-  screen.drawCentreString(MENU[menuIndex], 67, 203, 2);
-  screen.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  screen.drawCentreString("35 SUIV.  0 OK", 67, 230, 1);
-  screen.pushSprite(0, 0);
+static void drawEgg(uint32_t now) {
+  int wobble = ((now / 230) % 2) ? -3 : 3;
+  const int cx = 67+wobble;
+  gfx.fillRoundRect(cx-42,53,84,132,40,TFT_WHITE);
+  gfx.fillRoundRect(cx-36,59,72,120,36,TFT_LIGHTGREY);
+  gfx.fillEllipse(cx-9,92,18,10,TFT_WHITE);
+  // Petite forme visible sous la coquille
+  gfx.fillCircle(cx-15,127,5,TFT_BLACK);
+  gfx.fillCircle(cx+15,127,5,TFT_BLACK);
+  gfx.drawFastHLine(cx-7,146,14,TFT_BLACK);
+  if (pet.ageSec > 40 && (now / 350)%2==0) {
+    gfx.drawLine(cx-12,65,cx-2,74,TFT_DARKGREY);
+    gfx.drawLine(cx-2,74,cx+9,66,TFT_DARKGREY);
+  }
 }
+static void drawCreature(uint32_t now) {
+  const uint8_t st = stage();
+  const Mood m = mood();
+  const bool hop = (!pet.dort && (now/7200)%4==2);
+  const int bob = pet.dort ? 5 : hop ? ((now/160)%2 ? -11 : -2) : ((now/340)%2 ? -2 : 2);
+  const int wander = (st > 0 && !pet.dort && (now/7200)%4==1)
+                   ? static_cast<int>(sinf(now/650.0f)*9.0f) : 0;
+  int cx = 67 + wander;
+  const bool wave = (!pet.dort && ((now/7200)%4==3));
+  uint16_t body = st == 1 ? TFT_CYAN : st == 2 ? TFT_GREEN : TFT_SKYBLUE;
+  if (m == SICK) body = TFT_LIGHTGREY;
+  else if (st == 3 && m == SAD) body = TFT_ORANGE;
 
+  if (st == 0) {
+    drawEgg(now);
+    return;
+  }
+
+  const int bx = st == 1 ? 29 : st == 2 ? 19 : 13;
+  const int width = st == 1 ? 77 : st == 2 ? 97 : 108;
+  const int by = (st == 1 ? 77 : st == 2 ? 61 : 47) + bob;
+  const int height = st == 1 ? 102 : st == 2 ? 119 : 135;
+  const int bodyx = cx - width/2;
+  const int mouthY = by + (st == 1 ? 37 : 51);
+
+  if (st >= 2) {
+    // Petites antennes / oreilles evolutives
+    gfx.fillRoundRect(cx-41,by-18,21,31,7,body);
+    gfx.fillRoundRect(cx+20,by-18,21,31,7,body);
+    gfx.fillCircle(cx-31,by-15,5,TFT_PINK);
+    gfx.fillCircle(cx+31,by-15,5,TFT_PINK);
+  }
+  if (st == 3) {
+    gfx.fillRoundRect(cx-15,by-25,30,25,9,TFT_YELLOW);
+    gfx.fillCircle(cx,by-25,6,TFT_ORANGE);
+  }
+
+  // Jambes et bras avec mouvements.
+  int legShift = (now/290)%2 ? 5 : -5;
+  if (pet.dort) legShift = 0;
+  gfx.fillRoundRect(cx-38+legShift,by+height-13,29,20,8,body);
+  gfx.fillRoundRect(cx+9-legShift,by+height-13,29,20,8,body);
+  gfx.fillRoundRect(cx-width/2-9,by+55 + (wave ? -17 : 0),23,45,10,body);
+  gfx.fillRoundRect(cx+width/2-14,by+55 - (wave ? 17 : 0),23,45,10,body);
+  gfx.fillRoundRect(bodyx,by,width,height,st == 1 ? 33 : 40,body);
+
+  if (st >= 2) {
+    gfx.fillRoundRect(cx-22,by+76,44,36,18,TFT_WHITE);
+    gfx.fillRoundRect(cx-15,by+83,30,23,12,TFT_LIGHTGREY);
+  }
+  gfx.fillCircle(cx-31,by+68,7,TFT_PINK);
+  gfx.fillCircle(cx+31,by+68,7,TFT_PINK);
+  drawFace(cx,mouthY,now,m);
+
+  if (wave) {
+    cross(cx+width/2+10,by+41, TFT_YELLOW);
+  }
+  if (m == ASLEEP) {
+    gfx.setTextColor(TFT_WHITE,TFT_BLACK);
+    gfx.drawString("Z",cx+37,by+3,2);
+    gfx.drawString("z",cx+47,by-9,1);
+  } else if (pet.faim < 20 && now%2400 < 900) {
+    gfx.drawCircle(cx+44,by+15,6,TFT_ORANGE);
+  }
+}
+static void drawFX(uint32_t now) {
+  if (effect == FX_NONE || static_cast<int32_t>(now-effectUntil) >= 0) return;
+  const int drift = static_cast<int>((now/130)%45);
+  switch (effect) {
+    case FX_FOOD:
+      gfx.fillCircle(104,98+drift/3,11,TFT_ORANGE);
+      gfx.fillCircle(106,95+drift/3,3,TFT_YELLOW);
+      break;
+    case FX_CLEAN:
+      for (int i=0;i<6;i++) {
+        int x = 14 + (i*23)%111;
+        int y = 158 - (drift + i*29)%112;
+        gfx.drawCircle(x,y,4+(i%3)*3,TFT_CYAN);
+      }
+      break;
+    case FX_HEAL:
+      cross(22,81-drift, TFT_GREEN);
+      cross(116,97-drift, TFT_GREEN);
+      cross(66,49-drift/2, TFT_WHITE);
+      break;
+    case FX_GIFT:
+    case FX_PLAY:
+      heart(23,85-drift,TFT_PINK);
+      heart(105,73-drift/2,TFT_RED);
+      break;
+    case FX_GROW:
+    case FX_WAKE:
+      cross(16,52+drift,TFT_YELLOW);
+      cross(113,50+drift,TFT_CYAN);
+      cross(80,35+drift,TFT_WHITE);
+      break;
+    default: break;
+  }
+}
+static const char* idleSpeech() {
+  if (pet.dort) return "Zzz...";
+  if (pet.sante < 25) return "PAS EN FORME...";
+  if (pet.faim < 22) return "J'AI FAIM !";
+  if (pet.joie < 25) return "ON JOUE ?";
+  if (pet.proprete < 19) return "UN BAIN ?";
+  if (pet.energie < 15) return "SOMMEIL...";
+  if ((millis()/11000)%3==0) return "COUCOU !";
+  if ((millis()/11000)%3==1) return "...";
+  return "JE SUIS BIEN !";
+}
+static void drawHome(uint32_t now) {
+  gfx.fillSprite(TFT_BLACK);
+  // Aucune barre d'etat en haut : une scene entierement reservee au pet.
+  for (int i=0;i<4;i++) {
+    int x = 12+i*34, y = 30 + (i%2)*22;
+    if ((now/550+i)%4==0) gfx.drawPixel(x,y,TFT_DARKGREY);
+  }
+  gfx.drawFastHLine(12,189,111,TFT_DARKGREY);
+  gfx.fillEllipse(67,191,38,3,TFT_DARKGREY);
+  drawCreature(now);
+  drawFX(now);
+
+  const char* label = static_cast<int32_t>(now-speechUntil)<0 ? speech : idleSpeech();
+  // Une bulle discrete, sans ecraser le personnage.
+  gfx.fillRoundRect(8,5,119,23,9,TFT_DARKGREY);
+  gfx.setTextColor(TFT_WHITE,TFT_DARKGREY);
+  gfx.drawCentreString(label,67,12,1);
+
+  // Barre de selection en bas uniquement.
+  gfx.fillRoundRect(4,199,127,39,8,TFT_NAVY);
+  gfx.drawRoundRect(4,199,127,39,8,TFT_CYAN);
+  gfx.setTextColor(TFT_CYAN,TFT_NAVY);
+  gfx.drawCentreString(MENU[selected],67,203,2);
+  gfx.setTextColor(TFT_LIGHTGREY,TFT_NAVY);
+  gfx.drawCentreString("35 > MENU    0 OK",67,227,1);
+}
+static uint16_t colorFor(uint8_t val) {
+  return val<25 ? TFT_RED : val<55 ? TFT_ORANGE : TFT_GREEN;
+}
+static void drawGauge(int y,const char* title,uint8_t value) {
+  gfx.setTextColor(TFT_WHITE,TFT_BLACK);
+  gfx.drawString(title,9,y,1);
+  gfx.drawRoundRect(9,y+13,91,10,2,TFT_DARKGREY);
+  int w = (static_cast<int>(value)*87)/100;
+  if(w>0) gfx.fillRect(11,y+15,w,6,colorFor(value));
+  char pct[9];
+  snprintf(pct,sizeof(pct),"%u%%",(unsigned)value);
+  gfx.drawRightString(pct,126,y+13,1);
+}
+static void drawInfos() {
+  gfx.fillSprite(TFT_BLACK);
+  gfx.drawRoundRect(2,2,131,236,8,TFT_CYAN);
+  gfx.setTextColor(TFT_CYAN,TFT_BLACK);
+  gfx.drawCentreString("INFOS",67,8,2);
+  char age[36];
+  snprintf(age,sizeof(age),"%s - %lum",stageLabel(),(unsigned long)(pet.ageSec/60));
+  gfx.setTextColor(TFT_WHITE,TFT_BLACK);
+  gfx.drawCentreString(age,67,30,1);
+  drawGauge(49,"FAIM",pet.faim);
+  drawGauge(77,"JOIE",pet.joie);
+  drawGauge(105,"ENERGIE",pet.energie);
+  drawGauge(133,"PROPRETE",pet.proprete);
+  drawGauge(161,"SANTE",pet.sante);
+  gfx.setTextColor(TFT_LIGHTGREY,TFT_BLACK);
+  char score[45];
+  snprintf(score,sizeof(score),"JEUX %u  PARFAITS %u",(unsigned)gamePlayed,(unsigned)gameWins);
+  gfx.drawCentreString(score,67,196,1);
+  gfx.drawCentreString("35 / 0 : RETOUR",67,221,1);
+}
+static void drawStar(int x,int y,uint16_t color) {
+  gfx.fillTriangle(x,y-12,x-5,y-3,x+5,y-3,color);
+  gfx.fillTriangle(x-11,y-2,x+11,y-2,x,y+10,color);
+}
+static void drawGame(uint32_t now) {
+  gfx.fillSprite(TFT_BLACK);
+  gfx.drawRoundRect(3,3,129,234,8,TFT_CYAN);
+  gfx.setTextColor(TFT_CYAN,TFT_BLACK);
+  gfx.drawCentreString("ATTRAPE",67,17,2);
+  gfx.drawCentreString("L'ETOILE !",67,40,2);
+  char tries[35];
+  snprintf(tries,sizeof(tries),"ESSAI %u / 3",(unsigned)(gameRound+1));
+  gfx.setTextColor(TFT_WHITE,TFT_BLACK);
+  gfx.drawCentreString(tries,67,70,1);
+  gfx.drawRoundRect(12,121,111,28,6,TFT_DARKGREY);
+  gfx.fillRect(55,124,24,22,TFT_GREEN); // zone de reussite
+  int x = starX(now);
+  drawStar(x,134,TFT_YELLOW);
+  if (static_cast<int32_t>(now-gamePauseUntil)<0) {
+    gfx.drawCentreString(lastHit?"BRAVO !":"RATE !",67,172,2);
+  } else {
+    gfx.drawCentreString("0 : ATTRAPER",67,171,2);
+  }
+  gfx.setTextColor(TFT_LIGHTGREY,TFT_BLACK);
+  gfx.drawCentreString("35 : QUITTER",67,216,1);
+}
 void setup() {
-  nextButton.pin = PIN_NEXT;
-  okButton.pin = PIN_OK;
-  pinMode(PIN_NEXT, INPUT);         // Pull-up externe sur T-Display original
-  pinMode(PIN_OK, INPUT_PULLUP);
-  pinMode(PIN_BACKLIGHT, OUTPUT);
-  digitalWrite(PIN_BACKLIGHT, HIGH);
+  pinMode(PIN_NEXT,INPUT);           // Pull-up physique sur T-Display V1.1
+  pinMode(PIN_OK,INPUT_PULLUP);
+  pinMode(PIN_LIGHT,OUTPUT);
+  digitalWrite(PIN_LIGHT,HIGH);
+  nextKey.pin=PIN_NEXT;
+  okKey.pin=PIN_OK;
 
-  tft.init();
-  tft.setRotation(0);              // Portrait : 135 x 240
-  tft.fillScreen(TFT_BLACK);
-  screen.setColorDepth(16);
-  if (screen.createSprite(W, H) == nullptr) {
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    tft.drawCentreString("ERREUR MEMOIRE", W / 2, 110, 1);
-    while (true) delay(1000);
+  lcd.init();
+  lcd.setRotation(0);              // Portrait 135x240
+  lcd.fillScreen(TFT_BLACK);
+  gfx.setColorDepth(16);
+  if (gfx.createSprite(SW,SH) == nullptr) {
+    lcd.setTextColor(TFT_WHITE,TFT_BLACK);
+    lcd.drawCentreString("ERREUR RAM",67,112,1);
+    while(true) delay(1000);
   }
-  screen.setTextDatum(TL_DATUM);
-  loadPet();
-  lastSecond = millis();
-  lastSave = millis();
-  showMessage("BONJOUR !", 2200);
+  gfx.setTextDatum(TL_DATUM);
+  load();
+  lastSecond=millis();
+  lastSave=millis();
+  say("BONJOUR !",FX_WAKE,1800);
 }
-
 void loop() {
-  const uint32_t now = millis();
-  if (nextButton.justPressed(now)) {
-    menuIndex = static_cast<uint8_t>((menuIndex + 1) % 5);
+  const uint32_t now=millis();
+  const bool next=nextKey.readPress(now);
+  const bool ok=okKey.readPress(now);
+  if(page==HOME) {
+    if(next) selected=(selected+1)%MENU_COUNT;
+    if(ok) chooseAction(now);
+  } else if(page==INFOS) {
+    if(next || ok) page=HOME;
+  } else if(page==MINIGAME) {
+    if(next) { page=HOME; say("UNE AUTRE FOIS !",FX_NONE,1500); }
+    else if(ok) gamePress(now);
   }
-  if (okButton.justPressed(now)) {
-    doAction();
+  while((uint32_t)(now-lastSecond)>=1000) {
+    lastSecond+=1000;
+    tickSecond();
   }
+  if((uint32_t)(now-lastSave)>=60000) save();
 
-  while (static_cast<uint32_t>(now - lastSecond) >= 1000UL) {
-    lastSecond += 1000;
-    tickOneSecond();
-  }
-  if (static_cast<uint32_t>(now - lastSave) >= 60000UL) savePet();
-
-  if (static_cast<uint32_t>(now - lastDraw) >= 125UL) {
-    lastDraw = now;
-    render(now);
+  if((uint32_t)(now-lastFrame)>=95) {
+    lastFrame=now;
+    if(page==INFOS) drawInfos();
+    else if(page==MINIGAME) drawGame(now);
+    else drawHome(now);
+    gfx.pushSprite(0,0);
   }
   delay(2);
 }
