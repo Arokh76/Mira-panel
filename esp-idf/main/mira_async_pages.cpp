@@ -294,7 +294,8 @@ static bool action_rows(PsramPage& out){
                (status=beta_html_id(out,id))!=ESP_OK||
                (status=beta_html(out,"\">"))!=ESP_OK)break;
             int v=jint(item,"value",lo);
-            if(v<lo)v=lo;if(v>hi)v=hi;
+            if(v<lo)v=lo;
+            if(v>hi)v=hi;
             char cur[32];snprintf(cur,sizeof(cur),"%d",v);
             if((status=beta_html(out,cur))!=ESP_OK||
                (status=beta_html(out,"</output></b><br><input type=\"range\" id=\""))!=ESP_OK||
