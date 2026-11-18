@@ -17,3 +17,10 @@ esp_err_t mira_beta_setup_register(httpd_handle_t server);
 esp_err_t mira_beta_setup_register_minimal(httpd_handle_t server);
 // Catch captive OS probe URLs only on the AP while initial setup is pending.
 esp_err_t mira_beta_setup_register_captive(httpd_handle_t server);
+
+/* ESPAsyncWebServer first-run adapters: no HTTPD server required. */
+int mira_beta_setup_async_key_save(const char *key,const char *confirm);
+int mira_beta_setup_async_wifi_save(const char *ssid,const char *password,
+   const char *mode,const char *ip,const char *mask,const char *gateway,
+   const char *dns1,const char *dns2);
+int mira_beta_setup_async_keep_ap(void);

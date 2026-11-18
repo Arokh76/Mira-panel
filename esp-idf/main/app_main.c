@@ -16,6 +16,7 @@
 #include "mira_display.h"
 #include "mira_full.h"
 #include "mira_recovery.h"
+#include "mira_async_web.h"
 #include "mira_beta_setup.h"
 #include "mira_jeedom.h"
 #include "mira_mqtt.h"
@@ -100,6 +101,20 @@ void app_main(void){
         for(;;)vTaskDelay(pdMS_TO_TICKS(1000));
     }
     ESP_LOGI(TAG,"FULL_NET_READY: native Mira AP/STA + HTTP setup");
+    // Parallel transport smoke-test ONLY: 8081 is AsyncTCP/ESPAsyncWebServer;
+    // 80 remains native until full protocol, auth, SSE and OTA parity is proven.
+    // Same lifecycle as WT32: one ESPAsyncWebServer on port 80, including
+    // first-run wizard, configuration, normal Jeedom and OTA.
+    mira_async_web_start();
+    if(!mira_async_web_ready()){
+        ESP_LOGE(TAG,"ASYNC_WEB_UNAVAILABLE: no fallback HTTPD by design");
+        if(esp_lv_adapter_lock(-1)==ESP_OK){
+            mira_splash_set_message("Erreur serveur ESPAsync\nVerifier les logs USB");
+            esp_lv_adapter_unlock();
+        }
+        checkpoint("ASYNC_SERVER_FAILED");
+        for(;;)vTaskDelay(pdMS_TO_TICKS(1000));
+    }
     progress(60);
     if(mira_recovery_web_fallback()){
         if(esp_lv_adapter_lock(-1)==ESP_OK){
