@@ -1,28 +1,36 @@
-# Projet Tamagotshi 🐣 — V3 grand écran
+# Projet Tamagotshi - V4 🐣
 
-**Matériel :** LilyGO **T-Display original V1.1**, ESP32 classique, LCD ST7789 135 × 240 en portrait, deux boutons intégrés.
+Pour le **LilyGO T-Display V1.1 original**, ESP32 et ecran ST7789 **135x240 portrait**.
 
-## Interface et comportement
-- Scène principale sans barres ni jauges : personnage bien plus grand, expressions animées et réactions.
-- **4 stades** : œuf (0–1 minute), bébé (1–7 minutes), enfant (7–30 minutes), adulte ensuite. Durées volontairement accélérées pour le test.
-- Clignements, regards, petits sauts, déplacements, bras qui saluent, larmes, sommeil avec Zzz et effets visuels lors des actions.
-- États selon les besoins : content, neutre, triste, malade, endormi.
-- Menu 7 actions : **MANGER, JOUER, DODO, BAIN, SOINS, CADEAU, INFOS**.
-- Mini-jeu d'adresse **Attrape l'étoile** : valider quand l'étoile est au centre, 3 tentatives, points de joie.
-- Les cinq jauges sont **uniquement sur la page INFOS**, ainsi que l'âge et le score de jeu.
-- Sauvegarde régulière en NVS et après les actions. Données compatibles avec la V2.
+## Nouveautes V4
+- La ligne `35 > MENU / 0 OK` a disparu de l'ecran principal : seulement le nom de l'action en bas.
+- Un **second mini-jeu, REFLEXE** : appuyer quand la zone devient verte (« TOP ! »), 3 manches.
+- Une nouvelle action **CALIN**, qui augmente la joie et l'amitie, avec coeurs animes.
+- **Amitie de 0 a 100** : augmente avec les calins, les jeux et les cadeaux, decroit doucement.
+- **Petites surprises autonomes** environ toutes les 3 minutes d'activite, avec reaction du Tama.
+- Des **danses spontanees** avec notes de musique quand il est content, et une couleur speciale pour l'adulte tres attache.
+- Nouvelle page **SOUVENIRS** : amitie, nombre de calins, surprises, parties et victoires aux deux mini-jeux.
+- La scene principale reste dediee a un grand personnage anime. Les 5 jauges ne sont que dans INFOS.
+- Toutes les statistiques sont sauvegardees en NVS ; les sauvegardes V2/V3 restent lisibles.
+- Cycle accelere de test conserve : oeuf (1 min), bebe (7 min au total), enfant (30 min), adulte.
 
-### Commandes
-- Bouton **GPIO35** : action suivante ; depuis INFOS, retour ; pendant le mini-jeu, quitter.
-- Bouton **GPIO0 (BOOT)** : valider ; depuis INFOS, retour ; pendant le mini-jeu, attraper l'étoile.
+## Commandes (deux boutons integres)
 
-Aucune connexion Wi-Fi, aucun câble supplémentaire. Pas de temps réel pendant une coupure électrique (pas de RTC) : l'âge progresse uniquement lorsque la carte reste alimentée.
+| Ecran | Bouton GPIO35 (defiler) | Bouton GPIO0 (valider) |
+|---|---|---|
+| Accueil | Menu suivant | Executer action |
+| INFOS / SOUVENIRS | Alterner les pages | Retour accueil |
+| ETOILE | Quitter | Attraper l'etoile au centre |
+| REFLEXE | Quitter | Valider au signal « TOP ! » |
 
-## Flasher
-La compilation GitHub Actions crée deux images :
-- **[Tamagotchi_V3_TDisplay_V11_full.bin](firmware/Tamagotchi_V3_TDisplay_V11_full.bin)** : pour Flash Download Tools à l'adresse **0x0000**, installation complète.
-- **[Tamagotchi_V3_TDisplay_V11_app.bin](firmware/Tamagotchi_V3_TDisplay_V11_app.bin)** : application seule à **0x10000**, à privilégier pour une mise à jour depuis V2 afin de conserver les paramètres NVS si le flash n'est pas effacé.
+Le programme fonctionne entierement **hors ligne** et ne requiert ni cablage supplementaire ni serveur. L'age n'avance pas quand la carte est eteinte.
 
-Sélectionner **ESP32**, UART, DIO, 40 MHz, 32 Mbit (4MB), 115200 bauds.
+## Telecharger / flasher
 
-Les firmwares V1 et V2 restent disponibles dans le dossier firmware. Projet indépendant de Mira Panel.
+La [compilation automatique](../../actions/workflows/tamagotchi-build.yml) produit :
+- [**Tamagotchi_V4_TDisplay_V11_full.bin**](firmware/Tamagotchi_V4_TDisplay_V11_full.bin) : image complete a flasher a **0x0000**.
+- [**Tamagotchi_V4_TDisplay_V11_app.bin**](firmware/Tamagotchi_V4_TDisplay_V11_app.bin) : application seule a **0x10000**, pour mettre a jour depuis V3 sans effacer la NVS si la disposition de partitions reste identique.
+
+Flash Download Tools : **ESP32**, **UART**, **DIO**, **40 MHz**, **32 Mbit / 4 Mo**, **115200 bauds**. Eviter l'option ERASE avant une mise a jour application seule.
+
+Les anciennes versions et leurs BIN restent dans le dossier firmware. Aucun changement au projet Mira Panel.

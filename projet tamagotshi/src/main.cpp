@@ -1,5 +1,5 @@
-// Tamagotchi V3 — LilyGO T-Display V1.1 ORIGINAL (ESP32/ST7789, 135x240).
-// Portrait, creature grand format, jauges uniquement dans INFOS, mini-jeu.
+// Tamagotchi V4 — LilyGO T-Display V1.1 ORIGINAL (ESP32/ST7789, 135x240).
+// Portrait, creature animee grand format, stats sur pages annexes, 2 mini-jeux.
  // GPIO35 : menu suivant / retour; GPIO0 : valider.
  // Stockage compatible V2 : namespace "tama_v2", magic 0x54414D32.
 #include <Arduino.h>
@@ -14,7 +14,7 @@ static const uint8_t PIN_NEXT = 35, PIN_OK = 0, PIN_LIGHT = 4;
 static const uint32_t MAGIC = 0x54414D32UL;
 static const int SW = 135, SH = 240;
 static const char* const MENU[] = {
-  "MANGER", "JOUER", "DODO", "BAIN", "SOINS", "CADEAU", "INFOS"
+  "MANGER", "ETOILE", "REFLEXE", "DODO", "BAIN", "SOINS", "CADEAU", "CALIN", "INFOS"
 };
 static const uint8_t MENU_COUNT = sizeof(MENU) / sizeof(MENU[0]);
 
@@ -42,16 +42,22 @@ struct Key {
 };
 static Key nextKey, okKey;
 
-enum Page : uint8_t { HOME, INFOS, MINIGAME };
+enum Page : uint8_t { HOME, INFOS, SOUVENIRS, MINIGAME, REFLEXGAME };
 enum Mood : uint8_t { HAPPY, NORMAL, SAD, SICK, ASLEEP };
-enum Effect : uint8_t { FX_NONE, FX_FOOD, FX_CLEAN, FX_HEAL, FX_GIFT, FX_GROW, FX_WAKE, FX_PLAY };
+enum Effect : uint8_t { FX_NONE, FX_FOOD, FX_CLEAN, FX_HEAL, FX_GIFT, FX_GROW, FX_WAKE, FX_PLAY, FX_HUG, FX_SURPRISE };
 static Page page = HOME;
 static Effect effect = FX_NONE;
 static uint8_t selected = 0;
 static uint16_t gameWins = 0, gamePlayed = 0;
+static uint16_t reflexWins = 0, reflexPlayed = 0, surpriseCount = 0, hugCount = 0;
+static uint8_t friendship = 50;
+static uint32_t lastSurpriseAge = 0;
 static uint8_t gameRound = 0, gameHits = 0;
 static uint32_t gameStarted = 0, gamePauseUntil = 0;
 static bool lastHit = false;
+static uint32_t reflexReadyAt = 0, reflexPauseUntil = 0;
+static uint8_t reflexRound = 0, reflexHits = 0;
+static bool reflexLastHit = false;
 static char speech[30] = "";
 static uint32_t speechUntil = 0, effectUntil = 0;
 static uint32_t lastFrame = 0, lastSecond = 0, lastSave = 0, lastGift = 0;
@@ -97,6 +103,12 @@ static void save() {
   prefs.putBool("dort", pet.dort);
   prefs.putUShort("wins", gameWins);
   prefs.putUShort("games", gamePlayed);
+  prefs.putUShort("r_wins", reflexWins);
+  prefs.putUShort("r_games", reflexPlayed);
+  prefs.putUShort("events", surpriseCount);
+  prefs.putUShort("cuddles", hugCount);
+  prefs.putUChar("amitie", friendship);
+  prefs.putUInt("eventage", lastSurpriseAge);
   prefs.putUInt("magic", MAGIC);
   lastSave = millis();
 }
@@ -112,7 +124,14 @@ static void load() {
     pet.dort = prefs.getBool("dort", false);
     gameWins = prefs.getUShort("wins", 0);
     gamePlayed = prefs.getUShort("games", 0);
+    reflexWins = prefs.getUShort("r_wins", 0);
+    reflexPlayed = prefs.getUShort("r_games", 0);
+    surpriseCount = prefs.getUShort("events", 0);
+    hugCount = prefs.getUShort("cuddles", 0);
+    friendship = clip100(prefs.getUChar("amitie", 50));
+    lastSurpriseAge = prefs.getUInt("eventage", pet.ageSec);
   } else {
+    lastSurpriseAge = pet.ageSec;
     save();
   }
 }
@@ -130,6 +149,9 @@ static void tickSecond() {
     }
   } else if (pet.ageSec % 50 == 0) {
     pet.energie = clip100(pet.energie-1);
+  }
+  if (pet.ageSec % 180 == 0 && friendship > 0) {
+    friendship = clip100(friendship - 1);
   }
   if (pet.ageSec % 60 == 0) {
     if (pet.faim < 15 || pet.proprete < 15 || pet.energie < 10) {
@@ -172,10 +194,68 @@ static void gamePress(uint32_t now) {
     pet.faim = clip100(pet.faim - 3);
     ++gamePlayed;
     if (gameHits == 3) ++gameWins;
+    friendship = clip100(friendship + gameHits * 3);
     page = HOME;
     say(gameHits == 3 ? "CHAMPION !" : gameHits ? "BIEN JOUE !" : "ON REESSAIE ?", FX_PLAY, 2700);
     save();
   }
+}
+// Mini-jeu 2 : reactivite. Appuyer uniquement lorsque TOP! s'affiche.
+static void startReflex(uint32_t now) {
+  page = REFLEXGAME;
+  pet.dort = false;
+  reflexRound = 0;
+  reflexHits = 0;
+  reflexPauseUntil = 0;
+  reflexReadyAt = now + random(1100, 2800);
+  reflexLastHit = false;
+}
+static void reflexPress(uint32_t now) {
+  if ((int32_t)(now - reflexPauseUntil) < 0) return;
+  const bool hit = (int32_t)(now - reflexReadyAt) >= 0 &&
+                   (uint32_t)(now - reflexReadyAt) <= 700;
+  reflexLastHit = hit;
+  if (hit) ++reflexHits;
+  ++reflexRound;
+  if (reflexRound == 3) {
+    ++reflexPlayed;
+    if (reflexHits == 3) ++reflexWins;
+    pet.joie = clip100(pet.joie + 5 + 9 * reflexHits);
+    pet.energie = clip100(pet.energie - 6);
+    friendship = clip100(friendship + reflexHits * 3);
+    page = HOME;
+    say(reflexHits == 3 ? "SUPER REFLEXE !" : reflexHits ? "BIEN JOUE !" : "ON REESSAIE ?", FX_PLAY, 2700);
+    save();
+    return;
+  }
+  reflexPauseUntil = now + 800;
+  reflexReadyAt = reflexPauseUntil + random(900, 2700);
+}
+// Rencontres non intrusives : une surprise environ toutes les 3 minutes.
+static void trySurprise() {
+  if (page != HOME || pet.dort || pet.ageSec < lastSurpriseAge ||
+      pet.ageSec - lastSurpriseAge < 180) return;
+  lastSurpriseAge = pet.ageSec;
+  ++surpriseCount;
+  switch(random(0, 4)) {
+    case 0:
+      pet.faim = clip100(pet.faim + 8);
+      say("UN PETIT GOUTER !", FX_FOOD, 2600);
+      break;
+    case 1:
+      pet.joie = clip100(pet.joie + 10);
+      say("UN JOUET TROUVE !", FX_GIFT, 2600);
+      break;
+    case 2:
+      friendship = clip100(friendship + 6);
+      say("JE PENSE A TOI !", FX_HUG, 2600);
+      break;
+    default:
+      pet.energie = clip100(pet.energie + 7);
+      say("PETITE SIESTE !", FX_SURPRISE, 2600);
+      break;
+  }
+  save();
 }
 static void chooseAction(uint32_t now) {
   switch(selected) {
@@ -190,30 +270,41 @@ static void chooseAction(uint32_t now) {
       startGame();
       return;
     case 2:
+      startReflex(now);
+      return;
+    case 3:
       pet.dort = !pet.dort;
       say(pet.dort ? "BONNE NUIT..." : "BONJOUR !", pet.dort ? FX_NONE : FX_WAKE);
       break;
-    case 3:
+    case 4:
       pet.dort = false;
       pet.proprete = clip100(pet.proprete + 34);
       pet.joie = clip100(pet.joie + 4);
       say("TOUT PROPRE !", FX_CLEAN);
       break;
-    case 4:
+    case 5:
       pet.sante = clip100(pet.sante + 25);
       pet.joie = clip100(pet.joie - 2);
       say("CA VA MIEUX !", FX_HEAL);
       break;
-    case 5:
-      if (static_cast<int32_t>(now - lastGift) < 25000 && lastGift != 0) {
+    case 6:
+      if ((int32_t)(now - lastGift) < 25000 && lastGift != 0) {
         say("PATIENCE !", FX_NONE, 1100);
         return;
       }
       lastGift = now;
       pet.joie = clip100(pet.joie + 18);
+      friendship = clip100(friendship + 4);
       say("OH MERCI !", FX_GIFT);
       break;
-    case 6:
+    case 7:
+      pet.dort = false;
+      pet.joie = clip100(pet.joie + 12);
+      friendship = clip100(friendship + 10);
+      ++hugCount;
+      say("GROS CALIN !", FX_HUG, 2500);
+      break;
+    case 8:
       page = INFOS;
       return;
   }
@@ -284,8 +375,11 @@ static void drawCreature(uint32_t now) {
   const int wander = (st > 0 && !pet.dort && (now/7200)%4==1)
                    ? static_cast<int>(sinf(now/650.0f)*9.0f) : 0;
   int cx = 67 + wander;
-  const bool wave = (!pet.dort && ((now/7200)%4==3));
-  uint16_t body = st == 1 ? TFT_CYAN : st == 2 ? TFT_GREEN : TFT_SKYBLUE;
+  const bool dance = (!pet.dort && pet.joie >= 60 &&
+                      (now / 12000) % 5 == 3);
+  const bool wave = (!pet.dort && (((now/7200)%4==3) || dance));
+  uint16_t body = st == 1 ? TFT_CYAN : st == 2 ? TFT_GREEN :
+                  friendship >= 75 ? TFT_MAGENTA : TFT_SKYBLUE;
   if (m == SICK) body = TFT_LIGHTGREY;
   else if (st == 3 && m == SAD) body = TFT_ORANGE;
 
@@ -333,6 +427,14 @@ static void drawCreature(uint32_t now) {
   if (wave) {
     cross(cx+width/2+10,by+41, TFT_YELLOW);
   }
+  if (dance) {
+    // Notes de musique : danse spontanee lorsque Tama est heureux.
+    gfx.drawFastVLine(13,65,17,TFT_YELLOW);
+    gfx.fillCircle(10,83,5,TFT_YELLOW);
+    gfx.drawFastVLine(117,53,17,TFT_CYAN);
+    gfx.fillCircle(114,72,5,TFT_CYAN);
+    gfx.drawFastHLine(117,53,8,TFT_CYAN);
+  }
   if (m == ASLEEP) {
     gfx.setTextColor(TFT_WHITE,TFT_BLACK);
     gfx.drawString("Z",cx+37,by+3,2);
@@ -363,8 +465,14 @@ static void drawFX(uint32_t now) {
       break;
     case FX_GIFT:
     case FX_PLAY:
+    case FX_HUG:
       heart(23,85-drift,TFT_PINK);
       heart(105,73-drift/2,TFT_RED);
+      if (effect == FX_HUG) heart(67,43-drift/3,TFT_PINK);
+      break;
+    case FX_SURPRISE:
+      cross(18,53+drift,TFT_YELLOW);
+      cross(110,61+drift/2,TFT_CYAN);
       break;
     case FX_GROW:
     case FX_WAKE:
@@ -382,8 +490,10 @@ static const char* idleSpeech() {
   if (pet.joie < 25) return "ON JOUE ?";
   if (pet.proprete < 19) return "UN BAIN ?";
   if (pet.energie < 15) return "SOMMEIL...";
-  if ((millis()/11000)%3==0) return "COUCOU !";
-  if ((millis()/11000)%3==1) return "...";
+  if (friendship >= 80 && (millis()/11000)%4 == 0) return "MON MEILLEUR AMI !";
+  if ((millis()/11000)%4==0) return "COUCOU !";
+  if ((millis()/11000)%4==1) return "...";
+  if ((millis()/11000)%4==2) return "ON FAIT QUOI ?";
   return "JE SUIS BIEN !";
 }
 static void drawHome(uint32_t now) {
@@ -404,13 +514,11 @@ static void drawHome(uint32_t now) {
   gfx.setTextColor(TFT_WHITE,TFT_DARKGREY);
   gfx.drawCentreString(label,67,12,1);
 
-  // Barre de selection en bas uniquement.
-  gfx.fillRoundRect(4,199,127,39,8,TFT_NAVY);
-  gfx.drawRoundRect(4,199,127,39,8,TFT_CYAN);
+  // Menu seul : aucun numero de GPIO, on libere le bas de l'ecran.
+  gfx.fillRoundRect(4,210,127,26,8,TFT_NAVY);
+  gfx.drawRoundRect(4,210,127,26,8,TFT_CYAN);
   gfx.setTextColor(TFT_CYAN,TFT_NAVY);
-  gfx.drawCentreString(MENU[selected],67,203,2);
-  gfx.setTextColor(TFT_LIGHTGREY,TFT_NAVY);
-  gfx.drawCentreString("35 > MENU    0 OK",67,227,1);
+  gfx.drawCentreString(MENU[selected],67,215,2);
 }
 static uint16_t colorFor(uint8_t val) {
   return val<25 ? TFT_RED : val<55 ? TFT_ORANGE : TFT_GREEN;
@@ -443,7 +551,32 @@ static void drawInfos() {
   char score[45];
   snprintf(score,sizeof(score),"JEUX %u  PARFAITS %u",(unsigned)gamePlayed,(unsigned)gameWins);
   gfx.drawCentreString(score,67,196,1);
-  gfx.drawCentreString("35 / 0 : RETOUR",67,221,1);
+  gfx.drawCentreString("SUIVANT      RETOUR",67,221,1);
+}
+static void drawSouvenirs() {
+  gfx.fillSprite(TFT_BLACK);
+  gfx.drawRoundRect(2,2,131,236,8,TFT_MAGENTA);
+  gfx.setTextColor(TFT_MAGENTA,TFT_BLACK);
+  gfx.drawCentreString("SOUVENIRS",67,9,2);
+  gfx.setTextColor(TFT_WHITE,TFT_BLACK);
+  gfx.drawCentreString("AMITIE",67,43,2);
+  gfx.drawRoundRect(11,66,113,15,5,TFT_DARKGREY);
+  gfx.fillRoundRect(14,69,friendship * 107 / 100,9,3,TFT_PINK);
+  char line[46];
+  snprintf(line,sizeof(line),"%u / 100",(unsigned)friendship);
+  gfx.drawCentreString(line,67,86,1);
+  snprintf(line,sizeof(line),"CALINS : %u",(unsigned)hugCount);
+  gfx.drawCentreString(line,67,116,1);
+  snprintf(line,sizeof(line),"SURPRISES : %u",(unsigned)surpriseCount);
+  gfx.drawCentreString(line,67,134,1);
+  snprintf(line,sizeof(line),"ETOILE : %u/%u",(unsigned)gameWins,(unsigned)gamePlayed);
+  gfx.drawCentreString(line,67,152,1);
+  snprintf(line,sizeof(line),"REFLEXE : %u/%u",(unsigned)reflexWins,(unsigned)reflexPlayed);
+  gfx.drawCentreString(line,67,170,1);
+  gfx.setTextColor(TFT_YELLOW,TFT_BLACK);
+  gfx.drawCentreString(friendship>=80?"AMIS INSEPARABLES":friendship>=50?"BONS COPAINS":"ON SE DECOUVRE",67,201,1);
+  gfx.setTextColor(TFT_LIGHTGREY,TFT_BLACK);
+  gfx.drawCentreString("SUIVANT      RETOUR",67,221,1);
 }
 static void drawStar(int x,int y,uint16_t color) {
   gfx.fillTriangle(x,y-12,x-5,y-3,x+5,y-3,color);
@@ -466,10 +599,29 @@ static void drawGame(uint32_t now) {
   if (static_cast<int32_t>(now-gamePauseUntil)<0) {
     gfx.drawCentreString(lastHit?"BRAVO !":"RATE !",67,172,2);
   } else {
-    gfx.drawCentreString("0 : ATTRAPER",67,171,2);
+    gfx.drawCentreString("ATTRAPE !",67,171,2);
   }
   gfx.setTextColor(TFT_LIGHTGREY,TFT_BLACK);
-  gfx.drawCentreString("35 : QUITTER",67,216,1);
+  gfx.drawCentreString("RETOUR",67,216,1);
+}
+static void drawReflex(uint32_t now) {
+  gfx.fillSprite(TFT_BLACK);
+  gfx.drawRoundRect(3,3,129,234,8,TFT_YELLOW);
+  gfx.setTextColor(TFT_YELLOW,TFT_BLACK);
+  gfx.drawCentreString("REFLEXE",67,20,2);
+  char roundText[25];
+  snprintf(roundText,sizeof(roundText),"ESSAI %u / 3",(unsigned)(reflexRound+1));
+  gfx.setTextColor(TFT_WHITE,TFT_BLACK);
+  gfx.drawCentreString(roundText,67,65,1);
+  const bool paused = (int32_t)(now-reflexPauseUntil)<0;
+  const bool ready = !paused && (int32_t)(now-reflexReadyAt)>=0 &&
+                     (uint32_t)(now-reflexReadyAt)<=700;
+  gfx.fillRoundRect(14,103,107,54,12,ready?TFT_GREEN:paused?(reflexLastHit?TFT_CYAN:TFT_RED):TFT_DARKGREY);
+  gfx.setTextColor(ready?TFT_BLACK:TFT_WHITE,ready?TFT_GREEN:paused?(reflexLastHit?TFT_CYAN:TFT_RED):TFT_DARKGREY);
+  gfx.drawCentreString(paused?(reflexLastHit?"BRAVO !":"RATE !"):ready?"TOP !":"ATTENDS",67,119,2);
+  gfx.setTextColor(TFT_LIGHTGREY,TFT_BLACK);
+  gfx.drawCentreString("VALIDE AU VERT !",67,186,1);
+  gfx.drawCentreString("RETOUR",67,215,1);
 }
 void setup() {
   pinMode(PIN_NEXT,INPUT);           // Pull-up physique sur T-Display V1.1
@@ -490,6 +642,7 @@ void setup() {
   }
   gfx.setTextDatum(TL_DATUM);
   load();
+  randomSeed((uint32_t)micros() ^ (uint32_t)esp_random());
   lastSecond=millis();
   lastSave=millis();
   say("BONJOUR !",FX_WAKE,1800);
@@ -502,21 +655,31 @@ void loop() {
     if(next) selected=(selected+1)%MENU_COUNT;
     if(ok) chooseAction(now);
   } else if(page==INFOS) {
-    if(next || ok) page=HOME;
+    if(ok) page=HOME;
+    else if(next) page=SOUVENIRS;
+  } else if(page==SOUVENIRS) {
+    if(ok) page=HOME;
+    else if(next) page=INFOS;
   } else if(page==MINIGAME) {
     if(next) { page=HOME; say("UNE AUTRE FOIS !",FX_NONE,1500); }
     else if(ok) gamePress(now);
+  } else if(page==REFLEXGAME) {
+    if(next) { page=HOME; say("UNE AUTRE FOIS !",FX_NONE,1500); }
+    else if(ok) reflexPress(now);
   }
   while((uint32_t)(now-lastSecond)>=1000) {
     lastSecond+=1000;
     tickSecond();
   }
+  trySurprise();
   if((uint32_t)(now-lastSave)>=60000) save();
 
   if((uint32_t)(now-lastFrame)>=95) {
     lastFrame=now;
     if(page==INFOS) drawInfos();
+    else if(page==SOUVENIRS) drawSouvenirs();
     else if(page==MINIGAME) drawGame(now);
+    else if(page==REFLEXGAME) drawReflex(now);
     else drawHome(now);
     gfx.pushSprite(0,0);
   }
