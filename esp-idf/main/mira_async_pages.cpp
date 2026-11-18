@@ -138,51 +138,250 @@ static bool widget_rows(PsramPage& out,bool mqtt){
                            "<div class='empty'>Aucun widget programme</div>");
     return true;
 }
-static bool action_rows(PsramPage& out){
+// Accueil uniquement : port direct du moteur de rendu de
+// experiment/espasync-finish-7std (mira_jeedom_render_beta_actions).
+// L'ESPAsyncWebServer conserve ses routes et sa logique existantes.
+static esp_err_t beta_html(PsramPage& out,const char *s){
+    return out.add(s)?ESP_OK:ESP_FAIL;
+}
+static esp_err_t beta_html_escape(PsramPage& out,const char *s){
+    return out.escaped(s)?ESP_OK:ESP_FAIL;
+}
+static esp_err_t beta_html_id(PsramPage& out,int id){
+    char str[20];snprintf(str,sizeof(str),"%d",id);
+    return beta_html(out,str);
+}
+static esp_err_t beta_html_value(PsramPage& out,const char *name,
+                                 const char *fallback){
+    char cached[160]={0};
+    return beta_html_escape(out,mira_full_cached_state(name,cached,sizeof(cached))?
+                            cached:fallback);
+}
+static const char *jstr(const cJSON *obj,const char *key,const char *fallback){
+    const cJSON *v=cJSON_GetObjectItemCaseSensitive(obj,key);
+    return cJSON_IsString(v)&&v->valuestring?v->valuestring:fallback;
+}
+static int jint(const cJSON *obj,const char *key,int fallback){
+    const cJSON *v=cJSON_GetObjectItemCaseSensitive(obj,key);
+    if(cJSON_IsNumber(v))return v->valueint;
+    if(cJSON_IsString(v)&&v->valuestring)return atoi(v->valuestring);
+    return fallback;
+}
+static cJSON *original_home_index(){
     char *json=nullptr;size_t len=0;
-    if(mira_jeedom_async_index_snapshot(&json,&len)!=ESP_OK||!json)
-        return out.add("<p>Aucune programmation Mira Panel.</p>");
-    cJSON *root=cJSON_ParseWithLength(json,len);
+    if(mira_jeedom_async_index_snapshot(&json,&len)!=ESP_OK||!json)return nullptr;
+    cJSON *index=cJSON_ParseWithLength(json,len);
     heap_caps_free(json);
-    const cJSON *actions=root?cJSON_GetObjectItemCaseSensitive(root,"actions"):nullptr;
-    const cJSON *item=nullptr;
-    bool ok=true,any=false;
+    return index;
+}
+
+static bool action_rows(PsramPage& out){
+    // Permanent HTML-only fingerprint for checking which OTA really booted.
+    if(!out.add("<!-- MIRA7_HOME_WT32_V3_20261118 -->"))return false;
+    cJSON *index=original_home_index();
+    if(!index)return beta_html(out,"<p>Aucune programmation Mira Panel.</p>")==ESP_OK;
+    const cJSON *actions=cJSON_GetObjectItemCaseSensitive(index,"actions");
+    const cJSON *item=NULL;
+    bool any=false;
+    esp_err_t status=ESP_OK;
+    char seen_groups[16][96]={{0}};
+    unsigned group_count=0;
     cJSON_ArrayForEach(item,actions){
-        const char *name=field(item,"nom"),*type=field(item,"type");
-        const int id=number(item,"id");
+        const char *type=jstr((cJSON*)item,"type","");
+        const char *name=jstr((cJSON*)item,"nom","");
+        const int id=jint((cJSON*)item,"id",-1);
         if(!*name)continue;
-        char local[256];
+        // Only suppress display of internal transport bindings; /getindex,
+        // /updatenr, /events and their IDs are never touched.
+        if(!strncmp(name,"__mira_",7)||strstr(name,"__")||
+           !strncmp(name,"Multi_Clic_",11)||
+           !strncmp(name,"Multi_Double_",13)||
+           !strncmp(name,"Multi_Triple_",13)||
+           !strncmp(name,"Multi_Long_",11)||
+           !strncmp(name,"Camera_",7))continue;
         if((!strcmp(type,"button")||!strcmp(type,"little_button"))&&id>0){
-            snprintf(local,sizeof(local),"<button class=\"Bouton\" id=\"%d\" onclick=\"Click(this)\">",id);
-            ok=out.add(local)&&out.escaped(name)&&out.add("</button>");
             any=true;
-        }else if(!strcmp(type,"title")||!strcmp(type,"text_index")){
-            ok=out.add("<div style='padding:10px 0'>")&&out.escaped(name)&&out.add("</div>");
+            if((status=beta_html(out,!strcmp(type,"little_button")?
+                 "<button class=\"LittleBouton\" id=\"":"<button class=\"Bouton\" id=\""))!=ESP_OK||
+               (status=beta_html_id(out,id))!=ESP_OK||
+               (status=beta_html(out,"\" onclick=\"Click(this)\" style=\"margin-left:5px;margin-right:5px;text-decoration:none\"> "))!=ESP_OK||
+               (status=beta_html_escape(out,name))!=ESP_OK||
+               (status=beta_html(out," </button>"))!=ESP_OK||
+               (status=beta_html(out,!strcmp(jstr(item,"return","true"),"false")?"":"<br>"))!=ESP_OK)break;
+        }else if((!strcmp(type,"title")||!strcmp(type,"text_index"))){
+            int size=jint((cJSON*)item,"size",20);
+            if(size<10)size=10;
+            if(size>72)size=72;
+            char style[90];
+            snprintf(style,sizeof(style),
+                     "<div style=\"padding:10px 0;font-size:%dpx\">",size);
             any=true;
-        }else if(!strcmp(type,"info")&&id>0){
-            snprintf(local,sizeof(local),"<div class='mira-info'>%d : ",id);
-            char cached[160]={0};
-            (void)mira_full_cached_state(name,cached,sizeof(cached));
-            ok=out.add(local)&&out.escaped(name)&&out.add(" <span id='");
-            if(ok){
-                snprintf(local,sizeof(local),"%d",id);
-                ok=out.add(local)&&out.add("'>")&&out.escaped(cached)&&
-                   out.add("</span></div>");
-            }
+            if((status=beta_html(out,style))!=ESP_OK||
+               (status=beta_html_escape(out,name))!=ESP_OK||
+               (status=beta_html(out,"</div>"))!=ESP_OK)break;
+        }else if(!strcmp(type,"inputbox")&&id>0){
             any=true;
+            if((status=beta_html(out,"<label>"))!=ESP_OK||
+               (status=beta_html_escape(out,name))!=ESP_OK||
+               (status=beta_html(out,"</label><input class=\"inputbox\" type=\"text\" id=\""))!=ESP_OK||
+               (status=beta_html_id(out,id))!=ESP_OK||
+               (status=beta_html(out,"\" value=\""))!=ESP_OK||
+               (status=beta_html_value(out,name,jstr((cJSON*)item,"value","")))!=ESP_OK||
+               (status=beta_html(out,"\" onblur=\"InputBoxValidate(this)\"><br>"))!=ESP_OK)break;
+        }else if(!strcmp(type,"infofa")&&id>0){
+            any=true;
+            if((status=beta_html(out,"<div class=\"mira-info\">"))!=ESP_OK||
+               (status=beta_html_escape(out,name))!=ESP_OK||
+               (status=beta_html(out,": <i id=\""))!=ESP_OK||
+               (status=beta_html_id(out,id))!=ESP_OK||
+               (status=beta_html(out,"\" class=\""))!=ESP_OK||
+               (status=beta_html_value(out,name,jstr((cJSON*)item,"value","")))!=ESP_OK||
+               (status=beta_html(out,"\"></i></div>"))!=ESP_OK)break;
+        }else if(!strcmp(type,"color")&&id>0){
+            int red=jint((cJSON*)item,"r",0),green=jint((cJSON*)item,"g",0),blue=jint((cJSON*)item,"b",0);
+            if(red<0||red>255||green<0||green>255||blue<0||blue>255)continue;
+            char color[16];snprintf(color,sizeof(color),"#%02x%02x%02x",red,green,blue);
+            any=true;
+            if((status=beta_html(out,"<div class=\"FondBlanc_Color\">"))!=ESP_OK||
+               (status=beta_html_escape(out,name))!=ESP_OK||
+               (status=beta_html(out,"<br><input class=\"input_color\" type=\"color\" id=\""))!=ESP_OK||
+               (status=beta_html_id(out,id))!=ESP_OK||
+               (status=beta_html(out,"\" value=\""))!=ESP_OK||
+               (status=beta_html(out,color))!=ESP_OK||
+               (status=beta_html(out,"\" onchange=\"printColor(this,event)\"></div>"))!=ESP_OK)break;
         }else if(!strcmp(type,"toggle")){
-            int off=number(item,"id0"),on=number(item,"id1");
-            if(off<=0||on<=0)continue;
-            snprintf(local,sizeof(local),
-                "<div><button class='Bouton' id='%d' onclick='Click(this)'>OFF</button> "
-                "<button class='Bouton' id='%d' onclick='Click(this)'>ON</button> ",off,on);
-            ok=out.add(local)&&out.escaped(name)&&out.add("</div>");
+            int off=jint((cJSON*)item,"id0",-1),on=jint((cJSON*)item,"id1",-1);
+            if(off<1||on<1)continue;
+            char current[160]={0};
+            bool known=mira_full_cached_state(name,current,sizeof(current));
+            bool checked=known&&(!strcasecmp(current,"On")||!strcmp(current,"1")||
+                                  !strcasecmp(current,"true"));
             any=true;
+            if((status=beta_html(out,"<div class=\"div_toogle\"><div class=\"div_toogle_name\">"))!=ESP_OK||
+               (status=beta_html_escape(out,name))!=ESP_OK||
+               (status=beta_html(out,"</div><label class=\"switch\"><input type=\"checkbox\" id=\""))!=ESP_OK||
+               (status=beta_html_id(out,off))!=ESP_OK||
+               (status=beta_html(out,"\" onclick=\"ClickToogle(this,'Off','On','"))!=ESP_OK||
+               (status=beta_html_id(out,off))!=ESP_OK||
+               (status=beta_html(out,"','"))!=ESP_OK||
+               (status=beta_html_id(out,on))!=ESP_OK||
+               (status=beta_html(out,"')\""))!=ESP_OK||
+               (checked&&(status=beta_html(out," checked"))!=ESP_OK)||
+               (status=beta_html(out,"><span class=\"slider round\"></span></label></div><br>"))!=ESP_OK)break;
+        }else if(!strcmp(type,"info")&&id>0){
+            any=true;
+            if((status=beta_html(out,"<div class=\"mira-info\">"))!=ESP_OK||
+               (status=beta_html_escape(out,name))!=ESP_OK||
+               (status=beta_html(out,": <b><span id=\""))!=ESP_OK||
+               (status=beta_html_id(out,id))!=ESP_OK||
+               (status=beta_html(out,"\">"))!=ESP_OK||
+               (status=beta_html_value(out,name,jstr((cJSON*)item,"value","--")))!=ESP_OK||
+               (status=beta_html(out,"</span></b><span id=\"Unit"))!=ESP_OK||
+               (status=beta_html_id(out,id))!=ESP_OK||
+               (status=beta_html(out,"\"> "))!=ESP_OK||
+               (status=beta_html_escape(out,jstr(item,"unit","")))!=ESP_OK||
+               (status=beta_html(out,"</span></div>"))!=ESP_OK)break;
+        }else if(!strcmp(type,"range")&&id>0){
+            any=true;
+            int lo=jint((cJSON*)item,"min",0),hi=jint((cJSON*)item,"max",100);
+            if(lo>=hi||hi>100000||lo<-100000)continue;
+            char bound[160];
+            if((status=beta_html(out,"<div style=\"margin-top:15px;margin-bottom:10px\"><label for=\""))!=ESP_OK||
+               (status=beta_html_id(out,id))!=ESP_OK||
+               (status=beta_html(out,"\">"))!=ESP_OK||
+               (status=beta_html_escape(out,name))!=ESP_OK||
+               (status=beta_html(out,": </label><b><output id=\"RV"))!=ESP_OK||
+               (status=beta_html_id(out,id))!=ESP_OK||
+               (status=beta_html(out,"\">"))!=ESP_OK)break;
+            int v=jint(item,"value",lo);
+            if(v<lo)v=lo;if(v>hi)v=hi;
+            char cur[32];snprintf(cur,sizeof(cur),"%d",v);
+            if((status=beta_html(out,cur))!=ESP_OK||
+               (status=beta_html(out,"</output></b><br><input type=\"range\" id=\""))!=ESP_OK||
+               (status=beta_html_id(out,id))!=ESP_OK)break;
+            snprintf(bound,sizeof(bound),
+                     "\" min=\"%d\" max=\"%d\" value=\"%d\" oninput=\"document.getElementById('RV%d').value=this.value\" onchange=\"ValidRange(this)\"></div>",
+                     lo,hi,v,id);
+            if((status=beta_html(out,bound))!=ESP_OK)break;
+        }else if(!strcmp(type,"list")&&id>0){
+            const char *group=jstr((cJSON*)item,"nomliste","");
+            if(!*group)continue;
+            bool seen=false;
+            for(unsigned k=0;k<group_count;k++)if(!strcmp(seen_groups[k],group)){seen=true;break;}
+            if(seen||group_count>=16)continue;
+            snprintf(seen_groups[group_count++],sizeof(seen_groups[0]),"%s",group);
+            any=true;
+            if((status=beta_html(out,"<div><label>"))!=ESP_OK||
+               (status=beta_html_escape(out,group))!=ESP_OK||
+               (status=beta_html(out,"</label><select class=\"box\" id=\""))!=ESP_OK||
+               (status=beta_html_escape(out,group))!=ESP_OK||
+               (status=beta_html(out,"\" onchange=\"Liste(this)\">"))!=ESP_OK)break;
+            const cJSON *opt=NULL;
+            cJSON_ArrayForEach(opt,actions){
+                if(strcmp(jstr((cJSON*)opt,"type",""),"list")||
+                   strcmp(jstr((cJSON*)opt,"nomliste",""),group))continue;
+                int option_id=jint((cJSON*)opt,"id",-1);
+                if(option_id<1)continue;
+                if((status=beta_html(out,"<option value=\""))!=ESP_OK||
+                   (status=beta_html_id(out,option_id))!=ESP_OK||
+                   (status=beta_html(out,"\">"))!=ESP_OK||
+                   (status=beta_html_escape(out,jstr((cJSON*)opt,"nom","")))!=ESP_OK||
+                   (status=beta_html(out,"</option>"))!=ESP_OK)break;
+            }
+            if(status!=ESP_OK|| (status=beta_html(out,"</select></div>"))!=ESP_OK)break;
         }
-        if(!ok)break;
     }
-    cJSON_Delete(root);
-    return ok&&(any||out.add("<p>Aucune commande Web programmee.</p>"));
+    cJSON_Delete(index);
+    if(status!=ESP_OK)return false;
+    if(!any)return beta_html(out,"<p>Aucune commande programmée.</p>")==ESP_OK;
+    // The beta's live states are delivered by /events, which sends a bounded
+    // snapshot and lets EventSource reconnect. No HTTP worker remains blocked.
+    // Regenerate listeners from the same command index, never from the DOM.
+    index=original_home_index();
+    if(!index)return true;
+    actions=cJSON_GetObjectItemCaseSensitive(index,"actions");
+    status=beta_html(out,"<script>(function(){if(!window.EventSource)return;"
+                              "var source=new EventSource('/events');");
+    cJSON_ArrayForEach(item,actions){
+        if(status!=ESP_OK)break;
+        const char *type=jstr((cJSON*)item,"type","");
+        char js[640];
+        if(!strcmp(type,"toggle")){
+            int off=jint((cJSON*)item,"id0",-1),on=jint((cJSON*)item,"id1",-1);
+            if(off<1||on<1)continue;
+            snprintf(js,sizeof(js),
+                "source.addEventListener('%d',function(){var e=document.getElementById('%d');if(e)e.checked=false;});"
+                "source.addEventListener('%d',function(){var e=document.getElementById('%d');if(e)e.checked=true;});",
+                off,off,on,off);
+        }else if(!strcmp(type,"range")){
+            int id=jint(item,"id",-1);
+            if(id<1)continue;
+            snprintf(js,sizeof(js),
+                "source.addEventListener('%d',function(v){var e=document.getElementById('%d');"
+                "if(e)e.value=v.data;var o=document.getElementById('RV%d');"
+                "if(o)o.textContent=v.data;});",id,id,id);
+        }else if(!strcmp(type,"info")||
+                  !strcmp(type,"inputbox")||!strcmp(type,"infofa")){
+            int id=jint(item,"id",-1);
+            if(id<1)continue;
+            snprintf(js,sizeof(js),
+                "source.addEventListener('%d',function(v){var e=document.getElementById('%d');"
+                "if(e)e.%s=v.data;});",id,id,
+                !strcmp(type,"info")?"textContent":(!strcmp(type,"infofa")?"className":"value"));
+        }else if(!strcmp(type,"list")){
+            int id=jint((cJSON*)item,"id",-1);
+            if(id<1)continue;
+            // List selectors do not expose raw names to JavaScript: find by
+            // option id, then assign their parent select's selected value.
+            snprintf(js,sizeof(js),
+                "source.addEventListener('%d',function(){var o=document.querySelector('option[value=\"%d\"]');"
+                "if(o&&o.parentElement)o.parentElement.value='%d';});",id,id,id);
+        }else continue;
+        status=beta_html(out,js);
+    }
+    if(status==ESP_OK)status=beta_html(out,"})();</script>");
+    cJSON_Delete(index);
+    return status==ESP_OK;
 }
 static bool network_rows(PsramPage& out){
     mira_beta_network_t *entries=(mira_beta_network_t *)heap_caps_calloc(
