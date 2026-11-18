@@ -32,6 +32,7 @@ extern "C" {
 #include "mira_beta_setup.h"
 #include "mira_recovery.h"
 #include "mira_full.h"
+#include "mira_mqtt.h"
 }
 
 static const char *TAG="mira7-async";
@@ -435,9 +436,163 @@ static bool native_json_request(AsyncWebServerRequest *r){
 
 // Authenticated Jeedom programming: no HTTP loopback; processed in PSRAM worker.
 static bool basic_auth(AsyncWebServerRequest *r);
+// Restore the original POST /update browser command endpoint lost when
+// native HTTPD port 8081 was removed. This handles ONLY actions initiated
+// from the authenticated web homepage. GET /update (Jeedom/OTA) is unchanged.
+// Operates in proxy_worker, never in an AsyncTCP callback.
+static bool browser_integer(const String& s,long lo,long hi,long& out){
+    if(!s.length()||s.length()>16)return false;
+    char *end=nullptr;
+    const long v=strtol(s.c_str(),&end,10);
+    if(end==s.c_str()||!end||*end||v<lo||v>hi)return false;
+    out=v;
+    return true;
+}
+static const char *browser_field(const cJSON *item,const char *key){
+    const cJSON *p=cJSON_GetObjectItemCaseSensitive(item,key);
+    return cJSON_IsString(p)&&p->valuestring?p->valuestring:"";
+}
+static int browser_id(const cJSON *item,const char *key){
+    const cJSON *p=cJSON_GetObjectItemCaseSensitive(item,key);
+    return cJSON_IsNumber(p)?p->valueint:-1;
+}
+static bool browser_update_post(AsyncWebServerRequest *r){
+    if(!basic_auth(r)){r->requestAuthentication();return true;}
+    static const char *const selectors[]={
+        "send","send_range","send_list","send_color","send_textbox"
+    };
+    const char *kind=nullptr;
+    String selector;
+    for(const char *candidate:selectors){
+        if(const auto *p=r->getParam(candidate)){
+            kind=candidate;selector=p->value();break;
+        }
+    }
+    long numeric=0;
+    if(!kind||!browser_integer(selector,1,4096,numeric)){
+        r->send(400,"text/plain; charset=utf-8","Identifiant web invalide");
+        return true;
+    }
+    char *raw=nullptr;size_t length=0;
+    const esp_err_t err=mira_jeedom_async_index_snapshot(&raw,&length);
+    if(err!=ESP_OK||!raw){
+        r->send(503,"text/plain; charset=utf-8","Index des commandes indisponible");
+        return true;
+    }
+    cJSON *root=cJSON_ParseWithLength(raw,length);
+    heap_caps_free(raw);
+    if(!root){
+        r->send(503,"text/plain; charset=utf-8","Index des commandes invalide");
+        return true;
+    }
+    const cJSON *actions=cJSON_GetObjectItemCaseSensitive(root,"actions");
+    const cJSON *item=nullptr;
+    char action_name[96]={0},action_type[24]={0},payload[160]="1";
+    char color_hex[16]={0};
+    bool matched=false,bad_value=false;
+    const String list_name=param_or_empty(r,"list");
+    cJSON_ArrayForEach(item,actions){
+        const char *type=browser_field(item,"type");
+        const char *name=browser_field(item,"nom");
+        if(!*name)continue;
+        const int id=browser_id(item,"id");
+        if(!strcmp(kind,"send")&&!strcmp(type,"toggle")&&
+           (browser_id(item,"id0")==numeric||browser_id(item,"id1")==numeric)){
+            snprintf(action_name,sizeof(action_name),"%s",name);
+            snprintf(action_type,sizeof(action_type),"toggle");
+            snprintf(payload,sizeof(payload),"%d",
+                     browser_id(item,"id1")==numeric?1:0);
+            matched=true;break;
+        }
+        if(id!=numeric)continue;
+        if(!strcmp(kind,"send")&&
+           (!strcmp(type,"button")||!strcmp(type,"little_button"))){
+            snprintf(action_name,sizeof(action_name),"%s",name);
+            snprintf(action_type,sizeof(action_type),"button");
+            matched=true;break;
+        }
+        if(!strcmp(kind,"send_list")&&!strcmp(type,"list")){
+            if(!list_name.length()||list_name!=browser_field(item,"nomliste")){
+                bad_value=true;break;
+            }
+            snprintf(action_name,sizeof(action_name),"%s",list_name.c_str());
+            snprintf(action_type,sizeof(action_type),"list");
+            snprintf(payload,sizeof(payload),"%s",name);
+            matched=true;break;
+        }
+        if(!strcmp(kind,"send_range")&&!strcmp(type,"range")){
+            const auto *p=r->getParam("value");
+            long value=0;
+            if(!p||!browser_integer(p->value(),
+                    browser_id(item,"min"),browser_id(item,"max"),value)){
+                bad_value=true;break;
+            }
+            snprintf(action_name,sizeof(action_name),"%s",name);
+            snprintf(action_type,sizeof(action_type),"range");
+            snprintf(payload,sizeof(payload),"%ld",value);
+            matched=true;break;
+        }
+        if(!strcmp(kind,"send_color")&&!strcmp(type,"color")){
+            long channels[3]={0};const char *keys[]={"r","g","b"};
+            bool valid=true;
+            for(unsigned k=0;k<3;k++){
+                const auto *p=r->getParam(keys[k]);
+                if(!p||!browser_integer(p->value(),0,255,channels[k])){
+                    valid=false;break;
+                }
+            }
+            if(!valid){bad_value=true;break;}
+            snprintf(action_name,sizeof(action_name),"%s",name);
+            snprintf(action_type,sizeof(action_type),"color");
+            snprintf(payload,sizeof(payload),"%ld,%ld,%ld",
+                     channels[0],channels[1],channels[2]);
+            snprintf(color_hex,sizeof(color_hex),"#%02lx%02lx%02lx",
+                     channels[0],channels[1],channels[2]);
+            matched=true;break;
+        }
+        if(!strcmp(kind,"send_textbox")&&!strcmp(type,"inputbox")){
+            const auto *p=r->getParam("text");
+            if(!p||p->value().length()>=sizeof(payload)){
+                bad_value=true;break;
+            }
+            snprintf(action_name,sizeof(action_name),"%s",name);
+            snprintf(action_type,sizeof(action_type),"inputbox");
+            snprintf(payload,sizeof(payload),"%s",p->value().c_str());
+            matched=true;break;
+        }
+    }
+    cJSON_Delete(root);
+    if(!matched){
+        r->send(bad_value?400:404,"text/plain; charset=utf-8",
+                bad_value?"Parametres de commande invalides":
+                "Commande web introuvable");return true;
+    }
+    // Match the old route: Jeedom when enabled, otherwise MQTT then GenericCmd.
+    bool sent=mira_jeedom_actions_enabled()?
+        mira_jeedom_queue_local_action(action_name,action_type,payload):
+        (mira_mqtt_publish_action(action_name,payload)||
+         mira_generic_queue_local_action(action_name,action_type,payload));
+    if(!sent){
+        r->send(503,"text/plain; charset=utf-8","Transport d'action indisponible");
+        return true;
+    }
+    // The original web endpoint also updated the browser EventSource
+    // for controls with immediate local values.
+    const char *update=nullptr;
+    if(!strcmp(kind,"send_range")||!strcmp(kind,"send_textbox"))
+        update=payload;
+    else if(!strcmp(kind,"send_list"))update=action_name;
+    else if(!strcmp(kind,"send_color"))update=color_hex;
+    if(update)mira_async_web_emit_direct((int)numeric,update);
+    r->send(200,"text/plain; charset=utf-8","OK");
+    return true;
+}
+
 static bool native_jeedom_request(AsyncWebServerRequest *r){
     if(async_first_run(r))return true;
     const String path=r->url();
+    if(path=="/update"&&r->method()==AsyncWebRequestMethod::HTTP_POST)
+        return browser_update_post(r);
     const bool stage_clear=path=="/removelistlvgl"||path=="/screenformat";
     const bool stage_add=path=="/addlistlvgl"||path=="/screenadd";
     const bool stage_save=path=="/savelistlvgl"||path=="/screensave";
@@ -857,6 +1012,7 @@ extern "C" void mira_async_web_start(void){
         if(r->hasParam("key"))updatenr_get(r);
         else ota_page(r);
     });
+    server.on("/update",AsyncWebRequestMethod::HTTP_POST,proxy_request);
     server.on("/updatemodule",AsyncWebRequestMethod::HTTP_GET,ota_page);
     server.on("/api/otastatus",AsyncWebRequestMethod::HTTP_GET,[](AsyncWebServerRequest *r){
         if(!basic_auth(r)){r->requestAuthentication();return;}
