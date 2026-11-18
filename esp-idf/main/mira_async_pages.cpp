@@ -191,14 +191,6 @@ static bool action_rows(PsramPage& out){
         const char *name=jstr((cJSON*)item,"nom","");
         const int id=jint((cJSON*)item,"id",-1);
         if(!*name)continue;
-        // Only suppress display of internal transport bindings; /getindex,
-        // /updatenr, /events and their IDs are never touched.
-        if(!strncmp(name,"__mira_",7)||strstr(name,"__")||
-           !strncmp(name,"Multi_Clic_",11)||
-           !strncmp(name,"Multi_Double_",13)||
-           !strncmp(name,"Multi_Triple_",13)||
-           !strncmp(name,"Multi_Long_",11)||
-           !strncmp(name,"Camera_",7))continue;
         if((!strcmp(type,"button")||!strcmp(type,"little_button"))&&id>0){
             any=true;
             if((status=beta_html(out,!strcmp(type,"little_button")?
