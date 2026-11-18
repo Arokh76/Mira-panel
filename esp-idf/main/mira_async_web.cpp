@@ -17,6 +17,7 @@
 #include <cstring>
 #include <algorithm>
 #include <esp_ota_ops.h>
+#include <Update.h>
 #include <esp_app_desc.h>
 #include <esp_system.h>
 #include <esp_wifi.h>
@@ -235,9 +236,14 @@ static bool basic_auth(AsyncWebServerRequest *r);
 // Each firmware block is streamed to the inactive ESP-IDF OTA partition;
 // the full binary is NEVER buffered in RAM, and no HTTPD task is involved.
 struct AsyncOtaState {
-    esp_ota_handle_t handle=0;
     const esp_partition_t *target=nullptr;
     size_t written=0;
+    size_t captured=0;
+    // ESP image header (24) + first segment header (8) + app descriptor.
+    // Keep this in RAM: Arduino Update intentionally withholds the initial
+    // image magic until Update.end(true), so esp_ota_get_partition_description()
+    // cannot be called before finalization.
+    uint8_t preamble[32+sizeof(esp_app_desc_t)]={};
     bool begun=false;
     bool failed=false;
     bool completed=false;
@@ -254,100 +260,125 @@ static void ota_upload(AsyncWebServerRequest *r,const String& filename,
         if(ctx){ctx->failed=true;return;}
         ctx=(AsyncOtaState *)heap_caps_calloc(1,sizeof(*ctx),
                                             MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
-        if(!ctx)return;
+        if(!ctx){ota_last_status=503;return;}
         r->_tempObject=ctx;
-        if(!basic_auth(r)||filename.length()<5||
-           !filename.endsWith(".bin")||
-           !r->contentLength()||r->contentLength()<65536){
-            ctx->failed=true;
-            ota_last_status=403;
-            return;
+        ota_last_bytes=0;
+        if(!basic_auth(r)||filename.length()<5||!filename.endsWith(".bin")||
+           r->contentLength()<65536u){
+            ctx->failed=true;ota_last_status=403;return;
         }
         if(__atomic_exchange_n(&ota_busy,true,__ATOMIC_ACQ_REL)){
             ctx->failed=true;ota_last_status=409;return;
         }
         ctx->owns_slot=true;
         ctx->target=esp_ota_get_next_update_partition(NULL);
-        if(!ctx->target||r->contentLength()>ctx->target->size+4096u||
+        const esp_partition_t *running=esp_ota_get_running_partition();
+        if(!ctx->target||ctx->target==running||
+           r->contentLength()>ctx->target->size+4096u||
            !len||!data||data[0]!=0xe9){
             ctx->failed=true;ota_last_status=400;
+            ESP_LOGW(TAG,"OTA_WT32_BAD_TARGET_OR_HEADER");
             return;
         }
-        // AsyncTCP must not wait for a whole 3 MiB partition erase.
-        // Erase sectors as chunks arrive, equivalent to WT32 Update.write.
-        esp_err_t err=esp_ota_begin(ctx->target,OTA_WITH_SEQUENTIAL_WRITES,
-                                    &ctx->handle);
-        if(err!=ESP_OK){
+        // Exactly as on WT32: the Arduino Update library chooses the inactive
+        // OTA partition, buffers flash sectors and activates it at end(true).
+        // Never U_SPIFFS: the 7STD upload must be an application-only .bin.
+        if(!Update.begin(UPDATE_SIZE_UNKNOWN,U_FLASH)){
             ctx->failed=true;ota_last_status=503;
-            ESP_LOGW(TAG,"ASYNC_OTA_BEGIN_FAILED: %s",esp_err_to_name(err));
+            ESP_LOGE(TAG,"OTA_WT32_BEGIN_FAILED: error=%u",
+                     (unsigned)Update.getError());
             return;
         }
-        ctx->begun=true;
-        ESP_LOGI(TAG,"ASYNC_OTA_STARTED: partition=%s",ctx->target->label);
+        ctx->begun=true;ota_last_status=102;
+        ESP_LOGI(TAG,"OTA_WT32_BEGIN: running=%s target=%s",
+                 running?running->label:"unknown",ctx->target->label);
     }
     if(!ctx||ctx->failed)return;
-    if(len>0){
-        if(index!=ctx->written||ctx->written+len>ctx->target->size||
-           esp_ota_write(ctx->handle,data,len)!=ESP_OK){
+    if(len){
+        if(index!=ctx->written||len>ctx->target->size-ctx->written||
+           Update.write(data,len)!=len){
             ctx->failed=true;ota_last_status=500;
+            ESP_LOGE(TAG,"OTA_WT32_WRITE_FAILED: error=%u offset=%u len=%u",
+                     (unsigned)Update.getError(),
+                     (unsigned)index,(unsigned)len);
             return;
         }
+        size_t n=std::min(len,sizeof(ctx->preamble)-ctx->captured);
+        if(n){
+            memcpy(ctx->preamble+ctx->captured,data,n);
+            ctx->captured+=n;
+        }
         ctx->written+=len;
+        ota_last_bytes=ctx->written;
     }
     if(!final)return;
-    if(!ctx->begun||ctx->written<65536||ctx->written>ctx->target->size){
+    if(!ctx->begun||ctx->written<65536u||
+       ctx->captured!=sizeof(ctx->preamble)){
         ctx->failed=true;ota_last_status=400;return;
     }
-    esp_err_t err=esp_ota_end(ctx->handle);
+    esp_app_desc_t candidate={};
+    memcpy(&candidate,ctx->preamble+32,sizeof(candidate));
+    const esp_app_desc_t *running_desc=esp_app_get_description();
+    if(candidate.magic_word!=ESP_APP_DESC_MAGIC_WORD||
+       !running_desc||
+       strcmp(candidate.project_name,"mira_idf_7std")||
+       strcmp(candidate.project_name,running_desc->project_name)){
+        ctx->failed=true;ota_last_status=400;
+        ESP_LOGW(TAG,"OTA_WT32_REJECTED: non-Mira 7STD firmware");
+        return;
+    }
+    // WT32's Update.end(true) validates the written image and selects the
+    // boot partition. Unlike the former custom esp_ota_* implementation,
+    // this also uses Arduino's delayed first-sector write/verification.
+    bool ok=!Update.hasError()&&Update.end(true);
     ctx->begun=false;
-    if(err!=ESP_OK){
+    if(!ok){
         ctx->failed=true;ota_last_status=400;
-        ESP_LOGW(TAG,"ASYNC_OTA_IMAGE_INVALID: %s",esp_err_to_name(err));
+        ESP_LOGE(TAG,"OTA_WT32_END_FAILED: error=%u",
+                 (unsigned)Update.getError());
         return;
     }
-    esp_app_desc_t descriptor={};
-    const esp_app_desc_t *running=esp_app_get_description();
-    if(!running||
-       esp_ota_get_partition_description(ctx->target,&descriptor)!=ESP_OK||
-       strcmp(descriptor.project_name,running->project_name)||
-       strcmp(descriptor.project_name,"mira_idf_7std")){
-        ctx->failed=true;ota_last_status=400;
-        ESP_LOGW(TAG,"ASYNC_OTA_REJECTED: not a Mira 7 STD application");
-        return;
-    }
-    err=esp_ota_set_boot_partition(ctx->target);
-    if(err!=ESP_OK){
+    const esp_partition_t *next=esp_ota_get_boot_partition();
+    if(!next||next->address!=ctx->target->address){
         ctx->failed=true;ota_last_status=500;
-        ESP_LOGE(TAG,"ASYNC_OTA_SET_BOOT_FAILED: %s",esp_err_to_name(err));
+        ESP_LOGE(TAG,"OTA_WT32_BOOT_SLOT_MISMATCH: requested=%s selected=%s",
+                 ctx->target->label,next?next->label:"none");
         return;
     }
     ctx->verified=true;
     ctx->completed=true;
-    ota_last_bytes=ctx->written;
     ota_last_status=200;
-    ESP_LOGI(TAG,"ASYNC_OTA_VERIFIED: %u bytes",(unsigned)ctx->written);
+    ESP_LOGI(TAG,"OTA_WT32_VERIFIED: %u bytes, boot=%s",
+             (unsigned)ctx->written,next->label);
 }
 static void ota_upload_complete(AsyncWebServerRequest *r){
     auto *ctx=(AsyncOtaState *)r->_tempObject;
     if(!ctx){
-        r->send(503,"text/plain; charset=utf-8","OTA non initialise");
+        r->send(503,"text/plain; charset=utf-8","OTA non initialisee");
         return;
     }
     bool ok=ctx->completed&&ctx->verified&&!ctx->failed;
-    if(ctx->begun)esp_ota_abort(ctx->handle);
+    if(ctx->begun&&Update.isRunning())Update.abort();
     ctx->begun=false;
     r->_tempObject=nullptr;
-    const bool owned=ctx->owns_slot;
+    bool owned=ctx->owns_slot;
     heap_caps_free(ctx);
     if(owned)__atomic_store_n(&ota_busy,false,__ATOMIC_RELEASE);
     if(!basic_auth(r)){r->requestAuthentication();return;}
     if(!ok){
-        r->send(400,"text/plain; charset=utf-8",
+        r->send(500,"text/plain; charset=utf-8",
                 "UPDATE_FAILED - firmware precedent conserve");
         return;
     }
-    r->send(200,"text/plain; charset=utf-8","OK - Mira redemarre");
-    schedule_restart();
+    // Same WT32 contract: finish, send HTTP 200, then restart. A dedicated
+    // task gives AsyncTCP time to flush the response before reboot.
+    r->send(200,"text/plain; charset=utf-8","OK - Mise a jour verifiee; redemarrage");
+    if(xTaskCreate(restart_after_response,"mira_async_ota_reboot",
+                   3072,NULL,2,NULL)!=pdPASS){
+        ESP_LOGW(TAG,"OTA_WT32_RESTART_TASK_FAILED: fallback direct");
+        delay(1500);
+        esp_restart();
+    }
 }
 static void ota_page(AsyncWebServerRequest *r){
     if(!basic_auth(r)){r->requestAuthentication();return;}
@@ -1016,11 +1047,19 @@ extern "C" void mira_async_web_start(void){
     server.on("/updatemodule",AsyncWebRequestMethod::HTTP_GET,ota_page);
     server.on("/api/otastatus",AsyncWebRequestMethod::HTTP_GET,[](AsyncWebServerRequest *r){
         if(!basic_auth(r)){r->requestAuthentication();return;}
-        char answer[120];
+        char answer[240];
+        const esp_partition_t *boot=esp_ota_get_boot_partition();
+        const esp_partition_t *running=esp_ota_get_running_partition();
+        const esp_app_desc_t *app=esp_app_get_description();
         snprintf(answer,sizeof(answer),
-            "{\"last_status\":%u,\"last_bytes\":%u,\"active\":%s}",
+            "{\"last_status\":%u,\"last_bytes\":%u,\"active\":%s,"
+            "\"running_slot\":\"%s\",\"boot_slot\":\"%s\","
+            "\"elf_hash\":\"%02x%02x%02x%02x\"}",
             ota_last_status,(unsigned)ota_last_bytes,
-            __atomic_load_n(&ota_busy,__ATOMIC_ACQUIRE)?"true":"false");
+            __atomic_load_n(&ota_busy,__ATOMIC_ACQUIRE)?"true":"false",
+            running?running->label:"unknown",boot?boot->label:"unknown",
+            app?app->app_elf_sha256[0]:0,app?app->app_elf_sha256[1]:0,
+            app?app->app_elf_sha256[2]:0,app?app->app_elf_sha256[3]:0);
         r->send(200,"application/json",answer);
     });
     server.on("/mira/import",AsyncWebRequestMethod::HTTP_POST,proxy_request);
