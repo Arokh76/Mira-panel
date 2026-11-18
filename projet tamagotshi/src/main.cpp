@@ -55,8 +55,8 @@ struct Button {
   }
 };
 
-static Button nextButton = {PIN_NEXT};
-static Button okButton = {PIN_OK};
+static Button nextButton;
+static Button okButton;
 
 static uint8_t bounded(int value) {
   if (value < 0) return 0;
@@ -320,6 +320,8 @@ static void render(uint32_t now) {
 }
 
 void setup() {
+  nextButton.pin = PIN_NEXT;
+  okButton.pin = PIN_OK;
   pinMode(PIN_NEXT, INPUT);         // Pull-up externe sur T-Display original
   pinMode(PIN_OK, INPUT_PULLUP);
   pinMode(PIN_BACKLIGHT, OUTPUT);
