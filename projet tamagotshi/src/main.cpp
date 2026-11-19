@@ -1,4 +1,4 @@
-// Tamagotchi V7.2 — scenes de vie et petite maison — LilyGO T-Display V1.1 ORIGINAL (ESP32/ST7789, 135x240).
+// Tamagotchi V7.3 — scenes de vie et petite maison — LilyGO T-Display V1.1 ORIGINAL (ESP32/ST7789, 135x240).
 // Portrait, creature animee grand format, stats sur pages annexes, 2 mini-jeux.
  // GPIO35 : menu suivant / retour; GPIO0 : valider.
  // Stockage compatible V2 : namespace "tama_v2", magic 0x54414D32.
@@ -632,12 +632,13 @@ static uint16_t rgb565(uint8_t r,uint8_t g,uint8_t b);
 // V7.2 : retour du dessin prefere, ventre blanc + centre gris clair.
 // On ne change pas son style : seul l'emplacement descend sous la bouche.
 // Les dimensions sont ajustees pour ne pas deborder sur les pieds.
-static void drawBellyPatch(int cx,int by,uint8_t st,bool compact) {
+static void drawBellyPatch(int cx,int by,uint8_t st,bool compact,bool bedroom=false) {
   if(st<2) return;
-  const int y=by+(compact?(st==2?63:69):(st==2?82:89));
-  const int w=compact?(st==2?30:32):(st==2?41:44);
-  const int h=compact?(st==2?22:25):(st==2?29:36);
-  // Deux ovales arrondis superposes, comme sur V7.0, mais plus bas.
+  // Dessin blanc + gris de la V7.2 conserve tel quel ; dimensions adaptees
+  // aux deux tailles existantes et au modele intermediaire pour la chambre.
+  const int y=by+(compact?(st==2?63:69):bedroom?(st==2?79:83):(st==2?82:89));
+  const int w=compact?(st==2?30:32):bedroom?(st==2?38:40):(st==2?41:44);
+  const int h=compact?(st==2?22:25):bedroom?(st==2?27:31):(st==2?29:36);
   gfx.fillRoundRect(cx-w/2,y,w,h,h/2,TFT_WHITE);
   gfx.fillRoundRect(cx-(w-12)/2,y+5,w-12,h-10,(h-10)/2,TFT_LIGHTGREY);
 }
@@ -726,6 +727,7 @@ static void drawCreature(uint32_t now) {
   const Mood m = mood();
   const bool hop = (!pet.dort && (now/7200)%4==2);
   const bool walking = isWalking(now);
+  const bool bedroom = homeScene==1 || pet.dort;
   const int bob = pet.dort ? 5 : hop ? ((now/160)%2 ? -11 : -2) :
                   walking ? ((now/190)%2 ? -4 : 1) : ((now/340)%2 ? -2 : 2);
   const int wander = walking
@@ -745,18 +747,19 @@ static void drawCreature(uint32_t now) {
     drawEgg(now);
     return;
   }
-  // Grande creature au repos, version a 75-80 % durant la balade.
+  // Grand personnage dans le jardin, petit pendant la balade.
+  // Dans la chambre, taille intermediaire (~85 %) pour voir les meubles.
   if(walking) {
     drawWalkingCreature(now,st,m,body);
     return;
   }
 
   const int bx = st == 1 ? 29 : st == 2 ? 19 : 13;
-  const int width = st == 1 ? 77 : st == 2 ? 97 : 108;
-  const int by = (st == 1 ? 77 : st == 2 ? 61 : 47) + bob;
-  const int height = st == 1 ? 102 : st == 2 ? 119 : 135;
+  const int width = bedroom ? (st==1?67:st==2?84:92) : (st==1?77:st==2?97:108);
+  const int by = (bedroom ? (st==1?92:st==2?77:66) : (st==1?77:st==2?61:47)) + bob;
+  const int height = bedroom ? (st==1?90:st==2?105:118) : (st==1?102:st==2?119:135);
   const int bodyx = cx - width/2;
-  const int mouthY = by + (st == 1 ? 37 : 51);
+  const int mouthY = by + (st == 1 ? (bedroom?33:37) : (bedroom?44:51));
 
   if (st >= 2) {
     // Petites antennes / oreilles evolutives
@@ -790,16 +793,19 @@ static void drawCreature(uint32_t now) {
   if (pet.dort) legShift = 0;
   gfx.fillRoundRect(cx-38+legShift,by+height-13,29,20,8,body);
   gfx.fillRoundRect(cx+9-legShift,by+height-13,29,20,8,body);
-  gfx.fillRoundRect(cx-width/2-9,by+55 + (wave ? -17 : 0),23,45,10,body);
-  gfx.fillRoundRect(cx+width/2-14,by+55 - (wave ? 17 : 0),23,45,10,body);
+  const int armY = by+(bedroom?48:55);
+  const int armH = bedroom?39:45, armW=bedroom?20:23;
+  gfx.fillRoundRect(cx-width/2-9,armY + (wave ? -17 : 0),armW,armH,10,body);
+  gfx.fillRoundRect(cx+width/2-14,armY - (wave ? 17 : 0),armW,armH,10,body);
   gfx.fillRoundRect(bodyx,by,width,height,st == 1 ? 33 : 40,body);
   // Liseret fonce : particulierement utile pour le Tama vert sur le jardin.
   gfx.drawRoundRect(bodyx,by,width,height,st == 1 ? 33 : 40,rgb565(25,70,77));
 
   // Double ovale blanc/gris conserve, mais positionne sous le visage.
-  drawBellyPatch(cx,by,st,false);
-  gfx.fillCircle(cx-31,by+68,7,TFT_PINK);
-  gfx.fillCircle(cx+31,by+68,7,TFT_PINK);
+  drawBellyPatch(cx,by,st,false,bedroom);
+  const int cheekY=by+(bedroom?61:68);
+  gfx.fillCircle(cx-31,cheekY,7,TFT_PINK);
+  gfx.fillCircle(cx+31,cheekY,7,TFT_PINK);
   drawFace(cx,mouthY,now,m);
   // L'identite des quatre formes reste sur la tete (biscuit, etoile, coeur,
   // couronne) et dans leur couleur; le ventre demeure net pour chacune.
