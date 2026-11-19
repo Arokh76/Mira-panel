@@ -1,30 +1,32 @@
-# Tamagotchi V6 — personnalites, evolutions et sac
+# Projet Tamagotshi V6.1 — monde anime et promenades
 
-Pour **LilyGO T-Display V1.1 original** (ESP32, ST7789, 135 x 240). Tous les jeux, ecrans, sauvegardes et comportements batterie de la V5.1 sont preserves.
+Cette version conserve **toutes les fonctions de la V6** et ajoute un jardin vivant derriere le Tama sur son **LilyGO T-Display V1.1 original, ESP32, ST7789, 135 × 240**.
 
-## Nouveautes V6
+## V6.1 : decor dynamique
 
-- **Quatre personnalites** : GOURMAND, JOUEUR, CALIN, REVEUR. Attribuees a l'eclosion, puis sauvegardees. Elles changent les besoins, les reactions et les messages.
-- **Quatre formes adultes** : GOURMAND (biscuit orange), JOUEUR (etoile cyan), CALIN (coeur rose), SAGE (couronne verte). Determination a 30 minutes de temps actif selon le nombre de repas, jeux, calins, soins. Forme definitive.
-- **Inventaire** (nouveau menu SAC) : un biscuit (+23 faim), ballon (+26 joie, -3 energie), doudou (+20 energie, +12 amitie). Un biscuit au depart. Gagner un ballon avec 3/3 au jeu ETOILE ; un doudou avec 3/3 au jeu REFLEXE. Les surprises peuvent donner des objets. Max 9 par type.
-- **Page PROFIL** : INFOS -> SOUVENIRS -> PROFIL -> INFOS (bouton suivant). Voir sa personnalite, son evolution et les activites.
-- **Migration automatique V5.1** : sauvegarde Preferences `tama_v2` intacte. Un ancien Tama deja ne recoit une personnalite au premier demarrage et les adultes recoivent une forme a partir des statistiques existantes.
+- **Ciel, soleil, nuages, collines, arbres, herbe et petites fleurs** en pixel art leger, dessines directement dans le sprite TFT. Aucun telechargement ou fichier image necessaire.
+- **Cycle jour / crepuscule / nuit / aube** durant 12 minutes d'age actif pour faciliter les tests ; lorsque le Tama est couche (DODO), le decor est nocturne avec lune et etoiles.
+- **Balade spontanee** : le Tama se met a marcher pendant une phase de son animation existante (environ 7 secondes sur 29). Le sol et les fleurs defilent plus vite que les collines, pour creer un effet de profondeur (parallaxe), sans saut lors de la fin de balade.
+- **Nuages doux en mouvement** meme quand le personnage ne se deplace pas.
+- Le paysage reste derriere le personnage ; bulle de dialogue, menu bas, jauge batterie et animations de la creature restent au premier plan.
+- **Ecrans INFOS, PROFIL, SOUVENIRS, SAC, mini-jeux et USB** non modifies.
+- Pas de sauvegarde supplementaire pour le decor : le temps du jour suit l'age actif existant, et la distance de balade ne change pas la progression du Tama.
 
-**Commandes** : GPIO35 suivant ; GPIO0 valider. Dans le SAC, selectionner BISCUIT / BALLON / DOUDOU / RETOUR puis valider.
+## Rappel V6
 
-## Evolution acceleree pour developpement
+Quatre personnalites (gourmand / joueur / calin / reveur), quatre formes adultes (gourmand / joueur / calin / sage), inventaire (biscuit / ballon / doudou), deux mini-jeux et pages d'information. Les evolutions restent accelerees pour les tests.
 
-Oeuf : 1 minute ; bebe : 1 a 7 minutes ; enfant : 7 a 30 minutes ; adulte a 30 minutes de fonctionnement actif. Pas d'age cumule pendant les deep sleeps. On pourra ralentir cette croissance une fois le jeu valide.
+## Batterie et sauvegarde
 
-## Batterie
+Conservation du namespace NVS `tama_v2` et de la cle `magic` : le Tama de V4/V5/V5.1/V6 garde son age, sa personnalite, son evolution adulte et son sac si l'on flashe l'application **sans ERASE**.
 
-Gestion V5.1 preservee, a tester sur la carte : batterie vide rouge 2 sec lors d'un bouton en hibernation, sauvegarde puis deep sleep, reessai periodique, extinction ecran inactif. La detection USB est indicative, elle ne detecte pas une charge terminee.
+La gestion batterie de V6 reste en place : ecran eteint apres 2 min d'inactivite sur batterie, animation USB probable, alerte batterie rouge et deep sleep a basse tension. La mesure et les seuils necessitent encore validation materielle ; l'affichage « alimentation USB » n'est pas une indication de charge terminee.
 
 ## Flash Download Tools
 
-- [Firmware V6 complet](firmware/Tamagotchi_V6_TDisplay_V11_full.bin) a **0x0000**.
-- [Application seule V6](firmware/Tamagotchi_V6_TDisplay_V11_app.bin) a **0x10000** pour mettre a jour V4/V5/V5.1 **sans ERASE** et conserver l'animal.
+- [**Tamagotchi_V6_1_TDisplay_V11_app.bin**](firmware/Tamagotchi_V6_1_TDisplay_V11_app.bin) à flasher à **0x10000**, **sans ERASE**, depuis V4/V5/V6.
+- [**Tamagotchi_V6_1_TDisplay_V11_full.bin**](firmware/Tamagotchi_V6_1_TDisplay_V11_full.bin) à **0x0000** pour installation complète (peut effacer les sauvegardes NVS).
 
-Compilation : PlatformIO, `platformio.ini`, ESP32 classique, 4 Mo, DIO, 40 MHz, 115200.
+Parametres : ESP32 / DIO / 40MHz / 4MB / 115200 bauds.
 
-**ESP-NOW non inclus** : les rencontres sans fil entre deux Tamagotchi seront ajoutees apres validation de la V6 sur deux cartes.
+**La communication ESP-NOW entre les deux Tamas n'est pas encore presente dans cette version.** La compilation GitHub valide le binaire, mais le rendu devra etre confirme sur le TTGO reel.

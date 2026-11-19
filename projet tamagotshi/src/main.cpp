@@ -1,4 +1,4 @@
-// Tamagotchi V6 — LilyGO T-Display V1.1 ORIGINAL (ESP32/ST7789, 135x240).
+// Tamagotchi V6.1 — LilyGO T-Display V1.1 ORIGINAL (ESP32/ST7789, 135x240).
 // Portrait, creature animee grand format, stats sur pages annexes, 2 mini-jeux.
  // GPIO35 : menu suivant / retour; GPIO0 : valider.
  // Stockage compatible V2 : namespace "tama_v2", magic 0x54414D32.
@@ -594,12 +594,15 @@ static void drawEgg(uint32_t now) {
     gfx.drawLine(cx-2,74,cx+9,66,TFT_DARKGREY);
   }
 }
+static bool isWalking(uint32_t now);
 static void drawCreature(uint32_t now) {
   const uint8_t st = stage();
   const Mood m = mood();
   const bool hop = (!pet.dort && (now/7200)%4==2);
-  const int bob = pet.dort ? 5 : hop ? ((now/160)%2 ? -11 : -2) : ((now/340)%2 ? -2 : 2);
-  const int wander = (st > 0 && !pet.dort && (now/7200)%4==1)
+  const bool walking = isWalking(now);
+  const int bob = pet.dort ? 5 : hop ? ((now/160)%2 ? -11 : -2) :
+                  walking ? ((now/190)%2 ? -4 : 1) : ((now/340)%2 ? -2 : 2);
+  const int wander = walking
                    ? static_cast<int>(sinf(now/650.0f)*9.0f) : 0;
   int cx = 67 + wander;
   const bool dance = (!pet.dort && pet.joie >= 60 &&
@@ -652,7 +655,7 @@ static void drawCreature(uint32_t now) {
   }
 
   // Jambes et bras avec mouvements.
-  int legShift = (now/290)%2 ? 5 : -5;
+  int legShift = walking ? ((now/190)%2 ? 8 : -8) : ((now/290)%2 ? 5 : -5);
   if (pet.dort) legShift = 0;
   gfx.fillRoundRect(cx-38+legShift,by+height-13,29,20,8,body);
   gfx.fillRoundRect(cx+9-legShift,by+height-13,29,20,8,body);
@@ -760,15 +763,128 @@ static const char* idleSpeech() {
   if ((millis()/11000)%4==2) return "ON FAIT QUOI ?";
   return "JE SUIS BIEN !";
 }
-static void drawHome(uint32_t now) {
-  gfx.fillSprite(TFT_BLACK);
-  // Aucune barre d'etat en haut : une scene entierement reservee au pet.
-  for (int i=0;i<4;i++) {
-    int x = 12+i*34, y = 30 + (i%2)*22;
-    if ((now/550+i)%4==0) gfx.drawPixel(x,y,TFT_DARKGREY);
+// V6.1 : monde anime sur le sprite 135x240. Aucun Wi-Fi ni image en flash.
+// La distance augmente UNIQUEMENT pendant la promenade (cycle V6 existant).
+static uint32_t sceneryDistance=0, sceneryLastFrame=0, sceneryRemainder=0;
+static uint16_t rgb565(uint8_t r,uint8_t g,uint8_t b) {
+  return (static_cast<uint16_t>(r&0xF8)<<8) |
+         (static_cast<uint16_t>(g&0xFC)<<3) | (b>>3);
+}
+static int wrapPosition(int32_t x,int span) {
+  int result=x%span;
+  return result<0?result+span:result;
+}
+static bool isWalking(uint32_t now) {
+  return stage()>0 && !pet.dort && (now/7200UL)%4==1;
+}
+static void drawCloud(int x,int y,uint16_t c) {
+  gfx.fillRoundRect(x,y+9,39,12,6,c);
+  gfx.fillCircle(x+12,y+10,11,c);
+  gfx.fillCircle(x+25,y+7,13,c);
+  gfx.fillCircle(x+32,y+13,8,c);
+}
+static void drawScenery(uint32_t now) {
+  // Toutes les 12 min de temps ACTIF : jour -> coucher -> nuit -> aube.
+  // Si le Tama dort, le monde passe en mode nuit.
+  const uint32_t cycle=pet.ageSec%720UL;
+  const bool night=pet.dort || (cycle>=420UL && cycle<610UL);
+  const bool dusk=!pet.dort && cycle>=300UL && cycle<420UL;
+  const bool dawn=!pet.dort && cycle>=610UL;
+  const uint16_t sky=night?rgb565(13,24,65):
+                     dusk?rgb565(105,76,123):
+                     dawn?rgb565(124,119,158):rgb565(116,190,225);
+  const uint16_t skyLow=night?rgb565(34,47,93):
+                        dusk?rgb565(208,119,120):
+                        dawn?rgb565(231,159,132):rgb565(164,216,231);
+  const uint16_t cloud=night?rgb565(94,108,144):
+                       dusk?rgb565(243,161,151):rgb565(232,247,243);
+  const uint16_t farHill=night?rgb565(30,58,83):
+                         dusk?rgb565(93,123,118):rgb565(101,169,150);
+  const uint16_t nearHill=night?rgb565(24,73,75):
+                          dusk?rgb565(67,118,96):rgb565(67,151,111);
+  const uint16_t soil=night?rgb565(27,83,74):rgb565(69,161,102);
+  const uint16_t grass=night?rgb565(44,108,90):rgb565(112,192,105);
+  const uint16_t tree=night?rgb565(36,92,91):rgb565(41,127,74);
+  const uint16_t trunk=rgb565(118,83,59);
+  gfx.fillSprite(sky);
+  gfx.fillRect(0,76,SW,72,skyLow);
+
+  if(night) {
+    gfx.fillCircle(110,57,12,rgb565(242,238,178)); // lune
+    gfx.fillCircle(115,52,11,sky); // croissant
+    for(uint8_t i=0;i<11;++i) {
+      int x=wrapPosition(13+i*41,SW);
+      int y=35+(i*23)%69;
+      uint16_t star=((now/750+i)%5==0)?TFT_WHITE:rgb565(154,181,202);
+      gfx.drawPixel(x,y,star);
+      if(i%3==0) gfx.drawFastHLine(x-1,y,3,star);
+    }
+  } else {
+    gfx.fillCircle(108,62,14,dusk||dawn?rgb565(255,206,112):rgb565(255,235,132));
+    gfx.fillCircle(103,57,5,rgb565(255,242,181)); // reflet doux
   }
-  gfx.drawFastHLine(12,189,111,TFT_DARKGREY);
-  gfx.fillEllipse(67,191,38,3,TFT_DARKGREY);
+  // Les nuages avancent lentement meme lorsque la creature est immobile.
+  if(!night) {
+    const int cloudOffset=static_cast<int>((now/1600UL)%225UL);
+    for(int i=0;i<3;++i) {
+      const int x=wrapPosition(28+i*83-cloudOffset,225)-43;
+      drawCloud(x,38+(i%2)*29,cloud);
+    }
+  }
+
+  // Scrolling cumule sans saut entre les cycles balade/immobilite.
+  if(sceneryLastFrame!=0) {
+    const uint32_t elapsed=now-sceneryLastFrame;
+    if(isWalking(now) && elapsed<1500UL) {
+      sceneryRemainder+=elapsed;
+      sceneryDistance+=sceneryRemainder/70UL; // 14 px/s
+      sceneryRemainder%=70UL;
+    }
+  }
+  sceneryLastFrame=now;
+  const int farShift=static_cast<int>((sceneryDistance/5UL)%178UL);
+  const int nearShift=static_cast<int>((sceneryDistance/2UL)%148UL);
+  for(int i=0;i<4;++i) {
+    int x=wrapPosition(35+i*92-farShift,368)-65;
+    gfx.fillCircle(x,183,60,farHill);
+  }
+  for(int i=0;i<4;++i) {
+    int x=wrapPosition(22+i*88-nearShift,352)-65;
+    gfx.fillCircle(x,203,45,nearHill);
+  }
+  // Quelques arbres lointains glissent derriere le Tama.
+  const int treeShift=static_cast<int>((sceneryDistance/2UL)%210UL);
+  for(int i=0;i<3;++i) {
+    int x=wrapPosition(38+i*86-treeShift,258)-42;
+    gfx.fillRoundRect(x-3,138,7,43,3,trunk);
+    gfx.fillCircle(x,132,19,tree);
+    gfx.fillCircle(x-11,140,13,tree);
+    gfx.fillCircle(x+11,140,12,tree);
+  }
+
+  gfx.fillRect(0,183,SW,27,soil);
+  gfx.drawFastHLine(0,183,SW,grass);
+  const int groundShift=static_cast<int>(sceneryDistance%174UL);
+  // Petites touffes et fleurs, devant le paysage mais derriere la creature.
+  for(int i=0;i<7;++i) {
+    int x=wrapPosition(18+i*29-groundShift,203)-24;
+    const int y=192+(i%3)*4;
+    gfx.drawLine(x-3,y,x,y-4,grass);
+    gfx.drawLine(x,y-4,x+3,y,grass);
+    if(i%3==0) {
+      const uint16_t petal=night?rgb565(143,126,145):
+                           (i%2?TFT_PINK:TFT_YELLOW);
+      gfx.fillCircle(x,y-6,3,petal);
+      gfx.drawPixel(x,y-6,night?TFT_LIGHTGREY:TFT_WHITE);
+    }
+  }
+  // Ombre sous le personnage pour l'ancrer dans le monde.
+  gfx.fillEllipse(67,192,37,3,night?rgb565(20,55,56):rgb565(54,128,83));
+}
+
+static void drawHome(uint32_t now) {
+  drawScenery(now);
+  // Les personnages et leurs animations passent au-dessus du monde.
   drawCreature(now);
   drawFX(now);
 
