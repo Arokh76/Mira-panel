@@ -1,26 +1,22 @@
-# Tamagotchi V6.2 — promenade lisible et sommeil vivant 🐣
+# Projet Tamagotshi V6.3 — alerte batterie discrete
 
-Pour LilyGO/TTGO T-Display V1.1 **original** (ESP32 ST7789 135 × 240 portrait). Cette version conserve le systeme V6 (personnalites, evolution, sac, mini-jeux, batterie, sauvegardes).
+Pour LilyGO / TTGO T-Display V1.1 ORIGINAL (ESP32 ST7789 135 × 240, portrait).
 
-## Nouveautes visuelles
+## Changement V6.3
 
-- **Sommeil anime** : trois petits Z flottent et serpentent vers le haut, de tailles et couleurs differentes, accompagnes d'une discrete bulle de ronflement. L'animation se termine des le reveil.
-- **Promenade avec Tama plus petit** : pendant les phases de balade automatiques (~7 secondes par cycle de 28,8 secondes), le personnage passe a environ 75–80 % de sa grande taille. Cela libere l'arriere-plan : ciel, nuages, collines, arbres et fleurs.
-- **La grande taille au repos est conservee**, avec les expressions habituelles, les danses et les evolutions adultes.
-- **Contraste renforce** : collines legerement plus bleutees, sol sable/herbe, et fin liseret fonce autour du personnage. Les quatre couleurs de forme adulte restent presentes.
-- Le monde V6.1 conserve sa parallaxe et son cycle jour/nuit accelere. L'ecran de charge USB, les statistiques et les menus ne changent pas.
+- **Aucun indicateur de batterie sur l'ecran principal** en utilisation normale. L'icone verte et le pourcentage ont ete supprimes de l'accueil ; le petit texte « USB » sur l'accueil aussi.
+- **Batterie faible, 10 % ou moins (estimation par tension)** : une seule **icone de batterie vide rouge** apparait en bas, juste au-dessus du menu. Pas de pourcentage sur l'accueil.
+- **INFOS reste inchange** : pourcentage estime, tension (V) et indication USB probable si detectee.
+- **Gestion basse tension inchangee** : trois releves sous 3,48 V puis grande batterie rouge 2 secondes et deep sleep, controles periodiques, appui bouton en hibernation.
+- Le seuil 10 % est un choix volontaire : une alerte a 5 % laisserait trop peu de marge avant l'hibernation. Le pourcentage est approximatif car calcule par la tension, et la mesure sur USB ne garantit pas l'etat de charge.
 
-## Controle
+## Tout le reste conserve
 
-- GPIO35 : defiler dans le menu, suivant.
-- GPIO0 : selectionner, valider.
-- Menus et ecrans V6 conserves.
+Paysage dynamique V6.1, Tama plus petit pendant ses promenades, contrastes, Z animes et bulle de ronflement V6.2, quatre personnalites et quatre evolutions adultes, inventaire, mini-jeux, animation d'alimentation USB au repos, sauvegardes NVS.
 
 ## Flash Download Tools
 
-- [Tamagotchi_V6_2_TDisplay_V11_app.bin](firmware/Tamagotchi_V6_2_TDisplay_V11_app.bin) a **0x10000**, **sans ERASE** depuis V6 ou V6.1 : conserve la sauvegarde `tama_v2` (animal, age, evolution, objets).
-- [Tamagotchi_V6_2_TDisplay_V11_full.bin](firmware/Tamagotchi_V6_2_TDisplay_V11_full.bin) a **0x0000** pour une installation complete : risque d'effacement NVS.
+- [Tamagotchi_V6_3_TDisplay_V11_app.bin](firmware/Tamagotchi_V6_3_TDisplay_V11_app.bin) a **0x10000** sans ERASE pour mettre a jour depuis V6/V6.1/V6.2 en gardant le Tama.
+- [Tamagotchi_V6_3_TDisplay_V11_full.bin](firmware/Tamagotchi_V6_3_TDisplay_V11_full.bin) a **0x0000** pour reinstallation complete. ATTENTION : cette image peut effacer la sauvegarde.
 
-ESP32 / DIO / 40 MHz / 4 Mo / 115200 bauds.
-
-**La compilation ne remplace pas les essais reels.** Verifier notamment le rendu des Z, le contraste et la fluidite de l'animation. ESP-NOW n'est toujours pas integre.
+ESP32 classique / DIO / 40MHz / 4MB / 115200. Compilation via GitHub Actions. Le comportement batterie doit etre confirme sur la vraie carte.

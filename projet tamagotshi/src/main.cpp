@@ -1,4 +1,4 @@
-// Tamagotchi V6.2 — LilyGO T-Display V1.1 ORIGINAL (ESP32/ST7789, 135x240).
+// Tamagotchi V6.3 — LilyGO T-Display V1.1 ORIGINAL (ESP32/ST7789, 135x240).
 // Portrait, creature animee grand format, stats sur pages annexes, 2 mini-jeux.
  // GPIO35 : menu suivant / retour; GPIO0 : valider.
  // Stockage compatible V2 : namespace "tama_v2", magic 0x54414D32.
@@ -16,6 +16,7 @@ static const uint8_t PIN_NEXT = 35, PIN_OK = 0, PIN_LIGHT = 4;
 static const uint8_t PIN_BAT_ENABLE = 14, PIN_BAT_ADC = 34;
 // Seuils conservateurs pour LiPo 1S. Le % reste une estimation.
 static const uint16_t BAT_SLEEP_MV = 3480, BAT_RESUME_MV = 3700;
+static const uint8_t BAT_HOME_WARNING_PCT = 10; // alerte visuelle avant le deep sleep
 // A plus de 4.40V, l'ADC voit probablement le rail USB, PAS la cellule.
 static const uint16_t USB_PROBABLE_MV = 4400;
 static const uint32_t BAT_CHECK_MS = 30000, DISPLAY_IDLE_MS = 120000;
@@ -296,22 +297,13 @@ static void hibernateBattery(bool showWarning=false) {
   esp_deep_sleep_start();
 }
 static void displayBatteryIcon() {
-  if (usbProbable) {
-    gfx.setTextColor(TFT_CYAN,TFT_BLACK);
-    gfx.drawRightString("USB",128,197,1);
-    return;
-  }
-  if (!batteryMv) return;
-  const uint16_t color = batteryMv < 3600 ? TFT_ORANGE : TFT_GREEN;
-  const int x=111, y=197;
-  gfx.drawRect(x,y,17,9,color);
-  gfx.fillRect(x+17,y+3,2,3,color);
-  const int w = (batteryPercent*13)/100;
-  if (w>0) gfx.fillRect(x+2,y+2,w,5,color);
-  char pct[8];
-  snprintf(pct,sizeof(pct),"%u%%",(unsigned)batteryPercent);
-  gfx.setTextColor(color,TFT_BLACK);
-  gfx.drawRightString(pct,106,197,1);
+  // Accueil volontairement epure : aucune jauge permanente ni indication USB.
+  // A 10 % ou moins, une batterie rouge VIDE apparait, sans pourcentage.
+  // Ne rien afficher si la mesure est indisponible ou si USB est probable.
+  if (!batteryMv || usbProbable || batteryPercent > BAT_HOME_WARNING_PCT) return;
+  const int x=109, y=196;
+  gfx.drawRoundRect(x,y,18,11,2,TFT_RED);
+  gfx.fillRect(x+18,y+3,3,5,TFT_RED);
 }
 
 // Animation quand une alimentation USB est probable et Tama inutilise.
