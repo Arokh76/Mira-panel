@@ -1,4 +1,4 @@
-// Tamagotchi V6.1 — LilyGO T-Display V1.1 ORIGINAL (ESP32/ST7789, 135x240).
+// Tamagotchi V6.2 — LilyGO T-Display V1.1 ORIGINAL (ESP32/ST7789, 135x240).
 // Portrait, creature animee grand format, stats sur pages annexes, 2 mini-jeux.
  // GPIO35 : menu suivant / retour; GPIO0 : valider.
  // Stockage compatible V2 : namespace "tama_v2", magic 0x54414D32.
@@ -595,6 +595,95 @@ static void drawEgg(uint32_t now) {
   }
 }
 static bool isWalking(uint32_t now);
+static uint16_t rgb565(uint8_t r,uint8_t g,uint8_t b);
+// Petite version du personnage pour les promenades : plus de place au jardin.
+// Couleurs, humeur et forme adulte V6 conservees.
+static void drawWalkingCreature(uint32_t now,uint8_t st,Mood m,uint16_t body) {
+  const int cx=67+static_cast<int>(sinf(now/900.0f)*4.0f);
+  const int by=(st==1?105:st==2?91:81)+((now/190)%2?-3:2);
+  const int w=st==1?58:st==2?74:83;
+  const int h=st==1?74:st==2?89:100;
+  const int stride=(now/190)%2?7:-7;
+  const uint16_t outline=rgb565(28,65,72);
+  // Oreilles, membres et pieds legerement alternes pendant la marche.
+  if(st>=2) {
+    gfx.fillRoundRect(cx-w/2+11,by-13,15,22,6,body);
+    gfx.fillRoundRect(cx+w/2-26,by-13,15,22,6,body);
+    gfx.drawRoundRect(cx-w/2+11,by-13,15,22,6,outline);
+    gfx.drawRoundRect(cx+w/2-26,by-13,15,22,6,outline);
+    gfx.fillCircle(cx-w/2+18,by-10,3,TFT_PINK);
+    gfx.fillCircle(cx+w/2-19,by-10,3,TFT_PINK);
+  }
+  if(st==3) {
+    // Accessoire propre a chacune des quatre evolutions.
+    if(adultForm==1) {
+      gfx.fillCircle(cx,by-15,12,TFT_YELLOW);
+      gfx.fillCircle(cx-4,by-17,2,TFT_ORANGE);
+      gfx.fillCircle(cx+4,by-12,2,TFT_ORANGE);
+    } else if(adultForm==2) {
+      gfx.fillTriangle(cx,by-26,cx-9,by-8,cx+9,by-8,TFT_YELLOW);
+      gfx.fillCircle(cx,by-9,4,TFT_ORANGE);
+    } else if(adultForm==3) {
+      heart(cx,by-16,TFT_RED);
+    } else if(adultForm==4) {
+      gfx.fillTriangle(cx-12,by-6,cx-8,by-23,cx,by-7,TFT_YELLOW);
+      gfx.fillTriangle(cx,by-7,cx+8,by-23,cx+12,by-6,TFT_YELLOW);
+      gfx.fillRoundRect(cx-12,by-10,24,7,2,TFT_YELLOW);
+    } else {
+      gfx.fillRoundRect(cx-10,by-18,20,18,6,TFT_YELLOW);
+    }
+  }
+  const int feetY=by+h-9;
+  gfx.fillRoundRect(cx-29+stride,feetY,24,17,6,body);
+  gfx.fillRoundRect(cx+5-stride,feetY,24,17,6,body);
+  gfx.drawRoundRect(cx-29+stride,feetY,24,17,6,outline);
+  gfx.drawRoundRect(cx+5-stride,feetY,24,17,6,outline);
+  gfx.fillRoundRect(cx-w/2-7,by+39,17,35,7,body);
+  gfx.fillRoundRect(cx+w/2-10,by+39,17,35,7,body);
+  gfx.drawRoundRect(cx-w/2-7,by+39,17,35,7,outline);
+  gfx.drawRoundRect(cx+w/2-10,by+39,17,35,7,outline);
+  gfx.fillRoundRect(cx-w/2,by,w,h,st==1?25:30,body);
+  gfx.drawRoundRect(cx-w/2,by,w,h,st==1?25:30,outline);
+  // Un petit ventre et une expression reduite pour conserver la silhouette.
+  if(st>=2) {
+    gfx.fillRoundRect(cx-16,by+51,32,27,12,TFT_WHITE);
+    gfx.fillRoundRect(cx-11,by+56,22,18,9,TFT_LIGHTGREY);
+  }
+  const int faceY=by+(st==1?29:34);
+  const bool blink=now%3900<155;
+  if(m==SICK) {
+    gfx.drawLine(cx-20,faceY-5,cx-11,faceY+5,TFT_BLACK);
+    gfx.drawLine(cx-20,faceY+5,cx-11,faceY-5,TFT_BLACK);
+    gfx.drawLine(cx+11,faceY-5,cx+20,faceY+5,TFT_BLACK);
+    gfx.drawLine(cx+11,faceY+5,cx+20,faceY-5,TFT_BLACK);
+  } else if(blink) {
+    gfx.drawFastHLine(cx-21,faceY,13,TFT_BLACK);
+    gfx.drawFastHLine(cx+8,faceY,13,TFT_BLACK);
+  } else {
+    gfx.fillRoundRect(cx-21,faceY-6,12,15,4,TFT_BLACK);
+    gfx.fillRoundRect(cx+9,faceY-6,12,15,4,TFT_BLACK);
+    gfx.fillCircle(cx-17,faceY-3,2,TFT_WHITE);
+    gfx.fillCircle(cx+13,faceY-3,2,TFT_WHITE);
+  }
+  gfx.fillCircle(cx-24,faceY+16,5,TFT_PINK);
+  gfx.fillCircle(cx+24,faceY+16,5,TFT_PINK);
+  if(m==SAD || m==SICK) {
+    gfx.drawLine(cx-9,faceY+27,cx,faceY+21,TFT_BLACK);
+    gfx.drawLine(cx,faceY+21,cx+9,faceY+27,TFT_BLACK);
+  } else if(m==HAPPY) {
+    gfx.drawLine(cx-9,faceY+20,cx,faceY+29,TFT_BLACK);
+    gfx.drawLine(cx,faceY+29,cx+9,faceY+20,TFT_BLACK);
+  } else {
+    gfx.drawFastHLine(cx-8,faceY+25,16,TFT_BLACK);
+  }
+  if(st==3 && adultForm==2) {
+    // Joueur : embleme discret.
+    gfx.fillTriangle(cx,by+66,cx-7,by+77,cx+7,by+77,TFT_YELLOW);
+  } else if(st==3 && adultForm==3) {
+    gfx.fillCircle(cx,by+70,5,TFT_RED);
+  }
+}
+
 static void drawCreature(uint32_t now) {
   const uint8_t st = stage();
   const Mood m = mood();
@@ -617,6 +706,11 @@ static void drawCreature(uint32_t now) {
 
   if (st == 0) {
     drawEgg(now);
+    return;
+  }
+  // Grande creature au repos, version a 75-80 % durant la balade.
+  if(walking) {
+    drawWalkingCreature(now,st,m,body);
     return;
   }
 
@@ -662,6 +756,8 @@ static void drawCreature(uint32_t now) {
   gfx.fillRoundRect(cx-width/2-9,by+55 + (wave ? -17 : 0),23,45,10,body);
   gfx.fillRoundRect(cx+width/2-14,by+55 - (wave ? 17 : 0),23,45,10,body);
   gfx.fillRoundRect(bodyx,by,width,height,st == 1 ? 33 : 40,body);
+  // Liseret fonce : particulierement utile pour le Tama vert sur le jardin.
+  gfx.drawRoundRect(bodyx,by,width,height,st == 1 ? 33 : 40,rgb565(25,70,77));
 
   if (st >= 2) {
     gfx.fillRoundRect(cx-22,by+76,44,36,18,TFT_WHITE);
@@ -694,11 +790,7 @@ static void drawCreature(uint32_t now) {
     gfx.fillCircle(114,72,5,TFT_CYAN);
     gfx.drawFastHLine(117,53,8,TFT_CYAN);
   }
-  if (m == ASLEEP) {
-    gfx.setTextColor(TFT_WHITE,TFT_BLACK);
-    gfx.drawString("Z",cx+37,by+3,2);
-    gfx.drawString("z",cx+47,by-9,1);
-  } else if (pet.faim < 20 && now%2400 < 900) {
+  if (m != ASLEEP && pet.faim < 20 && now%2400 < 900) {
     gfx.drawCircle(cx+44,by+15,6,TFT_ORANGE);
   }
 }
@@ -799,11 +891,11 @@ static void drawScenery(uint32_t now) {
   const uint16_t cloud=night?rgb565(94,108,144):
                        dusk?rgb565(243,161,151):rgb565(232,247,243);
   const uint16_t farHill=night?rgb565(30,58,83):
-                         dusk?rgb565(93,123,118):rgb565(101,169,150);
+                         dusk?rgb565(91,119,139):rgb565(95,156,180);
   const uint16_t nearHill=night?rgb565(24,73,75):
-                          dusk?rgb565(67,118,96):rgb565(67,151,111);
-  const uint16_t soil=night?rgb565(27,83,74):rgb565(69,161,102);
-  const uint16_t grass=night?rgb565(44,108,90):rgb565(112,192,105);
+                          dusk?rgb565(74,108,123):rgb565(75,139,157);
+  const uint16_t soil=night?rgb565(52,76,85):rgb565(156,135,97);
+  const uint16_t grass=night?rgb565(84,118,103):rgb565(113,186,114);
   const uint16_t tree=night?rgb565(36,92,91):rgb565(41,127,74);
   const uint16_t trunk=rgb565(118,83,59);
   gfx.fillSprite(sky);
@@ -879,13 +971,36 @@ static void drawScenery(uint32_t now) {
     }
   }
   // Ombre sous le personnage pour l'ancrer dans le monde.
-  gfx.fillEllipse(67,192,37,3,night?rgb565(20,55,56):rgb565(54,128,83));
+  gfx.fillEllipse(67,192,37,3,night?rgb565(35,53,64):rgb565(110,96,79));
+}
+
+// Petits Z qui s'elevent par vagues, et une bulle de ronflement subtile.
+// Dessine apres le Tama pour eviter qu'ils disparaissent derriere son corps.
+static void drawSleepFX(uint32_t now) {
+  if(!pet.dort || stage()==0) return;
+  const uint32_t tick=now/80UL;
+  for(uint8_t i=0;i<3;++i) {
+    const int rise=static_cast<int>((tick+i*42UL)%127UL);
+    const int y=154-rise;
+    // Z qui part du coin haut droit de la tete et serpente en montant.
+    const int x=101+static_cast<int>((rise/13+i*3)%12UL);
+    const uint16_t col=rise>99?rgb565(155,183,210):
+                       rise>66?rgb565(207,225,242):TFT_WHITE;
+    gfx.setTextColor(col);
+    gfx.drawString(i==2?"z":"Z",x,y,i==0?2:1);
+  }
+  // Petit ronflement : trois ondes respiratoires, discretes.
+  const int breath=static_cast<int>((now/420UL)%4UL);
+  const uint16_t line=rgb565(215,237,247);
+  gfx.drawCircle(114,152,2+breath,line);
+  if(breath>=2) gfx.drawCircle(114,152,7+breath,rgb565(127,172,204));
 }
 
 static void drawHome(uint32_t now) {
   drawScenery(now);
   // Les personnages et leurs animations passent au-dessus du monde.
   drawCreature(now);
+  drawSleepFX(now);
   drawFX(now);
 
   const char* label = static_cast<int32_t>(now-speechUntil)<0 ? speech : idleSpeech();
