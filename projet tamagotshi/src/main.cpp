@@ -873,7 +873,7 @@ static void drawActivity(uint32_t now) {
     case FX_FOOD: {
       // Le biscuit se rapproche de la bouche; le Tama "mache" ensuite.
       if(elapsed<2350UL) {
-        const uint32_t travel=min(elapsed,1300UL);
+        const uint32_t travel=elapsed<1300U?elapsed:1300U;
         const int x=113-static_cast<int>(travel*42UL/1300UL);
         const int y=150-static_cast<int>(travel*32UL/1300UL);
         const int radius=elapsed<1750UL?11: max(2,11-static_cast<int>((elapsed-1750UL)/72UL));
