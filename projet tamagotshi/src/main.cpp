@@ -201,7 +201,8 @@ static void wakeDisplay() {
 }
 // Deep-sleep = vrai redemarrage du MCU au reveil, donc sauvegarde NVS d'abord.
 static void hibernateBattery() {
-  if (prefs.isKey("magic")) save();
+  // Ecrire la NVS une seule fois : ne pas user la flash a chaque reveil 5 min.
+  if (!batteryHibernating) save();
   batteryHibernating = true;
   shutDisplay();
   digitalWrite(PIN_LIGHT, LOW);
