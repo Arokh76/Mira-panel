@@ -999,8 +999,8 @@ static void drawActivity(uint32_t now) {
       // Le biscuit se rapproche de la bouche; le Tama "mache" ensuite.
       if(elapsed<2350UL) {
         const uint32_t travel=elapsed<1300U?elapsed:1300U;
-        const int x=113-static_cast<int>(travel*42UL/1300UL);
-        const int y=150-static_cast<int>(travel*32UL/1300UL);
+        const int x=109-static_cast<int>(travel*38UL/1300UL);
+        const int y=181-static_cast<int>(travel*29UL/1300UL);
         const int radius=elapsed<1750UL?11: max(2,11-static_cast<int>((elapsed-1750UL)/72UL));
         gfx.fillCircle(x,y,radius,chocolate);
         gfx.drawCircle(x,y,radius,TFT_ORANGE);
@@ -1011,7 +1011,7 @@ static void drawActivity(uint32_t now) {
       }
       if(elapsed>1350UL && elapsed<2850UL) {
         const int mouth=static_cast<int>((now/185UL)%2UL)?5:2;
-        gfx.fillEllipse(67,125,7,mouth,TFT_BLACK);
+        gfx.fillEllipse(67,(homeScene==1?157:152),7,mouth,TFT_BLACK);
       }
       break;
     }
