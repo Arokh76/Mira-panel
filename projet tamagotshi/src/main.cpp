@@ -1,4 +1,4 @@
-// Tamagotchi V6.3 — LilyGO T-Display V1.1 ORIGINAL (ESP32/ST7789, 135x240).
+// Tamagotchi V7.0 — scenes de vie et petite maison — LilyGO T-Display V1.1 ORIGINAL (ESP32/ST7789, 135x240).
 // Portrait, creature animee grand format, stats sur pages annexes, 2 mini-jeux.
  // GPIO35 : menu suivant / retour; GPIO0 : valider.
  // Stockage compatible V2 : namespace "tama_v2", magic 0x54414D32.
@@ -31,7 +31,7 @@ static bool lcdReady = false, displayOff = false;
 static const uint32_t MAGIC = 0x54414D32UL;
 static const int SW = 135, SH = 240;
 static const char* const MENU[] = {
-  "MANGER", "ETOILE", "REFLEXE", "DODO", "BAIN", "SOINS", "CADEAU", "CALIN", "INFOS", "SAC"
+  "MANGER", "ETOILE", "REFLEXE", "DODO", "BAIN", "SOINS", "CADEAU", "CALIN", "INFOS", "SAC", "MAISON"
 };
 static const uint8_t MENU_COUNT = sizeof(MENU) / sizeof(MENU[0]);
 
@@ -59,7 +59,7 @@ struct Key {
 };
 static Key nextKey, okKey;
 
-enum Page : uint8_t { HOME, INFOS, SOUVENIRS, PROFIL, SAC, MINIGAME, REFLEXGAME };
+enum Page : uint8_t { HOME, INFOS, SOUVENIRS, PROFIL, SAC, MINIGAME, REFLEXGAME, ROOM };
 enum Mood : uint8_t { HAPPY, NORMAL, SAD, SICK, ASLEEP };
 enum Effect : uint8_t { FX_NONE, FX_FOOD, FX_CLEAN, FX_HEAL, FX_GIFT, FX_GROW, FX_WAKE, FX_PLAY, FX_HUG, FX_SURPRISE };
 static Page page = HOME;
@@ -76,15 +76,27 @@ static uint32_t reflexReadyAt = 0, reflexPauseUntil = 0;
 static uint8_t reflexRound = 0, reflexHits = 0;
 static bool reflexLastHit = false;
 static char speech[30] = "";
-static uint32_t speechUntil = 0, effectUntil = 0;
+static uint32_t speechUntil = 0, effectUntil = 0, effectStarted = 0;
 static uint32_t lastFrame = 0, lastSecond = 0, lastSave = 0, lastGift = 0;
 // V6 : attributs permanents et objets conserves dans le NVS de V5.
 static uint8_t personality = 0, adultForm = 0, bagChoice = 0;
+static uint8_t homeScene = 0, homeDecor = 0, roomChoice = 0; // jardin/chambre, decoration
 static uint8_t inventory[3] = {1,0,0}; // biscuit, ballon, doudou
 static uint16_t fedCount = 0, careCount = 0;
 static const char* const PERSONALITY[] = {"INCONNUE","GOURMAND","JOUEUR","CALIN","REVEUR"};
 static const char* const EVOLUTION[] = {"EN COURS","GOURMAND","JOUEUR","CALIN","SAGE"};
 static const char* const ITEMS[] = {"BISCUIT","BALLON","DOUDOU","RETOUR"};
+static const char* const ROOM_OPTIONS[] = {"JARDIN","CHAMBRE","SANS DECO","FLEURS","BALLON","DOUDOU","RETOUR"};
+static const uint8_t ROOM_OPTIONS_COUNT = sizeof(ROOM_OPTIONS) / sizeof(ROOM_OPTIONS[0]);
+static bool decorUnlocked(uint8_t decoration) {
+  switch(decoration) {
+    case 0: return true;
+    case 1: return fedCount >= 3; // 3 repas
+    case 2: return gameWins >= 1; // ETOILE parfait
+    case 3: return reflexWins >= 1 || surpriseCount >= 3; // REFLEXE parfait ou surprises
+    default: return false;
+  }
+}
 static void giveItem(uint8_t type) {
   if(type<3 && inventory[type]<9) ++inventory[type];
 }
@@ -130,6 +142,7 @@ static void say(const char* msg, Effect fx=FX_NONE, uint32_t time=2000) {
   const uint32_t now = millis();
   speechUntil = now + time;
   effect = fx;
+  effectStarted = now;
   effectUntil = now + time;
 }
 static void save() {
@@ -155,6 +168,8 @@ static void save() {
   prefs.putUChar("item0",inventory[0]);
   prefs.putUChar("item1",inventory[1]);
   prefs.putUChar("item2",inventory[2]);
+  prefs.putUChar("room",homeScene);
+  prefs.putUChar("decor",homeDecor);
   prefs.putUInt("magic", MAGIC);
   lastSave = millis();
 }
@@ -185,6 +200,10 @@ static void load() {
     inventory[0]=min((int)prefs.getUChar("item0",1),9);
     inventory[1]=min((int)prefs.getUChar("item1",0),9);
     inventory[2]=min((int)prefs.getUChar("item2",0),9);
+    homeScene=prefs.getUChar("room",0);
+    homeDecor=prefs.getUChar("decor",0);
+    if(homeScene>1) homeScene=0;
+    if(homeDecor>3 || !decorUnlocked(homeDecor)) homeDecor=0;
   } else {
     lastSurpriseAge = pet.ageSec;
     save();
@@ -389,7 +408,7 @@ static void gamePress(uint32_t now) {
     if (gameHits == 3) { ++gameWins; giveItem(1); }
     friendship = clip100(friendship + gameHits * 3);
     page = HOME;
-    say(gameHits == 3 ? "GAGNE : BALLON !" : gameHits ? "BIEN JOUE !" : "ON REESSAIE ?", FX_PLAY, 2700);
+    say(gameHits == 3 && gameWins==1 ? "DECO BALLON !":gameHits == 3 ? "GAGNE : BALLON !" : gameHits ? "BIEN JOUE !" : "ON REESSAIE ?", FX_PLAY, 2900);
     save();
   }
 }
@@ -417,7 +436,7 @@ static void reflexPress(uint32_t now) {
     pet.energie = clip100(pet.energie - 6);
     friendship = clip100(friendship + reflexHits * 3);
     page = HOME;
-    say(reflexHits == 3 ? "GAGNE : DOUDOU !" : reflexHits ? "BIEN JOUE !" : "ON REESSAIE ?", FX_PLAY, 2700);
+    say(reflexHits == 3 && reflexWins==1 ? "DECO DOUDOU !" : reflexHits == 3 ? "GAGNE : DOUDOU !" : reflexHits ? "BIEN JOUE !" : "ON REESSAIE ?", FX_PLAY, 2900);
     save();
     return;
   }
@@ -449,6 +468,7 @@ static void trySurprise() {
       say("PETITE SIESTE !", FX_SURPRISE, 2600);
       break;
   }
+  if(surpriseCount==3 && reflexWins==0) say("DECO DOUDOU !",FX_GIFT,3000);
   save();
 }
 static void chooseAction(uint32_t now) {
@@ -459,7 +479,7 @@ static void chooseAction(uint32_t now) {
       if(fedCount<65535) ++fedCount;
       pet.proprete = clip100(pet.proprete - 3);
       pet.sante = clip100(pet.sante + 2);
-      say("MIAM MIAM !", FX_FOOD);
+      say(fedCount==3?"FLEURS DEBLOQUEES !":"MIAM MIAM !", FX_FOOD, 3400);
       break;
     case 1:
       startGame();
@@ -476,13 +496,13 @@ static void chooseAction(uint32_t now) {
       pet.proprete = clip100(pet.proprete + 34);
       if(careCount<65535) ++careCount;
       pet.joie = clip100(pet.joie + 4);
-      say("TOUT PROPRE !", FX_CLEAN);
+      say("TOUT PROPRE !", FX_CLEAN, 3600);
       break;
     case 5:
       pet.sante = clip100(pet.sante + 25);
       if(careCount<65535) ++careCount;
       pet.joie = clip100(pet.joie - 2);
-      say("CA VA MIEUX !", FX_HEAL);
+      say("CA VA MIEUX !", FX_HEAL, 3100);
       break;
     case 6:
       if ((int32_t)(now - lastGift) < 25000 && lastGift != 0) {
@@ -492,17 +512,18 @@ static void chooseAction(uint32_t now) {
       lastGift = now;
       pet.joie = clip100(pet.joie + 18);
       friendship = clip100(friendship + 4);
-      say("OH MERCI !", FX_GIFT);
+      say("OH MERCI !", FX_GIFT, 3500);
       break;
     case 7:
       pet.dort = false;
       pet.joie = clip100(pet.joie + 12);
       friendship = clip100(friendship + (personality==3?16:10));
       ++hugCount;
-      say("GROS CALIN !", FX_HUG, 2500);
+      say("GROS CALIN !", FX_HUG, 3400);
       break;
     case 8: page=INFOS; return;
     case 9: bagChoice=0; page=SAC; return;
+    case 10: roomChoice=0; page=ROOM; return;
   }
   save();
 }
@@ -516,15 +537,33 @@ static void useBagItem() {
   pet.dort=false;
   if(bagChoice==0) {
     pet.faim=clip100(pet.faim+23);
-    say("UN BISCUIT !",FX_FOOD,2100);
+    say("UN BISCUIT !",FX_FOOD,3300);
   } else if(bagChoice==1) {
     pet.joie=clip100(pet.joie+26);
     pet.energie=clip100(pet.energie-3);
-    say("ON JOUE !",FX_PLAY,2100);
+    say("ON JOUE !",FX_PLAY,3300);
   } else {
     pet.energie=clip100(pet.energie+20);
     friendship=clip100(friendship+12);
-    say("MON DOUDOU !",FX_HUG,2100);
+    say("MON DOUDOU !",FX_HUG,3300);
+  }
+  page=HOME;
+  save();
+}
+
+static void chooseRoom() {
+  if(roomChoice==ROOM_OPTIONS_COUNT-1) {
+    page=HOME;
+    return;
+  }
+  if(roomChoice<=1) {
+    homeScene=roomChoice;
+    say(homeScene?"DANS MA CHAMBRE !":"AU JARDIN !",FX_SURPRISE,2200);
+  } else {
+    const uint8_t requested=roomChoice-2;
+    if(!decorUnlocked(requested)) return; // Objectif de debloquage visible dans le menu.
+    homeDecor=requested;
+    say(homeDecor?"NOUVELLE DECO !":"DECO RANGEE !",FX_SURPRISE,2300);
   }
   page=HOME;
   save();
@@ -791,8 +830,7 @@ static void drawFX(uint32_t now) {
   const int drift = static_cast<int>((now/130)%45);
   switch (effect) {
     case FX_FOOD:
-      gfx.fillCircle(104,98+drift/3,11,TFT_ORANGE);
-      gfx.fillCircle(106,95+drift/3,3,TFT_YELLOW);
+      // L'animation du biscuit est geree par drawActivity().
       break;
     case FX_CLEAN:
       for (int i=0;i<6;i++) {
@@ -826,6 +864,93 @@ static void drawFX(uint32_t now) {
     default: break;
   }
 }
+// V7 : vraie animation liee a chaque action. Aucun asset bitmap n'est requis.
+static void drawActivity(uint32_t now) {
+  if(effect==FX_NONE || static_cast<int32_t>(now-effectUntil)>=0 || stage()==0) return;
+  const uint32_t elapsed=now-effectStarted;
+  const uint16_t chocolate=rgb565(177,103,58);
+  switch(effect) {
+    case FX_FOOD: {
+      // Le biscuit se rapproche de la bouche; le Tama "mache" ensuite.
+      if(elapsed<2350UL) {
+        const uint32_t travel=min(elapsed,1300UL);
+        const int x=113-static_cast<int>(travel*42UL/1300UL);
+        const int y=150-static_cast<int>(travel*32UL/1300UL);
+        const int radius=elapsed<1750UL?11: max(2,11-static_cast<int>((elapsed-1750UL)/72UL));
+        gfx.fillCircle(x,y,radius,chocolate);
+        gfx.drawCircle(x,y,radius,TFT_ORANGE);
+        if(radius>5) {
+          gfx.fillCircle(x-3,y-3,2,rgb565(89,62,42));
+          gfx.fillCircle(x+4,y+2,2,rgb565(89,62,42));
+        }
+      }
+      if(elapsed>1350UL && elapsed<2850UL) {
+        const int mouth=static_cast<int>((now/185UL)%2UL)?5:2;
+        gfx.fillEllipse(67,125,7,mouth,TFT_BLACK);
+      }
+      break;
+    }
+    case FX_CLEAN: {
+      // Une vague au niveau du ventre et de vraies bulles flottantes.
+      const int wave=static_cast<int>((now/180UL)%3UL);
+      gfx.drawFastHLine(20,184+wave,95,TFT_CYAN);
+      gfx.drawFastHLine(26,187+wave,82,TFT_SKYBLUE);
+      for(uint8_t i=0;i<11;++i) {
+        const int rise=static_cast<int>((elapsed/36UL+17UL*i)%126UL);
+        const int x=15+((i*23+static_cast<int>(elapsed/145UL))%110);
+        const int y=198-rise;
+        const int r=3+(i%3)*2;
+        gfx.drawCircle(x,y,r,TFT_CYAN);
+        gfx.drawPixel(x-r/2,y-r/2,TFT_WHITE);
+      }
+      gfx.fillCircle(45,154,5+wave,TFT_WHITE);
+      gfx.fillCircle(85,166,7-wave,TFT_WHITE);
+      break;
+    }
+    case FX_HEAL: {
+      // Pansement qui se pose et croix de soins.
+      const int x=90, y=143;
+      gfx.fillRoundRect(x-18,y-5,36,12,5,rgb565(245,194,148));
+      gfx.fillRect(x-5,y-4,10,10,TFT_WHITE);
+      cross(x,y+1,TFT_RED);
+      cross(24,111-static_cast<int>((elapsed/45UL)%36UL),TFT_GREEN);
+      cross(110,90-static_cast<int>((elapsed/65UL)%29UL),TFT_CYAN);
+      break;
+    }
+    case FX_GIFT: {
+      // Le couvercle se souleve et laisse jaillir quelques etoiles.
+      const int lift=min(26,static_cast<int>(elapsed/54UL));
+      gfx.fillRoundRect(81,156,36,29,4,TFT_ORANGE);
+      gfx.fillRect(97,157,5,27,TFT_YELLOW);
+      gfx.fillRoundRect(78,151-lift,42,9,2,TFT_RED);
+      gfx.fillRect(96,151-lift,7,9,TFT_YELLOW);
+      if(elapsed>550UL) {
+        const int drift=static_cast<int>((elapsed/55UL)%47UL);
+        cross(101,138-drift,TFT_YELLOW);
+        cross(82,147-drift/2,TFT_WHITE);
+      }
+      break;
+    }
+    case FX_HUG: {
+      // Les coeurs montent et le personnage se serre contre son doudou.
+      const int breathe=static_cast<int>((now/230UL)%3UL);
+      heart(32,141-static_cast<int>((elapsed/70UL)%64UL),TFT_PINK);
+      heart(108,136-static_cast<int>((elapsed/88UL)%58UL),TFT_RED);
+      gfx.drawRoundRect(36-breathe,151-breathe,62+2*breathe,36+2*breathe,16,TFT_PINK);
+      break;
+    }
+    case FX_PLAY: {
+      const int y=157-static_cast<int>(abs(sinf(elapsed/180.0f))*43.0f);
+      const int x=103-static_cast<int>(elapsed/165UL)%22;
+      gfx.fillCircle(x,y,12,TFT_YELLOW);
+      gfx.drawCircle(x,y,12,TFT_ORANGE);
+      gfx.fillCircle(x-4,y-3,3,TFT_CYAN);
+      break;
+    }
+    default: break;
+  }
+}
+
 static const char* idleSpeech() {
   if (pet.dort) return "Zzz...";
   if (pet.sante < 25) return "PAS EN FORME...";
@@ -859,7 +984,9 @@ static int wrapPosition(int32_t x,int span) {
   return result<0?result+span:result;
 }
 static bool isWalking(uint32_t now) {
-  return stage()>0 && !pet.dort && (now/7200UL)%4==1;
+  // Pas de changement brutal de taille durant les petites scenes de vie.
+  return stage()>0 && !pet.dort && static_cast<int32_t>(now-effectUntil)>=0
+         && homeScene==0 && (now/7200UL)%4==1;
 }
 static void drawCloud(int x,int y,uint16_t c) {
   gfx.fillRoundRect(x,y+9,39,12,6,c);
@@ -867,6 +994,75 @@ static void drawCloud(int x,int y,uint16_t c) {
   gfx.fillCircle(x+25,y+7,13,c);
   gfx.fillCircle(x+32,y+13,8,c);
 }
+// Elements permanents choisis dans MAISON, accessibles apres quelques actions.
+static void drawDecor(uint32_t now,bool indoors) {
+  if(homeDecor==0 || !decorUnlocked(homeDecor)) return;
+  const uint16_t stem=rgb565(43,117,73);
+  if(homeDecor==1) {
+    // Deux fleurs dans le jardin, une plante en pot dans la chambre.
+    for(uint8_t i=0;i<(indoors?1:2);++i) {
+      const int x=(i==0?15:120), y=(indoors?169:184);
+      if(indoors) {
+        gfx.fillRoundRect(x-9,y-2,18,17,3,rgb565(198,104,72));
+        gfx.drawFastHLine(x-11,y-2,22,TFT_ORANGE);
+      }
+      gfx.drawLine(x,y,x-2,y-23,stem);
+      gfx.fillEllipse(x-7,y-11,7,3,stem);
+      gfx.fillCircle(x-2,y-25,7,i==0?TFT_PINK:TFT_YELLOW);
+      gfx.fillCircle(x-2,y-25,3,TFT_YELLOW);
+    }
+  } else if(homeDecor==2) {
+    const int sway=static_cast<int>((now/400UL)%5UL)-2;
+    const int x=115+sway, y=107;
+    gfx.drawLine(x,y+16,112,184,indoors?TFT_WHITE:TFT_LIGHTGREY);
+    gfx.fillEllipse(x,y,13,16,TFT_RED);
+    gfx.fillCircle(x-4,y-5,4,TFT_PINK);
+    gfx.fillTriangle(x-3,y+12,x+3,y+12,x,y+20,TFT_RED);
+  } else if(homeDecor==3) {
+    // Petit doudou visible au pied du Tama.
+    const int x=115, y=171;
+    gfx.fillCircle(x-9,y-12,5,TFT_ORANGE);
+    gfx.fillCircle(x+9,y-12,5,TFT_ORANGE);
+    gfx.fillRoundRect(x-11,y-8,22,20,8,rgb565(206,150,110));
+    gfx.fillCircle(x,y-12,13,rgb565(206,150,110));
+    gfx.fillCircle(x-5,y-13,2,TFT_BLACK);
+    gfx.fillCircle(x+5,y-13,2,TFT_BLACK);
+    gfx.fillCircle(x,y-7,3,TFT_ORANGE);
+  }
+}
+// Chambre simple, claire et animee : l'animal garde ses animations habituelles.
+static void drawBedroom(uint32_t now) {
+  const uint32_t cycle=pet.ageSec%720UL;
+  const bool night=pet.dort || (cycle>=420UL && cycle<610UL);
+  const uint16_t wall=night?rgb565(78,77,123):rgb565(236,193,163);
+  const uint16_t floor=night?rgb565(80,80,107):rgb565(182,139,112);
+  gfx.fillSprite(wall);
+  gfx.fillRect(0,170,SW,40,floor);
+  for(int i=0;i<5;++i) gfx.drawFastHLine(0,35+i*35,SW,night?rgb565(88,83,132):rgb565(244,205,171));
+  // Une fenetre sur le jardin : soleil ou lune selon l'heure.
+  const uint16_t window=night?rgb565(31,50,92):rgb565(119,197,222);
+  gfx.fillRoundRect(86,39,42,58,5,rgb565(226,230,217));
+  gfx.fillRect(91,44,32,48,window);
+  gfx.drawFastVLine(106,44,48,TFT_WHITE);
+  gfx.drawFastHLine(91,68,32,TFT_WHITE);
+  gfx.fillCircle(113,54,6,night?TFT_WHITE:TFT_YELLOW);
+  gfx.fillRect(93,86,28,6,night?rgb565(43,97,97):rgb565(75,170,113));
+  // Horloge murale avec aiguille animee.
+  gfx.fillCircle(20,58,13,TFT_WHITE);
+  gfx.drawCircle(20,58,13,rgb565(109,86,88));
+  gfx.drawFastVLine(20,52,7,TFT_DARKGREY);
+  gfx.drawLine(20,58,20+static_cast<int>((now/2800UL)%7UL)-3,65,TFT_DARKGREY);
+  // Petite etagere et objet rond de decoration.
+  gfx.fillRect(5,118,35,4,rgb565(121,87,64));
+  gfx.fillRoundRect(12,104,13,14,3,TFT_CYAN);
+  gfx.fillCircle(30,111,6,TFT_YELLOW);
+  // Le lit reste au fond : le personnage est dessine devant.
+  gfx.fillRoundRect(3,169,129,33,8,night?rgb565(71,105,168):rgb565(128,178,204));
+  gfx.fillRoundRect(7,165,36,16,7,TFT_WHITE);
+  gfx.drawFastHLine(5,199,125,rgb565(79,71,65));
+  drawDecor(now,true);
+}
+
 static void drawScenery(uint32_t now) {
   // Toutes les 12 min de temps ACTIF : jour -> coucher -> nuit -> aube.
   // Si le Tama dort, le monde passe en mode nuit.
@@ -962,6 +1158,7 @@ static void drawScenery(uint32_t now) {
       gfx.drawPixel(x,y-6,night?TFT_LIGHTGREY:TFT_WHITE);
     }
   }
+  drawDecor(now,false);
   // Ombre sous le personnage pour l'ancrer dans le monde.
   gfx.fillEllipse(67,192,37,3,night?rgb565(35,53,64):rgb565(110,96,79));
 }
@@ -989,9 +1186,11 @@ static void drawSleepFX(uint32_t now) {
 }
 
 static void drawHome(uint32_t now) {
-  drawScenery(now);
+  if(homeScene==1 || pet.dort) drawBedroom(now);
+  else drawScenery(now);
   // Les personnages et leurs animations passent au-dessus du monde.
   drawCreature(now);
+  drawActivity(now);
   drawSleepFX(now);
   drawFX(now);
 
@@ -1098,6 +1297,37 @@ static void drawProfil() {
   gfx.drawCentreString(line,67,181,1);
   gfx.drawCentreString("SUIVANT      RETOUR",67,220,1);
 }
+static void drawRoomMenu() {
+  gfx.fillSprite(TFT_BLACK);
+  gfx.drawRoundRect(2,2,131,236,8,TFT_YELLOW);
+  gfx.setTextColor(TFT_YELLOW,TFT_BLACK);
+  gfx.drawCentreString("MA PETITE MAISON",67,10,2);
+  gfx.setTextColor(TFT_LIGHTGREY,TFT_BLACK);
+  gfx.drawCentreString(homeScene?"CHAMBRE":"JARDIN",67,31,1);
+  for(uint8_t i=0;i<ROOM_OPTIONS_COUNT;++i) {
+    const int y=52+i*21;
+    const bool active=roomChoice==i;
+    const bool locked=(i>=3 && i<=5 && !decorUnlocked(i-2));
+    const bool equipped=(i<2 && homeScene==i) || (i>=2 && i<=5 && homeDecor==i-2);
+    if(active) gfx.fillRoundRect(9,y-4,117,20,5,TFT_NAVY);
+    const uint16_t bg=active?TFT_NAVY:TFT_BLACK;
+    gfx.setTextColor(locked?TFT_DARKGREY:(active?TFT_CYAN:TFT_WHITE),bg);
+    gfx.drawString(ROOM_OPTIONS[i],17,y,1);
+    gfx.setTextColor(locked?TFT_RED:equipped?TFT_GREEN:TFT_DARKGREY,bg);
+    gfx.drawRightString(locked?"X":equipped?"OK":"",115,y,1);
+  }
+  const char *hint="DECOR A DEBLOQUER";
+  if(roomChoice==3) hint=decorUnlocked(1)?"FLEURS DISPONIBLES":"3 REPAS POUR FLEURS";
+  else if(roomChoice==4) hint=decorUnlocked(2)?"BALLON DISPONIBLE":"1 ETOILE PARFAITE";
+  else if(roomChoice==5) hint=decorUnlocked(3)?"DOUDOU DISPONIBLE":"REFLEXE OU 3 SURPRISES";
+  else if(roomChoice<2) hint="CHOISIS TON PAYSAGE";
+  else if(roomChoice==2) hint="RANGER LES OBJETS";
+  gfx.setTextColor(TFT_YELLOW,TFT_BLACK);
+  gfx.drawCentreString(hint,67,202,1);
+  gfx.setTextColor(TFT_LIGHTGREY,TFT_BLACK);
+  gfx.drawCentreString("SUIVANT / VALIDER",67,222,1);
+}
+
 static void drawSac() {
   gfx.fillSprite(TFT_BLACK);
   gfx.drawRoundRect(2,2,131,236,8,TFT_MAGENTA);
@@ -1246,6 +1476,9 @@ void loop() {
     } else if(page==SAC) {
       if(next) bagChoice=(bagChoice+1)%4;
       else if(ok) useBagItem();
+    } else if(page==ROOM) {
+      if(next) roomChoice=(roomChoice+1)%ROOM_OPTIONS_COUNT;
+      else if(ok) chooseRoom();
     } else if(page==MINIGAME) {
       if(next) { page=HOME; say("UNE AUTRE FOIS !",FX_NONE,1500); }
       else if(ok) gamePress(now);
@@ -1286,6 +1519,7 @@ void loop() {
     else if(page==SOUVENIRS) drawSouvenirs();
     else if(page==PROFIL) drawProfil();
     else if(page==SAC) drawSac();
+    else if(page==ROOM) drawRoomMenu();
     else if(page==MINIGAME) drawGame(now);
     else if(page==REFLEXGAME) drawReflex(now);
     else drawHome(now);
