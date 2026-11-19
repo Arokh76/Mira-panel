@@ -1,36 +1,32 @@
-# Projet Tamagotshi - V4 🐣
+# Projet Tamagotshi - V5 : batterie et hibernation 🔋🐣
 
-Pour le **LilyGO T-Display V1.1 original**, ESP32 et ecran ST7789 **135x240 portrait**.
+Firmware pour **LilyGO T-Display V1.1 original** (ESP32 classique, 135x240 portrait). Garde toutes les fonctions et mini-jeux de la V4.
 
-## Nouveautes V4
-- La ligne `35 > MENU / 0 OK` a disparu de l'ecran principal : seulement le nom de l'action en bas.
-- Un **second mini-jeu, REFLEXE** : appuyer quand la zone devient verte (« TOP ! »), 3 manches.
-- Une nouvelle action **CALIN**, qui augmente la joie et l'amitie, avec coeurs animes.
-- **Amitie de 0 a 100** : augmente avec les calins, les jeux et les cadeaux, decroit doucement.
-- **Petites surprises autonomes** environ toutes les 3 minutes d'activite, avec reaction du Tama.
-- Des **danses spontanees** avec notes de musique quand il est content, et une couleur speciale pour l'adulte tres attache.
-- Nouvelle page **SOUVENIRS** : amitie, nombre de calins, surprises, parties et victoires aux deux mini-jeux.
-- La scene principale reste dediee a un grand personnage anime. Les 5 jauges ne sont que dans INFOS.
-- Toutes les statistiques sont sauvegardees en NVS ; les sauvegardes V2/V3 restent lisibles.
-- Cycle accelere de test conserve : oeuf (1 min), bebe (7 min au total), enfant (30 min), adulte.
+## Nouveautés V5
 
-## Commandes (deux boutons integres)
+- **Mesure batterie intégrée** : GPIO14 active brièvement le diviseur de tension, puis GPIO34 lit la tension LiPo, sans composants supplémentaires.
+- **Petite icône batterie** discrète au-dessus du menu, et tension en volts et pourcentage estimé sur INFOS.
+- **Extinction de l'écran après 2 minutes sans bouton** (ce n'est pas un deep sleep) : le Tama continue à vivre, évoluer et se sauvegarder. Un appui sur un bouton réveille l'écran sans déclencher d'action.
+- **Batterie faible** : si la tension reste sous **3,48 V** pendant trois contrôles espacés de 30 secondes, l'état est sauvegardé dans NVS, le rétroéclairage est éteint et l'ESP32 passe en **deep sleep**.
+- **Réveil automatique toutes les 5 minutes** pour mesurer la batterie : retour à la vie normale uniquement si la tension est remontée à **3,70 V**. Le GPIO35 peut aussi provoquer un réveil, mais si la batterie est encore faible, le Tama se rendort.
+- **Sécurité** : mesure hors de la plage 2,70–4,40 V traitée comme indisponible (aucune décision de sommeil), pour éviter de dormir par erreur en USB sans batterie.
+- **Progression conservée** grâce à Preferences/NVS, compatible V2/V3/V4. Le deep sleep redémarre le processeur au réveil mais ne remet pas le Tama à zéro.
 
-| Ecran | Bouton GPIO35 (defiler) | Bouton GPIO0 (valider) |
-|---|---|---|
-| Accueil | Menu suivant | Executer action |
-| INFOS / SOUVENIRS | Alterner les pages | Retour accueil |
-| ETOILE | Quitter | Attraper l'etoile au centre |
-| REFLEXE | Quitter | Valider au signal « TOP ! » |
+**Attention** : une batterie LiPo 1S n'est pas un compteur de coulombs ; le pourcentage est une estimation par la tension. Les mesures et les seuils demandent un test sur la carte réelle. Le T-Display lui-même consomme en deep sleep davantage que l'ESP32 seul. Le Tama ne progresse pas pendant un vrai deep sleep (ou une coupure) ; aucun RTC externe n'est présent. Le réveil sur raccordement USB n'est pas instantané : la vérification est périodique (5 min). Le circuit de protection de la batterie doit rester opérationnel ; le firmware ne le remplace pas.
 
-Le programme fonctionne entierement **hors ligne** et ne requiert ni cablage supplementaire ni serveur. L'age n'avance pas quand la carte est eteinte.
+## Utilisation
 
-## Telecharger / flasher
+Les deux boutons intégrés conservent le fonctionnement de la V4 :
+- GPIO35 : choix suivant, navigation et réveil
+- GPIO0 (BOOT) : valider et réveil
 
-La [compilation automatique](../../actions/workflows/tamagotchi-build.yml) produit :
-- [**Tamagotchi_V4_TDisplay_V11_full.bin**](firmware/Tamagotchi_V4_TDisplay_V11_full.bin) : image complete a flasher a **0x0000**.
-- [**Tamagotchi_V4_TDisplay_V11_app.bin**](firmware/Tamagotchi_V4_TDisplay_V11_app.bin) : application seule a **0x10000**, pour mettre a jour depuis V3 sans effacer la NVS si la disposition de partitions reste identique.
+Les jauges du Tama sont dans INFOS ; la page suivante est SOUVENIRS.
 
-Flash Download Tools : **ESP32**, **UART**, **DIO**, **40 MHz**, **32 Mbit / 4 Mo**, **115200 bauds**. Eviter l'option ERASE avant une mise a jour application seule.
+## Flash Download Tools
 
-Les anciennes versions et leurs BIN restent dans le dossier firmware. Aucun changement au projet Mira Panel.
+- [Tamagotchi_V5_TDisplay_V11_full.bin](firmware/Tamagotchi_V5_TDisplay_V11_full.bin) : **0x0000**, installation complète.
+- [Tamagotchi_V5_TDisplay_V11_app.bin](firmware/Tamagotchi_V5_TDisplay_V11_app.bin) : **0x10000**, mise à jour depuis V4 **sans ERASE**, conservation NVS avec la même table de partitions.
+
+Configuration : ESP32 / UART / 40MHz / DIO / 32 Mbit (4 Mo) / 115200 bauds.
+
+Compilation par [GitHub Actions](../../actions/workflows/tamagotchi-build.yml), fichiers rangés dans le dossier firmware sans toucher aux fichiers de Mira.

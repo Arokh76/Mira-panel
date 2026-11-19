@@ -1,4 +1,4 @@
-// Tamagotchi V4 — LilyGO T-Display V1.1 ORIGINAL (ESP32/ST7789, 135x240).
+// Tamagotchi V5 — LilyGO T-Display V1.1 ORIGINAL (ESP32/ST7789, 135x240).
 // Portrait, creature animee grand format, stats sur pages annexes, 2 mini-jeux.
  // GPIO35 : menu suivant / retour; GPIO0 : valider.
  // Stockage compatible V2 : namespace "tama_v2", magic 0x54414D32.
@@ -6,11 +6,23 @@
 #include <Preferences.h>
 #include <TFT_eSPI.h>
 #include <math.h>
+#include <esp_sleep.h>
+#include <driver/gpio.h>
 
 static TFT_eSPI lcd;
 static TFT_eSprite gfx(&lcd);
 static Preferences prefs;
 static const uint8_t PIN_NEXT = 35, PIN_OK = 0, PIN_LIGHT = 4;
+static const uint8_t PIN_BAT_ENABLE = 14, PIN_BAT_ADC = 34;
+// Seuils conservateurs pour LiPo 1S. Le % reste une estimation.
+static const uint16_t BAT_SLEEP_MV = 3480, BAT_RESUME_MV = 3700;
+static const uint32_t BAT_CHECK_MS = 30000, DISPLAY_IDLE_MS = 120000;
+static const uint64_t BAT_RECHECK_US = 5ULL * 60ULL * 1000000ULL;
+RTC_DATA_ATTR static bool batteryHibernating = false;
+static uint16_t batteryMv = 0;  // 0 = mesure indisponible
+static uint8_t batteryPercent = 0, consecutiveLow = 0;
+static uint32_t lastBatteryCheck = 0, lastInteraction = 0;
+static bool lcdReady = false, displayOff = false;
 static const uint32_t MAGIC = 0x54414D32UL;
 static const int SW = 135, SH = 240;
 static const char* const MENU[] = {
@@ -135,6 +147,88 @@ static void load() {
     save();
   }
 }
+// Lecture du pont diviseur 1:2 de la version originale (GPIO14 HIGH -> GPIO34 ADC).
+// Une valeur hors plage est refusee pour eviter un sommeil intempestif.
+static uint16_t sampleBatteryMv() {
+  digitalWrite(PIN_BAT_ENABLE, HIGH);
+  delay(12); // stabilisation du pont diviseur
+  (void)analogReadMilliVolts(PIN_BAT_ADC); // Premiere lecture jetee
+  uint32_t total = 0;
+  for (uint8_t n=0; n<12; n++) {
+    total += analogReadMilliVolts(PIN_BAT_ADC);
+    delay(2);
+  }
+  digitalWrite(PIN_BAT_ENABLE, LOW); // evite un courant de fuite permanent
+  const uint32_t value = (total / 12UL) * 2UL;
+  if (value < 2700 || value > 4400) return 0;
+  return static_cast<uint16_t>(value);
+}
+static uint8_t estimateBattery(uint16_t mv) {
+  if (!mv) return 0;
+  static const uint16_t voltage[] = {3300,3450,3550,3650,3750,3850,3950,4050,4150,4200};
+  static const uint8_t level[] = {0,4,10,20,35,55,73,87,96,100};
+  if (mv <= voltage[0]) return 0;
+  if (mv >= voltage[9]) return 100;
+  for (uint8_t i=1; i<10; ++i) {
+    if (mv <= voltage[i]) {
+      return level[i-1] + ((uint32_t)(mv-voltage[i-1]) *
+                               (level[i]-level[i-1])) /
+                               (voltage[i]-voltage[i-1]);
+    }
+  }
+  return 100;
+}
+static void refreshBattery() {
+  batteryMv = sampleBatteryMv();
+  batteryPercent = estimateBattery(batteryMv);
+  lastBatteryCheck = millis();
+}
+static void shutDisplay() {
+  if (!lcdReady || displayOff) return;
+  digitalWrite(PIN_LIGHT, LOW);
+  lcd.writecommand(TFT_DISPOFF);
+  lcd.writecommand(TFT_SLPIN);
+  displayOff = true;
+}
+static void wakeDisplay() {
+  if (!lcdReady || !displayOff) return;
+  lcd.writecommand(TFT_SLPOUT);
+  delay(125);
+  lcd.writecommand(TFT_DISPON);
+  digitalWrite(PIN_LIGHT, HIGH);
+  displayOff = false;
+  lastFrame = 0;
+}
+// Deep-sleep = vrai redemarrage du MCU au reveil, donc sauvegarde NVS d'abord.
+static void hibernateBattery() {
+  if (prefs.isKey("magic")) save();
+  batteryHibernating = true;
+  shutDisplay();
+  digitalWrite(PIN_LIGHT, LOW);
+  digitalWrite(PIN_BAT_ENABLE, LOW);
+  // Conserver le retroeclairage a LOW pendant deep sleep sur ESP32 original.
+  gpio_hold_en(GPIO_NUM_4);
+  gpio_deep_sleep_hold_en();
+  esp_sleep_enable_timer_wakeup(BAT_RECHECK_US);
+  // Le bouton GPIO35 dispose d'un pull-up externe sur la carte d'origine.
+  esp_sleep_enable_ext0_wakeup(GPIO_NUM_35, 0);
+  delay(12);
+  esp_deep_sleep_start();
+}
+static void displayBatteryIcon() {
+  if (!batteryMv) return;
+  const uint16_t color = batteryMv < 3600 ? TFT_ORANGE : TFT_GREEN;
+  const int x=111, y=197;
+  gfx.drawRect(x,y,17,9,color);
+  gfx.fillRect(x+17,y+3,2,3,color);
+  const int w = (batteryPercent*13)/100;
+  if (w>0) gfx.fillRect(x+2,y+2,w,5,color);
+  char pct[8];
+  snprintf(pct,sizeof(pct),"%u%%",(unsigned)batteryPercent);
+  gfx.setTextColor(color,TFT_BLACK);
+  gfx.drawRightString(pct,106,197,1);
+}
+
 static void tickSecond() {
   const uint8_t oldStage = stage();
   ++pet.ageSec;
@@ -514,6 +608,7 @@ static void drawHome(uint32_t now) {
   gfx.setTextColor(TFT_WHITE,TFT_DARKGREY);
   gfx.drawCentreString(label,67,12,1);
 
+  displayBatteryIcon();
   // Menu seul : aucun numero de GPIO, on libere le bas de l'ecran.
   gfx.fillRoundRect(4,210,127,26,8,TFT_NAVY);
   gfx.drawRoundRect(4,210,127,26,8,TFT_CYAN);
@@ -550,8 +645,16 @@ static void drawInfos() {
   gfx.setTextColor(TFT_LIGHTGREY,TFT_BLACK);
   char score[45];
   snprintf(score,sizeof(score),"JEUX %u  PARFAITS %u",(unsigned)gamePlayed,(unsigned)gameWins);
-  gfx.drawCentreString(score,67,196,1);
-  gfx.drawCentreString("SUIVANT      RETOUR",67,221,1);
+  gfx.drawCentreString(score,67,191,1);
+  char batt[32];
+  if (batteryMv)
+    snprintf(batt,sizeof(batt),"BAT %u%%  %u.%02uV",(unsigned)batteryPercent,
+             (unsigned)(batteryMv/1000), (unsigned)((batteryMv%1000)/10));
+  else
+    snprintf(batt,sizeof(batt),"BAT : INDISPONIBLE");
+  gfx.setTextColor(batteryMv && batteryMv<3600 ? TFT_ORANGE : TFT_LIGHTGREY,TFT_BLACK);
+  gfx.drawCentreString(batt,67,208,1);
+  gfx.drawCentreString("SUIVANT      RETOUR",67,225,1);
 }
 static void drawSouvenirs() {
   gfx.fillSprite(TFT_BLACK);
@@ -624,16 +727,36 @@ static void drawReflex(uint32_t now) {
   gfx.drawCentreString("RETOUR",67,215,1);
 }
 void setup() {
-  pinMode(PIN_NEXT,INPUT);           // Pull-up physique sur T-Display V1.1
+  // Relacher les verrous du retroeclairage apres un reveil deep sleep.
+  gpio_deep_sleep_hold_dis();
+  gpio_hold_dis(GPIO_NUM_4);
+  pinMode(PIN_NEXT,INPUT);          // Pull-up physique sur T-Display V1.1
   pinMode(PIN_OK,INPUT_PULLUP);
   pinMode(PIN_LIGHT,OUTPUT);
-  digitalWrite(PIN_LIGHT,HIGH);
+  digitalWrite(PIN_LIGHT,LOW);
+  pinMode(PIN_BAT_ENABLE,OUTPUT);
+  digitalWrite(PIN_BAT_ENABLE,LOW);
+  pinMode(PIN_BAT_ADC,INPUT);
+  analogReadResolution(12);
+  analogSetPinAttenuation(PIN_BAT_ADC, ADC_11db);
   nextKey.pin=PIN_NEXT;
   okKey.pin=PIN_OK;
 
+  load();
+  refreshBattery();
+  // Aucun affichage/jeu tant que la batterie ne s'est pas suffisamment rechargee.
+  if (batteryHibernating) {
+    if (batteryMv && batteryMv < BAT_RESUME_MV) hibernateBattery();
+    batteryHibernating = false;
+  } else if (batteryMv && batteryMv < BAT_SLEEP_MV) {
+    hibernateBattery();
+  }
+
   lcd.init();
+  lcdReady = true;
   lcd.setRotation(0);              // Portrait 135x240
   lcd.fillScreen(TFT_BLACK);
+  digitalWrite(PIN_LIGHT,HIGH);
   gfx.setColorDepth(16);
   if (gfx.createSprite(SW,SH) == nullptr) {
     lcd.setTextColor(TFT_WHITE,TFT_BLACK);
@@ -641,32 +764,40 @@ void setup() {
     while(true) delay(1000);
   }
   gfx.setTextDatum(TL_DATUM);
-  load();
   randomSeed((uint32_t)micros() ^ (uint32_t)esp_random());
   lastSecond=millis();
   lastSave=millis();
+  lastInteraction=millis();
   say("BONJOUR !",FX_WAKE,1800);
 }
 void loop() {
   const uint32_t now=millis();
   const bool next=nextKey.readPress(now);
   const bool ok=okKey.readPress(now);
-  if(page==HOME) {
-    if(next) selected=(selected+1)%MENU_COUNT;
-    if(ok) chooseAction(now);
-  } else if(page==INFOS) {
-    if(ok) page=HOME;
-    else if(next) page=SOUVENIRS;
-  } else if(page==SOUVENIRS) {
-    if(ok) page=HOME;
-    else if(next) page=INFOS;
-  } else if(page==MINIGAME) {
-    if(next) { page=HOME; say("UNE AUTRE FOIS !",FX_NONE,1500); }
-    else if(ok) gamePress(now);
-  } else if(page==REFLEXGAME) {
-    if(next) { page=HOME; say("UNE AUTRE FOIS !",FX_NONE,1500); }
-    else if(ok) reflexPress(now);
+  const bool wasOff = displayOff;
+  if (next || ok) {
+    lastInteraction=now;
+    if (wasOff) wakeDisplay();  // Premier appui = reveil, sans action involontaire.
   }
+  if (!wasOff) {
+    if(page==HOME) {
+      if(next) selected=(selected+1)%MENU_COUNT;
+      if(ok) chooseAction(now);
+    } else if(page==INFOS) {
+      if(ok) page=HOME;
+      else if(next) page=SOUVENIRS;
+    } else if(page==SOUVENIRS) {
+      if(ok) page=HOME;
+      else if(next) page=INFOS;
+    } else if(page==MINIGAME) {
+      if(next) { page=HOME; say("UNE AUTRE FOIS !",FX_NONE,1500); }
+      else if(ok) gamePress(now);
+    } else if(page==REFLEXGAME) {
+      if(next) { page=HOME; say("UNE AUTRE FOIS !",FX_NONE,1500); }
+      else if(ok) reflexPress(now);
+    }
+  }
+
   while((uint32_t)(now-lastSecond)>=1000) {
     lastSecond+=1000;
     tickSecond();
@@ -674,7 +805,23 @@ void loop() {
   trySurprise();
   if((uint32_t)(now-lastSave)>=60000) save();
 
-  if((uint32_t)(now-lastFrame)>=95) {
+  if((uint32_t)(now-lastBatteryCheck)>=BAT_CHECK_MS) {
+    refreshBattery();
+    if (batteryMv && batteryMv < BAT_SLEEP_MV) {
+      if (++consecutiveLow >= 3) {
+        say("BATTERIE FAIBLE",FX_NONE,1000);
+        hibernateBattery();
+      }
+    } else {
+      consecutiveLow=0;
+    }
+  }
+  // Ecran endormi seulement : Tama continue de vivre et se sauvegarde.
+  if (!displayOff && (uint32_t)(now-lastInteraction)>=DISPLAY_IDLE_MS) {
+    if(page==MINIGAME || page==REFLEXGAME) page=HOME;
+    shutDisplay();
+  }
+  if(!displayOff && (uint32_t)(now-lastFrame)>=95) {
     lastFrame=now;
     if(page==INFOS) drawInfos();
     else if(page==SOUVENIRS) drawSouvenirs();
