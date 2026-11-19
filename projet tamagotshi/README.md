@@ -1,32 +1,25 @@
-# Projet Tamagotshi - V5 : batterie et hibernation 🔋🐣
+# Projet Tamagotshi V5.1 - Hibernation et affichage batterie
 
-Firmware pour **LilyGO T-Display V1.1 original** (ESP32 classique, 135x240 portrait). Garde toutes les fonctions et mini-jeux de la V4.
+Pour LilyGO T-Display V1.1 original, ecran portrait 135x240, batterie LiPo 1S. Conserve tous les jeux et fonctionnalites de V4/V5.
 
-## Nouveautés V5
+## Etat batterie faible
+- Sous 3,48 V, au moins 3 mesures a 30 secondes d'intervalle, une **grosse batterie vide rouge** apparait **2 secondes**, puis l'ecran s'eteint et l'ESP32 passe en **deep sleep**.
+- L'etat (age, besoins, amitie, parties, etc.) est sauvegarde en NVS avant l'hibernation et conserve au reveil.
+- **Appui GPIO35 pendant l'hibernation** : la carte redemarre, mesure la tension et, si elle est toujours trop basse, affiche encore le pictogramme **2 secondes**, puis repart en deep sleep. Le bouton ne lance aucun jeu tant que la batterie est faible.
+- Controle silencieux automatique toutes les 5 minutes ; reprise quand la tension mesuree est >= 3,70 V.
+- Pas de consommation reduite garantie au niveau d'un appareil commercial : les essais materiels sont necessaires.
 
-- **Mesure batterie intégrée** : GPIO14 active brièvement le diviseur de tension, puis GPIO34 lit la tension LiPo, sans composants supplémentaires.
-- **Petite icône batterie** discrète au-dessus du menu, et tension en volts et pourcentage estimé sur INFOS.
-- **Extinction de l'écran après 2 minutes sans bouton** (ce n'est pas un deep sleep) : le Tama continue à vivre, évoluer et se sauvegarder. Un appui sur un bouton réveille l'écran sans déclencher d'action.
-- **Batterie faible** : si la tension reste sous **3,48 V** pendant trois contrôles espacés de 30 secondes, l'état est sauvegardé dans NVS, le rétroéclairage est éteint et l'ESP32 passe en **deep sleep**.
-- **Réveil automatique toutes les 5 minutes** pour mesurer la batterie : retour à la vie normale uniquement si la tension est remontée à **3,70 V**. Le GPIO35 peut aussi provoquer un réveil, mais si la batterie est encore faible, le Tama se rendort.
-- **Sécurité** : mesure hors de la plage 2,70–4,40 V traitée comme indisponible (aucune décision de sommeil), pour éviter de dormir par erreur en USB sans batterie.
-- **Progression conservée** grâce à Preferences/NVS, compatible V2/V3/V4. Le deep sleep redémarre le processeur au réveil mais ne remet pas le Tama à zéro.
+## Charge / USB
+- Le T-Display utilise un **TP4054** dont la sortie **CHRG** commande la **LED bleue de charge**, mais cette sortie n'est pas reliee d'origine a un GPIO accessible par le firmware. Il est donc **impossible de confirmer charge en cours / charge terminee sans modification materielle**.
+- La lecture GPIO34 est fiable sur batterie mais peut lire la tension d'alimentation USB pendant la recharge. Quand elle depasse **4,40 V**, le firmware suppose **USB probable** ; il affiche une grosse batterie animee quand le Tama n'est pas utilise pendant 2 minutes. Le message est volontairement **« ALIMENTATION USB »**, pas « batterie pleine ».
+- La detection USB est une **heuristique**, particulierement peu fiable en debut de charge (la mesure peut rester vers 4,20 V) : elle doit etre verifiee sur votre carte.
+- En l'absence de detection USB, l'ecran s'eteint apres 2 minutes pour economiser la batterie. Un premier appui le rallume sans executer d'action.
+- La ligne **GPIO14 reste HIGH pendant le fonctionnement sur batterie**, car elle fait partie du circuit de mise sous tension. Elle ne passe LOW qu'au moment de la veille profonde.
 
-**Attention** : une batterie LiPo 1S n'est pas un compteur de coulombs ; le pourcentage est une estimation par la tension. Les mesures et les seuils demandent un test sur la carte réelle. Le T-Display lui-même consomme en deep sleep davantage que l'ESP32 seul. Le Tama ne progresse pas pendant un vrai deep sleep (ou une coupure) ; aucun RTC externe n'est présent. Le réveil sur raccordement USB n'est pas instantané : la vérification est périodique (5 min). Le circuit de protection de la batterie doit rester opérationnel ; le firmware ne le remplace pas.
+## Firmware
+- [**Tamagotchi_V5_1_TDisplay_V11_full.bin**](firmware/Tamagotchi_V5_1_TDisplay_V11_full.bin) : image complete pour Flash Download Tools a **0x0000**.
+- [**Tamagotchi_V5_1_TDisplay_V11_app.bin**](firmware/Tamagotchi_V5_1_TDisplay_V11_app.bin) : application seule a **0x10000** depuis V4/V5, sans ERASE pour conserver la NVS.
+- Reglages ESP32 / UART / 40 MHz / DIO / 32 Mbit / 115200.
+- L'age n'avance pas pendant un vrai deep sleep ni pendant une coupure d'alimentation.
 
-## Utilisation
-
-Les deux boutons intégrés conservent le fonctionnement de la V4 :
-- GPIO35 : choix suivant, navigation et réveil
-- GPIO0 (BOOT) : valider et réveil
-
-Les jauges du Tama sont dans INFOS ; la page suivante est SOUVENIRS.
-
-## Flash Download Tools
-
-- [Tamagotchi_V5_TDisplay_V11_full.bin](firmware/Tamagotchi_V5_TDisplay_V11_full.bin) : **0x0000**, installation complète.
-- [Tamagotchi_V5_TDisplay_V11_app.bin](firmware/Tamagotchi_V5_TDisplay_V11_app.bin) : **0x10000**, mise à jour depuis V4 **sans ERASE**, conservation NVS avec la même table de partitions.
-
-Configuration : ESP32 / UART / 40MHz / DIO / 32 Mbit (4 Mo) / 115200 bauds.
-
-Compilation par [GitHub Actions](../../actions/workflows/tamagotchi-build.yml), fichiers rangés dans le dossier firmware sans toucher aux fichiers de Mira.
+**Ce comportement n'est valide qu'a la compilation et doit etre teste sur la carte reelle avant de compter dessus pour proteger la LiPo.** La protection propre a la batterie reste necessaire.

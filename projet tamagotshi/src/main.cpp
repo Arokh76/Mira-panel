@@ -1,4 +1,4 @@
-// Tamagotchi V5 — LilyGO T-Display V1.1 ORIGINAL (ESP32/ST7789, 135x240).
+// Tamagotchi V5.1 — LilyGO T-Display V1.1 ORIGINAL (ESP32/ST7789, 135x240).
 // Portrait, creature animee grand format, stats sur pages annexes, 2 mini-jeux.
  // GPIO35 : menu suivant / retour; GPIO0 : valider.
  // Stockage compatible V2 : namespace "tama_v2", magic 0x54414D32.
@@ -16,10 +16,14 @@ static const uint8_t PIN_NEXT = 35, PIN_OK = 0, PIN_LIGHT = 4;
 static const uint8_t PIN_BAT_ENABLE = 14, PIN_BAT_ADC = 34;
 // Seuils conservateurs pour LiPo 1S. Le % reste une estimation.
 static const uint16_t BAT_SLEEP_MV = 3480, BAT_RESUME_MV = 3700;
+// A plus de 4.40V, l'ADC voit probablement le rail USB, PAS la cellule.
+static const uint16_t USB_PROBABLE_MV = 4400;
 static const uint32_t BAT_CHECK_MS = 30000, DISPLAY_IDLE_MS = 120000;
 static const uint64_t BAT_RECHECK_US = 5ULL * 60ULL * 1000000ULL;
 RTC_DATA_ATTR static bool batteryHibernating = false;
-static uint16_t batteryMv = 0;  // 0 = mesure indisponible
+static uint16_t batteryMv = 0;   // Tension LiPo credible hors charge
+static uint16_t rawSupplyMv = 0;
+static bool usbProbable = false; // Heuristique, pas une broche VBUS !
 static uint8_t batteryPercent = 0, consecutiveLow = 0;
 static uint32_t lastBatteryCheck = 0, lastInteraction = 0;
 static bool lcdReady = false, displayOff = false;
@@ -150,18 +154,27 @@ static void load() {
 // Lecture du pont diviseur 1:2 de la version originale (GPIO14 HIGH -> GPIO34 ADC).
 // Une valeur hors plage est refusee pour eviter un sommeil intempestif.
 static uint16_t sampleBatteryMv() {
+  // GPIO14 doit rester HIGH pendant l'utilisation sur batterie :
+  // il intervient aussi dans l'autorisation d'alimentation du module.
   digitalWrite(PIN_BAT_ENABLE, HIGH);
-  delay(12); // stabilisation du pont diviseur
-  (void)analogReadMilliVolts(PIN_BAT_ADC); // Premiere lecture jetee
-  uint32_t total = 0;
+  delay(12);
+  (void)analogReadMilliVolts(PIN_BAT_ADC);
+  uint16_t samples[12];
   for (uint8_t n=0; n<12; n++) {
-    total += analogReadMilliVolts(PIN_BAT_ADC);
+    samples[n] = analogReadMilliVolts(PIN_BAT_ADC);
     delay(2);
   }
-  digitalWrite(PIN_BAT_ENABLE, LOW); // evite un courant de fuite permanent
-  const uint32_t value = (total / 12UL) * 2UL;
-  if (value < 2700 || value > 4400) return 0;
-  return static_cast<uint16_t>(value);
+  // 25e percentile pour limiter les pics POSITIFS de l'ADC ESP32.
+  for (uint8_t i=0; i<12; ++i) {
+    for (uint8_t j=i+1; j<12; ++j) {
+      if (samples[j]<samples[i]) {
+        const uint16_t tmp=samples[i]; samples[i]=samples[j]; samples[j]=tmp;
+      }
+    }
+  }
+  const uint32_t v = static_cast<uint32_t>(samples[3]) * 2UL;
+  if(v<2600 || v>5400) return 0;
+  return static_cast<uint16_t>(v);
 }
 static uint8_t estimateBattery(uint16_t mv) {
   if (!mv) return 0;
@@ -179,7 +192,11 @@ static uint8_t estimateBattery(uint16_t mv) {
   return 100;
 }
 static void refreshBattery() {
-  batteryMv = sampleBatteryMv();
+  rawSupplyMv = sampleBatteryMv();
+  // La cellule 1S ne monte normalement pas au-dessus de 4.2V.
+  // Une tension >4.4V indique probablement le secteur USB sur ce modele.
+  usbProbable = rawSupplyMv > USB_PROBABLE_MV;
+  batteryMv = usbProbable ? 0 : rawSupplyMv;
   batteryPercent = estimateBattery(batteryMv);
   lastBatteryCheck = millis();
 }
@@ -200,23 +217,52 @@ static void wakeDisplay() {
   lastFrame = 0;
 }
 // Deep-sleep = vrai redemarrage du MCU au reveil, donc sauvegarde NVS d'abord.
-static void hibernateBattery() {
-  // Ecrire la NVS une seule fois : ne pas user la flash a chaque reveil 5 min.
+// Page d'alerte autonome, visible 2 secondes, meme lors d'un reveil bouton.
+static void showEmptyBattery() {
+  if (!lcdReady) {
+    lcd.init();
+    lcdReady = true;
+    lcd.setRotation(0);
+  }
+  if (displayOff) wakeDisplay();
+  digitalWrite(PIN_LIGHT, HIGH);
+  lcd.fillScreen(TFT_BLACK);
+  lcd.drawRoundRect(20,72,91,62,9,TFT_RED);
+  lcd.fillRect(111,92,8,22,TFT_RED);
+  lcd.fillRect(31,83,11,40,TFT_RED); // Reserve minimale
+  lcd.drawLine(53,83,87,122,TFT_RED);
+  lcd.drawLine(87,83,53,122,TFT_RED);
+  lcd.setTextColor(TFT_RED,TFT_BLACK);
+  lcd.drawCentreString("BATTERIE VIDE",67,150,2);
+  lcd.setTextColor(TFT_LIGHTGREY,TFT_BLACK);
+  lcd.drawCentreString("RECHARGE MOI !",67,174,1);
+  delay(2000);
+}
+static void hibernateBattery(bool showWarning=false) {
+  // Ecrire en NVS une fois seulement, pas toutes les 5 min.
   if (!batteryHibernating) save();
   batteryHibernating = true;
+  if (showWarning) showEmptyBattery();
   shutDisplay();
   digitalWrite(PIN_LIGHT, LOW);
-  digitalWrite(PIN_BAT_ENABLE, LOW);
-  // Conserver le retroeclairage a LOW pendant deep sleep sur ESP32 original.
+  // Ne pas laisser GPIO35 au niveau bas pendant l'entree en deep sleep,
+  // sinon le bouton provoquerait une boucle de reveils instantanes.
+  while(digitalRead(PIN_NEXT)==LOW) delay(15);
   gpio_hold_en(GPIO_NUM_4);
   gpio_deep_sleep_hold_en();
   esp_sleep_enable_timer_wakeup(BAT_RECHECK_US);
-  // Le bouton GPIO35 dispose d'un pull-up externe sur la carte d'origine.
   esp_sleep_enable_ext0_wakeup(GPIO_NUM_35, 0);
+  // La ligne GPIO14 se met LOW uniquement lors de l'hibernation.
+  digitalWrite(PIN_BAT_ENABLE, LOW);
   delay(12);
   esp_deep_sleep_start();
 }
 static void displayBatteryIcon() {
+  if (usbProbable) {
+    gfx.setTextColor(TFT_CYAN,TFT_BLACK);
+    gfx.drawRightString("USB",128,197,1);
+    return;
+  }
   if (!batteryMv) return;
   const uint16_t color = batteryMv < 3600 ? TFT_ORANGE : TFT_GREEN;
   const int x=111, y=197;
@@ -230,6 +276,26 @@ static void displayBatteryIcon() {
   gfx.drawRightString(pct,106,197,1);
 }
 
+// Animation quand une alimentation USB est probable et Tama inutilise.
+static void drawUsbIdle(uint32_t now) {
+  gfx.fillSprite(TFT_BLACK);
+  gfx.setTextColor(TFT_CYAN,TFT_BLACK);
+  gfx.drawCentreString("USB",67,30,2);
+  gfx.drawRoundRect(17,86,101,67,12,TFT_CYAN);
+  gfx.fillRect(118,108,8,23,TFT_CYAN);
+  const int step = (now/650)%5;
+  for(int i=0;i<4;i++) {
+    const uint16_t c = i<=step ? TFT_GREEN : TFT_DARKGREY;
+    gfx.fillRoundRect(26+i*22,97,17,46,4,c);
+  }
+  gfx.fillTriangle(64,99,53,125,67,119,TFT_YELLOW);
+  gfx.fillTriangle(68,110,82,110,59,137,TFT_YELLOW);
+  gfx.setTextColor(TFT_LIGHTGREY,TFT_BLACK);
+  gfx.drawCentreString("ALIMENTATION USB",67,173,1);
+  gfx.drawCentreString("APPUYER POUR JOUER",67,204,1);
+}
+// NOTE: Impossible d'affirmer "CHARGE TERMINEE" sans le signal CHRG
+// du TP4054 ; GPIO34 mesure le rail d'alimentation en USB.
 static void tickSecond() {
   const uint8_t oldStage = stage();
   ++pet.ageSec;
@@ -648,8 +714,10 @@ static void drawInfos() {
   snprintf(score,sizeof(score),"JEUX %u  PARFAITS %u",(unsigned)gamePlayed,(unsigned)gameWins);
   gfx.drawCentreString(score,67,191,1);
   char batt[32];
-  if (batteryMv)
-    snprintf(batt,sizeof(batt),"BAT %u%%  %u.%02uV",(unsigned)batteryPercent,
+  if (usbProbable)
+    snprintf(batt,sizeof(batt),"USB - CHARGE NON VERIF.");
+  else if (batteryMv)
+    snprintf(batt,sizeof(batt),"BAT %u%% %u.%02uV",(unsigned)batteryPercent,
              (unsigned)(batteryMv/1000), (unsigned)((batteryMv%1000)/10));
   else
     snprintf(batt,sizeof(batt),"BAT : INDISPONIBLE");
@@ -736,7 +804,7 @@ void setup() {
   pinMode(PIN_LIGHT,OUTPUT);
   digitalWrite(PIN_LIGHT,LOW);
   pinMode(PIN_BAT_ENABLE,OUTPUT);
-  digitalWrite(PIN_BAT_ENABLE,LOW);
+  digitalWrite(PIN_BAT_ENABLE,HIGH);
   pinMode(PIN_BAT_ADC,INPUT);
   analogReadResolution(12);
   analogSetPinAttenuation(PIN_BAT_ADC, ADC_11db);
@@ -747,10 +815,13 @@ void setup() {
   refreshBattery();
   // Aucun affichage/jeu tant que la batterie ne s'est pas suffisamment rechargee.
   if (batteryHibernating) {
-    if (batteryMv && batteryMv < BAT_RESUME_MV) hibernateBattery();
+    if (batteryMv && batteryMv < BAT_RESUME_MV) {
+      const bool pressed = esp_sleep_get_wakeup_cause()==ESP_SLEEP_WAKEUP_EXT0;
+      hibernateBattery(pressed);
+    }
     batteryHibernating = false;
   } else if (batteryMv && batteryMv < BAT_SLEEP_MV) {
-    hibernateBattery();
+    hibernateBattery(true);
   }
 
   lcd.init();
@@ -810,21 +881,23 @@ void loop() {
     refreshBattery();
     if (batteryMv && batteryMv < BAT_SLEEP_MV) {
       if (++consecutiveLow >= 3) {
-        say("BATTERIE FAIBLE",FX_NONE,1000);
-        hibernateBattery();
+        hibernateBattery(true);
       }
     } else {
       consecutiveLow=0;
     }
   }
-  // Ecran endormi seulement : Tama continue de vivre et se sauvegarde.
-  if (!displayOff && (uint32_t)(now-lastInteraction)>=DISPLAY_IDLE_MS) {
+  // Inactivite: batterie -> ecran eteint; USB probable -> animation.
+  const bool idle = (uint32_t)(now-lastInteraction)>=DISPLAY_IDLE_MS;
+  if (!displayOff && idle && !usbProbable) {
     if(page==MINIGAME || page==REFLEXGAME) page=HOME;
     shutDisplay();
   }
-  if(!displayOff && (uint32_t)(now-lastFrame)>=95) {
+  if(displayOff && idle && usbProbable) wakeDisplay();
+  if(!displayOff && (uint32_t)(now-lastFrame)>=(idle&&usbProbable ? 330UL : 95UL)) {
     lastFrame=now;
-    if(page==INFOS) drawInfos();
+    if(idle && usbProbable) drawUsbIdle(now);
+    else if(page==INFOS) drawInfos();
     else if(page==SOUVENIRS) drawSouvenirs();
     else if(page==MINIGAME) drawGame(now);
     else if(page==REFLEXGAME) drawReflex(now);
