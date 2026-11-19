@@ -1,4 +1,4 @@
-// Tamagotchi V7.1 — scenes de vie et petite maison — LilyGO T-Display V1.1 ORIGINAL (ESP32/ST7789, 135x240).
+// Tamagotchi V7.2 — scenes de vie et petite maison — LilyGO T-Display V1.1 ORIGINAL (ESP32/ST7789, 135x240).
 // Portrait, creature animee grand format, stats sur pages annexes, 2 mini-jeux.
  // GPIO35 : menu suivant / retour; GPIO0 : valider.
  // Stockage compatible V2 : namespace "tama_v2", magic 0x54414D32.
@@ -629,16 +629,17 @@ static bool isWalking(uint32_t now);
 static uint16_t rgb565(uint8_t r,uint8_t g,uint8_t b);
 // Petite version du personnage pour les promenades : plus de place au jardin.
 // Couleurs, humeur et forme adulte V6 conservees.
-// V7.1 : une seule forme de ventre pour toutes les evolutions.
-// Place SOUS le visage, sans l'ancien double cercle ni symbole central.
-// Les silhouettes compactes des promenades respectent la meme proportion.
+// V7.2 : retour du dessin prefere, ventre blanc + centre gris clair.
+// On ne change pas son style : seul l'emplacement descend sous la bouche.
+// Les dimensions sont ajustees pour ne pas deborder sur les pieds.
 static void drawBellyPatch(int cx,int by,uint8_t st,bool compact) {
   if(st<2) return;
-  const int y=by+(compact?(st==2?64:69):(st==2?90:94));
-  const int w=compact?(st==2?27:31):(st==2?38:44);
-  const int h=compact?(st==2?20:23):(st==2?24:30);
+  const int y=by+(compact?(st==2?63:69):(st==2?82:89));
+  const int w=compact?(st==2?30:32):(st==2?41:44);
+  const int h=compact?(st==2?22:25):(st==2?29:36);
+  // Deux ovales arrondis superposes, comme sur V7.0, mais plus bas.
   gfx.fillRoundRect(cx-w/2,y,w,h,h/2,TFT_WHITE);
-  gfx.drawRoundRect(cx-w/2,y,w,h,h/2,rgb565(185,208,218));
+  gfx.fillRoundRect(cx-(w-12)/2,y+5,w-12,h-10,(h-10)/2,TFT_LIGHTGREY);
 }
 
 static void drawWalkingCreature(uint32_t now,uint8_t st,Mood m,uint16_t body) {
@@ -687,7 +688,7 @@ static void drawWalkingCreature(uint32_t now,uint8_t st,Mood m,uint16_t body) {
   gfx.drawRoundRect(cx+w/2-10,by+39,17,35,7,outline);
   gfx.fillRoundRect(cx-w/2,by,w,h,st==1?25:30,body);
   gfx.drawRoundRect(cx-w/2,by,w,h,st==1?25:30,outline);
-  // Un ventre simple, bien en dessous de la bouche (identique au grand Tama).
+  // Retour au ventre blanc/gris de V7.0, descendu sous la bouche.
   drawBellyPatch(cx,by,st,true);
   const int faceY=by+(st==1?29:34);
   const bool blink=now%3900<155;
@@ -795,7 +796,7 @@ static void drawCreature(uint32_t now) {
   // Liseret fonce : particulierement utile pour le Tama vert sur le jardin.
   gfx.drawRoundRect(bodyx,by,width,height,st == 1 ? 33 : 40,rgb565(25,70,77));
 
-  // Ventre recule vers le bas du corps, sans recouvrir la bouche.
+  // Double ovale blanc/gris conserve, mais positionne sous le visage.
   drawBellyPatch(cx,by,st,false);
   gfx.fillCircle(cx-31,by+68,7,TFT_PINK);
   gfx.fillCircle(cx+31,by+68,7,TFT_PINK);
@@ -825,11 +826,7 @@ static void drawFX(uint32_t now) {
       // L'animation du biscuit est geree par drawActivity().
       break;
     case FX_CLEAN:
-      for (int i=0;i<6;i++) {
-        int x = 14 + (i*23)%111;
-        int y = 158 - (drift + i*29)%112;
-        gfx.drawCircle(x,y,4+(i%3)*3,TFT_CYAN);
-      }
+      // Douche complete dessinee dans drawActivity() : pas de bulles doublees.
       break;
     case FX_HEAL:
       cross(22,81-drift, TFT_GREEN);
@@ -883,20 +880,48 @@ static void drawActivity(uint32_t now) {
       break;
     }
     case FX_CLEAN: {
-      // Une vague au niveau du ventre et de vraies bulles flottantes.
+      // V7.2 : un VRAI pommeau de douche et un jet d'eau anime.
+      // Pommeau fixe au coin superieur gauche, arrose le Tama au centre.
+      const uint16_t metal=rgb565(171,201,213);
+      const uint16_t darkMetal=rgb565(66,109,138);
+      gfx.fillRoundRect(7,37,9,27,3,metal);
+      gfx.fillRoundRect(13,36,44,9,4,metal);
+      gfx.fillRoundRect(51,39,10,15,4,metal);
+      gfx.fillRoundRect(31,52,53,12,5,metal);
+      gfx.drawFastHLine(36,63,43,darkMetal);
+      gfx.drawFastHLine(42,57,32,TFT_WHITE);
+
+      // Les filets se deplacent vers le bas a chaque image.
+      // 7 colonnes de gouttes, trois gouttes en cascade par colonne.
+      const uint16_t water=rgb565(76,202,250);
+      const uint16_t foam=rgb565(197,236,253);
+      for(uint8_t i=0;i<7;++i) {
+        const int x=39+i*7;
+        const int phase=static_cast<int>((elapsed/8UL+i*15UL)%123UL);
+        for(uint8_t j=0;j<3;++j) {
+          const int y=69+(phase+static_cast<int>(j)*41)%123;
+          const int length=6+(i+j)%4;
+          if(y+length<194) {
+            gfx.drawFastVLine(x,y,length,water);
+            gfx.drawPixel(x+1,y+1,foam);
+          }
+        }
+      }
+      // Ecume qui s'accumule au niveau des pieds.
       const int wave=static_cast<int>((now/180UL)%3UL);
-      gfx.drawFastHLine(20,184+wave,95,TFT_CYAN);
-      gfx.drawFastHLine(26,187+wave,82,TFT_SKYBLUE);
-      for(uint8_t i=0;i<11;++i) {
-        const int rise=static_cast<int>((elapsed/36UL+17UL*i)%126UL);
-        const int x=15+((i*23+static_cast<int>(elapsed/145UL))%110);
-        const int y=198-rise;
+      gfx.drawFastHLine(20,185+wave,95,TFT_CYAN);
+      gfx.drawFastHLine(26,189+wave,82,TFT_SKYBLUE);
+      // On conserve quelques bulles en complement de la pluie.
+      for(uint8_t i=0;i<7;++i) {
+        const int rise=static_cast<int>((elapsed/40UL+19UL*i)%102UL);
+        const int x=15+((i*23+static_cast<int>(elapsed/170UL))%107);
+        const int y=195-rise;
         const int r=3+(i%3)*2;
         gfx.drawCircle(x,y,r,TFT_CYAN);
         gfx.drawPixel(x-r/2,y-r/2,TFT_WHITE);
       }
-      gfx.fillCircle(45,154,5+wave,TFT_WHITE);
-      gfx.fillCircle(85,166,7-wave,TFT_WHITE);
+      gfx.fillCircle(45,163,4+wave,TFT_WHITE);
+      gfx.fillCircle(89,174,6-wave,foam);
       break;
     }
     case FX_HEAL: {
