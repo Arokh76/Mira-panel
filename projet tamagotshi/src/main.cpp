@@ -1,4 +1,4 @@
-// Tamagotchi V7.0 — scenes de vie et petite maison — LilyGO T-Display V1.1 ORIGINAL (ESP32/ST7789, 135x240).
+// Tamagotchi V7.1 — scenes de vie et petite maison — LilyGO T-Display V1.1 ORIGINAL (ESP32/ST7789, 135x240).
 // Portrait, creature animee grand format, stats sur pages annexes, 2 mini-jeux.
  // GPIO35 : menu suivant / retour; GPIO0 : valider.
  // Stockage compatible V2 : namespace "tama_v2", magic 0x54414D32.
@@ -629,6 +629,18 @@ static bool isWalking(uint32_t now);
 static uint16_t rgb565(uint8_t r,uint8_t g,uint8_t b);
 // Petite version du personnage pour les promenades : plus de place au jardin.
 // Couleurs, humeur et forme adulte V6 conservees.
+// V7.1 : une seule forme de ventre pour toutes les evolutions.
+// Place SOUS le visage, sans l'ancien double cercle ni symbole central.
+// Les silhouettes compactes des promenades respectent la meme proportion.
+static void drawBellyPatch(int cx,int by,uint8_t st,bool compact) {
+  if(st<2) return;
+  const int y=by+(compact?(st==2?64:69):(st==2?90:94));
+  const int w=compact?(st==2?27:31):(st==2?38:44);
+  const int h=compact?(st==2?20:23):(st==2?24:30);
+  gfx.fillRoundRect(cx-w/2,y,w,h,h/2,TFT_WHITE);
+  gfx.drawRoundRect(cx-w/2,y,w,h,h/2,rgb565(185,208,218));
+}
+
 static void drawWalkingCreature(uint32_t now,uint8_t st,Mood m,uint16_t body) {
   const int cx=67+static_cast<int>(sinf(now/900.0f)*4.0f);
   const int by=(st==1?105:st==2?91:81)+((now/190)%2?-3:2);
@@ -675,11 +687,8 @@ static void drawWalkingCreature(uint32_t now,uint8_t st,Mood m,uint16_t body) {
   gfx.drawRoundRect(cx+w/2-10,by+39,17,35,7,outline);
   gfx.fillRoundRect(cx-w/2,by,w,h,st==1?25:30,body);
   gfx.drawRoundRect(cx-w/2,by,w,h,st==1?25:30,outline);
-  // Un petit ventre et une expression reduite pour conserver la silhouette.
-  if(st>=2) {
-    gfx.fillRoundRect(cx-16,by+51,32,27,12,TFT_WHITE);
-    gfx.fillRoundRect(cx-11,by+56,22,18,9,TFT_LIGHTGREY);
-  }
+  // Un ventre simple, bien en dessous de la bouche (identique au grand Tama).
+  drawBellyPatch(cx,by,st,true);
   const int faceY=by+(st==1?29:34);
   const bool blink=now%3900<155;
   if(m==SICK) {
@@ -707,12 +716,8 @@ static void drawWalkingCreature(uint32_t now,uint8_t st,Mood m,uint16_t body) {
   } else {
     gfx.drawFastHLine(cx-8,faceY+25,16,TFT_BLACK);
   }
-  if(st==3 && adultForm==2) {
-    // Joueur : embleme discret.
-    gfx.fillTriangle(cx,by+66,cx-7,by+77,cx+7,by+77,TFT_YELLOW);
-  } else if(st==3 && adultForm==3) {
-    gfx.fillCircle(cx,by+70,5,TFT_RED);
-  }
+  // Chaque adulte conserve sa couleur et son accessoire sur la tete.
+  // Aucun triangle/insigne n'est ajoute sur le ventre.
 }
 
 static void drawCreature(uint32_t now) {
@@ -790,26 +795,13 @@ static void drawCreature(uint32_t now) {
   // Liseret fonce : particulierement utile pour le Tama vert sur le jardin.
   gfx.drawRoundRect(bodyx,by,width,height,st == 1 ? 33 : 40,rgb565(25,70,77));
 
-  if (st >= 2) {
-    gfx.fillRoundRect(cx-22,by+76,44,36,18,TFT_WHITE);
-    gfx.fillRoundRect(cx-15,by+83,30,23,12,TFT_LIGHTGREY);
-  }
+  // Ventre recule vers le bas du corps, sans recouvrir la bouche.
+  drawBellyPatch(cx,by,st,false);
   gfx.fillCircle(cx-31,by+68,7,TFT_PINK);
   gfx.fillCircle(cx+31,by+68,7,TFT_PINK);
   drawFace(cx,mouthY,now,m);
-  if(st==3) {
-    if(adultForm==1) {
-      gfx.fillCircle(cx,by+102,8,TFT_YELLOW);
-      gfx.fillCircle(cx-3,by+100,2,TFT_ORANGE);
-    } else if(adultForm==2) {
-      gfx.fillTriangle(cx,by+86,cx-12,by+106,cx+12,by+106,TFT_YELLOW);
-    } else if(adultForm==3) {
-      heart(cx,by+98,TFT_RED);
-    } else if(adultForm==4) {
-      gfx.drawCircle(cx,by+99,12,TFT_YELLOW);
-      gfx.fillCircle(cx,by+99,4,TFT_YELLOW);
-    }
-  }
+  // L'identite des quatre formes reste sur la tete (biscuit, etoile, coeur,
+  // couronne) et dans leur couleur; le ventre demeure net pour chacune.
   if (wave) {
     cross(cx+width/2+10,by+41, TFT_YELLOW);
   }
