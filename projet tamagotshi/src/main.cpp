@@ -661,6 +661,7 @@ static void drawFace(int cx, int cy, uint32_t now, Mood m) {
   }
 }
 // L'oeuf commun a toutes les familles, tachete et anime, avant la naissance.
+static uint16_t rgb565(uint8_t r,uint8_t g,uint8_t b);
 static void drawEgg(uint32_t now) {
   const uint32_t age=pet.ageSec;
   const int shake=age<22?0:age<38?((now/210UL)%2?2:-2):((now/98UL)%2?4:-4);
