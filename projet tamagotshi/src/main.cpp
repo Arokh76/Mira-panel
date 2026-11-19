@@ -1,4 +1,4 @@
-// Tamagotchi V5.1 — LilyGO T-Display V1.1 ORIGINAL (ESP32/ST7789, 135x240).
+// Tamagotchi V6 — LilyGO T-Display V1.1 ORIGINAL (ESP32/ST7789, 135x240).
 // Portrait, creature animee grand format, stats sur pages annexes, 2 mini-jeux.
  // GPIO35 : menu suivant / retour; GPIO0 : valider.
  // Stockage compatible V2 : namespace "tama_v2", magic 0x54414D32.
@@ -30,7 +30,7 @@ static bool lcdReady = false, displayOff = false;
 static const uint32_t MAGIC = 0x54414D32UL;
 static const int SW = 135, SH = 240;
 static const char* const MENU[] = {
-  "MANGER", "ETOILE", "REFLEXE", "DODO", "BAIN", "SOINS", "CADEAU", "CALIN", "INFOS"
+  "MANGER", "ETOILE", "REFLEXE", "DODO", "BAIN", "SOINS", "CADEAU", "CALIN", "INFOS", "SAC"
 };
 static const uint8_t MENU_COUNT = sizeof(MENU) / sizeof(MENU[0]);
 
@@ -58,7 +58,7 @@ struct Key {
 };
 static Key nextKey, okKey;
 
-enum Page : uint8_t { HOME, INFOS, SOUVENIRS, MINIGAME, REFLEXGAME };
+enum Page : uint8_t { HOME, INFOS, SOUVENIRS, PROFIL, SAC, MINIGAME, REFLEXGAME };
 enum Mood : uint8_t { HAPPY, NORMAL, SAD, SICK, ASLEEP };
 enum Effect : uint8_t { FX_NONE, FX_FOOD, FX_CLEAN, FX_HEAL, FX_GIFT, FX_GROW, FX_WAKE, FX_PLAY, FX_HUG, FX_SURPRISE };
 static Page page = HOME;
@@ -77,6 +77,28 @@ static bool reflexLastHit = false;
 static char speech[30] = "";
 static uint32_t speechUntil = 0, effectUntil = 0;
 static uint32_t lastFrame = 0, lastSecond = 0, lastSave = 0, lastGift = 0;
+// V6 : attributs permanents et objets conserves dans le NVS de V5.
+static uint8_t personality = 0, adultForm = 0, bagChoice = 0;
+static uint8_t inventory[3] = {1,0,0}; // biscuit, ballon, doudou
+static uint16_t fedCount = 0, careCount = 0;
+static const char* const PERSONALITY[] = {"INCONNUE","GOURMAND","JOUEUR","CALIN","REVEUR"};
+static const char* const EVOLUTION[] = {"EN COURS","GOURMAND","JOUEUR","CALIN","SAGE"};
+static const char* const ITEMS[] = {"BISCUIT","BALLON","DOUDOU","RETOUR"};
+static void giveItem(uint8_t type) {
+  if(type<3 && inventory[type]<9) ++inventory[type];
+}
+static uint8_t pickAdultForm() {
+  const uint32_t play=static_cast<uint32_t>(gamePlayed)+reflexPlayed;
+  const uint32_t score[4] = {
+    static_cast<uint32_t>(fedCount)*3+(personality==1?2U:0U),
+    play*3+gameWins+reflexWins+(personality==2?2U:0U),
+    static_cast<uint32_t>(hugCount)*3+(personality==3?2U:0U),
+    static_cast<uint32_t>(careCount)*3+(personality==4?2U:0U)
+  };
+  uint8_t best=0;
+  for(uint8_t i=1;i<4;++i) if(score[i]>score[best]) best=i;
+  return best+1;
+}
 
 static uint8_t clip100(int v) {
   return static_cast<uint8_t>(v < 0 ? 0 : v > 100 ? 100 : v);
@@ -125,6 +147,13 @@ static void save() {
   prefs.putUShort("cuddles", hugCount);
   prefs.putUChar("amitie", friendship);
   prefs.putUInt("eventage", lastSurpriseAge);
+  prefs.putUChar("perso",personality);
+  prefs.putUChar("form",adultForm);
+  prefs.putUShort("feedn",fedCount);
+  prefs.putUShort("caren",careCount);
+  prefs.putUChar("item0",inventory[0]);
+  prefs.putUChar("item1",inventory[1]);
+  prefs.putUChar("item2",inventory[2]);
   prefs.putUInt("magic", MAGIC);
   lastSave = millis();
 }
@@ -146,6 +175,15 @@ static void load() {
     hugCount = prefs.getUShort("cuddles", 0);
     friendship = clip100(prefs.getUChar("amitie", 50));
     lastSurpriseAge = prefs.getUInt("eventage", pet.ageSec);
+    personality=prefs.getUChar("perso",0);
+    adultForm=prefs.getUChar("form",0);
+    if(personality>4) personality=0;
+    if(adultForm>4) adultForm=0;
+    fedCount=prefs.getUShort("feedn",0);
+    careCount=prefs.getUShort("caren",0);
+    inventory[0]=min((int)prefs.getUChar("item0",1),9);
+    inventory[1]=min((int)prefs.getUChar("item1",0),9);
+    inventory[2]=min((int)prefs.getUChar("item2",0),9);
   } else {
     lastSurpriseAge = pet.ageSec;
     save();
@@ -299,19 +337,19 @@ static void drawUsbIdle(uint32_t now) {
 static void tickSecond() {
   const uint8_t oldStage = stage();
   ++pet.ageSec;
-  if (pet.ageSec % 42 == 0) pet.faim = clip100(pet.faim-1);
-  if (pet.ageSec % 55 == 0) pet.joie = clip100(pet.joie-1);
+  if (pet.ageSec % (personality==1?35U:42U) == 0) pet.faim = clip100(pet.faim-1);
+  if (pet.ageSec % (personality==2?45U:55U) == 0) pet.joie = clip100(pet.joie-1);
   if (pet.ageSec % 75 == 0) pet.proprete = clip100(pet.proprete-1);
   if (pet.dort) {
-    if (pet.ageSec % 7 == 0) pet.energie = clip100(pet.energie+1);
+    if (pet.ageSec % 7 == 0) pet.energie = clip100(pet.energie+(personality==4?2:1));
     if (pet.energie >= 100) {
       pet.dort = false;
       say("BIEN DORMI !", FX_WAKE);
     }
-  } else if (pet.ageSec % 50 == 0) {
+  } else if (pet.ageSec % (personality==4?65U:50U) == 0) {
     pet.energie = clip100(pet.energie-1);
   }
-  if (pet.ageSec % 180 == 0 && friendship > 0) {
+  if (pet.ageSec % (personality==3?240U:180U) == 0 && friendship > 0) {
     friendship = clip100(friendship - 1);
   }
   if (pet.ageSec % 60 == 0) {
@@ -323,7 +361,9 @@ static void tickSecond() {
     }
   }
   if (stage() != oldStage) {
-    say(stage() == 1 ? "JE SUIS NE !" : "J'AI GRANDI !", FX_GROW, 3400);
+    if(stage()==1 && personality==0) personality=static_cast<uint8_t>(random(1,5));
+    if(stage()==3 && adultForm==0) adultForm=pickAdultForm();
+    say(stage()==1?"JE SUIS NE !":stage()==3?"MA NOUVELLE FORME !":"J'AI GRANDI !",FX_GROW,3400);
     save();
   }
 }
@@ -354,10 +394,10 @@ static void gamePress(uint32_t now) {
     pet.energie = clip100(pet.energie - 7);
     pet.faim = clip100(pet.faim - 3);
     ++gamePlayed;
-    if (gameHits == 3) ++gameWins;
+    if (gameHits == 3) { ++gameWins; giveItem(1); }
     friendship = clip100(friendship + gameHits * 3);
     page = HOME;
-    say(gameHits == 3 ? "CHAMPION !" : gameHits ? "BIEN JOUE !" : "ON REESSAIE ?", FX_PLAY, 2700);
+    say(gameHits == 3 ? "GAGNE : BALLON !" : gameHits ? "BIEN JOUE !" : "ON REESSAIE ?", FX_PLAY, 2700);
     save();
   }
 }
@@ -380,12 +420,12 @@ static void reflexPress(uint32_t now) {
   ++reflexRound;
   if (reflexRound == 3) {
     ++reflexPlayed;
-    if (reflexHits == 3) ++reflexWins;
+    if (reflexHits == 3) { ++reflexWins; giveItem(2); }
     pet.joie = clip100(pet.joie + 5 + 9 * reflexHits);
     pet.energie = clip100(pet.energie - 6);
     friendship = clip100(friendship + reflexHits * 3);
     page = HOME;
-    say(reflexHits == 3 ? "SUPER REFLEXE !" : reflexHits ? "BIEN JOUE !" : "ON REESSAIE ?", FX_PLAY, 2700);
+    say(reflexHits == 3 ? "GAGNE : DOUDOU !" : reflexHits ? "BIEN JOUE !" : "ON REESSAIE ?", FX_PLAY, 2700);
     save();
     return;
   }
@@ -404,8 +444,9 @@ static void trySurprise() {
       say("UN PETIT GOUTER !", FX_FOOD, 2600);
       break;
     case 1:
-      pet.joie = clip100(pet.joie + 10);
-      say("UN JOUET TROUVE !", FX_GIFT, 2600);
+      giveItem(static_cast<uint8_t>(random(0,3)));
+      pet.joie=clip100(pet.joie+5);
+      say("OBJET TROUVE !",FX_GIFT,2600);
       break;
     case 2:
       friendship = clip100(friendship + 6);
@@ -422,7 +463,8 @@ static void chooseAction(uint32_t now) {
   switch(selected) {
     case 0:
       pet.dort = false;
-      pet.faim = clip100(pet.faim + 26);
+      pet.faim = clip100(pet.faim + (personality==1?33:26));
+      if(fedCount<65535) ++fedCount;
       pet.proprete = clip100(pet.proprete - 3);
       pet.sante = clip100(pet.sante + 2);
       say("MIAM MIAM !", FX_FOOD);
@@ -440,11 +482,13 @@ static void chooseAction(uint32_t now) {
     case 4:
       pet.dort = false;
       pet.proprete = clip100(pet.proprete + 34);
+      if(careCount<65535) ++careCount;
       pet.joie = clip100(pet.joie + 4);
       say("TOUT PROPRE !", FX_CLEAN);
       break;
     case 5:
       pet.sante = clip100(pet.sante + 25);
+      if(careCount<65535) ++careCount;
       pet.joie = clip100(pet.joie - 2);
       say("CA VA MIEUX !", FX_HEAL);
       break;
@@ -461,14 +505,36 @@ static void chooseAction(uint32_t now) {
     case 7:
       pet.dort = false;
       pet.joie = clip100(pet.joie + 12);
-      friendship = clip100(friendship + 10);
+      friendship = clip100(friendship + (personality==3?16:10));
       ++hugCount;
       say("GROS CALIN !", FX_HUG, 2500);
       break;
-    case 8:
-      page = INFOS;
-      return;
+    case 8: page=INFOS; return;
+    case 9: bagChoice=0; page=SAC; return;
   }
+  save();
+}
+static void useBagItem() {
+  if(bagChoice==3) { page=HOME; return; }
+  if(bagChoice>=3 || inventory[bagChoice]==0) {
+    say("SAC VIDE !",FX_NONE,1400);
+    return;
+  }
+  --inventory[bagChoice];
+  pet.dort=false;
+  if(bagChoice==0) {
+    pet.faim=clip100(pet.faim+23);
+    say("UN BISCUIT !",FX_FOOD,2100);
+  } else if(bagChoice==1) {
+    pet.joie=clip100(pet.joie+26);
+    pet.energie=clip100(pet.energie-3);
+    say("ON JOUE !",FX_PLAY,2100);
+  } else {
+    pet.energie=clip100(pet.energie+20);
+    friendship=clip100(friendship+12);
+    say("MON DOUDOU !",FX_HUG,2100);
+  }
+  page=HOME;
   save();
 }
 
@@ -539,8 +605,10 @@ static void drawCreature(uint32_t now) {
   const bool dance = (!pet.dort && pet.joie >= 60 &&
                       (now / 12000) % 5 == 3);
   const bool wave = (!pet.dort && (((now/7200)%4==3) || dance));
-  uint16_t body = st == 1 ? TFT_CYAN : st == 2 ? TFT_GREEN :
-                  friendship >= 75 ? TFT_MAGENTA : TFT_SKYBLUE;
+  const uint16_t adultColor=adultForm==1?TFT_ORANGE:adultForm==2?TFT_CYAN:
+                            adultForm==3?TFT_PINK:adultForm==4?TFT_GREEN:
+                            friendship>=75?TFT_MAGENTA:TFT_SKYBLUE;
+  uint16_t body=st==1?TFT_CYAN:st==2?TFT_GREEN:adultColor;
   if (m == SICK) body = TFT_LIGHTGREY;
   else if (st == 3 && m == SAD) body = TFT_ORANGE;
 
@@ -564,8 +632,23 @@ static void drawCreature(uint32_t now) {
     gfx.fillCircle(cx+31,by-15,5,TFT_PINK);
   }
   if (st == 3) {
-    gfx.fillRoundRect(cx-15,by-25,30,25,9,TFT_YELLOW);
-    gfx.fillCircle(cx,by-25,6,TFT_ORANGE);
+    if(adultForm==1) { // Gourmand : biscuit
+      gfx.fillCircle(cx,by-20,17,TFT_YELLOW);
+      gfx.fillCircle(cx-7,by-24,3,TFT_ORANGE);
+      gfx.fillCircle(cx+7,by-17,3,TFT_ORANGE);
+    } else if(adultForm==2) { // Joueur : etoile
+      gfx.fillTriangle(cx,by-32,cx-10,by-10,cx+10,by-10,TFT_YELLOW);
+      gfx.fillCircle(cx,by-13,6,TFT_ORANGE);
+    } else if(adultForm==3) {
+      heart(cx,by-21,TFT_RED);
+    } else if(adultForm==4) { // Sage : couronne
+      gfx.fillTriangle(cx-18,by-5,cx-11,by-29,cx,by-8,TFT_YELLOW);
+      gfx.fillTriangle(cx,by-8,cx+11,by-29,cx+18,by-5,TFT_YELLOW);
+      gfx.fillRoundRect(cx-18,by-11,36,10,3,TFT_YELLOW);
+    } else {
+      gfx.fillRoundRect(cx-15,by-25,30,25,9,TFT_YELLOW);
+      gfx.fillCircle(cx,by-25,6,TFT_ORANGE);
+    }
   }
 
   // Jambes et bras avec mouvements.
@@ -584,7 +667,19 @@ static void drawCreature(uint32_t now) {
   gfx.fillCircle(cx-31,by+68,7,TFT_PINK);
   gfx.fillCircle(cx+31,by+68,7,TFT_PINK);
   drawFace(cx,mouthY,now,m);
-
+  if(st==3) {
+    if(adultForm==1) {
+      gfx.fillCircle(cx,by+102,8,TFT_YELLOW);
+      gfx.fillCircle(cx-3,by+100,2,TFT_ORANGE);
+    } else if(adultForm==2) {
+      gfx.fillTriangle(cx,by+86,cx-12,by+106,cx+12,by+106,TFT_YELLOW);
+    } else if(adultForm==3) {
+      heart(cx,by+98,TFT_RED);
+    } else if(adultForm==4) {
+      gfx.drawCircle(cx,by+99,12,TFT_YELLOW);
+      gfx.fillCircle(cx,by+99,4,TFT_YELLOW);
+    }
+  }
   if (wave) {
     cross(cx+width/2+10,by+41, TFT_YELLOW);
   }
@@ -652,6 +747,14 @@ static const char* idleSpeech() {
   if (pet.proprete < 19) return "UN BAIN ?";
   if (pet.energie < 15) return "SOMMEIL...";
   if (friendship >= 80 && (millis()/11000)%4 == 0) return "MON MEILLEUR AMI !";
+  if((millis()/11000)%5==4) {
+    switch(personality) {
+      case 1: return "UN PETIT GOUTER ?";
+      case 2: return "ON FAIT UN JEU ?";
+      case 3: return "UN CALIN ?";
+      case 4: return "JE REVE...";
+    }
+  }
   if ((millis()/11000)%4==0) return "COUCOU !";
   if ((millis()/11000)%4==1) return "...";
   if ((millis()/11000)%4==2) return "ON FAIT QUOI ?";
@@ -750,6 +853,48 @@ static void drawSouvenirs() {
   gfx.setTextColor(TFT_LIGHTGREY,TFT_BLACK);
   gfx.drawCentreString("SUIVANT      RETOUR",67,221,1);
 }
+static void drawProfil() {
+  gfx.fillSprite(TFT_BLACK);
+  gfx.drawRoundRect(2,2,131,236,8,TFT_YELLOW);
+  gfx.setTextColor(TFT_YELLOW,TFT_BLACK);
+  gfx.drawCentreString("MON PROFIL",67,12,2);
+  gfx.setTextColor(TFT_WHITE,TFT_BLACK);
+  gfx.drawCentreString("PERSONNALITE",67,49,1);
+  gfx.setTextColor(TFT_CYAN,TFT_BLACK);
+  gfx.drawCentreString(PERSONALITY[personality],67,67,2);
+  gfx.setTextColor(TFT_WHITE,TFT_BLACK);
+  gfx.drawCentreString("EVOLUTION",67,104,1);
+  gfx.setTextColor(TFT_GREEN,TFT_BLACK);
+  gfx.drawCentreString(stage()==3?EVOLUTION[adultForm]:"EN COURS...",67,123,2);
+  char line[35];
+  snprintf(line,sizeof(line),"REPAS %u  SOINS %u",(unsigned)fedCount,(unsigned)careCount);
+  gfx.setTextColor(TFT_LIGHTGREY,TFT_BLACK);
+  gfx.drawCentreString(line,67,165,1);
+  snprintf(line,sizeof(line),"JEUX %lu CALINS %u",
+       (unsigned long)(static_cast<uint32_t>(gamePlayed)+reflexPlayed),(unsigned)hugCount);
+  gfx.drawCentreString(line,67,181,1);
+  gfx.drawCentreString("SUIVANT      RETOUR",67,220,1);
+}
+static void drawSac() {
+  gfx.fillSprite(TFT_BLACK);
+  gfx.drawRoundRect(2,2,131,236,8,TFT_MAGENTA);
+  gfx.setTextColor(TFT_MAGENTA,TFT_BLACK);
+  gfx.drawCentreString("MON SAC",67,12,2);
+  for(uint8_t i=0;i<4;++i) {
+    const int y=51+i*38;
+    const bool active=bagChoice==i;
+    if(active) gfx.fillRoundRect(10,y-5,115,31,7,TFT_NAVY);
+    gfx.setTextColor(active?TFT_CYAN:TFT_WHITE,active?TFT_NAVY:TFT_BLACK);
+    gfx.drawString(ITEMS[i],19,y,2);
+    if(i<3) {
+      char count[8];
+      snprintf(count,sizeof(count),"x%u",(unsigned)inventory[i]);
+      gfx.drawRightString(count,113,y,2);
+    }
+  }
+  gfx.setTextColor(TFT_LIGHTGREY,TFT_BLACK);
+  gfx.drawCentreString("SUIVANT / UTILISER",67,215,1);
+}
 static void drawStar(int x,int y,uint16_t color) {
   gfx.fillTriangle(x,y-12,x-5,y-3,x+5,y-3,color);
   gfx.fillTriangle(x-11,y-2,x+11,y-2,x,y+10,color);
@@ -837,6 +982,17 @@ void setup() {
   }
   gfx.setTextDatum(TL_DATUM);
   randomSeed((uint32_t)micros() ^ (uint32_t)esp_random());
+  // Migration sans perte du Tama de V5.1.
+  bool migrated=false;
+  if(stage()>0 && personality==0) {
+    personality=static_cast<uint8_t>(random(1,5));
+    migrated=true;
+  }
+  if(stage()==3 && adultForm==0) {
+    adultForm=pickAdultForm();
+    migrated=true;
+  }
+  if(migrated) save();
   lastSecond=millis();
   lastSave=millis();
   lastInteraction=millis();
@@ -860,7 +1016,13 @@ void loop() {
       else if(next) page=SOUVENIRS;
     } else if(page==SOUVENIRS) {
       if(ok) page=HOME;
+      else if(next) page=PROFIL;
+    } else if(page==PROFIL) {
+      if(ok) page=HOME;
       else if(next) page=INFOS;
+    } else if(page==SAC) {
+      if(next) bagChoice=(bagChoice+1)%4;
+      else if(ok) useBagItem();
     } else if(page==MINIGAME) {
       if(next) { page=HOME; say("UNE AUTRE FOIS !",FX_NONE,1500); }
       else if(ok) gamePress(now);
@@ -899,6 +1061,8 @@ void loop() {
     if(idle && usbProbable) drawUsbIdle(now);
     else if(page==INFOS) drawInfos();
     else if(page==SOUVENIRS) drawSouvenirs();
+    else if(page==PROFIL) drawProfil();
+    else if(page==SAC) drawSac();
     else if(page==MINIGAME) drawGame(now);
     else if(page==REFLEXGAME) drawReflex(now);
     else drawHome(now);

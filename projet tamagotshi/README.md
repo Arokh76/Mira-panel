@@ -1,25 +1,30 @@
-# Projet Tamagotshi V5.1 - Hibernation et affichage batterie
+# Tamagotchi V6 — personnalites, evolutions et sac
 
-Pour LilyGO T-Display V1.1 original, ecran portrait 135x240, batterie LiPo 1S. Conserve tous les jeux et fonctionnalites de V4/V5.
+Pour **LilyGO T-Display V1.1 original** (ESP32, ST7789, 135 x 240). Tous les jeux, ecrans, sauvegardes et comportements batterie de la V5.1 sont preserves.
 
-## Etat batterie faible
-- Sous 3,48 V, au moins 3 mesures a 30 secondes d'intervalle, une **grosse batterie vide rouge** apparait **2 secondes**, puis l'ecran s'eteint et l'ESP32 passe en **deep sleep**.
-- L'etat (age, besoins, amitie, parties, etc.) est sauvegarde en NVS avant l'hibernation et conserve au reveil.
-- **Appui GPIO35 pendant l'hibernation** : la carte redemarre, mesure la tension et, si elle est toujours trop basse, affiche encore le pictogramme **2 secondes**, puis repart en deep sleep. Le bouton ne lance aucun jeu tant que la batterie est faible.
-- Controle silencieux automatique toutes les 5 minutes ; reprise quand la tension mesuree est >= 3,70 V.
-- Pas de consommation reduite garantie au niveau d'un appareil commercial : les essais materiels sont necessaires.
+## Nouveautes V6
 
-## Charge / USB
-- Le T-Display utilise un **TP4054** dont la sortie **CHRG** commande la **LED bleue de charge**, mais cette sortie n'est pas reliee d'origine a un GPIO accessible par le firmware. Il est donc **impossible de confirmer charge en cours / charge terminee sans modification materielle**.
-- La lecture GPIO34 est fiable sur batterie mais peut lire la tension d'alimentation USB pendant la recharge. Quand elle depasse **4,40 V**, le firmware suppose **USB probable** ; il affiche une grosse batterie animee quand le Tama n'est pas utilise pendant 2 minutes. Le message est volontairement **« ALIMENTATION USB »**, pas « batterie pleine ».
-- La detection USB est une **heuristique**, particulierement peu fiable en debut de charge (la mesure peut rester vers 4,20 V) : elle doit etre verifiee sur votre carte.
-- En l'absence de detection USB, l'ecran s'eteint apres 2 minutes pour economiser la batterie. Un premier appui le rallume sans executer d'action.
-- La ligne **GPIO14 reste HIGH pendant le fonctionnement sur batterie**, car elle fait partie du circuit de mise sous tension. Elle ne passe LOW qu'au moment de la veille profonde.
+- **Quatre personnalites** : GOURMAND, JOUEUR, CALIN, REVEUR. Attribuees a l'eclosion, puis sauvegardees. Elles changent les besoins, les reactions et les messages.
+- **Quatre formes adultes** : GOURMAND (biscuit orange), JOUEUR (etoile cyan), CALIN (coeur rose), SAGE (couronne verte). Determination a 30 minutes de temps actif selon le nombre de repas, jeux, calins, soins. Forme definitive.
+- **Inventaire** (nouveau menu SAC) : un biscuit (+23 faim), ballon (+26 joie, -3 energie), doudou (+20 energie, +12 amitie). Un biscuit au depart. Gagner un ballon avec 3/3 au jeu ETOILE ; un doudou avec 3/3 au jeu REFLEXE. Les surprises peuvent donner des objets. Max 9 par type.
+- **Page PROFIL** : INFOS -> SOUVENIRS -> PROFIL -> INFOS (bouton suivant). Voir sa personnalite, son evolution et les activites.
+- **Migration automatique V5.1** : sauvegarde Preferences `tama_v2` intacte. Un ancien Tama deja ne recoit une personnalite au premier demarrage et les adultes recoivent une forme a partir des statistiques existantes.
 
-## Firmware
-- [**Tamagotchi_V5_1_TDisplay_V11_full.bin**](firmware/Tamagotchi_V5_1_TDisplay_V11_full.bin) : image complete pour Flash Download Tools a **0x0000**.
-- [**Tamagotchi_V5_1_TDisplay_V11_app.bin**](firmware/Tamagotchi_V5_1_TDisplay_V11_app.bin) : application seule a **0x10000** depuis V4/V5, sans ERASE pour conserver la NVS.
-- Reglages ESP32 / UART / 40 MHz / DIO / 32 Mbit / 115200.
-- L'age n'avance pas pendant un vrai deep sleep ni pendant une coupure d'alimentation.
+**Commandes** : GPIO35 suivant ; GPIO0 valider. Dans le SAC, selectionner BISCUIT / BALLON / DOUDOU / RETOUR puis valider.
 
-**Ce comportement n'est valide qu'a la compilation et doit etre teste sur la carte reelle avant de compter dessus pour proteger la LiPo.** La protection propre a la batterie reste necessaire.
+## Evolution acceleree pour developpement
+
+Oeuf : 1 minute ; bebe : 1 a 7 minutes ; enfant : 7 a 30 minutes ; adulte a 30 minutes de fonctionnement actif. Pas d'age cumule pendant les deep sleeps. On pourra ralentir cette croissance une fois le jeu valide.
+
+## Batterie
+
+Gestion V5.1 preservee, a tester sur la carte : batterie vide rouge 2 sec lors d'un bouton en hibernation, sauvegarde puis deep sleep, reessai periodique, extinction ecran inactif. La detection USB est indicative, elle ne detecte pas une charge terminee.
+
+## Flash Download Tools
+
+- [Firmware V6 complet](firmware/Tamagotchi_V6_TDisplay_V11_full.bin) a **0x0000**.
+- [Application seule V6](firmware/Tamagotchi_V6_TDisplay_V11_app.bin) a **0x10000** pour mettre a jour V4/V5/V5.1 **sans ERASE** et conserver l'animal.
+
+Compilation : PlatformIO, `platformio.ini`, ESP32 classique, 4 Mo, DIO, 40 MHz, 115200.
+
+**ESP-NOW non inclus** : les rencontres sans fil entre deux Tamagotchi seront ajoutees apres validation de la V6 sur deux cartes.
