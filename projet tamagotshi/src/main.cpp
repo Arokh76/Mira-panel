@@ -1,4 +1,4 @@
-// Tamagotchi V7.3 — scenes de vie et petite maison — LilyGO T-Display V1.1 ORIGINAL (ESP32/ST7789, 135x240).
+// Tamagotchi V8.0 — scenes de vie et petite maison — LilyGO T-Display V1.1 ORIGINAL (ESP32/ST7789, 135x240).
 // Portrait, creature animee grand format, stats sur pages annexes, 2 mini-jeux.
  // GPIO35 : menu suivant / retour; GPIO0 : valider.
  // Stockage compatible V2 : namespace "tama_v2", magic 0x54414D32.
@@ -81,6 +81,15 @@ static uint32_t lastFrame = 0, lastSecond = 0, lastSave = 0, lastGift = 0;
 // V6 : attributs permanents et objets conserves dans le NVS de V5.
 static uint8_t personality = 0, adultForm = 0, bagChoice = 0;
 static uint8_t homeScene = 0, homeDecor = 0, roomChoice = 0; // jardin/chambre, decoration
+// V8 : famille tiree a l'eclosion, puis voie A ou B au passage adolescent.
+static uint8_t tamaFamily=0, tamaBranch=0; // 1 Terre/2 Eau/3 Ciel ; 1 A/2 B
+static const char* const FAMILY_NAMES[]={"MYSTERE","TERRE","EAU","CIEL"};
+// Par famille : bebe, jeune, ado A, adulte A, ado B, adulte B.
+static const char* const CREATURE_NAMES[3][6]={
+  {"POUSSIN","FEUILLU","BOURGEON","SYLVAN","MOUSSE","FLORALIS"},
+  {"GOUTI","NAGEO","AQUILON","MAREON","RIVAGE","LAGRIN"},
+  {"PLUMI","AELO","ALIZE","ZEPHYR","EOLE","AERYS"}
+};
 static uint8_t inventory[3] = {1,0,0}; // biscuit, ballon, doudou
 static uint16_t fedCount = 0, careCount = 0;
 static const char* const PERSONALITY[] = {"INCONNUE","GOURMAND","JOUEUR","CALIN","REVEUR"};
@@ -117,18 +126,39 @@ static uint8_t clip100(int v) {
   return static_cast<uint8_t>(v < 0 ? 0 : v > 100 ? 100 : v);
 }
 static uint8_t stage() {
-  if (pet.ageSec < 60) return 0;        // OEUF 1 minute : test accelere
-  if (pet.ageSec < 420) return 1;       // BEBE 7 minutes
-  if (pet.ageSec < 1800) return 2;      // ENFANT 30 minutes
-  return 3;                             // ADULTE
+  if (pet.ageSec < 60U) return 0;    // oeuf 1 min (test)
+  if (pet.ageSec < 420U) return 1;   // bebe de 1 a 7 min
+  if (pet.ageSec < 900U) return 2;   // jeune de 7 a 15 min
+  if (pet.ageSec < 1800U) return 3;  // ado de 15 a 30 min
+  return 4;                          // adulte, conserve le seuil de la V7.3
 }
 static const char* stageLabel() {
-  switch (stage()) {
+  switch(stage()) {
     case 0: return "OEUF";
     case 1: return "BEBE";
-    case 2: return "ENFANT";
-    default: return "ADULTE";
+    case 2: return "JEUNE";
+    case 3: return "ADO";
+    default:return "ADULTE";
   }
+}
+static const char* creatureName() {
+  if(tamaFamily<1 || tamaFamily>3 || stage()==0) return "OEUF";
+  const uint8_t st=stage();
+  const uint8_t idx=st==1?0:st==2?1:st==3?(tamaBranch==2?4:2):(tamaBranch==2?5:3);
+  return CREATURE_NAMES[tamaFamily-1][idx];
+}
+// La voie A recompense surtout les jeux, la B les repas, calins et soins.
+// Les ecarts faibles sont tires au sort pour ne pas verrouiller une branche.
+static uint8_t chooseBranchV8() {
+  const uint32_t play=(uint32_t)(gamePlayed+reflexPlayed)*4U+
+                      (uint32_t)(gameWins+reflexWins)*2U+
+                      (personality==2?2U:0U);
+  const uint32_t care=(uint32_t)fedCount*2U+(uint32_t)careCount*3U+
+                      (uint32_t)hugCount*2U+(friendship>=80?3U:0U)+
+                      (personality==3||personality==4?2U:0U);
+  if(play>care+2U) return 1;
+  if(care>play+2U) return 2;
+  return (uint8_t)random(1,3);
 }
 static Mood mood() {
   if (pet.dort) return ASLEEP;
@@ -170,6 +200,9 @@ static void save() {
   prefs.putUChar("item2",inventory[2]);
   prefs.putUChar("room",homeScene);
   prefs.putUChar("decor",homeDecor);
+  prefs.putUChar("family",tamaFamily);
+  prefs.putUChar("branch",tamaBranch);
+  prefs.putUChar("evo_v8",1); // distinguer migration V7 et nouveau cycle
   prefs.putUInt("magic", MAGIC);
   lastSave = millis();
 }
@@ -204,6 +237,12 @@ static void load() {
     homeDecor=prefs.getUChar("decor",0);
     if(homeScene>1) homeScene=0;
     if(homeDecor>3 || !decorUnlocked(homeDecor)) homeDecor=0;
+    if(prefs.getUChar("evo_v8",0)==1) {
+      tamaFamily=prefs.getUChar("family",0);
+      tamaBranch=prefs.getUChar("branch",0);
+      if(tamaFamily>3) tamaFamily=0;
+      if(tamaBranch>2) tamaBranch=0;
+    }
   } else {
     lastSurpriseAge = pet.ageSec;
     save();
@@ -371,10 +410,21 @@ static void tickSecond() {
       pet.sante = clip100(pet.sante+1);
     }
   }
-  if (stage() != oldStage) {
-    if(stage()==1 && personality==0) personality=static_cast<uint8_t>(random(1,5));
-    if(stage()==3 && adultForm==0) adultForm=pickAdultForm();
-    say(stage()==1?"JE SUIS NE !":stage()==3?"MA NOUVELLE FORME !":"J'AI GRANDI !",FX_GROW,3400);
+  if(stage()!=oldStage) {
+    if(stage()==1) {
+      if(tamaFamily==0) tamaFamily=(uint8_t)random(1,4); // chances 1/3
+      if(personality==0) personality=(uint8_t)random(1,5);
+      say(tamaFamily==1?"BONJOUR, TERRE !":tamaFamily==2?"BONJOUR, EAU !":"BONJOUR, CIEL !",FX_GROW,3700);
+    } else if(stage()==3) {
+      if(tamaBranch==0) tamaBranch=chooseBranchV8();
+      say(tamaBranch==1?"VOIE A !":"VOIE B !",FX_GROW,3600);
+    } else if(stage()==4) {
+      if(tamaBranch==0) tamaBranch=chooseBranchV8();
+      if(adultForm==0) adultForm=pickAdultForm(); // compatibilite sauvegarde V6
+      say("MA FORME ADULTE !",FX_GROW,3600);
+    } else {
+      say("J'AI GRANDI !",FX_GROW,3300);
+    }
     save();
   }
 }
@@ -610,21 +660,44 @@ static void drawFace(int cx, int cy, uint32_t now, Mood m) {
     gfx.drawFastHLine(cx-9,cy+26,18,TFT_BLACK);
   }
 }
+// L'oeuf commun a toutes les familles, tachete et anime, avant la naissance.
 static void drawEgg(uint32_t now) {
-  int wobble = ((now / 230) % 2) ? -3 : 3;
-  const int cx = 67+wobble;
-  gfx.fillRoundRect(cx-42,53,84,132,40,TFT_WHITE);
-  gfx.fillRoundRect(cx-36,59,72,120,36,TFT_LIGHTGREY);
-  gfx.fillEllipse(cx-9,92,18,10,TFT_WHITE);
-  // Petite forme visible sous la coquille
-  gfx.fillCircle(cx-15,127,5,TFT_BLACK);
-  gfx.fillCircle(cx+15,127,5,TFT_BLACK);
-  gfx.drawFastHLine(cx-7,146,14,TFT_BLACK);
-  if (pet.ageSec > 40 && (now / 350)%2==0) {
-    gfx.drawLine(cx-12,65,cx-2,74,TFT_DARKGREY);
-    gfx.drawLine(cx-2,74,cx+9,66,TFT_DARKGREY);
+  const uint32_t age=pet.ageSec;
+  const int shake=age<22?0:age<38?((now/210UL)%2?2:-2):((now/98UL)%2?4:-4);
+  const int cx=67+shake;
+  const int cy=142+(age>40 && (now/280UL)%2?2:0);
+  const uint16_t shell=rgb565(255,244,211);
+  const uint16_t pink=rgb565(246,145,185);
+  const uint16_t edge=rgb565(142,112,127);
+  // L'oeuf a une silhouette creme avec taches roses.
+  gfx.fillEllipse(cx,cy,39,49,edge);
+  gfx.fillEllipse(cx,cy-1,36,47,shell);
+  gfx.fillEllipse(cx-17,cy-23,9,7,TFT_WHITE);
+  gfx.fillCircle(cx-18,cy+4,8,pink);
+  gfx.fillCircle(cx+19,cy-18,9,pink);
+  gfx.fillCircle(cx+14,cy+26,7,pink);
+  gfx.fillCircle(cx-5,cy-31,5,pink);
+  gfx.fillCircle(cx-22,cy+28,5,pink);
+  gfx.fillCircle(cx+25,cy+5,5,pink);
+  // Debut de l'eclosion pendant les 20 dernieres secondes.
+  if(age>=41) {
+    gfx.drawLine(cx-17,cy-12,cx-7,cy-4,edge);
+    gfx.drawLine(cx-7,cy-4,cx+2,cy-13,edge);
+    gfx.drawLine(cx+2,cy-13,cx+10,cy-5,edge);
+  }
+  if(age>=52) {
+    gfx.drawLine(cx+10,cy-5,cx+24,cy-18,edge);
+    gfx.drawLine(cx-7,cy-4,cx-12,cy+9,edge);
+    gfx.fillCircle(cx-10,cy+14,3,rgb565(36,44,55));
+    gfx.fillCircle(cx+10,cy+14,3,rgb565(36,44,55));
+    gfx.drawFastHLine(cx-3,cy+24,6,edge);
+  }
+  if(age>=57 && (now/180UL)%2) {
+    gfx.drawLine(cx-38,cy-9,cx-45,cy-17,TFT_YELLOW);
+    gfx.drawLine(cx+38,cy-9,cx+45,cy-17,TFT_YELLOW);
   }
 }
+
 static bool isWalking(uint32_t now);
 static uint16_t rgb565(uint8_t r,uint8_t g,uint8_t b);
 // Petite version du personnage pour les promenades : plus de place au jardin.
@@ -632,198 +705,254 @@ static uint16_t rgb565(uint8_t r,uint8_t g,uint8_t b);
 // V7.2 : retour du dessin prefere, ventre blanc + centre gris clair.
 // On ne change pas son style : seul l'emplacement descend sous la bouche.
 // Les dimensions sont ajustees pour ne pas deborder sur les pieds.
-static void drawBellyPatch(int cx,int by,uint8_t st,bool compact,bool bedroom=false) {
-  if(st<2) return;
-  // Dessin blanc + gris de la V7.2 conserve tel quel ; dimensions adaptees
-  // aux deux tailles existantes et au modele intermediaire pour la chambre.
-  const int y=by+(compact?(st==2?63:69):bedroom?(st==2?79:83):(st==2?82:89));
-  const int w=compact?(st==2?30:32):bedroom?(st==2?38:40):(st==2?41:44);
-  const int h=compact?(st==2?22:25):bedroom?(st==2?27:31):(st==2?29:36);
-  gfx.fillRoundRect(cx-w/2,y,w,h,h/2,TFT_WHITE);
-  gfx.fillRoundRect(cx-(w-12)/2,y+5,w-12,h-10,(h-10)/2,TFT_LIGHTGREY);
+// V8 — art procedurale adaptee au TFT 135x240. Vue de FACE, selon les
+// 18 concepts valides : Terre (feuilles/fleurs), Eau (nageoires), Ciel (ailes).
+// Les couleurs sont en RGB565, sans bitmap a charger ni besoin de Wi-Fi.
+struct TamaBrush {
+  int cx,cy,s;
+  int X(int v) const { return cx+(v*s)/100; }
+  int Y(int v) const { return cy+(v*s)/100; }
+  int R(int v) const { return max(1,(v*s)/100); }
+  void ball(int x,int y,int r,uint16_t c) const {
+    gfx.fillCircle(X(x),Y(y),R(r),c);
+  }
+  void oval(int x,int y,int rx,int ry,uint16_t c) const {
+    gfx.fillEllipse(X(x),Y(y),R(rx),R(ry),c);
+  }
+  void line(int x1,int y1,int x2,int y2,uint16_t c) const {
+    gfx.drawLine(X(x1),Y(y1),X(x2),Y(y2),c);
+  }
+  void tri(int x1,int y1,int x2,int y2,int x3,int y3,uint16_t c) const {
+    gfx.fillTriangle(X(x1),Y(y1),X(x2),Y(y2),X(x3),Y(y3),c);
+  }
+  void rect(int x,int y,int w,int h,int r,uint16_t c) const {
+    gfx.fillRoundRect(X(x),Y(y),R(w),R(h),R(r),c);
+  }
+};
+static void tamaLeaf(const TamaBrush &p,int x,int y,bool left,uint16_t col) {
+  const int dir=left?-1:1;
+  p.tri(x,y+14,x+dir*27,y-13,x+dir*10,y-18,col);
+  p.tri(x,y+14,x+dir*10,y-18,x+dir*23,y+4,col);
+  p.line(x,y+12,x+dir*14,y-7,rgb565(47,139,69));
 }
-
-static void drawWalkingCreature(uint32_t now,uint8_t st,Mood m,uint16_t body) {
-  const int cx=67+static_cast<int>(sinf(now/900.0f)*4.0f);
-  const int by=(st==1?105:st==2?91:81)+((now/190)%2?-3:2);
-  const int w=st==1?58:st==2?74:83;
-  const int h=st==1?74:st==2?89:100;
-  const int stride=(now/190)%2?7:-7;
-  const uint16_t outline=rgb565(28,65,72);
-  // Oreilles, membres et pieds legerement alternes pendant la marche.
-  if(st>=2) {
-    gfx.fillRoundRect(cx-w/2+11,by-13,15,22,6,body);
-    gfx.fillRoundRect(cx+w/2-26,by-13,15,22,6,body);
-    gfx.drawRoundRect(cx-w/2+11,by-13,15,22,6,outline);
-    gfx.drawRoundRect(cx+w/2-26,by-13,15,22,6,outline);
-    gfx.fillCircle(cx-w/2+18,by-10,3,TFT_PINK);
-    gfx.fillCircle(cx+w/2-19,by-10,3,TFT_PINK);
-  }
-  if(st==3) {
-    // Accessoire propre a chacune des quatre evolutions.
-    if(adultForm==1) {
-      gfx.fillCircle(cx,by-15,12,TFT_YELLOW);
-      gfx.fillCircle(cx-4,by-17,2,TFT_ORANGE);
-      gfx.fillCircle(cx+4,by-12,2,TFT_ORANGE);
-    } else if(adultForm==2) {
-      gfx.fillTriangle(cx,by-26,cx-9,by-8,cx+9,by-8,TFT_YELLOW);
-      gfx.fillCircle(cx,by-9,4,TFT_ORANGE);
-    } else if(adultForm==3) {
-      heart(cx,by-16,TFT_RED);
-    } else if(adultForm==4) {
-      gfx.fillTriangle(cx-12,by-6,cx-8,by-23,cx,by-7,TFT_YELLOW);
-      gfx.fillTriangle(cx,by-7,cx+8,by-23,cx+12,by-6,TFT_YELLOW);
-      gfx.fillRoundRect(cx-12,by-10,24,7,2,TFT_YELLOW);
-    } else {
-      gfx.fillRoundRect(cx-10,by-18,20,18,6,TFT_YELLOW);
-    }
-  }
-  const int feetY=by+h-9;
-  gfx.fillRoundRect(cx-29+stride,feetY,24,17,6,body);
-  gfx.fillRoundRect(cx+5-stride,feetY,24,17,6,body);
-  gfx.drawRoundRect(cx-29+stride,feetY,24,17,6,outline);
-  gfx.drawRoundRect(cx+5-stride,feetY,24,17,6,outline);
-  gfx.fillRoundRect(cx-w/2-7,by+39,17,35,7,body);
-  gfx.fillRoundRect(cx+w/2-10,by+39,17,35,7,body);
-  gfx.drawRoundRect(cx-w/2-7,by+39,17,35,7,outline);
-  gfx.drawRoundRect(cx+w/2-10,by+39,17,35,7,outline);
-  gfx.fillRoundRect(cx-w/2,by,w,h,st==1?25:30,body);
-  gfx.drawRoundRect(cx-w/2,by,w,h,st==1?25:30,outline);
-  // Retour au ventre blanc/gris de V7.0, descendu sous la bouche.
-  drawBellyPatch(cx,by,st,true);
-  const int faceY=by+(st==1?29:34);
-  const bool blink=now%3900<155;
-  if(m==SICK) {
-    gfx.drawLine(cx-20,faceY-5,cx-11,faceY+5,TFT_BLACK);
-    gfx.drawLine(cx-20,faceY+5,cx-11,faceY-5,TFT_BLACK);
-    gfx.drawLine(cx+11,faceY-5,cx+20,faceY+5,TFT_BLACK);
-    gfx.drawLine(cx+11,faceY+5,cx+20,faceY-5,TFT_BLACK);
+static void tamaFlower(const TamaBrush &p,int x,int y) {
+  const uint16_t petal=rgb565(255,244,245),mid=rgb565(255,204,75);
+  p.ball(x-7,y,5,petal);
+  p.ball(x+7,y,5,petal);
+  p.ball(x,y-7,5,petal);
+  p.ball(x,y+7,5,petal);
+  p.ball(x,y,5,mid);
+}
+static void tamaWing(const TamaBrush &p,int x,int y,bool left,
+                     uint16_t outer,uint16_t inner,bool big) {
+  const int d=left?-1:1;
+  // Ailes plumees, reconnaissables de face pour le theme Ciel.
+  p.tri(x,y+12,x+d*(big?44:33),y-30,x+d*(big?39:27),y+22,outer);
+  p.oval(x+d*16,y-10,big?19:15,big?12:10,outer);
+  p.oval(x+d*25,y-2,big?18:12,big?10:8,inner);
+  if(big) p.oval(x+d*34,y+12,12,8,outer);
+  p.line(x+d*7,y+9,x+d*(big?36:27),y-8,rgb565(122,104,177));
+}
+static void tamaFin(const TamaBrush &p,int x,int y,bool left,
+                    uint16_t col,bool big) {
+  const int d=left?-1:1;
+  p.tri(x,y-16,x+d*(big?23:16),y-26,x+d*(big?25:19),y-2,col);
+  p.tri(x,y-2,x+d*(big?26:21),y+13,x,y+20,col);
+  p.line(x,y+2,x+d*(big?22:17),y+3,rgb565(255,235,151));
+}
+static void drawTamaFaceV8(const TamaBrush &p, uint8_t fam, Mood m,
+                           uint32_t now, uint8_t phase) {
+  const uint16_t ink=rgb565(24,37,55);
+  const bool sleep=m==ASLEEP, blink=sleep || now%3900UL<165UL;
+  const int sep=(fam==3?16:17);
+  if(m==SICK && !sleep) {
+    p.line(-sep-5,-13,-sep+5,-3,ink);
+    p.line(-sep-5,-3,-sep+5,-13,ink);
+    p.line(sep-5,-13,sep+5,-3,ink);
+    p.line(sep-5,-3,sep+5,-13,ink);
   } else if(blink) {
-    gfx.drawFastHLine(cx-21,faceY,13,TFT_BLACK);
-    gfx.drawFastHLine(cx+8,faceY,13,TFT_BLACK);
+    p.line(-sep-6,-7,-sep+6,-7,ink);
+    p.line(sep-6,-7,sep+6,-7,ink);
   } else {
-    gfx.fillRoundRect(cx-21,faceY-6,12,15,4,TFT_BLACK);
-    gfx.fillRoundRect(cx+9,faceY-6,12,15,4,TFT_BLACK);
-    gfx.fillCircle(cx-17,faceY-3,2,TFT_WHITE);
-    gfx.fillCircle(cx+13,faceY-3,2,TFT_WHITE);
+    const int look=((now/4600UL)%3UL==0)?-1:((now/4600UL)%3UL==1?1:0);
+    p.oval(-sep+look,-9,6,8,ink);
+    p.oval(sep+look,-9,6,8,ink);
+    p.ball(-sep-2+look,-12,2,TFT_WHITE);
+    p.ball(sep-2+look,-12,2,TFT_WHITE);
   }
-  gfx.fillCircle(cx-24,faceY+16,5,TFT_PINK);
-  gfx.fillCircle(cx+24,faceY+16,5,TFT_PINK);
-  if(m==SAD || m==SICK) {
-    gfx.drawLine(cx-9,faceY+27,cx,faceY+21,TFT_BLACK);
-    gfx.drawLine(cx,faceY+21,cx+9,faceY+27,TFT_BLACK);
+  p.oval(-25,4,7,5,rgb565(249,160,186));
+  p.oval(25,4,7,5,rgb565(249,160,186));
+  if(fam==3) {
+    // Les oiseaux gardent un petit bec orange a tous les stades.
+    p.tri(-6,7,6,7,0,15,rgb565(247,167,56));
+    p.line(-5,7,5,7,rgb565(255,226,133));
+  } else if(sleep) {
+    p.line(-5,13,5,13,ink);
+  } else if(m==SAD || m==SICK) {
+    p.line(-7,18,0,13,ink);
+    p.line(0,13,7,18,ink);
   } else if(m==HAPPY) {
-    gfx.drawLine(cx-9,faceY+20,cx,faceY+29,TFT_BLACK);
-    gfx.drawLine(cx,faceY+29,cx+9,faceY+20,TFT_BLACK);
+    p.line(-7,11,0,17,ink);
+    p.line(0,17,7,11,ink);
   } else {
-    gfx.drawFastHLine(cx-8,faceY+25,16,TFT_BLACK);
+    p.line(-5,13,0,15,ink);
+    p.line(0,15,5,13,ink);
   }
-  // Chaque adulte conserve sa couleur et son accessoire sur la tete.
-  // Aucun triangle/insigne n'est ajoute sur le ventre.
 }
-
-static void drawCreature(uint32_t now) {
-  const uint8_t st = stage();
-  const Mood m = mood();
-  const bool hop = (!pet.dort && (now/7200)%4==2);
-  const bool walking = isWalking(now);
-  const bool bedroom = homeScene==1 || pet.dort;
-  const int bob = pet.dort ? 5 : hop ? ((now/160)%2 ? -11 : -2) :
-                  walking ? ((now/190)%2 ? -4 : 1) : ((now/340)%2 ? -2 : 2);
-  const int wander = walking
-                   ? static_cast<int>(sinf(now/650.0f)*9.0f) : 0;
-  int cx = 67 + wander;
-  const bool dance = (!pet.dort && pet.joie >= 60 &&
-                      (now / 12000) % 5 == 3);
-  const bool wave = (!pet.dort && (((now/7200)%4==3) || dance));
-  const uint16_t adultColor=adultForm==1?TFT_ORANGE:adultForm==2?TFT_CYAN:
-                            adultForm==3?TFT_PINK:adultForm==4?TFT_GREEN:
-                            friendship>=75?TFT_MAGENTA:TFT_SKYBLUE;
-  uint16_t body=st==1?TFT_CYAN:st==2?TFT_GREEN:adultColor;
-  if (m == SICK) body = TFT_LIGHTGREY;
-  else if (st == 3 && m == SAD) body = TFT_ORANGE;
-
-  if (st == 0) {
-    drawEgg(now);
-    return;
+static void drawTamaCreatureV8(uint32_t now) {
+  const uint8_t st=stage();
+  if(st==0 || tamaFamily<1 || tamaFamily>3) { drawEgg(now); return; }
+  const bool bedroom=homeScene==1 || pet.dort;
+  const bool walking=isWalking(now);
+  const uint8_t branch=tamaBranch==2?2:1;
+  // 0.80 durant balade, 0.87 dans la chambre, taille normale au jardin.
+  const int scale=walking?80:bedroom?87:100;
+  const int bob=pet.dort?2:walking?((now/180UL)%2UL?1:-3):
+                 ((now/330UL)%2UL?1:-2);
+  const TamaBrush p={67,139+(bedroom?5:0)+bob,scale};
+  const uint8_t fam=tamaFamily;
+  const bool teen=st==3,adult=st==4,baby=st==1,young=st==2;
+  const bool pathB=(teen||adult)&&branch==2;
+  const Mood m=mood();
+  const int rw=baby?30:young?36:teen?(pathB&&fam==3?37:39):43;
+  const int rh=baby?30:young?35:teen?39:42;
+  uint16_t mainColor=fam==1?rgb565(167,230,72):
+                     fam==2?rgb565(69,202,239):rgb565(224,219,251);
+  uint16_t shade=fam==1?rgb565(112,194,72):
+                   fam==2?rgb565(35,158,213):rgb565(169,153,220);
+  uint16_t outline=fam==1?rgb565(43,109,62):
+                     fam==2?rgb565(22,103,143):rgb565(104,88,149);
+  if(m==SICK) mainColor=rgb565(181,192,195);
+  // Pieds et pattes, ensuite corps, visage puis accessoires de la famille.
+  if(fam==3) {
+    p.oval(-18,rh-2,10,6,rgb565(240,168,55));
+    p.oval(18,rh-2,10,6,rgb565(240,168,55));
+  } else {
+    p.oval(-20,rh-2,13,8,outline);
+    p.oval(20,rh-2,13,8,outline);
+    p.oval(-20,rh-3,10,6,mainColor);
+    p.oval(20,rh-3,10,6,mainColor);
   }
-  // Grand personnage dans le jardin, petit pendant la balade.
-  // Dans la chambre, taille intermediaire (~85 %) pour voir les meubles.
-  if(walking) {
-    drawWalkingCreature(now,st,m,body);
-    return;
-  }
-
-  const int bx = st == 1 ? 29 : st == 2 ? 19 : 13;
-  const int width = bedroom ? (st==1?67:st==2?84:92) : (st==1?77:st==2?97:108);
-  const int by = (bedroom ? (st==1?92:st==2?77:66) : (st==1?77:st==2?61:47)) + bob;
-  const int height = bedroom ? (st==1?90:st==2?105:118) : (st==1?102:st==2?119:135);
-  const int bodyx = cx - width/2;
-  const int mouthY = by + (st == 1 ? (bedroom?33:37) : (bedroom?44:51));
-
-  if (st >= 2) {
-    // Petites antennes / oreilles evolutives
-    gfx.fillRoundRect(cx-41,by-18,21,31,7,body);
-    gfx.fillRoundRect(cx+20,by-18,21,31,7,body);
-    gfx.fillCircle(cx-31,by-15,5,TFT_PINK);
-    gfx.fillCircle(cx+31,by-15,5,TFT_PINK);
-  }
-  if (st == 3) {
-    if(adultForm==1) { // Gourmand : biscuit
-      gfx.fillCircle(cx,by-20,17,TFT_YELLOW);
-      gfx.fillCircle(cx-7,by-24,3,TFT_ORANGE);
-      gfx.fillCircle(cx+7,by-17,3,TFT_ORANGE);
-    } else if(adultForm==2) { // Joueur : etoile
-      gfx.fillTriangle(cx,by-32,cx-10,by-10,cx+10,by-10,TFT_YELLOW);
-      gfx.fillCircle(cx,by-13,6,TFT_ORANGE);
-    } else if(adultForm==3) {
-      heart(cx,by-21,TFT_RED);
-    } else if(adultForm==4) { // Sage : couronne
-      gfx.fillTriangle(cx-18,by-5,cx-11,by-29,cx,by-8,TFT_YELLOW);
-      gfx.fillTriangle(cx,by-8,cx+11,by-29,cx+18,by-5,TFT_YELLOW);
-      gfx.fillRoundRect(cx-18,by-11,36,10,3,TFT_YELLOW);
+  if(fam==1) {
+    // TERRE : une pousse verte, qui devient feuillage ou floral.
+    const uint16_t foliage=rgb565(68,184,65);
+    const uint16_t light=rgb565(119,221,62);
+    if(st>=3) {
+      for(int i=0;i<(adult?5:3);++i) {
+        const int a=i*14;
+        p.oval(-rw-5,a-29,10,14,i%2?light:foliage);
+        p.oval(rw+5,a-29,10,14,i%2?light:foliage);
+      }
+      if(!pathB) {
+        p.tri(-rw+7,-21,-rw-8,-48,-rw+23,-39,light);
+        p.tri(rw-7,-21,rw+8,-48,rw-23,-39,light);
+        p.tri(-rw+8,-29,-rw-2,-42,-rw+20,-37,rgb565(245,202,172));
+        p.tri(rw-8,-29,rw+2,-42,rw-20,-37,rgb565(245,202,172));
+      }
+    }
+    if(st==1) {
+      tamaLeaf(p,-2,-rh-11,true,light);
+      tamaLeaf(p,2,-rh-11,false,foliage);
+    } else if(st==2) {
+      tamaLeaf(p,-4,-rh-10,true,light);
+      tamaLeaf(p,4,-rh-10,false,foliage);
     } else {
-      gfx.fillRoundRect(cx-15,by-25,30,25,9,TFT_YELLOW);
-      gfx.fillCircle(cx,by-25,6,TFT_ORANGE);
+      tamaLeaf(p,-3,-rh-12,true,light);
+      tamaLeaf(p,3,-rh-12,false,foliage);
+    }
+  } else if(fam==2) {
+    // EAU : crest dorsal sur toutes les formes. Bleu en ado B,
+    // orange en adulte B ; deux nageoires orange symetriques de FACE.
+    const uint16_t fin=rgb565(253,175,65);
+    if(st>=2) {
+      tamaFin(p,-rw+3,-2,true,fin,adult);
+      tamaFin(p,rw-3,-2,false,fin,adult);
+    } else {
+      p.oval(-rw+2,15,11,7,shade);
+      p.oval(rw-2,15,11,7,shade);
+    }
+    const uint16_t headFin=(adult && pathB)?fin:
+                            (adult&&!pathB)?fin:rgb565(44,175,238);
+    p.tri(-10,-rh+6,0,-rh-(adult?29:young?24:18),
+          10,-rh+6,outline);
+    p.tri(-7,-rh+3,0,-rh-(adult?26:young?21:15),
+          7,-rh+3,headFin);
+    if(teen||adult) {
+      const uint16_t accent=pathB?rgb565(156,229,245):rgb565(72,196,232);
+      p.oval(-rw+8,-17,7,6,accent);
+      p.oval(rw-8,-17,7,6,accent);
+    }
+  } else if(fam==3) {
+    // CIEL : ailettes plumes beiges/violacees depuis le bebe,
+    // toujours en VUE DE FACE ; ado B legerement plus fin.
+    const uint16_t wingMain=rgb565(195,184,248);
+    const uint16_t wingLight=rgb565(246,238,255);
+    if(st==1) {
+      tamaWing(p,-rw+2,-3,true,wingMain,wingLight,false);
+      tamaWing(p,rw-2,-3,false,wingMain,wingLight,false);
+    } else {
+      tamaWing(p,-rw+5,-4,true,wingMain,wingLight,teen||adult);
+      tamaWing(p,rw-5,-4,false,wingMain,wingLight,teen||adult);
+    }
+    if(teen||adult) {
+      if(pathB) {
+        // Eole/Aerys : lune, ruban de plumes, sans gonfler le visage.
+        p.oval(0,-rh-16,10,13,rgb565(246,215,103));
+        p.oval(5,-rh-20,9,10,rgb565(30,37,73));
+        p.oval(-13,-rh-6,9,4,wingMain);
+      } else {
+        // Alize/Zephyr : plumes volantes, petite couronne doree adulte.
+        p.tri(-8,-rh+3,-15,-rh-18,0,-rh-10,wingMain);
+        p.tri(0,-rh-10,8,-rh-27,11,-rh+1,wingMain);
+        if(adult) {
+          p.tri(-14,-rh-12,-12,-rh-29,0,-rh-13,rgb565(255,209,86));
+          p.tri(0,-rh-13,10,-rh-33,15,-rh-12,rgb565(255,209,86));
+        }
+      }
+    } else if(young) {
+      p.oval(1,-rh-9,10,14,wingMain);
+    } else {
+      p.oval(0,-rh-8,8,9,wingMain);
     }
   }
-
-  // Jambes et bras avec mouvements.
-  int legShift = walking ? ((now/190)%2 ? 8 : -8) : ((now/290)%2 ? 5 : -5);
-  if (pet.dort) legShift = 0;
-  gfx.fillRoundRect(cx-38+legShift,by+height-13,29,20,8,body);
-  gfx.fillRoundRect(cx+9-legShift,by+height-13,29,20,8,body);
-  const int armY = by+(bedroom?48:55);
-  const int armH = bedroom?39:45, armW=bedroom?20:23;
-  gfx.fillRoundRect(cx-width/2-9,armY + (wave ? -17 : 0),armW,armH,10,body);
-  gfx.fillRoundRect(cx+width/2-14,armY - (wave ? 17 : 0),armW,armH,10,body);
-  gfx.fillRoundRect(bodyx,by,width,height,st == 1 ? 33 : 40,body);
-  // Liseret fonce : particulierement utile pour le Tama vert sur le jardin.
-  gfx.drawRoundRect(bodyx,by,width,height,st == 1 ? 33 : 40,rgb565(25,70,77));
-
-  // Double ovale blanc/gris conserve, mais positionne sous le visage.
-  drawBellyPatch(cx,by,st,false,bedroom);
-  const int cheekY=by+(bedroom?61:68);
-  gfx.fillCircle(cx-31,cheekY,7,TFT_PINK);
-  gfx.fillCircle(cx+31,cheekY,7,TFT_PINK);
-  drawFace(cx,mouthY,now,m);
-  // L'identite des quatre formes reste sur la tete (biscuit, etoile, coeur,
-  // couronne) et dans leur couleur; le ventre demeure net pour chacune.
-  if (wave) {
-    cross(cx+width/2+10,by+41, TFT_YELLOW);
+  // Bras/ailes devant le corps sont subtils, le relief et les joues
+  // restent communs aux trois familles.
+  if(fam!=3) {
+    p.oval(-rw-2,17,9,15,shade);
+    p.oval(rw+2,17,9,15,shade);
   }
-  if (dance) {
-    // Notes de musique : danse spontanee lorsque Tama est heureux.
-    gfx.drawFastVLine(13,65,17,TFT_YELLOW);
-    gfx.fillCircle(10,83,5,TFT_YELLOW);
-    gfx.drawFastVLine(117,53,17,TFT_CYAN);
-    gfx.fillCircle(114,72,5,TFT_CYAN);
-    gfx.drawFastHLine(117,53,8,TFT_CYAN);
+  p.oval(0,0,rw+2,rh+2,outline);
+  p.oval(0,-1,rw,rh,mainColor);
+  p.oval(-rw/3,-rh/2,8,5,
+         fam==1?rgb565(199,250,128):fam==2?rgb565(155,232,254):TFT_WHITE);
+  // Deux ovales blanc et gris (design valide sur la V7.2) descendus.
+  const int bellyW=baby?20:young?26:teen?30:35;
+  const int bellyH=baby?14:young?17:teen?19:21;
+  p.oval(0,23,bellyW,bellyH,rgb565(255,252,225));
+  p.oval(0,24,bellyW-7,bellyH-5,rgb565(224,233,239));
+  // Petits motifs distinctifs des adultes (aucun triangle sous la bouche).
+  if(adult) {
+    if(fam==1 && pathB) {
+      tamaFlower(p,-30,-30);
+      tamaFlower(p,30,-28);
+    } else if(fam==1) {
+      p.oval(-22,-34,9,11,rgb565(66,182,60));
+      p.oval(22,-34,9,11,rgb565(66,182,60));
+    } else if(fam==2) {
+      p.line(-14,25,-6,29,rgb565(82,181,227));
+      p.line(-6,29,4,25,rgb565(82,181,227));
+      p.line(4,25,15,30,rgb565(82,181,227));
+    }
+  } else if(teen && fam==1 && pathB) {
+    tamaFlower(p,24,-31);
   }
-  if (m != ASLEEP && pet.faim < 20 && now%2400 < 900) {
-    gfx.drawCircle(cx+44,by+15,6,TFT_ORANGE);
+  drawTamaFaceV8(p,fam,m,now,st);
+  if((now/12000UL)%5UL==3UL && !pet.dort && pet.joie>=60) {
+    p.line(-rw-10,-22,-rw-10,-11,TFT_YELLOW);
+    p.ball(-rw-10,-7,3,TFT_YELLOW);
   }
 }
+
 static void drawFX(uint32_t now) {
   if (effect == FX_NONE || static_cast<int32_t>(now-effectUntil) >= 0) return;
   const int drift = static_cast<int>((now/130)%45);
@@ -931,13 +1060,14 @@ static void drawActivity(uint32_t now) {
       break;
     }
     case FX_HEAL: {
-      // Pansement qui se pose et croix de soins.
-      const int x=90, y=143;
-      gfx.fillRoundRect(x-18,y-5,36,12,5,rgb565(245,194,148));
-      gfx.fillRect(x-5,y-4,10,10,TFT_WHITE);
-      cross(x,y+1,TFT_RED);
-      cross(24,111-static_cast<int>((elapsed/45UL)%36UL),TFT_GREEN);
-      cross(110,90-static_cast<int>((elapsed/65UL)%29UL),TFT_CYAN);
+      // Soin sans pansement : halo doux et petites croix qui montent.
+      const uint16_t glow=rgb565(119,207,184);
+      const int breath=(now/260UL)%3UL;
+      gfx.drawEllipse(67,141,46+breath,45+breath,glow);
+      gfx.drawEllipse(67,141,50+breath,49+breath,rgb565(48,119,133));
+      cross(23,145-(int)((elapsed/35UL)%83UL),TFT_GREEN);
+      cross(113,158-(int)((elapsed/44UL)%87UL),TFT_CYAN);
+      cross(81,73-(int)((elapsed/90UL)%33UL),TFT_WHITE);
       break;
     }
     case FX_GIFT: {
@@ -1209,10 +1339,10 @@ static void drawSleepFX(uint32_t now) {
 }
 
 static void drawHome(uint32_t now) {
-  if(homeScene==1 || pet.dort) drawBedroom(now);
+  if(stage()==0 || homeScene==1 || pet.dort) drawBedroom(now);
   else drawScenery(now);
-  // Les personnages et leurs animations passent au-dessus du monde.
-  drawCreature(now);
+  // Nouvelle collection de 18 creatures, en vue de face.
+  drawTamaCreatureV8(now);
   drawActivity(now);
   drawSleepFX(now);
   drawFX(now);
@@ -1302,24 +1432,36 @@ static void drawProfil() {
   gfx.fillSprite(TFT_BLACK);
   gfx.drawRoundRect(2,2,131,236,8,TFT_YELLOW);
   gfx.setTextColor(TFT_YELLOW,TFT_BLACK);
-  gfx.drawCentreString("MON PROFIL",67,12,2);
+  gfx.drawCentreString("MON PROFIL",67,10,2);
   gfx.setTextColor(TFT_WHITE,TFT_BLACK);
-  gfx.drawCentreString("PERSONNALITE",67,49,1);
+  gfx.drawCentreString("CREATURE",67,37,1);
   gfx.setTextColor(TFT_CYAN,TFT_BLACK);
-  gfx.drawCentreString(PERSONALITY[personality],67,67,2);
+  gfx.drawCentreString(creatureName(),67,51,2);
   gfx.setTextColor(TFT_WHITE,TFT_BLACK);
-  gfx.drawCentreString("EVOLUTION",67,104,1);
+  gfx.drawCentreString("FAMILLE / STADE",67,82,1);
+  char label[35];
+  snprintf(label,sizeof(label),"%s - %s",FAMILY_NAMES[tamaFamily],stageLabel());
   gfx.setTextColor(TFT_GREEN,TFT_BLACK);
-  gfx.drawCentreString(stage()==3?EVOLUTION[adultForm]:"EN COURS...",67,123,2);
-  char line[35];
-  snprintf(line,sizeof(line),"REPAS %u  SOINS %u",(unsigned)fedCount,(unsigned)careCount);
-  gfx.setTextColor(TFT_LIGHTGREY,TFT_BLACK);
-  gfx.drawCentreString(line,67,165,1);
-  snprintf(line,sizeof(line),"JEUX %lu CALINS %u",
-       (unsigned long)(static_cast<uint32_t>(gamePlayed)+reflexPlayed),(unsigned)hugCount);
-  gfx.drawCentreString(line,67,181,1);
-  gfx.drawCentreString("SUIVANT      RETOUR",67,220,1);
+  gfx.drawCentreString(label,67,96,1);
+  gfx.setTextColor(TFT_WHITE,TFT_BLACK);
+  gfx.drawCentreString("PERSONNALITE",67,121,1);
+  gfx.setTextColor(TFT_CYAN,TFT_BLACK);
+  gfx.drawCentreString(PERSONALITY[personality],67,135,2);
+  if(stage()>=3) {
+    gfx.setTextColor(TFT_YELLOW,TFT_BLACK);
+    gfx.drawCentreString(tamaBranch==2?"EVOLUTION : VOIE B":"EVOLUTION : VOIE A",67,164,1);
+  } else {
+    gfx.setTextColor(TFT_LIGHTGREY,TFT_BLACK);
+    gfx.drawCentreString("VOIE A/B A L'ADO",67,164,1);
+  }
+  snprintf(label,sizeof(label),"REPAS %u SOINS %u",(unsigned)fedCount,(unsigned)careCount);
+  gfx.drawCentreString(label,67,187,1);
+  snprintf(label,sizeof(label),"JEUX %lu CALINS %u",
+           (unsigned long)((uint32_t)gamePlayed+reflexPlayed),(unsigned)hugCount);
+  gfx.drawCentreString(label,67,201,1);
+  gfx.drawCentreString("SUIVANT      RETOUR",67,222,1);
 }
+
 static void drawRoomMenu() {
   gfx.fillSprite(TFT_BLACK);
   gfx.drawRoundRect(2,2,131,236,8,TFT_YELLOW);
@@ -1461,10 +1603,24 @@ void setup() {
   // Migration sans perte du Tama de V5.1.
   bool migrated=false;
   if(stage()>0 && personality==0) {
-    personality=static_cast<uint8_t>(random(1,5));
+    personality=(uint8_t)random(1,5);
     migrated=true;
   }
-  if(stage()==3 && adultForm==0) {
+  if(stage()>0 && tamaFamily==0) {
+    // V7.3 -> V8 : la couleur de la forme adulte aide a maintenir
+    // une parente visuelle. Les nouvelles naissances restent 100% aleatoires.
+    if(stage()==4 && adultForm>0) {
+      tamaFamily=adultForm==2?2:adultForm==3?3:1;
+    } else {
+      tamaFamily=(uint8_t)random(1,4);
+    }
+    migrated=true;
+  }
+  if(stage()>=3 && tamaBranch==0) {
+    tamaBranch=chooseBranchV8();
+    migrated=true;
+  }
+  if(stage()==4 && adultForm==0) {
     adultForm=pickAdultForm();
     migrated=true;
   }
