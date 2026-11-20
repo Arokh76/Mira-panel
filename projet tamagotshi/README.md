@@ -118,3 +118,21 @@ Le log V8.2.2 transmis par l'utilisateur indique `fond_menu=6D74 bouton=6D74`, a
 Le log diagnostic de la V8.2.3 ajoute `[TAMA-S3] Validation coord. natifs: OK | menu 08C6/08C6 bouton 118B/118B | sprite 170x320` si les deux pixels clefs du menu sont enfin corrects. Une valeur differente fera apparaitre `ALERTE`, utile pour la suite.
 
 **Flash** : uniquement `Tamagotchi_V8_2_3_TDisplay_S3_LCD_BASE_app.bin` a l'adresse **0x10000**, sans ERASE. Conserver toutes les autres partitions et les images V8.2.0. La reussite de la compilation ne suffit pas : valider le rendu sur le LCD physique.
+
+
+## V8.3.0 — 18 sprites COMPLETS et 3 images d'animation par creature
+
+Les visuels V8.2 avaient ete decoupes dans des boites trop courtes : par exemple Sylvan etait coupe avant ses petites pattes (original : y=110..220, V8.2 : y=122..211). Le personnage etait ensuite simplement translate de quelques pixels vers le haut ou le bas, sans expression propre.
+
+V8.3 introduit un nouveau pack **TAMASPR2** : 18 creatures x 3 images = **54 images en RGB565 RLE**, issues de la meme planche utilisateur. Chaque creature a maintenant un etat normal, un clignement des yeux et un mouvement subtil du corps, des nageoires, des feuilles ou des ailes. Les pattes ont ete restituees/completees pour les ados et adultes lorsque les cartouches de noms les masquaient dans la planche. L'animation est plantee au sol (suppression du bond vertical factice), mais un petit pas horizontal subsiste durant les promenades.
+
+La V8.3 lit aussi l'ancien pack **TAMASPR1** (18 images) : cela permet de mettre a jour le firmware seul, mais **les animations n'apparaissent qu'avec le nouveau pack**. Le code ne change ni le moteur graphique 170x320 valide V8.2.3, ni les sauvegardes NVS, ni le code historique du TTGO.
+
+**Flasher deux binaires sans effacement :**
+- `Tamagotchi_V8_3_0_TDisplay_S3_LCD_BASE_app.bin` a **0x10000**
+- `Tamagotchi_V8_3_Art_18x3_S3.bin` a **0xC90000**
+- conserver la table des partitions existante de la V8.2.0 ; ne pas cocher ERASE.
+
+Le pack d'animations doit etre reconstruit depuis l'image de reference `a_detailed_colorful_clean_tamagotchi_evolution.png` (voir script fourni en annexe de livraison). Le firmware en soi ne contient pas les pixels : ils restent dans la partition `tama_art`.
+
+La compilation S3 ne remplace pas un essai physique : verifier l'absence de morceaux d'etiquettes de la planche et la fidelite des pattes sur l'ecran.

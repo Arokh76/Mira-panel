@@ -1617,6 +1617,7 @@ static uint8_t *artPixels=nullptr;
 static TamaArtDesc artCurrent={};
 static uint8_t cachedArtId=255;
 static bool artReady=false;
+static bool artAnimated=false; // TAMASPR2 : 18 creatures x 3 images, clignements et respiration
 static void initS3FrameBuffer() {
   artPartition=esp_partition_find_first(ESP_PARTITION_TYPE_DATA,
                          (esp_partition_subtype_t)0x40,"tama_art");
@@ -1628,17 +1629,21 @@ static void initS3FrameBuffer() {
   uint32_t count=0;
   if(esp_partition_read(artPartition,0,hdr,sizeof(hdr))!=ESP_OK) return;
   memcpy(&count,hdr+8,4);
-  if(memcmp(hdr,"TAMASPR1",8)!=0 || count!=18) {
-    Serial.println("[TAMA-S3] Pas d'images dans tama_art, formes secours.");
+  artAnimated=(memcmp(hdr,"TAMASPR2",8)==0 && count==54);
+  const bool artLegacy=(memcmp(hdr,"TAMASPR1",8)==0 && count==18);
+  if(!artAnimated && !artLegacy) {
+    Serial.println("[TAMA-S3] Partition art inconnue; formes de secours.");
     return;
   }
   artPixels=(uint8_t*)heap_caps_malloc(150U*120U,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
   if(!artPixels)artPixels=(uint8_t*)malloc(150U*120U);
   artReady=artPixels!=nullptr;
-  Serial.printf("[TAMA-S3] 18 sprites originaux: %s\n",artReady?"OK":"memoire KO");
+  Serial.printf("[TAMA-S3] 18 creatures / %s: %s\n",
+      artAnimated?"54 images (clignements et mouvement)":"18 images statiques V8.2",
+      artReady?"OK":"memoire KO");
 }
 static bool loadArt(uint8_t id) {
-  if(!artReady || id>=18)return false;
+  if(!artReady || id >= (artAnimated ? 54 : 18)) return false;
   if(cachedArtId==id)return true;
   if(esp_partition_read(artPartition,16U+(uint32_t)id*sizeof(TamaArtDesc),
                          &artCurrent,sizeof(artCurrent))!=ESP_OK)return false;
@@ -1671,13 +1676,23 @@ static void drawS3ArtCreature(uint32_t now){
   const uint8_t st=stage();
   if(st==0 || tamaFamily<1 || tamaFamily>3){drawEgg(now);return;}
   const uint8_t idx=st==1?0:st==2?1:st==3?(tamaBranch==2?4:2):(tamaBranch==2?5:3);
-  if(!loadArt((uint8_t)((tamaFamily-1)*6+idx))){
+  uint8_t variant=0;
+  if(artAnimated) {
+    const bool blink=pet.dort || (now%3800UL)<190UL;
+    const bool active=(effect!=FX_NONE && (int32_t)(now-effectUntil)<0);
+    variant=blink?1:((active || (now/650UL)%2UL) ? 2 : 0);
+  }
+  const uint8_t spriteIndex=(uint8_t)((tamaFamily-1)*6+idx);
+  const uint8_t id=artAnimated?(uint8_t)(spriteIndex*3+variant):spriteIndex;
+  if(!loadArt(id)){
     drawTamaCreatureV8(now);return;
   }
-  const int bob=pet.dort?1:((now/350UL)%2UL?1:-2);
-  const int ground=237; // Ligne de sol native: fixee sous les pattes, au-dessus du menu
-  const int x0=(170-(int)artCurrent.width)/2;
-  const int y0=ground-(int)artCurrent.height+bob;
+  // Animations dessinees dans la forme : les pieds restent poses au sol.
+  // On supprime le va-et-vient vertical qui donnait une "icone flottante".
+  const int ground=237;
+  const int walk=(isWalking(now) && !pet.dort) ? ((now/280UL)%2UL ? 2 : -2) : 0;
+  const int x0=(170-(int)artCurrent.width)/2+walk;
+  const int y0=ground-(int)artCurrent.height;
   const uint32_t n=(uint32_t)artCurrent.width*artCurrent.height;
   for(uint32_t i=0;i<n;++i){
     const uint8_t c=artPixels[i];
