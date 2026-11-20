@@ -1617,8 +1617,9 @@ static uint8_t *artPixels=nullptr;
 static TamaArtDesc artCurrent={};
 static uint8_t cachedArtId=255;
 static bool artReady=false;
-static bool artAnimated=false; // TAMASPR2 / TAMASPR3
-static bool artFullAnimation=false; // TAMASPR3 : 18 creatures x 6 poses chibi
+static bool artAnimated=false; // TAMASPR2, TAMASPR3, TAMASPR4
+static bool artFullAnimation=false; // TAMASPR3 : six poses / creature
+static bool artPose12=false; // TAMASPR4 : 18 creatures x 12 poses / creature
 static bool artFrameWasDrawn=false;
 static void initS3FrameBuffer() {
   artPartition=esp_partition_find_first(ESP_PARTITION_TYPE_DATA,
@@ -1631,8 +1632,9 @@ static void initS3FrameBuffer() {
   uint32_t count=0;
   if(esp_partition_read(artPartition,0,hdr,sizeof(hdr))!=ESP_OK) return;
   memcpy(&count,hdr+8,4);
+  artPose12=(memcmp(hdr,"TAMASPR4",8)==0 && count==216);
   artFullAnimation=(memcmp(hdr,"TAMASPR3",8)==0 && count==108);
-  artAnimated=artFullAnimation || (memcmp(hdr,"TAMASPR2",8)==0 && count==54);
+  artAnimated=artPose12 || artFullAnimation || (memcmp(hdr,"TAMASPR2",8)==0 && count==54);
   const bool artLegacy=(memcmp(hdr,"TAMASPR1",8)==0 && count==18);
   if(!artAnimated && !artLegacy) {
     Serial.println("[TAMA-S3] Partition art inconnue; formes de secours.");
@@ -1642,12 +1644,13 @@ static void initS3FrameBuffer() {
   if(!artPixels)artPixels=(uint8_t*)malloc(150U*120U);
   artReady=artPixels!=nullptr;
   Serial.printf("[TAMA-S3] 18 creatures / %s: %s\n",
+      artPose12?"TAMASPR4 216 images (12 poses par creature)":
       artFullAnimation?"TAMASPR3 108 images (6 poses par creature)":
       artAnimated?"TAMASPR2 54 images":"18 images statiques V8.2",
       artReady?"OK":"memoire KO");
 }
 static bool loadArt(uint8_t id) {
-  if(!artReady || id >= (artFullAnimation ? 108 : artAnimated ? 54 : 18)) return false;
+  if(!artReady || id >= (artPose12 ? 216 : artFullAnimation ? 108 : artAnimated ? 54 : 18)) return false;
   if(cachedArtId==id)return true;
   if(esp_partition_read(artPartition,16U+(uint32_t)id*sizeof(TamaArtDesc),
                          &artCurrent,sizeof(artCurrent))!=ESP_OK)return false;
@@ -1682,10 +1685,30 @@ static void drawS3ArtCreature(uint32_t now){
   const uint8_t idx=st==1?0:st==2?1:st==3?(tamaBranch==2?4:2):(tamaBranch==2?5:3);
   uint8_t variant=0;
   const bool active=(effect!=FX_NONE && (int32_t)(now-effectUntil)<0);
-  if(artFullAnimation) {
+  if(artPose12) {
+    // V8.3.2 : chaque activite utilise SA pose, jamais celle de la gamelle.
+    // Ordre des poses : repos, yeux fermes, respiration, anticipation,
+    // gamelle, bouchée, mastication, satisfait, couche, calin, jeu, bain.
+    if(pet.dort) variant=8;
+    else if(active) {
+      const uint32_t elapsed=now-effectStarted;
+      if(effect==FX_FOOD) {
+        if(elapsed<450UL) variant=3;
+        else if(elapsed<1050UL) variant=4;
+        else if(elapsed<1600UL) variant=5;
+        else if(elapsed<2700UL) variant=(elapsed/270UL)%2UL?5:6;
+        else variant=7;
+      } else if(effect==FX_CLEAN) variant=11;
+      else if(effect==FX_HUG || effect==FX_GIFT) variant=9;
+      else if(effect==FX_PLAY) variant=10;
+      else if(effect==FX_HEAL || effect==FX_GROW ||
+              effect==FX_WAKE) variant=7;
+      else variant=0;
+    } else if((now%3900UL)<190UL) variant=1;
+    else variant=(now/680UL)%2UL?2:0;
+  } else if(artFullAnimation) {
     if(active && effect==FX_FOOD) {
       const uint32_t elapsed=now-effectStarted;
-      // Vraie animation du repas : gamelle, bouche, mastication et contentement.
       variant=elapsed<700UL?3:elapsed<2700UL?((elapsed/330UL)%2UL?3:4):5;
     } else if(pet.dort) variant=1;
     else if(active && (effect==FX_HUG || effect==FX_PLAY || effect==FX_GIFT)) variant=5;
@@ -1696,7 +1719,8 @@ static void drawS3ArtCreature(uint32_t now){
     variant=blink?1:((active || (now/650UL)%2UL) ? 2 : 0);
   }
   const uint8_t spriteIndex=(uint8_t)((tamaFamily-1)*6+idx);
-  const uint8_t id=artFullAnimation?(uint8_t)(spriteIndex*6+variant):
+  const uint8_t id=artPose12?(uint8_t)(spriteIndex*12+variant):
+                   artFullAnimation?(uint8_t)(spriteIndex*6+variant):
                    artAnimated?(uint8_t)(spriteIndex*3+variant):spriteIndex;
   if(!loadArt(id)){
     drawTamaCreatureV8(now);return;
@@ -1830,7 +1854,7 @@ static void drawS3NativeHome(uint32_t now) {
       ui.drawFastHLine(x-3,y+18,7,ink);
     }
   } else {
-    // RLE 108 poses chibi, aucune nouvelle echelle ni changement du moteur V8.2.3.
+    // RLE chibi sur la grille native 170x320. Moteur V8.2.3 conserve.
     artFrameWasDrawn=false;
     drawS3ArtCreature(now);
   }
@@ -1842,19 +1866,49 @@ static void drawS3NativeHome(uint32_t now) {
     if(effect==FX_FOOD){
       // Ne pas superposer un biscuit artificiel sur les nouvelles poses de repas.
       // Les anciens packs SPR1/SPR2 conservent leur rendu historique.
-      if(!artFullAnimation || !artFrameWasDrawn) {
+      if(!(artPose12 || artFullAnimation) || !artFrameWasDrawn) {
         const int x=144-(int)(min<uint32_t>(elapsed,1350U)*59UL/1350UL);
         const int y=205-(int)(min<uint32_t>(elapsed,1350U)*17UL/1350UL);
         ui.fillCircle(x,y,8,rgb565(194,127,75));
         ui.fillCircle(x-3,y-2,2,rgb565(106,70,42));
       }
-    } else if(effect==FX_CLEAN){
-      ui.fillRoundRect(4,57,56,9,4,rgb565(190,211,219));
-      ui.fillRoundRect(42,61,28,9,4,rgb565(173,194,208));
-      for(int i=0;i<7;++i){
-        const int x=49+i*10,y=74+(int)((elapsed/12UL+i*20)%127UL);
-        ui.drawFastVLine(x,y,8,rgb565(155,228,252));
+    } else if(effect==FX_CLEAN) {
+      // Douche visible en premier plan et bulles vers les pattes.
+      const uint16_t metal=rgb565(178,211,220);
+      const uint16_t water=rgb565(73,205,250);
+      const uint16_t foam=rgb565(224,249,255);
+      ui.fillRoundRect(5,65,10,35,4,metal);
+      ui.fillRoundRect(11,62,44,9,4,metal);
+      ui.fillRoundRect(43,69,38,12,5,metal);
+      ui.drawFastHLine(45,80,32,rgb565(65,118,141));
+      for(int i=0;i<9;++i) {
+        const int x=49+i*10;
+        for(int j=0;j<3;++j) {
+          const int y=83+((int)(elapsed/10UL+i*17+j*35)%133);
+          ui.drawFastVLine(x,y,9,water);
+          ui.drawPixel(x+1,y+2,foam);
+        }
       }
+      for(int i=0;i<12;++i) {
+        const int x=18+(i*37)%142;
+        const int y=237-((int)(elapsed/30UL+i*29)%79);
+        const int r=3+(i%3)*2;
+        ui.drawCircle(x,y,r,foam);
+        ui.drawPixel(x-r/2,y-r/2,TFT_WHITE);
+      }
+      ui.fillEllipse(65,234,31,6,foam);
+      ui.fillEllipse(107,232,24,7,rgb565(149,230,246));
+    } else if(artPose12 && effect==FX_HUG) {
+      // Des coeurs pendant le calin, et jamais de bol de nourriture.
+      heart(33,177-(int)((elapsed/65UL)%63UL),TFT_PINK);
+      heart(127,182-(int)((elapsed/85UL)%66UL),TFT_RED);
+    } else if(artPose12 && effect==FX_GIFT) {
+      // Cadeau distinct du repas : boite, ruban et couvercle qui se leve.
+      const int lift=min(17,(int)(elapsed/43UL));
+      ui.fillRoundRect(114,195,37,35,5,rgb565(239,122,152));
+      ui.fillRect(130,196,6,33,TFT_YELLOW);
+      ui.fillRoundRect(110,190-lift,45,10,3,rgb565(251,176,83));
+      ui.fillRect(130,190-lift,6,10,TFT_WHITE);
     } else if(effect==FX_HEAL || effect==FX_GROW || effect==FX_HUG || effect==FX_GIFT || effect==FX_PLAY) {
       const uint16_t fx=effect==FX_HEAL?TFT_GREEN:
                         effect==FX_HUG?TFT_PINK:TFT_YELLOW;
