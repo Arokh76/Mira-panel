@@ -1,4 +1,4 @@
-name: Tamagotchi V8.2.1 - S3 accueil 170x320 natif et cadrage corrige
+name: Tamagotchi V8.2.2 - S3 RGB565 transfert fiable et diagnostic
 on:
   push:
     branches: [projet-tamagotshi]
@@ -50,33 +50,33 @@ jobs:
           test -s "$BUILD_S3/firmware.bin"
           python -m esptool --chip esp32s3 merge_bin \
             --flash_mode dio --flash_freq 80m --flash_size 16MB \
-            -o "$OUT/Tamagotchi_V8_2_1_TDisplay_S3_LCD_BASE_full.bin" \
+            -o "$OUT/Tamagotchi_V8_2_2_TDisplay_S3_LCD_BASE_full.bin" \
             0x0 "$BUILD_S3/bootloader.bin" \
             0x8000 "$BUILD_S3/partitions.bin" \
             0xe000 "$BOOT_APP0" \
             0x10000 "$BUILD_S3/firmware.bin"
-          cp "$BUILD_S3/firmware.bin" "$OUT/Tamagotchi_V8_2_1_TDisplay_S3_LCD_BASE_app.bin"
+          cp "$BUILD_S3/firmware.bin" "$OUT/Tamagotchi_V8_2_2_TDisplay_S3_LCD_BASE_app.bin"
           # Le boot ROM ESP32-S3 ne charge pas le second bootloader en mode QIO.
           # Le binaire peut exploiter QIO ENSUITE, mais 0x0000 doit commencer en DIO.
           python - <<'PY'
           from pathlib import Path
-          f = Path("projet tamagotshi/firmware/Tamagotchi_V8_2_1_TDisplay_S3_LCD_BASE_full.bin")
+          f = Path("projet tamagotshi/firmware/Tamagotchi_V8_2_2_TDisplay_S3_LCD_BASE_full.bin")
           d = f.read_bytes()
           assert d[:4] == bytes.fromhex("E9 03 02 4F"), f"Header S3 ROM incorrect : {d[:4].hex()}"
           assert d[0x8000:0x8002] == bytes.fromhex("AA 50"), "Table de partitions absente"
           assert d[0x10000] == 0xE9, "Application S3 absente"
           print("OK S3 ROM : DIO 80MHz 16MB / bootloader 0x0, partitions 0x8000, app 0x10000")
           PY
-          ls -lh "$OUT/Tamagotchi_V8_2_1_TDisplay_S3_LCD_BASE_"*.bin
+          ls -lh "$OUT/Tamagotchi_V8_2_2_TDisplay_S3_LCD_BASE_"*.bin
       - name: Publier les BIN dans projet GitHub
         if: github.ref == 'refs/heads/projet-tamagotshi'
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "projet tamagotshi/firmware/Tamagotchi_V8_0_TDisplay_V11_full.bin" "projet tamagotshi/firmware/Tamagotchi_V8_0_TDisplay_V11_app.bin" "projet tamagotshi/firmware/Tamagotchi_V8_2_1_TDisplay_S3_LCD_BASE_full.bin" "projet tamagotshi/firmware/Tamagotchi_V8_2_1_TDisplay_S3_LCD_BASE_app.bin"
+          git add "projet tamagotshi/firmware/Tamagotchi_V8_0_TDisplay_V11_full.bin" "projet tamagotshi/firmware/Tamagotchi_V8_0_TDisplay_V11_app.bin" "projet tamagotshi/firmware/Tamagotchi_V8_2_2_TDisplay_S3_LCD_BASE_full.bin" "projet tamagotshi/firmware/Tamagotchi_V8_2_2_TDisplay_S3_LCD_BASE_app.bin"
           if ! git diff --cached --quiet; then
-            git commit -m "Tamagotchi V8.2.1 BASE: publier les BIN V1.1 et S3 LCD"
+            git commit -m "Tamagotchi V8.2.2 BASE: publier les BIN V1.1 et S3 LCD"
             for attempt in 1 2 3; do
               if git push; then exit 0; fi
               git pull --rebase origin projet-tamagotshi
@@ -86,8 +86,8 @@ jobs:
       - name: Artefact firmwares
         uses: actions/upload-artifact@v4
         with:
-          name: Tamagotchi-V8_2_1-LCD-V11-S3-Base
+          name: Tamagotchi-V8_2_2-LCD-V11-S3-Base
           path: |
             projet tamagotshi/firmware/Tamagotchi_V8_0_TDisplay_V11_*.bin
-            projet tamagotshi/firmware/Tamagotchi_V8_2_1_TDisplay_S3_LCD_BASE_*.bin
+            projet tamagotshi/firmware/Tamagotchi_V8_2_2_TDisplay_S3_LCD_BASE_*.bin
           if-no-files-found: error

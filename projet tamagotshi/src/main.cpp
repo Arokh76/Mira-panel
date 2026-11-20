@@ -1889,7 +1889,46 @@ static void drawS3NativeHome(uint32_t now) {
   ui.drawCentreString(MENU[selected],85,291,2);
 }
 
-static void pushTamaFrame(){gfx.pushSprite(0,0);}
+// V8.2.2 : transfert controle RGB565 pour le LCD parallele du S3.
+// La V8.1.3 envoyait un tampon reconstruit a lcd.pushImage() sans bandes.
+// V8.2.0 avait remplace ce chemin par le pushSprite() plein ecran PSRAM :
+// les lignes horizontales et le menu absent sont apparus a ce moment.
+static uint16_t *s3OutputBuffer=nullptr;
+static bool s3FrameDiagnosticPrinted=false;
+static void initS3OutputBuffer() {
+  constexpr size_t frameBytes=170U*320U*sizeof(uint16_t);
+  s3OutputBuffer=(uint16_t*)heap_caps_malloc(frameBytes,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+  if(!s3OutputBuffer) s3OutputBuffer=(uint16_t*)malloc(frameBytes);
+  Serial.printf("[TAMA-S3] Sortie LCD: %s (%u octets)\n",
+                s3OutputBuffer?"tampon RGB565 / lcd.pushImage":"fallback pushSprite",
+                (unsigned)frameBytes);
+}
+static void pushTamaFrame() {
+  if(!s3FrameDiagnosticPrinted) {
+    s3FrameDiagnosticPrinted=true;
+    // Contrôle AVANT le transfert physique de trois pixels du framebuffer.
+    // 3,300 : fond du menu ; 85,290 : bouton ; 50,60 : fond du décor.
+    Serial.printf("[TAMA-S3] Pixel framebuffer: fond_menu=%04X bouton=%04X decor=%04X bpp=%u\n",
+      (unsigned)gfx.readPixel(3,300),(unsigned)gfx.readPixel(85,290),
+      (unsigned)gfx.readPixel(50,60),(unsigned)gfx.getColorDepth());
+  }
+  if(!s3OutputBuffer) {
+    gfx.pushSprite(0,0);
+    return;
+  }
+  // Les pixels lus sont en RGB565 naturel, pas au format byte-swappe
+  // de la memoire interne du sprite (comme sur la V8.1.3 fonctionnelle).
+  for(int y=0;y<320;++y) {
+    const size_t row=(size_t)y*170U;
+    for(int x=0;x<170;++x) {
+      s3OutputBuffer[row+(size_t)x]=gfx.readPixel(x,y);
+    }
+  }
+  const bool savedSwap=lcd.getSwapBytes();
+  lcd.setSwapBytes(true);
+  lcd.pushImage(0,0,170,320,s3OutputBuffer);
+  lcd.setSwapBytes(savedSwap);
+}
 #else
 static void pushTamaFrame(){gfx.pushSprite(0,0);}
 #endif
@@ -1968,7 +2007,8 @@ void setup() {
 #ifdef TAMA_S3_LCD
   // Reserve un tampon RGB565 en PSRAM, sans modifier le sprite historique.
   initS3FrameBuffer();
-  Serial.println("[TAMA-S3] Sprite et buffer OK");
+  initS3OutputBuffer();
+  Serial.println("[TAMA-S3] Sprite, sprites art et buffer LCD prets");
 #endif
   gfx.setTextDatum(TL_DATUM);
   randomSeed((uint32_t)micros() ^ (uint32_t)esp_random());
