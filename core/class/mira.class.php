@@ -2727,7 +2727,11 @@ class miraCmd extends cmd {
               $lastValue!==null && (string)$lastValue===(string)$result &&
               $lastAt>0 && $now>=$lastAt && ($now-$lastAt)<45.0)
             return $result;
-          $url = 'http://'. $eqLogic->getConfiguration('adresseip') . '/updatenr?key=' . $eqLogic->getConfiguration('password') . '&info=' . $cmd .'&value='.$result;
+          // Manually mapped media Infos must use the same RFC3986 encoding
+          // as the automatic media path. Keep UTF-8 titles and artwork URLs intact.
+          $url = 'http://'.$eqLogic->getConfiguration('adresseip').
+                 '/updatenr?key='.rawurlencode((string)$eqLogic->getConfiguration('password')).
+                 '&info='.(int)$cmd.'&value='.rawurlencode((string)$result);
           $output=$eqLogic->panelHttpGet($url);
           if ($output!==false) {
             $this->setCache(array('mira_info_http_value'=>(string)$result,
