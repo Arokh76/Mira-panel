@@ -10,23 +10,33 @@ static inline uint16_t C(uint8_t r,uint8_t g,uint8_t b) {
 }
 static const uint16_t UNUSED_SENTINEL = 0; // aucune allocation graphique
 
-// Feuille articulee : losange courbe avec nervure. Pointes bornees par le
-// moteur de pose, pas de recadrage d'image.
+// Feuille composee de bandes arrondies, sans polygone carre ni halo PNG.
+// Les 11 profils dessinent deux courbes de tapering vers la pointe.
+// L'outline est peint d'abord, puis le vert interieur (aucun anti-alias).
 static inline void leaf(int bx,int by,int tx,int ty,int width,
                         uint16_t edge,uint16_t green,uint16_t shine) {
-  const int dx=tx-bx, dy=ty-by;
+  const int dx=tx-bx,dy=ty-by;
   const int len=max(1,max(abs(dx),abs(dy)));
-  const int px=(-dy*width)/len, py=(dx*width)/len;
-  const int mx=bx+(dx*3)/7, my=by+(dy*3)/7;
-  gfx.fillTriangle(bx,by,mx+px,my+py,tx,ty,edge);
-  gfx.fillTriangle(bx,by,mx-px,my-py,tx,ty,edge);
-  const int iw=max(2,width-3);
-  const int ipx=(-dy*iw)/len, ipy=(dx*iw)/len;
-  const int itx=tx-dx/16, ity=ty-dy/16;
-  gfx.fillTriangle(bx,by,mx+ipx,my+ipy,itx,ity,green);
-  gfx.fillTriangle(bx,by,mx-ipx,my-ipy,itx,ity,green);
-  gfx.drawLine(bx,by,itx,ity,shine);
-  gfx.drawLine(mx+(ipx/2),my+(ipy/2),itx,ity,shine);
+  static const uint8_t widths[11]={0,4,7,9,10,10,9,7,5,2,0};
+  for(int pass=0;pass<2;++pass) {
+    const int w=pass==0?width:max(2,width-3);
+    const uint16_t color=pass==0?edge:green;
+    int lx=bx,ly=by,rx=bx,ry=by;
+    for(int i=1;i<=10;++i) {
+      const int centerX=bx+dx*i/10;
+      const int centerY=by+dy*i/10;
+      const int r=w*widths[i]/10;
+      const int ox=-dy*r/len,oy=dx*r/len;
+      const int nx=centerX+ox,ny=centerY+oy;
+      const int px=centerX-ox,py=centerY-oy;
+      gfx.fillTriangle(lx,ly,rx,ry,nx,ny,color);
+      gfx.fillTriangle(rx,ry,nx,ny,px,py,color);
+      lx=nx;ly=ny;rx=px;ry=py;
+    }
+  }
+  gfx.drawLine(bx,by,tx-dx/15,ty-dy/15,shine);
+  gfx.drawLine(bx+dx*5/10,by+dy*5/10,
+               bx+dx*8/10-dy/18,by+dy*8/10+dx/18,shine);
 }
 static inline void heartShape(int x,int y,int s,uint16_t color) {
   gfx.fillCircle(x-s/2,y,s/2,color);
@@ -51,8 +61,9 @@ static inline void eye(int x,int y,bool closed,bool happy,bool surprised) {
 }
 static inline void paw(int x,int y,bool lifted,uint16_t outline,uint16_t cream) {
   const int py=y-(lifted?12:0);
-  gfx.fillEllipse(x,py,11,13,outline);
-  gfx.fillEllipse(x,py-1,9,10,cream);
+  // Petites pattes ovales au lieu de grandes boules detachees du ventre.
+  gfx.fillEllipse(x,py,9,10,outline);
+  gfx.fillEllipse(x,py-1,7,8,cream);
   if(!lifted) {
     gfx.drawFastVLine(x-3,py+5,4,C(176,163,124));
     gfx.drawFastVLine(x+3,py+5,4,C(176,163,124));
@@ -108,6 +119,7 @@ static inline void draw(uint32_t now) {
     // Silhouette horizontale COMPLETE, pas un personnage assis yeux fermes.
     gfx.fillEllipse(x+11,220,48,19,outline);
     gfx.fillEllipse(x+11,218,45,17,green);
+    gfx.fillEllipse(x+8,225,24,8,cream); // ventre du dormeur
     leaf(x+30,213,x+57,191,11,outline,green,lime);
     leaf(x+23,210,x+47,196,9,outline,lime,lightLeaf);
     gfx.fillEllipse(x+37,232,15,7,outline);
@@ -188,11 +200,12 @@ static inline void draw(uint32_t now) {
     gfx.drawLine(x-5,headY+20,x,headY+23,outline);
     gfx.drawLine(x,headY+23,x+5,headY+20,outline);
   }
-  // Collier de feuilles a l'attache du cou.
-  leaf(x-1,bodyY-21,x-14,bodyY-36,9,outline,deep,lime);
-  leaf(x+2,bodyY-20,x+17,bodyY-35,9,outline,green,lightLeaf);
-  gfx.fillCircle(x,bodyY-23,5,outline);
-  gfx.fillCircle(x,bodyY-24,3,lime);
+  // Collier sous le menton : y~198, jamais a la hauteur de la bouche (~179).
+  // V8.3.3 dessinait ces feuilles SUR le visage, creant un rectangle vert.
+  leaf(x-4,bodyY-3,x-21,bodyY-12,8,outline,deep,lime);
+  leaf(x+4,bodyY-3,x+21,bodyY-12,8,outline,green,lightLeaf);
+  gfx.fillCircle(x,bodyY-2,5,outline);
+  gfx.fillCircle(x,bodyY-3,3,lime);
 
   // Bras / pattes AVANT : articulation pilotee selon l'activite.
   const bool reaching=eating && t>=550UL && t<2550UL;
@@ -207,8 +220,8 @@ static inline void draw(uint32_t now) {
     paw(x-26,bodyY+12,false,outline,cream);
     paw(x+32,bodyY+13,(t/230UL)%2U,outline,cream);
   } else {
-    paw(x-23,bodyY+16,false,outline,cream);
-    paw(x+23,bodyY+16,false,outline,cream);
+    paw(x-23,bodyY+21,false,outline,cream);
+    paw(x+23,bodyY+21,false,outline,cream);
   }
 
   if(eating) {
@@ -224,6 +237,15 @@ static inline void draw(uint32_t now) {
     gfx.fillRoundRect(bx-21,by-11,42,13,4,outline);
     gfx.fillRoundRect(bx-18,by-11,36,11,4,C(84,191,84));
     gfx.drawFastHLine(bx-13,by-7,26,lime);
+    // Morceau de nourriture qui rejoint la bouche en suivant une trajectoire
+    // visible, avec le bras deja leve. Le bol reste pose au sol.
+    if(t>=950UL && t<1450UL) {
+      const int step=(int)(t-950UL);
+      const int fx=bx-7-(step*33)/500;
+      const int fy=by-20-(step*29)/500;
+      gfx.fillCircle(fx,fy,5,C(139,83,46));
+      gfx.fillCircle(fx-1,fy-1,3,C(238,178,81));
+    }
   }
   if(playing) {
     const int bx=x+48+(int)((t/300UL)%3UL)-1;
