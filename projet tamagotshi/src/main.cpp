@@ -1399,8 +1399,12 @@ static void drawSleepFX(uint32_t now) {
 static void drawHome(uint32_t now) {
   if(stage()==0 || homeScene==1 || pet.dort) drawBedroom(now);
   else drawScenery(now);
-  // Nouvelle collection de 18 creatures, en vue de face.
+  // S3 : personnages reels extraits de la planche, en taille native.
+#ifdef TAMA_S3_LCD
+  drawS3ArtCreature(now);
+#else
   drawTamaCreatureV8(now);
+#endif
   drawActivity(now);
   drawSleepFX(now);
   drawFX(now);
@@ -1616,48 +1620,92 @@ static void drawReflex(uint32_t now) {
   gfx.drawCentreString("VALIDE AU VERT !",67,186,1);
   gfx.drawCentreString("RETOUR",67,215,1);
 }
-// Le moteur conserve des coordonnees logiques 135x240 pour NE PAS casser
-// les 18 sprites, les scenes et les menus de la V8 sur les deux modeles.
+// Tamagotchi V8.2 S3 : 18 personnages RLE / palettes RGB565
+// dans la partition data "tama_art" (0xC90000) du flash 16 Mo.
 #ifdef TAMA_S3_LCD
-static uint16_t *s3ScaledPixels=nullptr;
-static const int S3_PHYSICAL_W=170,S3_PHYSICAL_H=320;
-static const int S3_VIEW_H=300,S3_OFFSET_Y=10;
+struct TamaArtDesc {
+  uint32_t offset,length;
+  uint16_t width,height;
+  uint16_t palette[32];
+};
+static const esp_partition_t *artPartition=nullptr;
+static uint8_t *artPixels=nullptr;
+static TamaArtDesc artCurrent={};
+static uint8_t cachedArtId=255;
+static bool artReady=false;
 static void initS3FrameBuffer() {
-  s3ScaledPixels=(uint16_t*)heap_caps_malloc(
-      S3_PHYSICAL_W*S3_VIEW_H*sizeof(uint16_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
-  if(!s3ScaledPixels) s3ScaledPixels=(uint16_t*)malloc(
-      S3_PHYSICAL_W*S3_VIEW_H*sizeof(uint16_t));
-  lcd.fillScreen(TFT_BLACK);
-  Serial.printf("[TAMA-S3] Buffer RGB565: %s\n",s3ScaledPixels?"OK":"fallback");
-}
-static void pushTamaFrame() {
-  if(!s3ScaledPixels) {
-    // Fallback sans tampon : UI jouable, centree en taille native.
-    gfx.pushSprite((S3_PHYSICAL_W-SW)/2,(S3_PHYSICAL_H-SH)/2);
+  artPartition=esp_partition_find_first(ESP_PARTITION_TYPE_DATA,
+                         (esp_partition_subtype_t)0x40,"tama_art");
+  if(!artPartition) {
+    Serial.println("[TAMA-S3] Pas de partition tama_art, formes secours.");
     return;
   }
-  // Nearest neighbour sans anti-alias : contours pixel-art nets.
-  // x:135->170 / y:240->300 = echelle presque uniforme 1,25.
-  // Une seule transaction LCD parallele par image.
-  for(int y=0;y<S3_VIEW_H;++y) {
-    const int sy=(y*SH)/S3_VIEW_H;
-    const size_t offset=(size_t)y*S3_PHYSICAL_W;
-    for(int x=0;x<S3_PHYSICAL_W;++x) {
-      const int sx=(x*SW)/S3_PHYSICAL_W;
-      s3ScaledPixels[offset+x]=gfx.readPixel(sx,sy);
+  uint8_t hdr[16];
+  uint32_t count=0;
+  if(esp_partition_read(artPartition,0,hdr,sizeof(hdr))!=ESP_OK) return;
+  memcpy(&count,hdr+8,4);
+  if(memcmp(hdr,"TAMASPR1",8)!=0 || count!=18) {
+    Serial.println("[TAMA-S3] Pas d'images dans tama_art, formes secours.");
+    return;
+  }
+  artPixels=(uint8_t*)heap_caps_malloc(130U*120U,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+  if(!artPixels)artPixels=(uint8_t*)malloc(130U*120U);
+  artReady=artPixels!=nullptr;
+  Serial.printf("[TAMA-S3] 18 sprites originaux: %s\n",artReady?"OK":"memoire KO");
+}
+static bool loadArt(uint8_t id) {
+  if(!artReady || id>=18)return false;
+  if(cachedArtId==id)return true;
+  if(esp_partition_read(artPartition,16U+(uint32_t)id*sizeof(TamaArtDesc),
+                         &artCurrent,sizeof(artCurrent))!=ESP_OK)return false;
+  const uint32_t count=(uint32_t)artCurrent.width*artCurrent.height;
+  if(!count || count>130U*120U || artCurrent.length>16000U ||
+     artCurrent.offset+artCurrent.length>artPartition->size)return false;
+  uint8_t *data=(uint8_t*)malloc(artCurrent.length);
+  if(!data)return false;
+  bool ok=esp_partition_read(artPartition,artCurrent.offset,data,artCurrent.length)==ESP_OK;
+  uint32_t n=0,i=0;
+  while(ok && i<artCurrent.length && n<count){
+    const uint8_t t=data[i++];
+    if(t<128){
+      const uint32_t run=(uint32_t)t+1;
+      if(i+run>artCurrent.length || n+run>count){ok=false;break;}
+      memcpy(artPixels+n,data+i,run);
+      i+=run;n+=run;
+    } else {
+      const uint32_t run=(uint32_t)(t-128)+3;
+      if(i>=artCurrent.length || n+run>count){ok=false;break;}
+      memset(artPixels+n,data[i++],run);n+=run;
     }
   }
-  // gfx.readPixel() renvoie RGB565 dans l'ordre naturel (R5G6B5).
-  // TFT_eSprite::pushSprite utilise au contraire sa RAM interne byte-swappee.
-  // lcd.pushImage() doit donc ECHANGER les octets pour ce tampon reconstruit.
-  // Sinon le rose de l'oeuf devient vert et le decor parait corrompu.
-  const bool wasSwapped=lcd.getSwapBytes();
-  lcd.setSwapBytes(true);
-  lcd.pushImage(0,S3_OFFSET_Y,S3_PHYSICAL_W,S3_VIEW_H,s3ScaledPixels);
-  lcd.setSwapBytes(wasSwapped);
+  free(data);
+  if(!ok || n!=count){cachedArtId=255;return false;}
+  cachedArtId=id;
+  return true;
 }
+static void drawS3ArtCreature(uint32_t now){
+  const uint8_t st=stage();
+  if(st==0 || tamaFamily<1 || tamaFamily>3){drawEgg(now);return;}
+  const uint8_t idx=st==1?0:st==2?1:st==3?(tamaBranch==2?4:2):(tamaBranch==2?5:3);
+  if(!loadArt((uint8_t)((tamaFamily-1)*6+idx))){
+    drawTamaCreatureV8(now);return;
+  }
+  const int bob=pet.dort?1:((now/350UL)%2UL?1:-2);
+  const int ground=(pet.dort||homeScene==1)?251:250;
+  const int x0=(170-(int)artCurrent.width)/2;
+  const int y0=ground-(int)artCurrent.height+bob;
+  const uint32_t n=(uint32_t)artCurrent.width*artCurrent.height;
+  for(uint32_t i=0;i<n;++i){
+    const uint8_t c=artPixels[i];
+    if(c>0 && c<32){
+      gfx.rawPixel(x0+(int)(i%artCurrent.width),
+                   y0+(int)(i/artCurrent.width),artCurrent.palette[c]);
+    }
+  }
+}
+static void pushTamaFrame(){gfx.pushSprite(0,0);}
 #else
-static void pushTamaFrame() { gfx.pushSprite(0,0); }
+static void pushTamaFrame(){gfx.pushSprite(0,0);}
 #endif
 
 void setup() {
@@ -1722,7 +1770,11 @@ void setup() {
 #ifdef TAMA_S3_LCD
   Serial.println("[TAMA-S3] Creation sprite 135x240");
 #endif
+#ifdef TAMA_S3_LCD
+  if (gfx.createSprite(170,320) == nullptr) {
+#else
   if (gfx.createSprite(SW,SH) == nullptr) {
+#endif
     lcd.setTextColor(TFT_WHITE,TFT_BLACK);
     lcd.drawCentreString("ERREUR RAM",lcd.width()/2,lcd.height()/2,1);
     while(true) delay(1000);
