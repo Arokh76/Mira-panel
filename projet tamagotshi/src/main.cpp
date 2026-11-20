@@ -1617,7 +1617,9 @@ static uint8_t *artPixels=nullptr;
 static TamaArtDesc artCurrent={};
 static uint8_t cachedArtId=255;
 static bool artReady=false;
-static bool artAnimated=false; // TAMASPR2 : 18 creatures x 3 images, clignements et respiration
+static bool artAnimated=false; // TAMASPR2 / TAMASPR3
+static bool artFullAnimation=false; // TAMASPR3 : 18 creatures x 6 poses chibi
+static bool artFrameWasDrawn=false;
 static void initS3FrameBuffer() {
   artPartition=esp_partition_find_first(ESP_PARTITION_TYPE_DATA,
                          (esp_partition_subtype_t)0x40,"tama_art");
@@ -1629,7 +1631,8 @@ static void initS3FrameBuffer() {
   uint32_t count=0;
   if(esp_partition_read(artPartition,0,hdr,sizeof(hdr))!=ESP_OK) return;
   memcpy(&count,hdr+8,4);
-  artAnimated=(memcmp(hdr,"TAMASPR2",8)==0 && count==54);
+  artFullAnimation=(memcmp(hdr,"TAMASPR3",8)==0 && count==108);
+  artAnimated=artFullAnimation || (memcmp(hdr,"TAMASPR2",8)==0 && count==54);
   const bool artLegacy=(memcmp(hdr,"TAMASPR1",8)==0 && count==18);
   if(!artAnimated && !artLegacy) {
     Serial.println("[TAMA-S3] Partition art inconnue; formes de secours.");
@@ -1639,11 +1642,12 @@ static void initS3FrameBuffer() {
   if(!artPixels)artPixels=(uint8_t*)malloc(150U*120U);
   artReady=artPixels!=nullptr;
   Serial.printf("[TAMA-S3] 18 creatures / %s: %s\n",
-      artAnimated?"54 images (clignements et mouvement)":"18 images statiques V8.2",
+      artFullAnimation?"TAMASPR3 108 images (6 poses par creature)":
+      artAnimated?"TAMASPR2 54 images":"18 images statiques V8.2",
       artReady?"OK":"memoire KO");
 }
 static bool loadArt(uint8_t id) {
-  if(!artReady || id >= (artAnimated ? 54 : 18)) return false;
+  if(!artReady || id >= (artFullAnimation ? 108 : artAnimated ? 54 : 18)) return false;
   if(cachedArtId==id)return true;
   if(esp_partition_read(artPartition,16U+(uint32_t)id*sizeof(TamaArtDesc),
                          &artCurrent,sizeof(artCurrent))!=ESP_OK)return false;
@@ -1677,16 +1681,27 @@ static void drawS3ArtCreature(uint32_t now){
   if(st==0 || tamaFamily<1 || tamaFamily>3){drawEgg(now);return;}
   const uint8_t idx=st==1?0:st==2?1:st==3?(tamaBranch==2?4:2):(tamaBranch==2?5:3);
   uint8_t variant=0;
-  if(artAnimated) {
+  const bool active=(effect!=FX_NONE && (int32_t)(now-effectUntil)<0);
+  if(artFullAnimation) {
+    if(active && effect==FX_FOOD) {
+      const uint32_t elapsed=now-effectStarted;
+      // Vraie animation du repas : gamelle, bouche, mastication et contentement.
+      variant=elapsed<700UL?3:elapsed<2700UL?((elapsed/330UL)%2UL?3:4):5;
+    } else if(pet.dort) variant=1;
+    else if(active && (effect==FX_HUG || effect==FX_PLAY || effect==FX_GIFT)) variant=5;
+    else if((now%3900UL)<190UL) variant=1;
+    else variant=(now/680UL)%2UL?2:0;
+  } else if(artAnimated) {
     const bool blink=pet.dort || (now%3800UL)<190UL;
-    const bool active=(effect!=FX_NONE && (int32_t)(now-effectUntil)<0);
     variant=blink?1:((active || (now/650UL)%2UL) ? 2 : 0);
   }
   const uint8_t spriteIndex=(uint8_t)((tamaFamily-1)*6+idx);
-  const uint8_t id=artAnimated?(uint8_t)(spriteIndex*3+variant):spriteIndex;
+  const uint8_t id=artFullAnimation?(uint8_t)(spriteIndex*6+variant):
+                   artAnimated?(uint8_t)(spriteIndex*3+variant):spriteIndex;
   if(!loadArt(id)){
     drawTamaCreatureV8(now);return;
   }
+  artFrameWasDrawn=true;
   // Animations dessinees dans la forme : les pieds restent poses au sol.
   // On supprime le va-et-vient vertical qui donnait une "icone flottante".
   const int ground=237;
@@ -1815,7 +1830,8 @@ static void drawS3NativeHome(uint32_t now) {
       ui.drawFastHLine(x-3,y+18,7,ink);
     }
   } else {
-    // RLE extrait de la planche validee. Aucune transformation geometrie.
+    // RLE 108 poses chibi, aucune nouvelle echelle ni changement du moteur V8.2.3.
+    artFrameWasDrawn=false;
     drawS3ArtCreature(now);
   }
 
@@ -1824,10 +1840,14 @@ static void drawS3NativeHome(uint32_t now) {
   if(effectActive && stage()>0){
     const uint32_t elapsed=now-effectStarted;
     if(effect==FX_FOOD){
-      const int x=144-(int)(min<uint32_t>(elapsed,1350U)*59UL/1350UL);
-      const int y=205-(int)(min<uint32_t>(elapsed,1350U)*17UL/1350UL);
-      ui.fillCircle(x,y,8,rgb565(194,127,75));
-      ui.fillCircle(x-3,y-2,2,rgb565(106,70,42));
+      // Ne pas superposer un biscuit artificiel sur les nouvelles poses de repas.
+      // Les anciens packs SPR1/SPR2 conservent leur rendu historique.
+      if(!artFullAnimation || !artFrameWasDrawn) {
+        const int x=144-(int)(min<uint32_t>(elapsed,1350U)*59UL/1350UL);
+        const int y=205-(int)(min<uint32_t>(elapsed,1350U)*17UL/1350UL);
+        ui.fillCircle(x,y,8,rgb565(194,127,75));
+        ui.fillCircle(x-3,y-2,2,rgb565(106,70,42));
+      }
     } else if(effect==FX_CLEAN){
       ui.fillRoundRect(4,57,56,9,4,rgb565(190,211,219));
       ui.fillRoundRect(42,61,28,9,4,rgb565(173,194,208));
