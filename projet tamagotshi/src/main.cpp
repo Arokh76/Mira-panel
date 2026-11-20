@@ -13,7 +13,41 @@
 #endif
 
 static TFT_eSPI lcd;
+
+#ifdef TAMA_S3_LCD
+#include <esp_partition.h>
+class TamaNativeSprite : public TFT_eSprite {
+  static int32_t X(int32_t a){return a*170/135;}
+  static int32_t Y(int32_t a){return a*320/240;}
+  static int32_t W(int32_t a){return max(1,a*170/135);}
+  static int32_t H(int32_t a){return max(1,a*320/240);}
+  static int32_t R(int32_t a){return max(1,a*170/135);}
+public:
+  explicit TamaNativeSprite(TFT_eSPI *t):TFT_eSprite(t){}
+  void rawPixel(int32_t x,int32_t y,uint16_t c){TFT_eSprite::drawPixel(x,y,c);}
+  void drawPixel(int32_t x,int32_t y,uint32_t c){TFT_eSprite::drawPixel(X(x),Y(y),c);}
+  void drawLine(int32_t x,int32_t y,int32_t x2,int32_t y2,uint32_t c){TFT_eSprite::drawLine(X(x),Y(y),X(x2),Y(y2),c);}
+  void drawFastHLine(int32_t x,int32_t y,int32_t w,uint32_t c){TFT_eSprite::drawFastHLine(X(x),Y(y),W(w),c);}
+  void drawFastVLine(int32_t x,int32_t y,int32_t h,uint32_t c){TFT_eSprite::drawFastVLine(X(x),Y(y),H(h),c);}
+  void fillRect(int32_t x,int32_t y,int32_t w,int32_t h,uint32_t c){TFT_eSprite::fillRect(X(x),Y(y),W(w),H(h),c);}
+  void fillRoundRect(int32_t x,int32_t y,int32_t w,int32_t h,int32_t rad,uint32_t c){TFT_eSprite::fillRoundRect(X(x),Y(y),W(w),H(h),R(rad),c);}
+  void drawRoundRect(int32_t x,int32_t y,int32_t w,int32_t h,int32_t rad,uint32_t c){TFT_eSprite::drawRoundRect(X(x),Y(y),W(w),H(h),R(rad),c);}
+  void fillCircle(int32_t x,int32_t y,int32_t rad,uint32_t c){TFT_eSprite::fillCircle(X(x),Y(y),R(rad),c);}
+  void drawCircle(int32_t x,int32_t y,int32_t rad,uint32_t c){TFT_eSprite::drawCircle(X(x),Y(y),R(rad),c);}
+  void fillEllipse(int32_t x,int32_t y,int32_t rx,int32_t ry,uint32_t c){TFT_eSprite::fillEllipse(X(x),Y(y),W(rx),H(ry),c);}
+  void drawEllipse(int32_t x,int32_t y,int32_t rx,int32_t ry,uint32_t c){TFT_eSprite::drawEllipse(X(x),Y(y),W(rx),H(ry),c);}
+  void fillTriangle(int32_t x,int32_t y,int32_t x2,int32_t y2,int32_t x3,int32_t y3,uint32_t c){TFT_eSprite::fillTriangle(X(x),Y(y),X(x2),Y(y2),X(x3),Y(y3),c);}
+  template<class T> int16_t drawString(const T &str,int32_t x,int32_t y,uint8_t font=1){return TFT_eSprite::drawString(str,X(x),Y(y),font);}
+  template<class T> int16_t drawCentreString(const T &str,int32_t x,int32_t y,uint8_t font=1){return TFT_eSprite::drawCentreString(str,X(x),Y(y),font);}
+  template<class T> int16_t drawRightString(const T &str,int32_t x,int32_t y,uint8_t font=1){return TFT_eSprite::drawRightString(str,X(x),Y(y),font);}
+};
+#endif
+
+#ifdef TAMA_S3_LCD
+static TamaNativeSprite gfx(&lcd);
+#else
 static TFT_eSprite gfx(&lcd);
+#endif
 static Preferences prefs;
 #ifdef TAMA_S3_LCD
 static const uint8_t PIN_NEXT = 14, PIN_OK = 0, PIN_LIGHT = 38;
