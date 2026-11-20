@@ -72,6 +72,7 @@ static uint32_t lastBatteryCheck = 0, lastInteraction = 0;
 static bool lcdReady = false, displayOff = false;
 #ifdef TAMA_S3_LCD
 static void drawS3ArtCreature(uint32_t now); // utilise dans drawHome
+static void drawS3NativeHome(uint32_t now);  // scene 170x320 sans mise a l'echelle
 #endif
 static const uint32_t MAGIC = 0x54414D32UL;
 static const int SW = 135, SH = 240;
@@ -1400,6 +1401,12 @@ static void drawSleepFX(uint32_t now) {
 }
 
 static void drawHome(uint32_t now) {
+#ifdef TAMA_S3_LCD
+  // Le S3 utilise des coordonnees reelles 170x320 sur l'accueil.
+  // Aucun melange 135x240 / 170x320 pour l'art, les decors ou le menu.
+  drawS3NativeHome(now);
+  return;
+#endif
   if(stage()==0 || homeScene==1 || pet.dort) drawBedroom(now);
   else drawScenery(now);
   // S3 : personnages reels extraits de la planche, en taille native.
@@ -1694,7 +1701,7 @@ static void drawS3ArtCreature(uint32_t now){
     drawTamaCreatureV8(now);return;
   }
   const int bob=pet.dort?1:((now/350UL)%2UL?1:-2);
-  const int ground=(pet.dort||homeScene==1)?251:250;
+  const int ground=237; // Ligne de sol native: fixee sous les pattes, au-dessus du menu
   const int x0=(170-(int)artCurrent.width)/2;
   const int y0=ground-(int)artCurrent.height+bob;
   const uint32_t n=(uint32_t)artCurrent.width*artCurrent.height;
@@ -1706,6 +1713,182 @@ static void drawS3ArtCreature(uint32_t now){
     }
   }
 }
+
+// Accueil S3 : vraie composition 170x320, independante de l'ancienne
+// grille 135x240. Les pages annexes de la V8 restent compatibles.
+static void drawS3NativeHome(uint32_t now) {
+  // Important : appele explicitement le moteur de rendu TFT_eSprite,
+  // sans les surcharges de conversion coordonnees TamaNativeSprite.
+  TFT_eSprite &ui=static_cast<TFT_eSprite&>(gfx);
+  const bool indoors=(stage()==0 || homeScene==1 || pet.dort);
+  const uint32_t cycle=pet.ageSec%720UL;
+  const bool night=pet.dort || (cycle>=420UL && cycle<610UL);
+  const bool dusk=!pet.dort && cycle>=300UL && cycle<420UL;
+  const uint16_t ink=rgb565(14,30,53);
+  const uint16_t cream=rgb565(250,246,226);
+  const uint16_t cyan=rgb565(77,224,240);
+  ui.fillSprite(ink);
+
+  if(!indoors) {
+    // Un degrade tres fin, calcule sur les 170 pixels REELS et non etire.
+    uint8_t r0=night?18:dusk?119:99, g0=night?30:dusk?87:169, b0=night?72:dusk?132:219;
+    uint8_t r1=night?48:dusk?222:186, g1=night?63:dusk?151:220, b1=night?108:dusk?145:235;
+    for(int y=30;y<232;++y){
+      const int t=y-30;
+      ui.drawFastHLine(0,y,170,
+        rgb565((uint8_t)((r0*(202-t)+r1*t)/202),
+               (uint8_t)((g0*(202-t)+g1*t)/202),
+               (uint8_t)((b0*(202-t)+b1*t)/202)));
+    }
+    if(night) {
+      ui.fillCircle(142,73,14,rgb565(255,248,193));
+      ui.fillCircle(148,66,13,rgb565(20,37,80));
+      for(int i=0;i<10;++i){
+        const int x=(i*41+17)%170,y=46+(i*37)%103;
+        ui.drawPixel(x,y,(now/800UL+i)%3==0?TFT_WHITE:rgb565(190,208,230));
+      }
+    } else {
+      ui.fillCircle(143,69,14,dusk?rgb565(255,196,138):rgb565(255,238,148));
+      ui.fillCircle(139,65,5,rgb565(255,249,202));
+    }
+    const uint16_t cloud=night?rgb565(105,124,156):rgb565(243,250,245);
+    const int cx=34-(int)((now/650UL)%52UL);
+    ui.fillEllipse(cx+8,81,25,9,cloud);
+    ui.fillCircle(cx+3,74,11,cloud);
+    ui.fillCircle(cx+23,76,10,cloud);
+    ui.fillEllipse(143+(int)((now/1200UL)%30UL),114,21,7,cloud);
+    // Colines basses, arbres sur les COTES, pas derriere le visage.
+    const uint16_t back=night?rgb565(39,80,98):rgb565(107,173,164);
+    const uint16_t near=night?rgb565(43,101,91):rgb565(105,182,131);
+    ui.fillEllipse(30,241,90,29,back);
+    ui.fillEllipse(157,238,91,24,near);
+    ui.fillRoundRect(11,190,6,39,2,rgb565(124,100,75));
+    ui.fillCircle(14,191,15,near);
+    ui.fillCircle(26,197,10,near);
+    ui.fillRoundRect(154,184,5,42,2,rgb565(124,100,75));
+    ui.fillCircle(157,182,17,near);
+    ui.fillCircle(146,188,10,near);
+    const uint16_t soil=night?rgb565(69,98,99):rgb565(158,185,125);
+    const uint16_t grass=night?rgb565(76,142,115):rgb565(93,176,109);
+    ui.fillRect(0,236,170,44,soil);
+    ui.drawFastHLine(0,236,170,grass);
+    for(int i=0;i<5;++i) {
+      const int x=6+i*39;
+      ui.drawLine(x,248,x+2,244,grass);
+      ui.drawLine(x+2,244,x+5,248,grass);
+    }
+  } else {
+    // Chambre en pixels natifs : sol, fenetre, lit et meuble independants.
+    const uint16_t wall=night?rgb565(77,74,121):rgb565(229,192,170);
+    const uint16_t floor=night?rgb565(79,76,109):rgb565(185,145,117);
+    ui.fillRect(0,30,170,207,wall);
+    for(int y=55;y<236;y+=37)
+      ui.drawFastHLine(0,y,170,night?rgb565(91,87,135):rgb565(241,208,186));
+    ui.fillRect(0,237,170,43,floor);
+    ui.drawFastHLine(0,237,170,rgb565(138,105,88));
+    ui.fillRoundRect(124,52,38,59,4,cream);
+    ui.fillRect(128,56,30,50,night?rgb565(27,43,86):rgb565(108,185,225));
+    ui.drawFastVLine(143,56,50,cream);
+    ui.drawFastHLine(128,79,30,cream);
+    ui.fillCircle(151,66,5,night?rgb565(255,245,185):rgb565(255,226,129));
+    ui.fillRoundRect(2,204,46,32,6,rgb565(122,163,199));
+    ui.fillRoundRect(5,203,37,14,5,cream);
+    ui.drawFastHLine(3,234,46,rgb565(96,83,81));
+    ui.fillRoundRect(146,196,20,40,3,rgb565(134,95,80));
+    ui.fillEllipse(156,194,10,5,rgb565(205,159,118));
+    ui.fillCircle(155,182,9,rgb565(91,174,115));
+    ui.fillCircle(150,175,6,rgb565(67,153,91));
+    ui.fillCircle(161,174,6,rgb565(67,153,91));
+  }
+  // L'ombre DOIT etre placee avant le personnage.
+  ui.fillEllipse(85,239,50,6,night?rgb565(56,80,90):rgb565(93,129,105));
+  if(stage()==0){
+    const int wobble=pet.ageSec<22?0:((now/(pet.ageSec<45?170UL:85UL))%2UL?2:-2);
+    const int x=85+wobble,y=173;
+    if(indoors)ui.fillEllipse(85,232,49,11,rgb565(186,199,240));
+    ui.fillEllipse(x,y,39,54,rgb565(145,105,124));
+    ui.fillEllipse(x,y-1,37,52,cream);
+    const uint16_t pink=rgb565(248,147,187);
+    ui.fillCircle(x-19,y-22,9,pink);
+    ui.fillCircle(x+17,y-26,10,pink);
+    ui.fillCircle(x-10,y+18,9,pink);
+    ui.fillCircle(x+19,y+25,7,pink);
+    ui.fillCircle(x+27,y-2,6,pink);
+    if(pet.ageSec>=42){
+      ui.drawLine(x-23,y-12,x-12,y-2,ink);
+      ui.drawLine(x-12,y-2,x,y-15,ink);
+      ui.drawLine(x,y-15,x+12,y-3,ink);
+      ui.drawLine(x+12,y-3,x+25,y-11,ink);
+    }
+    if(pet.ageSec>=54){
+      ui.fillCircle(x-11,y+9,4,ink);
+      ui.fillCircle(x+11,y+9,4,ink);
+      ui.drawFastHLine(x-3,y+18,7,ink);
+    }
+  } else {
+    // RLE extrait de la planche validee. Aucune transformation geometrie.
+    drawS3ArtCreature(now);
+  }
+
+  // Reactions natives, sans ecraser le sprite ni faire passer le menu dessus.
+  const bool effectActive=effect!=FX_NONE && (int32_t)(now-effectUntil)<0;
+  if(effectActive && stage()>0){
+    const uint32_t elapsed=now-effectStarted;
+    if(effect==FX_FOOD){
+      const int x=144-(int)(min(elapsed,1350UL)*59UL/1350UL);
+      const int y=205-(int)(min(elapsed,1350UL)*17UL/1350UL);
+      ui.fillCircle(x,y,8,rgb565(194,127,75));
+      ui.fillCircle(x-3,y-2,2,rgb565(106,70,42));
+    } else if(effect==FX_CLEAN){
+      ui.fillRoundRect(4,57,56,9,4,rgb565(190,211,219));
+      ui.fillRoundRect(42,61,28,9,4,rgb565(173,194,208));
+      for(int i=0;i<7;++i){
+        const int x=49+i*10,y=74+(int)((elapsed/12UL+i*20)%127UL);
+        ui.drawFastVLine(x,y,8,rgb565(155,228,252));
+      }
+    } else if(effect==FX_HEAL || effect==FX_GROW || effect==FX_HUG || effect==FX_GIFT || effect==FX_PLAY) {
+      const uint16_t fx=effect==FX_HEAL?TFT_GREEN:
+                        effect==FX_HUG?TFT_PINK:TFT_YELLOW;
+      for(int i=0;i<4;++i){
+        const int x=23+i*41,y=207-(int)((elapsed/25UL+i*27UL)%125UL);
+        ui.drawFastHLine(x-3,y,7,fx);
+        ui.drawFastVLine(x,y-3,7,fx);
+      }
+    }
+  }
+  if(pet.dort && stage()>0){
+    for(int i=0;i<2;++i){
+      int y=152-(int)((now/85UL+i*46UL)%95UL);
+      ui.setTextColor(rgb565(230,244,255));
+      ui.drawString(i?"z":"Z",125+i*13,y,i?1:2);
+    }
+  }
+
+  // Zone d'interface reservee : haut 0..29 et menu 281..319.
+  const char* txt=(int32_t)(now-speechUntil)<0?speech:idleSpeech();
+  ui.fillRoundRect(6,5,158,28,8,rgb565(22,43,72));
+  ui.drawRoundRect(6,5,158,28,8,rgb565(88,182,212));
+  ui.setTextColor(TFT_WHITE,rgb565(22,43,72));
+  ui.drawCentreString(txt,85,13,1);
+  if(batteryMv && !usbProbable && batteryPercent<=10) {
+    ui.drawRoundRect(148,8,13,7,1,TFT_RED);
+    ui.fillRect(161,10,2,3,TFT_RED);
+  }
+  if(stage()>0){
+    const uint16_t familyColor=tamaFamily==1?rgb565(95,218,122):
+                               tamaFamily==2?rgb565(82,204,239):rgb565(203,164,246);
+    ui.fillRoundRect(36,255,98,20,7,rgb565(23,46,66));
+    ui.drawRoundRect(36,255,98,20,7,familyColor);
+    ui.setTextColor(familyColor,rgb565(23,46,66));
+    ui.drawCentreString(creatureName(),85,261,1);
+  }
+  ui.fillRect(0,281,170,39,rgb565(9,25,52));
+  ui.fillRoundRect(7,283,156,32,10,rgb565(21,49,90));
+  ui.drawRoundRect(7,283,156,32,10,cyan);
+  ui.setTextColor(cream,rgb565(21,49,90));
+  ui.drawCentreString(MENU[selected],85,291,2);
+}
+
 static void pushTamaFrame(){gfx.pushSprite(0,0);}
 #else
 static void pushTamaFrame(){gfx.pushSprite(0,0);}
