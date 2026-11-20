@@ -105,3 +105,16 @@ Photo utilisateur du 20 novembre 2026 : grosses bandes horizontales sur le déco
 Pour identifier une éventuelle autre cause, le terminal à **115200 bauds** affiche au premier rendu le format du framebuffer et les couleurs des pixels du fond de menu, du bouton et du décor AVANT transfert. En cas de bandes persistantes, ces lignes permettent de trancher entre corruption du dessin en mémoire et corruption de transfert LCD.
 
 **Le moteur de jeu, les 18 images en partition `tama_art`, le cadrage S3 et le firmware TTGO V1.1 sont inchangés.** Installer uniquement le binaire application `Tamagotchi_V8_2_2_TDisplay_S3_LCD_BASE_app.bin` à **0x10000**, sans ERASE et sans toucher aux partitions ni aux images.
+
+
+## V8.2.3 — Correction de cause racine : double echelle virtuelle
+
+Le log V8.2.2 transmis par l'utilisateur indique `fond_menu=6D74 bouton=6D74`, alors que les valeurs attendues sont `08C6` et `118B`. `6D74` est EXACTEMENT la couleur de la colline `rgb565(107,173,164)` du jardin. Une colline dessinee pres du sol est donc presente dans les pixels du menu : le framebuffer est faux avant `lcd.pushImage()`.
+
+**Cause racine trouvee dans les sources** : `TamaNativeSprite` redefinissait `drawFastHLine`, `drawPixel`, `fillRect` etc. pour multiplier les coordonnees 135x240 en 170x320. La V8.2.1 faisait `TFT_eSprite &ui = static_cast<TFT_eSprite&>(gfx)` en supposant supprimer l'echelle, MAIS ces methodes sont **virtuelles** dans `TFT_eSPI`. Les primitives `fillEllipse`, `drawCentreString`, les lignes du degrade et du menu faisaient toujours un dispatch vers l'ancien multiplicateur (deux echelles dans une meme image), d'ou les bandes horizontales, fond de menu couvert par la colline, et elements hors ecran.
+
+**Correction** : abandon de la classe `TamaNativeSprite` et emploi direct de `TFT_eSprite gfx(&lcd)`, a l'echelle native 170x320 pour le S3. Les 18 sprites sont ecrits avec `drawPixel` natif. Les autres pages du jeu, historiquement 135x240, sont temporairement dessinees sans agrandissement dans un viewport centre 135x240 pour ne rien etirer. Le code TTGO V1.1 demeure intact du point de vue de l'affichage. La partition `tama_art` reste strictement identique.
+
+Le log diagnostic de la V8.2.3 ajoute `[TAMA-S3] Validation coord. natifs: OK | menu 08C6/08C6 bouton 118B/118B | sprite 170x320` si les deux pixels clefs du menu sont enfin corrects. Une valeur differente fera apparaitre `ALERTE`, utile pour la suite.
+
+**Flash** : uniquement `Tamagotchi_V8_2_3_TDisplay_S3_LCD_BASE_app.bin` a l'adresse **0x10000**, sans ERASE. Conserver toutes les autres partitions et les images V8.2.0. La reussite de la compilation ne suffit pas : valider le rendu sur le LCD physique.

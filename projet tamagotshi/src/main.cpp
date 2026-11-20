@@ -16,38 +16,12 @@ static TFT_eSPI lcd;
 
 #ifdef TAMA_S3_LCD
 #include <esp_partition.h>
-class TamaNativeSprite : public TFT_eSprite {
-  static int32_t X(int32_t a){return a*170/135;}
-  static int32_t Y(int32_t a){return a*320/240;}
-  static int32_t W(int32_t a){return max(1,a*170/135);}
-  static int32_t H(int32_t a){return max(1,a*320/240);}
-  static int32_t R(int32_t a){return max(1,a*170/135);}
-public:
-  explicit TamaNativeSprite(TFT_eSPI *t):TFT_eSprite(t){}
-  void rawPixel(int32_t x,int32_t y,uint16_t c){TFT_eSprite::drawPixel(x,y,c);}
-  void drawPixel(int32_t x,int32_t y,uint32_t c){TFT_eSprite::drawPixel(X(x),Y(y),c);}
-  void drawLine(int32_t x,int32_t y,int32_t x2,int32_t y2,uint32_t c){TFT_eSprite::drawLine(X(x),Y(y),X(x2),Y(y2),c);}
-  void drawFastHLine(int32_t x,int32_t y,int32_t w,uint32_t c){TFT_eSprite::drawFastHLine(X(x),Y(y),W(w),c);}
-  void drawFastVLine(int32_t x,int32_t y,int32_t h,uint32_t c){TFT_eSprite::drawFastVLine(X(x),Y(y),H(h),c);}
-  void fillRect(int32_t x,int32_t y,int32_t w,int32_t h,uint32_t c){TFT_eSprite::fillRect(X(x),Y(y),W(w),H(h),c);}
-  void fillRoundRect(int32_t x,int32_t y,int32_t w,int32_t h,int32_t rad,uint32_t c){TFT_eSprite::fillRoundRect(X(x),Y(y),W(w),H(h),R(rad),c);}
-  void drawRoundRect(int32_t x,int32_t y,int32_t w,int32_t h,int32_t rad,uint32_t c){TFT_eSprite::drawRoundRect(X(x),Y(y),W(w),H(h),R(rad),c);}
-  void fillCircle(int32_t x,int32_t y,int32_t rad,uint32_t c){TFT_eSprite::fillCircle(X(x),Y(y),R(rad),c);}
-  void drawCircle(int32_t x,int32_t y,int32_t rad,uint32_t c){TFT_eSprite::drawCircle(X(x),Y(y),R(rad),c);}
-  void fillEllipse(int32_t x,int32_t y,int32_t rx,int32_t ry,uint32_t c){TFT_eSprite::fillEllipse(X(x),Y(y),W(rx),H(ry),c);}
-  void drawEllipse(int32_t x,int32_t y,int32_t rx,int32_t ry,uint32_t c){TFT_eSprite::drawEllipse(X(x),Y(y),W(rx),H(ry),c);}
-  void fillTriangle(int32_t x,int32_t y,int32_t x2,int32_t y2,int32_t x3,int32_t y3,uint32_t c){TFT_eSprite::fillTriangle(X(x),Y(y),X(x2),Y(y2),X(x3),Y(y3),c);}
-  template<class T> int16_t drawString(const T &str,int32_t x,int32_t y,uint8_t font=1){return TFT_eSprite::drawString(str,X(x),Y(y),font);}
-  template<class T> int16_t drawCentreString(const T &str,int32_t x,int32_t y,uint8_t font=1){return TFT_eSprite::drawCentreString(str,X(x),Y(y),font);}
-  template<class T> int16_t drawRightString(const T &str,int32_t x,int32_t y,uint8_t font=1){return TFT_eSprite::drawRightString(str,X(x),Y(y),font);}
-};
 #endif
-
-#ifdef TAMA_S3_LCD
-static TamaNativeSprite gfx(&lcd);
-#else
+// Une seule couche de coordonnees : TFT_eSprite natif.
+// L'ancien TamaNativeSprite doublait implicitement l'echelle via ses
+// methodes virtuelles, MEME depuis une reference TFT_eSprite&.
+// C'est la cause des bandes et du menu disparu sur les ecrans 170x320.
 static TFT_eSprite gfx(&lcd);
-#endif
 static Preferences prefs;
 #ifdef TAMA_S3_LCD
 static const uint8_t PIN_NEXT = 14, PIN_OK = 0, PIN_LIGHT = 38;
@@ -1708,8 +1682,8 @@ static void drawS3ArtCreature(uint32_t now){
   for(uint32_t i=0;i<n;++i){
     const uint8_t c=artPixels[i];
     if(c>0 && c<128){
-      gfx.rawPixel(x0+(int)(i%artCurrent.width),
-                   y0+(int)(i/artCurrent.width),artCurrent.palette[c]);
+      gfx.drawPixel(x0+(int)(i%artCurrent.width),
+                  y0+(int)(i/artCurrent.width),artCurrent.palette[c]);
     }
   }
 }
@@ -1719,7 +1693,7 @@ static void drawS3ArtCreature(uint32_t now){
 static void drawS3NativeHome(uint32_t now) {
   // Important : appele explicitement le moteur de rendu TFT_eSprite,
   // sans les surcharges de conversion coordonnees TamaNativeSprite.
-  TFT_eSprite &ui=static_cast<TFT_eSprite&>(gfx);
+  TFT_eSprite &ui=gfx; // Native 170x320, sans surcharge de mise a l'echelle
   const bool indoors=(stage()==0 || homeScene==1 || pet.dort);
   const uint32_t cycle=pet.ageSec%720UL;
   const bool night=pet.dort || (cycle>=420UL && cycle<610UL);
@@ -1911,6 +1885,14 @@ static void pushTamaFrame() {
     Serial.printf("[TAMA-S3] Pixel framebuffer: fond_menu=%04X bouton=%04X decor=%04X bpp=%u\n",
       (unsigned)gfx.readPixel(3,300),(unsigned)gfx.readPixel(85,290),
       (unsigned)gfx.readPixel(50,60),(unsigned)gfx.getColorDepth());
+    const uint16_t expectedBackground=rgb565(9,25,52);
+    const uint16_t expectedButton=rgb565(21,49,90);
+    const uint16_t actualBackground=gfx.readPixel(3,300);
+    const uint16_t actualButton=gfx.readPixel(85,290);
+    Serial.printf("[TAMA-S3] Validation coord. natifs: %s | menu %04X/%04X bouton %04X/%04X | sprite %dx%d\n",
+        (actualBackground==expectedBackground && actualButton==expectedButton)?"OK":"ALERTE",
+        (unsigned)actualBackground,(unsigned)expectedBackground,
+        (unsigned)actualButton,(unsigned)expectedButton,gfx.width(),gfx.height());
   }
   if(!s3OutputBuffer) {
     gfx.pushSprite(0,0);
@@ -1993,7 +1975,7 @@ void setup() {
   digitalWrite(PIN_LIGHT,HIGH);
   gfx.setColorDepth(16);
 #ifdef TAMA_S3_LCD
-  Serial.println("[TAMA-S3] Creation sprite 135x240");
+  Serial.println("[TAMA-S3] Creation sprite NATIF 170x320");
 #endif
 #ifdef TAMA_S3_LCD
   if (gfx.createSprite(170,320) == nullptr) {
@@ -2108,6 +2090,16 @@ void loop() {
   if(displayOff && idle && usbProbable) wakeDisplay();
   if(!displayOff && (uint32_t)(now-lastFrame)>=(idle&&usbProbable ? 330UL : 95UL)) {
     lastFrame=now;
+#ifdef TAMA_S3_LCD
+    // Les pages V1.1 restent jouables dans une zone centree 135x240,
+    // en attendant leur futur redesign 170x320. Accueil 100% natif.
+    const bool legacyScreen=(idle&&usbProbable)||page!=HOME;
+    if(legacyScreen) {
+      gfx.resetViewport();
+      gfx.fillSprite(TFT_BLACK);
+      gfx.setViewport(17,40,135,240,true);
+    } else gfx.resetViewport();
+#endif
     if(idle && usbProbable) drawUsbIdle(now);
     else if(page==INFOS) drawInfos();
     else if(page==SOUVENIRS) drawSouvenirs();
@@ -2117,6 +2109,9 @@ void loop() {
     else if(page==MINIGAME) drawGame(now);
     else if(page==REFLEXGAME) drawReflex(now);
     else drawHome(now);
+#ifdef TAMA_S3_LCD
+    gfx.resetViewport(); // Lire et envoyer les pixels a coordonnees physiques.
+#endif
     pushTamaFrame();
   }
   delay(2);
