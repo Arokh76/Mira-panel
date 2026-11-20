@@ -55,3 +55,17 @@ Materiel : LilyGO / TTGO **T-Display V1.1 ORIGINAL** (ESP32 classique, ST7789 13
 - Sur S3, l'animation "USB" reste **heuristique** (mesure batterie invalide), pas une indication de charge terminee. Aucun Wi-Fi n'est utilise par le jeu.
 
 Code et build confinés a la branche `projet-tamagotshi`, sous-dossier `projet tamagotshi/` plus workflow Tamagotchi. La branche `main` n'est pas modifiee.
+
+
+## V8.1.1 — S3 redémarrage en boucle : correctif TFT_eSPI
+
+LilyGO documente des plantages de `TFT_eSPI` avec les cores Arduino ESP32 **apres 2.0.14**.
+Le premier firmware S3 avait ete produit sur **2.0.17** via `espressif32@6.10.0`.
+Ce correctif compile **seulement le S3 avec `espressif32@6.5.0` (Arduino 2.0.14)**, sans changer le moteur ni le binaire de l'ancien TTGO V1.1.
+
+- Nouvelle image complete `Tamagotchi_V8_1_1_TDisplay_S3_LCD_full.bin` a **0x0000**.
+- Ajout de messages `[TAMA-S3]` dans le terminal serie USB a 115200 bauds (boot, NVS, TFT, sprite, boucle).
+- USB CDC active au demarrage pour faciliter l'identification de la cause si le reboot persiste.
+- Si un ecran noir et/ou un redemarrage persiste : ne pas tenter plusieurs flashs a l'aveugle ; noter les **20 dernieres lignes de log** apres RST. En cas de souci, il est possible de restaurer la demonstration officielle.
+
+Documentation : [LilyGO T-Display-S3](https://wiki.lilygo.cc/products/t-display-series/t-display-s3/) et [Core Arduino 2.0.14](https://community.platformio.org/t/confused-about-versions-using-esp32/38053).

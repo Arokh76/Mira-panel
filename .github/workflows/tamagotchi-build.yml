@@ -1,4 +1,4 @@
-name: Tamagotchi V8.1 - compiler TTGO V1.1 + T-Display S3 LCD
+name: Tamagotchi V8.1.1 - TTGO V1.1 + S3 LCD core 2.0.14
 on:
   push:
     branches: [projet-tamagotshi]
@@ -49,22 +49,22 @@ jobs:
           test -s "$BUILD_S3/firmware.bin"
           python -m esptool --chip esp32s3 merge_bin \
             --flash_mode qio --flash_freq 80m --flash_size 16MB \
-            -o "$OUT/Tamagotchi_V8_1_TDisplay_S3_LCD_full.bin" \
+            -o "$OUT/Tamagotchi_V8_1_1_TDisplay_S3_LCD_full.bin" \
             0x0 "$BUILD_S3/bootloader.bin" \
             0x8000 "$BUILD_S3/partitions.bin" \
             0xe000 "$BOOT_APP0" \
             0x10000 "$BUILD_S3/firmware.bin"
-          cp "$BUILD_S3/firmware.bin" "$OUT/Tamagotchi_V8_1_TDisplay_S3_LCD_app.bin"
-          ls -lh "$OUT/Tamagotchi_V8_1_TDisplay_S3_LCD_"*.bin
+          cp "$BUILD_S3/firmware.bin" "$OUT/Tamagotchi_V8_1_1_TDisplay_S3_LCD_app.bin"
+          ls -lh "$OUT/Tamagotchi_V8_1_1_TDisplay_S3_LCD_"*.bin
       - name: Publier les BIN dans projet GitHub
         if: github.ref == 'refs/heads/projet-tamagotshi'
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "projet tamagotshi/firmware/Tamagotchi_V8_0_TDisplay_V11_full.bin" "projet tamagotshi/firmware/Tamagotchi_V8_0_TDisplay_V11_app.bin" "projet tamagotshi/firmware/Tamagotchi_V8_1_TDisplay_S3_LCD_full.bin" "projet tamagotshi/firmware/Tamagotchi_V8_1_TDisplay_S3_LCD_app.bin"
+          git add "projet tamagotshi/firmware/Tamagotchi_V8_0_TDisplay_V11_full.bin" "projet tamagotshi/firmware/Tamagotchi_V8_0_TDisplay_V11_app.bin" "projet tamagotshi/firmware/Tamagotchi_V8_1_1_TDisplay_S3_LCD_full.bin" "projet tamagotshi/firmware/Tamagotchi_V8_1_1_TDisplay_S3_LCD_app.bin"
           if ! git diff --cached --quiet; then
-            git commit -m "Tamagotchi V8.1: publier les BIN V1.1 et S3 LCD"
+            git commit -m "Tamagotchi V8.1.1: publier les BIN V1.1 et S3 LCD"
             for attempt in 1 2 3; do
               if git push; then exit 0; fi
               git pull --rebase origin projet-tamagotshi
@@ -74,8 +74,8 @@ jobs:
       - name: Artefact firmwares
         uses: actions/upload-artifact@v4
         with:
-          name: Tamagotchi-V8_1-LCD-V11-S3-Firmwares
+          name: Tamagotchi-V8_1_1-LCD-V11-S3-Firmwares
           path: |
             projet tamagotshi/firmware/Tamagotchi_V8_0_TDisplay_V11_*.bin
-            projet tamagotshi/firmware/Tamagotchi_V8_1_TDisplay_S3_LCD_*.bin
+            projet tamagotshi/firmware/Tamagotchi_V8_1_1_TDisplay_S3_LCD_*.bin
           if-no-files-found: error

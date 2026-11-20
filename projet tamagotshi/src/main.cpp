@@ -1594,6 +1594,7 @@ static void initS3FrameBuffer() {
   if(!s3ScaledPixels) s3ScaledPixels=(uint16_t*)malloc(
       S3_PHYSICAL_W*S3_VIEW_H*sizeof(uint16_t));
   lcd.fillScreen(TFT_BLACK);
+  Serial.printf("[TAMA-S3] Buffer RGB565: %s\n",s3ScaledPixels?"OK":"fallback");
 }
 static void pushTamaFrame() {
   if(!s3ScaledPixels) {
@@ -1620,6 +1621,10 @@ static void pushTamaFrame() { gfx.pushSprite(0,0); }
 
 void setup() {
 #ifdef TAMA_S3_LCD
+  Serial.begin(115200);
+  delay(250);
+  Serial.println("\n[TAMA-S3] v8.1.1 boot, noyau Arduino 2.0.14");
+  Serial.printf("[TAMA-S3] PSRAM %u octets\n",(unsigned)ESP.getPsramSize());
   // Sur S3, GPIO15 alimente le LCD et GPIO38 controle son retroeclairage.
   // GPIO14 est un BOUTON, ne jamais l'utiliser pour autoriser la batterie !
   pinMode(PIN_POWER,OUTPUT);
@@ -1643,6 +1648,9 @@ void setup() {
   nextKey.pin=PIN_NEXT;
   okKey.pin=PIN_OK;
 
+#ifdef TAMA_S3_LCD
+  Serial.println("[TAMA-S3] Lecture NVS et ADC");
+#endif
   load();
   refreshBattery();
 #ifndef TAMA_S3_LCD
@@ -1658,12 +1666,21 @@ void setup() {
   }
 #endif
 
+#ifdef TAMA_S3_LCD
+  Serial.println("[TAMA-S3] Initialisation TFT_eSPI");
+#endif
   lcd.init();
   lcdReady = true;
+#ifdef TAMA_S3_LCD
+  Serial.printf("[TAMA-S3] LCD init OK %dx%d\n",lcd.width(),lcd.height());
+#endif
   lcd.setRotation(0);              // Portrait physique 135x240 ou 170x320
   lcd.fillScreen(TFT_BLACK);
   digitalWrite(PIN_LIGHT,HIGH);
   gfx.setColorDepth(16);
+#ifdef TAMA_S3_LCD
+  Serial.println("[TAMA-S3] Creation sprite 135x240");
+#endif
   if (gfx.createSprite(SW,SH) == nullptr) {
     lcd.setTextColor(TFT_WHITE,TFT_BLACK);
     lcd.drawCentreString("ERREUR RAM",lcd.width()/2,lcd.height()/2,1);
@@ -1672,6 +1689,7 @@ void setup() {
 #ifdef TAMA_S3_LCD
   // Reserve un tampon RGB565 en PSRAM, sans modifier le sprite historique.
   initS3FrameBuffer();
+  Serial.println("[TAMA-S3] Sprite et buffer OK");
 #endif
   gfx.setTextDatum(TL_DATUM);
   randomSeed((uint32_t)micros() ^ (uint32_t)esp_random());
@@ -1704,6 +1722,9 @@ void setup() {
   lastSave=millis();
   lastInteraction=millis();
   say("BONJOUR !",FX_WAKE,1800);
+#ifdef TAMA_S3_LCD
+  Serial.println("[TAMA-S3] setup termine, debut animation");
+#endif
 }
 void loop() {
   const uint32_t now=millis();
