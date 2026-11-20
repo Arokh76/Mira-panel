@@ -1941,9 +1941,13 @@ static void drawS3NativeHome(uint32_t now) {
   }
   if(pet.dort && stage()>0){
     for(int i=0;i<2;++i){
-      int y=152-(int)((now/85UL+i*46UL)%95UL);
+      const int rise=(int)((now/110UL+i*39UL)%83UL);
+      // Le dormeur procedural a la tete en bas a gauche de la chambre.
+      // Les "Z" doivent partir de SON visage, pas de la fenetre a droite.
+      const int x=s3ProceduralCreatureDrawn?76+rise/4+i*7:125+i*13;
+      const int y=s3ProceduralCreatureDrawn?191-rise:152-(int)((now/85UL+i*46UL)%95UL);
       ui.setTextColor(rgb565(230,244,255));
-      ui.drawString(i?"z":"Z",125+i*13,y,i?1:2);
+      ui.drawString(i?"z":"Z",x,y,i?1:2);
     }
   }
 
