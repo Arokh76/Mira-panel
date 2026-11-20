@@ -164,3 +164,37 @@ l'ancien art ou les dessins de secours. La sauvegarde NVS n'est pas effacee.
 
 Le S3 utilise toujours le moteur TFT_eSprite natif 170x320 corrige en V8.2.3 ;
 le TTGO V1.1, les sauvegardes et le projet Mira Panel sont inchanges.
+
+
+## V8.3.2 — Test de vrais sprites et animations chibi (S3)
+
+**Objectif immediat : Sylvan.** Le rendu adopte le style chibi valide, avec des
+membres complets et un personnage qui se couche reellement pour dormir.
+Le nouveau format `TAMASPR4` contient **216 images (18 creatures x 12 poses)**.
+Seul **Sylvan** dispose actuellement des 12 images chibi distinctes : repos,
+clignement, respiration, attente du repas, gamelle, morsure, mastication,
+contentement, sommeil couche, calin, jeu, bain. Les **17 autres creatures**
+conservent provisoirement les visuels V8.3.1, reutilises comme images de
+secours pour remplir les 12 emplacements ; cela ne constitue PAS 216 nouvelles
+animations achevees.
+
+Le code S3 selectionne une pose adaptee a l'effet en cours : les calins et cadeaux
+ne montrent plus la gamelle ; le cadeau recoit sa propre boite animee ; le bain
+affiche une douche et des bulles bien visibles. Le moteur TFT_eSprite V8.2.3,
+les menus, la partition NVS et le TTGO V1.1 restent inchanges. Les anciens packs
+TAMASPR1/2/3 restent compatibles avec le nouveau firmware.
+
+**Deux fichiers, S3 uniquement, sans ERASE** :
+
+1. `firmware/Tamagotchi_V8_3_2_TDisplay_S3_LCD_BASE_app.bin` a l'offset
+   `0x10000` (nouvelle application publiee par le workflow GitHub).
+2. `Tamagotchi_V8_3_2_S3_CHIBI_18x12_ART.bin` a l'offset `0xC90000`
+   (pack graphique independant du firmware, a flasher en meme temps).
+
+Ne pas utiliser le firmware V8.3.1 avec le pack TAMASPR4, car le vieux chargeur
+ne connait pas ce format. Si le nouveau pack n'est pas present, le firmware
+utilise l'ancien pack et les anciennes poses. Le pack a ete verifie par
+relecture/decompression des 216 frames en Python, **pas sur l'ecran physique**.
+Les positions exactes, les couleurs et le rendu temps reel restent a valider
+sur le T-Display S3 de l'utilisateur avant de generaliser la methode aux autres
+17 creatures.
