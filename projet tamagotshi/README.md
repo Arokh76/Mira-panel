@@ -198,3 +198,31 @@ relecture/decompression des 216 frames en Python, **pas sur l'ecran physique**.
 Les positions exactes, les couleurs et le rendu temps reel restent a valider
 sur le T-Display S3 de l'utilisateur avant de generaliser la methode aux autres
 17 creatures.
+
+
+## V8.3.3 — premier personnage anime EN CODE (S3 uniquement)
+
+Cette version ne decoupe plus d'illustration pour l'adulte **Sylvan**
+(famille Terre, branche A). Le personnage est genere a chaque image depuis
+\`src/tama_sylvan_s3.h\` en primitives natives TFT_eSprite : feuilles, yeux,
+masque du visage, queue, pattes, corps et accessoires. Aucun PNG, pack ART
+supplementaire ni suppression du jeu n'est requis pour voir ce Sylvan.
+
+Animations procedurales : respiration et clignement en repos ; bouche,
+tete et patte articulees au repas ; silhouette reellement couchee au sommeil ;
+pattes/ballon pendant le jeu ; coeurs et bras pendant les calins ; boite et
+couvercle mobiles au cadeau ; douche et bulles au bain. Les positions restent
+sur le canvas 170x320, loin des bords et au-dessus du nom y=255.
+
+**Test :** mettre a jour uniquement le firmware S3
+\`firmware/Tamagotchi_V8_3_3_TDisplay_S3_LCD_BASE_app.bin\` a l'adresse
+**0x10000**, sans ERASE. Conserver l'ancienne partition \`tama_art\` a
+\`0xC90000\` : elle sert encore aux 17 autres formes, qui restent inchanges.
+Le firmware reste compatible avec TAMASPR1/2/3/4. La sauvegarde existante,
+les seuils d'evolution, menus, commandes et moteur S3 de V8.2.3 sont conserves.
+Le firmware TTGO V1.1 n'utilise pas ce fichier de dessin S3.
+
+Pour verifier la bascule : le journal serie 115200 affiche
+\`[TAMA-S3] V8.3.3 Sylvan procedural actif, aucun sprite RLE\`
+quand un Sylvan adulte A est affiche. Le personnage doit etre teste sur
+l'ecran physique avant de dupliquer le rendu aux 17 autres.
