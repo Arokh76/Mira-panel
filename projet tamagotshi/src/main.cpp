@@ -70,6 +70,9 @@ static bool usbProbable = false; // Heuristique, pas une broche VBUS !
 static uint8_t batteryPercent = 0, consecutiveLow = 0;
 static uint32_t lastBatteryCheck = 0, lastInteraction = 0;
 static bool lcdReady = false, displayOff = false;
+#ifdef TAMA_S3_LCD
+static void drawS3ArtCreature(uint32_t now); // utilise dans drawHome
+#endif
 static const uint32_t MAGIC = 0x54414D32UL;
 static const int SW = 135, SH = 240;
 static const char* const MENU[] = {
