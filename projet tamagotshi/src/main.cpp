@@ -1,6 +1,6 @@
-// Tamagotchi V8.0 — scenes de vie et petite maison — LilyGO T-Display V1.1 ORIGINAL (ESP32/ST7789, 135x240).
-// Portrait, creature animee grand format, stats sur pages annexes, 2 mini-jeux.
- // GPIO35 : menu suivant / retour; GPIO0 : valider.
+// Tamagotchi V8.1 — meme jeu, deux firmwares : TTGO V1.1 (SPI) et T-Display S3 (parallele).
+// Espace graphique logique 135x240 conserve ; S3 agrandi en 170x300 (+ marges).
+// Boutons : V1.1 GPIO35/0 ; S3 GPIO14/0.
  // Stockage compatible V2 : namespace "tama_v2", magic 0x54414D32.
 #include <Arduino.h>
 #include <Preferences.h>
@@ -8,12 +8,20 @@
 #include <math.h>
 #include <esp_sleep.h>
 #include <driver/gpio.h>
+#ifdef TAMA_S3_LCD
+#include <esp_heap_caps.h>
+#endif
 
 static TFT_eSPI lcd;
 static TFT_eSprite gfx(&lcd);
 static Preferences prefs;
+#ifdef TAMA_S3_LCD
+static const uint8_t PIN_NEXT = 14, PIN_OK = 0, PIN_LIGHT = 38;
+static const uint8_t PIN_POWER=15, PIN_BAT_ADC=4;
+#else
 static const uint8_t PIN_NEXT = 35, PIN_OK = 0, PIN_LIGHT = 4;
 static const uint8_t PIN_BAT_ENABLE = 14, PIN_BAT_ADC = 34;
+#endif
 // Seuils conservateurs pour LiPo 1S. Le % reste une estimation.
 static const uint16_t BAT_SLEEP_MV = 3480, BAT_RESUME_MV = 3700;
 static const uint8_t BAT_HOME_WARNING_PCT = 10; // alerte visuelle avant le deep sleep
@@ -251,27 +259,34 @@ static void load() {
 // Lecture du pont diviseur 1:2 de la version originale (GPIO14 HIGH -> GPIO34 ADC).
 // Une valeur hors plage est refusee pour eviter un sommeil intempestif.
 static uint16_t sampleBatteryMv() {
-  // GPIO14 doit rester HIGH pendant l'utilisation sur batterie :
-  // il intervient aussi dans l'autorisation d'alimentation du module.
-  digitalWrite(PIN_BAT_ENABLE, HIGH);
+#ifdef TAMA_S3_LCD
+  // GPIO4 est relie a VBAT par diviseur x2 sur le LCD 1,9".
+  // D'apres LilyGO l'ADC n'est PAS fiable en USB-C : lecture 0 = inconnue.
+  (void)analogReadMilliVolts(PIN_BAT_ADC);
+#else
+  // Sur l'ancien V1.1 GPIO14 doit rester HIGH sur batterie.
+  digitalWrite(PIN_BAT_ENABLE,HIGH);
   delay(12);
   (void)analogReadMilliVolts(PIN_BAT_ADC);
+#endif
   uint16_t samples[12];
-  for (uint8_t n=0; n<12; n++) {
-    samples[n] = analogReadMilliVolts(PIN_BAT_ADC);
+  for(uint8_t n=0;n<12;n++) {
+    samples[n]=analogReadMilliVolts(PIN_BAT_ADC);
     delay(2);
   }
-  // 25e percentile pour limiter les pics POSITIFS de l'ADC ESP32.
-  for (uint8_t i=0; i<12; ++i) {
-    for (uint8_t j=i+1; j<12; ++j) {
-      if (samples[j]<samples[i]) {
-        const uint16_t tmp=samples[i]; samples[i]=samples[j]; samples[j]=tmp;
-      }
+  for(uint8_t i=0;i<12;++i) for(uint8_t j=i+1;j<12;++j) {
+    if(samples[j]<samples[i]) {
+      const uint16_t t=samples[i];samples[i]=samples[j];samples[j]=t;
     }
   }
-  const uint32_t v = static_cast<uint32_t>(samples[3]) * 2UL;
-  if(v<2600 || v>5400) return 0;
-  return static_cast<uint16_t>(v);
+  const uint32_t v=(uint32_t)samples[3]*2U;
+#ifdef TAMA_S3_LCD
+  // Ne jamais prendre une mesure incoherente sous USB pour une batterie vide.
+  if(v<3000U || v>4400U) return 0;
+#else
+  if(v<2600U || v>5400U) return 0;
+#endif
+  return (uint16_t)v;
 }
 static uint8_t estimateBattery(uint16_t mv) {
   if (!mv) return 0;
@@ -292,7 +307,13 @@ static void refreshBattery() {
   rawSupplyMv = sampleBatteryMv();
   // La cellule 1S ne monte normalement pas au-dessus de 4.2V.
   // Une tension >4.4V indique probablement le secteur USB sur ce modele.
+#ifdef TAMA_S3_LCD
+  // Pas de mesure VBUS sur cette carte. Une tension VBAT invalide lorsque
+  // le MCU fonctionne signifie alimentation USB/externe PROBABLE uniquement.
+  usbProbable = (rawSupplyMv == 0);
+#else
   usbProbable = rawSupplyMv > USB_PROBABLE_MV;
+#endif
   batteryMv = usbProbable ? 0 : rawSupplyMv;
   batteryPercent = estimateBattery(batteryMv);
   lastBatteryCheck = millis();
@@ -335,6 +356,7 @@ static void showEmptyBattery() {
   lcd.drawCentreString("RECHARGE MOI !",67,174,1);
   delay(2000);
 }
+#ifndef TAMA_S3_LCD
 static void hibernateBattery(bool showWarning=false) {
   // Ecrire en NVS une fois seulement, pas toutes les 5 min.
   if (!batteryHibernating) save();
@@ -354,6 +376,7 @@ static void hibernateBattery(bool showWarning=false) {
   delay(12);
   esp_deep_sleep_start();
 }
+#endif  // TAMA_S3_LCD : hibernation basse tension a valider avant activation
 static void displayBatteryIcon() {
   // Accueil volontairement epure : aucune jauge permanente ni indication USB.
   // A 10 % ou moins, une batterie rouge VIDE apparait, sans pourcentage.
@@ -1559,16 +1582,61 @@ static void drawReflex(uint32_t now) {
   gfx.drawCentreString("VALIDE AU VERT !",67,186,1);
   gfx.drawCentreString("RETOUR",67,215,1);
 }
+// Le moteur conserve des coordonnees logiques 135x240 pour NE PAS casser
+// les 18 sprites, les scenes et les menus de la V8 sur les deux modeles.
+#ifdef TAMA_S3_LCD
+static uint16_t *s3ScaledPixels=nullptr;
+static const int S3_PHYSICAL_W=170,S3_PHYSICAL_H=320;
+static const int S3_VIEW_H=300,S3_OFFSET_Y=10;
+static void initS3FrameBuffer() {
+  s3ScaledPixels=(uint16_t*)heap_caps_malloc(
+      S3_PHYSICAL_W*S3_VIEW_H*sizeof(uint16_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+  if(!s3ScaledPixels) s3ScaledPixels=(uint16_t*)malloc(
+      S3_PHYSICAL_W*S3_VIEW_H*sizeof(uint16_t));
+  lcd.fillScreen(TFT_BLACK);
+}
+static void pushTamaFrame() {
+  if(!s3ScaledPixels) {
+    // Fallback sans tampon : UI jouable, centree en taille native.
+    gfx.pushSprite((S3_PHYSICAL_W-SW)/2,(S3_PHYSICAL_H-SH)/2);
+    return;
+  }
+  // Nearest neighbour sans anti-alias : contours pixel-art nets.
+  // x:135->170 / y:240->300 = echelle presque uniforme 1,25.
+  // Une seule transaction LCD parallele par image.
+  for(int y=0;y<S3_VIEW_H;++y) {
+    const int sy=(y*SH)/S3_VIEW_H;
+    const size_t offset=(size_t)y*S3_PHYSICAL_W;
+    for(int x=0;x<S3_PHYSICAL_W;++x) {
+      const int sx=(x*SW)/S3_PHYSICAL_W;
+      s3ScaledPixels[offset+x]=gfx.readPixel(sx,sy);
+    }
+  }
+  lcd.pushImage(0,S3_OFFSET_Y,S3_PHYSICAL_W,S3_VIEW_H,s3ScaledPixels);
+}
+#else
+static void pushTamaFrame() { gfx.pushSprite(0,0); }
+#endif
+
 void setup() {
-  // Relacher les verrous du retroeclairage apres un reveil deep sleep.
+#ifdef TAMA_S3_LCD
+  // Sur S3, GPIO15 alimente le LCD et GPIO38 controle son retroeclairage.
+  // GPIO14 est un BOUTON, ne jamais l'utiliser pour autoriser la batterie !
+  pinMode(PIN_POWER,OUTPUT);
+  digitalWrite(PIN_POWER,HIGH);
+  delay(25);
+  pinMode(PIN_NEXT,INPUT_PULLUP);
+#else
+  // T-Display V1.1 d'origine, cables inchanges.
   gpio_deep_sleep_hold_dis();
   gpio_hold_dis(GPIO_NUM_4);
-  pinMode(PIN_NEXT,INPUT);          // Pull-up physique sur T-Display V1.1
+  pinMode(PIN_NEXT,INPUT);
+  pinMode(PIN_BAT_ENABLE,OUTPUT);
+  digitalWrite(PIN_BAT_ENABLE,HIGH);
+#endif
   pinMode(PIN_OK,INPUT_PULLUP);
   pinMode(PIN_LIGHT,OUTPUT);
   digitalWrite(PIN_LIGHT,LOW);
-  pinMode(PIN_BAT_ENABLE,OUTPUT);
-  digitalWrite(PIN_BAT_ENABLE,HIGH);
   pinMode(PIN_BAT_ADC,INPUT);
   analogReadResolution(12);
   analogSetPinAttenuation(PIN_BAT_ADC, ADC_11db);
@@ -1577,7 +1645,8 @@ void setup() {
 
   load();
   refreshBattery();
-  // Aucun affichage/jeu tant que la batterie ne s'est pas suffisamment rechargee.
+#ifndef TAMA_S3_LCD
+  // Protection basse tension connue et testee sur le TTGO V1.1 uniquement.
   if (batteryHibernating) {
     if (batteryMv && batteryMv < BAT_RESUME_MV) {
       const bool pressed = esp_sleep_get_wakeup_cause()==ESP_SLEEP_WAKEUP_EXT0;
@@ -1587,18 +1656,23 @@ void setup() {
   } else if (batteryMv && batteryMv < BAT_SLEEP_MV) {
     hibernateBattery(true);
   }
+#endif
 
   lcd.init();
   lcdReady = true;
-  lcd.setRotation(0);              // Portrait 135x240
+  lcd.setRotation(0);              // Portrait physique 135x240 ou 170x320
   lcd.fillScreen(TFT_BLACK);
   digitalWrite(PIN_LIGHT,HIGH);
   gfx.setColorDepth(16);
   if (gfx.createSprite(SW,SH) == nullptr) {
     lcd.setTextColor(TFT_WHITE,TFT_BLACK);
-    lcd.drawCentreString("ERREUR RAM",67,112,1);
+    lcd.drawCentreString("ERREUR RAM",lcd.width()/2,lcd.height()/2,1);
     while(true) delay(1000);
   }
+#ifdef TAMA_S3_LCD
+  // Reserve un tampon RGB565 en PSRAM, sans modifier le sprite historique.
+  initS3FrameBuffer();
+#endif
   gfx.setTextDatum(TL_DATUM);
   randomSeed((uint32_t)micros() ^ (uint32_t)esp_random());
   // Migration sans perte du Tama de V5.1.
@@ -1677,13 +1751,13 @@ void loop() {
 
   if((uint32_t)(now-lastBatteryCheck)>=BAT_CHECK_MS) {
     refreshBattery();
+#ifndef TAMA_S3_LCD
     if (batteryMv && batteryMv < BAT_SLEEP_MV) {
-      if (++consecutiveLow >= 3) {
-        hibernateBattery(true);
-      }
+      if (++consecutiveLow >= 3) hibernateBattery(true);
     } else {
       consecutiveLow=0;
     }
+#endif
   }
   // Inactivite: batterie -> ecran eteint; USB probable -> animation.
   const bool idle = (uint32_t)(now-lastInteraction)>=DISPLAY_IDLE_MS;
@@ -1703,7 +1777,7 @@ void loop() {
     else if(page==MINIGAME) drawGame(now);
     else if(page==REFLEXGAME) drawReflex(now);
     else drawHome(now);
-    gfx.pushSprite(0,0);
+    pushTamaFrame();
   }
   delay(2);
 }

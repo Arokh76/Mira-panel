@@ -30,3 +30,28 @@ Menus, maison (jardin et chambre), decor, promenade et nuages en parallaxe, repa
 - [Tamagotchi_V8_0_TDisplay_V11_full.bin](firmware/Tamagotchi_V8_0_TDisplay_V11_full.bin) : **0x0000**, reinstallation complete, risque de perdre le Tama.
 
 Materiel : LilyGO / TTGO **T-Display V1.1 ORIGINAL** (ESP32 classique, ST7789 135 x 240), DIO, 40 MHz, flash 4 Mo. ESP-NOW reporte.
+
+## V8.1 : portage sur le nouveau LilyGO T-Display S3 LCD 1,9 pouces
+
+**Deux firmwares DISTINCTS** cohabitent sur la branche `projet-tamagotshi`, sans toucher au projet Mira Panel :
+
+| Modele | ESP | LCD | Boutons (suivant/valider) | Reglage PlatformIO |
+|---|---|---|---|---|
+| TTGO T-Display V1.1 original | ESP32 | 135x240, SPI | GPIO35 / GPIO0 | `tdisplay_v11` |
+| LilyGO T-Display S3 LCD 1,9" | ESP32-S3R8 | 170x320, parallele 8 bits | GPIO14 / GPIO0 | `tdisplay_s3_lcd` |
+
+### Installation premiere fois : S3 LCD UNIQUEMENT
+
+- **S3_app.bin** a `0x10000` seulement si le partitionnement est deja le bon.
+- **S3_full.bin** a `0x0000` pour une premiere installation recommandee (16MB, bootloader S3 et partitions compris). Cela remplace le firmware de demonstration Wi-Fi et peut effacer ses donnees.
+- **NE JAMAIS flasher le binaire TTGO V1.1 sur le S3.** Parametres ESP32-S3, QIO, 80MHz, 16MB.
+- Si la carte ne passe pas en mode telechargement : maintenir **BOOT**, appuyer sur **RST**, relacher **RST** puis **BOOT** ; flasher et appuyer sur RST.
+
+### Affichage et autonomie
+
+- L'interface du Tama V8 reste dessinee logiquement en **135x240** pour conserver le meme cadrage et les memes animations ; le S3 la redimensionne en **170x300** (pixel-art, sans lissage) avec 10 pixels de marge haute et basse.
+- GPIO15 est mis **HIGH** pour autoriser l'alimentation ecran ; GPIO38 commande le retroeclairage. Le controle batterie est sur GPIO4 avec un diviseur par 2 (contrairement au TTGO original, GPIO14 ne doit jamais servir de sortie !).
+- **Precaution V8.1 S3** : LilyGO precise que GPIO4 ne donne PAS une tension cellule fiable lorsque l'USB-C est branche. Le pourcentage n'est affiché que si la mesure est plausible ; sur le S3 **la mise en hibernation automatique pour batterie faible est provisoirement desactivee**, le temps d'une validation sur batterie sans USB. L'ecran s'eteint toujours apres inactivite en mode batterie ; la protection physique de la cellule LiPo reste necessaire.
+- Sur S3, l'animation "USB" reste **heuristique** (mesure batterie invalide), pas une indication de charge terminee. Aucun Wi-Fi n'est utilise par le jeu.
+
+Code et build confinés a la branche `projet-tamagotshi`, sous-dossier `projet tamagotshi/` plus workflow Tamagotchi. La branche `main` n'est pas modifiee.
