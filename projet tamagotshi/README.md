@@ -136,3 +136,31 @@ La V8.3 lit aussi l'ancien pack **TAMASPR1** (18 images) : cela permet de mettre
 Le pack d'animations doit etre reconstruit depuis l'image de reference `a_detailed_colorful_clean_tamagotchi_evolution.png` (voir script fourni en annexe de livraison). Le firmware en soi ne contient pas les pixels : ils restent dans la partition `tama_art`.
 
 La compilation S3 ne remplace pas un essai physique : verifier l'absence de morceaux d'etiquettes de la planche et la fidelite des pattes sur l'ecran.
+
+
+## V8.3.1 — Vrais sprites chibi sur le LilyGO T-Display S3
+
+Cette version n'est PAS une maquette : le moteur S3 existant charge des images RGB565
+palettisees et compressees depuis la partition **tama_art** a l'adresse **0xC90000**.
+Le nouveau format `TAMASPR3` contient 108 images : 18 creatures x 6 poses
+(repos, clignement, mouvement, repas, mastication, joie). L'image est transparente
+et posee au sol, au-dessus du nom et du menu. Les sprites proviennent du rendu
+chibi approuve, notamment les images de Sylvan, avec les autres personnages
+issus de la planche des 18 evolutions (animations secondaires encore provisoires).
+
+**IMPORTANT : il faut mettre a jour l'application ET le pack d'images.**
+Le firmware V8.3.0 ne reconnait pas TAMASPR3 ; mettre a jour sans pack affiche
+l'ancien art ou les dessins de secours. La sauvegarde NVS n'est pas effacee.
+
+- S3 uniquement : `firmware/Tamagotchi_V8_3_1_TDisplay_S3_LCD_BASE_app.bin` a **0x10000**.
+- S3 uniquement : `Tamagotchi_V8_3_1_S3_CHIBI_18x6_ART.bin` a **0xC90000**.
+- Ne pas cocher **ERASE** ; ne pas flasher le `_BASE_full.bin` sur une installation
+  existante avec sprites, puisqu'il n'inclut pas le pack graphique.
+- Conserver partitions V8.2.0+ ; le partitionnement n'a pas change.
+- Les anciennes partitions TAMASPR1/TAMASPR2 restent compatibles avec cette
+  version de l'application ; dans ce cas les anciennes animations sont conservees.
+- Un essai sur le vrai LCD est encore necessaire pour confirmer couleurs,
+  cadrage et animation du repas. La compilation seule ne valide pas le rendu.
+
+Le S3 utilise toujours le moteur TFT_eSprite natif 170x320 corrige en V8.2.3 ;
+le TTGO V1.1, les sauvegardes et le projet Mira Panel sont inchanges.
