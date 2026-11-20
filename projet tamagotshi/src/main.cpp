@@ -1629,7 +1629,7 @@ static void drawReflex(uint32_t now) {
 struct TamaArtDesc {
   uint32_t offset,length;
   uint16_t width,height;
-  uint16_t palette[32];
+  uint16_t palette[128];
 };
 static const esp_partition_t *artPartition=nullptr;
 static uint8_t *artPixels=nullptr;
@@ -1651,8 +1651,8 @@ static void initS3FrameBuffer() {
     Serial.println("[TAMA-S3] Pas d'images dans tama_art, formes secours.");
     return;
   }
-  artPixels=(uint8_t*)heap_caps_malloc(130U*120U,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
-  if(!artPixels)artPixels=(uint8_t*)malloc(130U*120U);
+  artPixels=(uint8_t*)heap_caps_malloc(150U*120U,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+  if(!artPixels)artPixels=(uint8_t*)malloc(150U*120U);
   artReady=artPixels!=nullptr;
   Serial.printf("[TAMA-S3] 18 sprites originaux: %s\n",artReady?"OK":"memoire KO");
 }
@@ -1662,7 +1662,7 @@ static bool loadArt(uint8_t id) {
   if(esp_partition_read(artPartition,16U+(uint32_t)id*sizeof(TamaArtDesc),
                          &artCurrent,sizeof(artCurrent))!=ESP_OK)return false;
   const uint32_t count=(uint32_t)artCurrent.width*artCurrent.height;
-  if(!count || count>130U*120U || artCurrent.length>16000U ||
+  if(!count || count>150U*120U || artCurrent.length>18000U ||
      artCurrent.offset+artCurrent.length>artPartition->size)return false;
   uint8_t *data=(uint8_t*)malloc(artCurrent.length);
   if(!data)return false;
@@ -1700,7 +1700,7 @@ static void drawS3ArtCreature(uint32_t now){
   const uint32_t n=(uint32_t)artCurrent.width*artCurrent.height;
   for(uint32_t i=0;i<n;++i){
     const uint8_t c=artPixels[i];
-    if(c>0 && c<32){
+    if(c>0 && c<128){
       gfx.rawPixel(x0+(int)(i%artCurrent.width),
                    y0+(int)(i/artCurrent.width),artCurrent.palette[c]);
     }
