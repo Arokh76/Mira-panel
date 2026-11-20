@@ -226,3 +226,23 @@ Pour verifier la bascule : le journal serie 115200 affiche
 \`[TAMA-S3] V8.3.3 Sylvan procedural actif, aucun sprite RLE\`
 quand un Sylvan adulte A est affiche. Le personnage doit etre teste sur
 l'ecran physique avant de dupliquer le rendu aux 17 autres.
+
+
+## V8.3.4 — corrections d'apres la video 2468.mp4
+
+Retour reel sur le LilyGO S3 : les dessins proceduraux s'affichent et
+les activites se declenchent, mais la collerette du personnage recouvrait
+sa bouche, les feuilles et les pattes etaient excessivement geometriques
+et les « Z » du sommeil flottaient pres de la fenetre.
+
+Correctifs : feuilles dessinees par bandes courbes et contours nets,
+collerette sous le menton, pattes plus petites, ventre arrondi pendant le
+sommeil et « Z » animes pres de la tete. Un petit morceau de nourriture
+se deplace maintenant jusqu'a la bouche pendant le repas. Le moteur LCD,
+les sauvegardes NVS, le TTGO V1.1 et les autres creatures restent inchanges.
+
+Sur S3 deja installe : flasher uniquement le binaire application
+`firmware/Tamagotchi_V8_3_4_TDisplay_S3_LCD_BASE_app.bin` a `0x10000`
+**sans ERASE** ; ne pas flasher le BIN FULL et ne pas remplacer `tama_art`.
+La compilation et le rendu physique doivent etre verifies avant de
+declarer les corrections validees.
