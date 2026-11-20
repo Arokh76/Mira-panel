@@ -1835,8 +1835,8 @@ static void drawS3NativeHome(uint32_t now) {
   if(effectActive && stage()>0){
     const uint32_t elapsed=now-effectStarted;
     if(effect==FX_FOOD){
-      const int x=144-(int)(min(elapsed,1350UL)*59UL/1350UL);
-      const int y=205-(int)(min(elapsed,1350UL)*17UL/1350UL);
+      const int x=144-(int)(min<uint32_t>(elapsed,1350U)*59UL/1350UL);
+      const int y=205-(int)(min<uint32_t>(elapsed,1350U)*17UL/1350UL);
       ui.fillCircle(x,y,8,rgb565(194,127,75));
       ui.fillCircle(x-3,y-2,2,rgb565(106,70,42));
     } else if(effect==FX_CLEAN){
