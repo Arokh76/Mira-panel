@@ -9,6 +9,7 @@
 #include "freertos/task.h"
 #include "freertos/idf_additions.h"
 #include <string.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <stdint.h>
 
@@ -43,8 +44,14 @@ void mira_album_art_diagnostics(mira_album_art_diag_t *out){
     out->last_socket_errno=__atomic_load_n(&last_socket_errno,__ATOMIC_RELAXED);
 }
 
+// Match the WT32 String::trim() behavior before validating approved hosts.
+// Keep strict HTTPS allowlisting; do not rewrite or authorize another domain.
 static bool cover_url(const char *url){
-    if(!url||!*url||strlen(url)>MIRA_COVER_URL)return false;
+    if(!url)return false;
+    while(*url&&isspace((unsigned char)*url))url++;
+    size_t length=strlen(url);
+    while(length&&isspace((unsigned char)url[length-1]))length--;
+    if(!length||length>MIRA_COVER_URL)return false;
     static const char *const allowed[]={
         "https://i.scdn.co/image/",
         "https://mosaic.scdn.co/",
@@ -135,6 +142,10 @@ bool mira_album_art_request(uint8_t widget_index,const char *url){
         __atomic_fetch_add(&art_rejected,1u,__ATOMIC_RELAXED);
         return false;
     }
+    // WT32 trims URL whitespace before storing/comparing/fetching artwork.
+    while(isspace((unsigned char)*url))url++;
+    size_t url_length=strlen(url);
+    while(url_length&&isspace((unsigned char)url[url_length-1]))url_length--;
     if(!art_lock&&mira_album_art_init()!=ESP_OK)return false;
     if(!worker_started){
         // Album JPEG/TLS decoding is deferred and can run on a PSRAM-backed
@@ -149,7 +160,8 @@ bool mira_album_art_request(uint8_t widget_index,const char *url){
     }
     xSemaphoreTake(art_lock,portMAX_DELAY);
     // Repeated metadata deliveries never restart a JPEG download.
-    if(art_enabled&&art_index==widget_index&&!strcmp(requested,url)){
+    if(art_enabled&&art_index==widget_index&&
+       strlen(requested)==url_length&&!strncmp(requested,url,url_length)){
         xSemaphoreGive(art_lock);
         return true;
     }
@@ -158,7 +170,8 @@ bool mira_album_art_request(uint8_t widget_index,const char *url){
     art_index=widget_index;
     art_enabled=true;
     __atomic_fetch_add(&art_started,1u,__ATOMIC_RELAXED);
-    snprintf(requested,sizeof(requested),"%s",url);
+    memcpy(requested,url,url_length);
+    requested[url_length]=0;
     if(delivered.pixels){heap_caps_free(delivered.pixels);memset(&delivered,0,sizeof(delivered));}
     xSemaphoreGive(art_lock);
     return true;
