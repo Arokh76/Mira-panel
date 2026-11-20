@@ -69,3 +69,13 @@ Ce correctif compile **seulement le S3 avec `espressif32@6.5.0` (Arduino 2.0.14)
 - Si un ecran noir et/ou un redemarrage persiste : ne pas tenter plusieurs flashs a l'aveugle ; noter les **20 dernieres lignes de log** apres RST. En cas de souci, il est possible de restaurer la demonstration officielle.
 
 Documentation : [LilyGO T-Display-S3](https://wiki.lilygo.cc/products/t-display-series/t-display-s3/) et [Core Arduino 2.0.14](https://community.platformio.org/t/confused-about-versions-using-esp32/38053).
+
+
+## V8.1.2 — Correctif du watchdog de boot ROM S3
+Le log utilisateur du **20 novembre 2026** montre une repetition de `rst:0x7 (TG0WDT_SYS_RST)`, `mode:QIO, clock div:1`, `load:0x3fce3808,len:0x44c`, `ets_loader.c 78`, sans aucun message `[TAMA-S3]`. Ce symptome intervient **avant l'application**.
+
+Cause identifiee : la commande d'assemblage du firmware S3 complet forçait par erreur `--flash_mode qio`, alors que le **boot ROM du S3 ne peut charger le bootloader logiciel en QIO** ; utiliser DIO pour cette premiere phase, puis le bootloader peut activer QIO. Source : documentation officielle Espressif, [Boot Mode Selection](https://docs.espressif.com/projects/esptool/en/latest/esp32s3/advanced-topics/boot-mode-selection.html#software-bootloader-header-info).
+
+Correction : `esptool --chip esp32s3 merge_bin --flash_mode dio --flash_freq 80m --flash_size 16MB`. En-tete attendu du firmware complet `E9 03 02 4F`. Une verification automatique du firmware assemblé interdit le retour accidentel en QIO.
+
+**Flasher `Tamagotchi_V8_1_2_TDisplay_S3_LCD_full.bin` a l'adresse 0x0000**. Ne pas utiliser les anciens fichiers V8.1 ou V8.1.1 du S3 qui conservent l'en-tete incorrect. **Ne pas modifier les eFuses, ni les parametres dans ESP Flash Download Tools.** Le TTGO ESP32 original reste strictement inchange. La correction du boot ROM n'a pas encore ete validee en execution reelle sur la carte ; si le reset persiste, capturer le log 115200 du nouveau firmware.
