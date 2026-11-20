@@ -79,3 +79,9 @@ Cause identifiee : la commande d'assemblage du firmware S3 complet forçait par 
 Correction : `esptool --chip esp32s3 merge_bin --flash_mode dio --flash_freq 80m --flash_size 16MB`. En-tete attendu du firmware complet `E9 03 02 4F`. Une verification automatique du firmware assemblé interdit le retour accidentel en QIO.
 
 **Flasher `Tamagotchi_V8_1_2_TDisplay_S3_LCD_full.bin` a l'adresse 0x0000**. Ne pas utiliser les anciens fichiers V8.1 ou V8.1.1 du S3 qui conservent l'en-tete incorrect. **Ne pas modifier les eFuses, ni les parametres dans ESP Flash Download Tools.** Le TTGO ESP32 original reste strictement inchange. La correction du boot ROM n'a pas encore ete validee en execution reelle sur la carte ; si le reset persiste, capturer le log 115200 du nouveau firmware.
+
+## V8.1.3 — Correction des couleurs sur le S3 LCD
+
+La V8.1.2 démarre sur le S3R8, mais le rose de l'œuf apparaît vert et les couleurs du décor sont incohérentes. Le sprite 16 bits est lu pixel par pixel avec `TFT_eSprite::readPixel()`, ce qui fournit la valeur RGB565 en ordre naturel. En revanche, lors de `lcd.pushImage()`, le chemin par défaut du pilote TFT_eSPI attend des pixels byte-swappés, comme ceux présents dans la RAM interne des sprites. **Correction : `lcd.setSwapBytes(true)` avant `pushImage()` et restauration de la valeur précédente ensuite.** Ceci s'applique uniquement au S3 et au tampon de redimensionnement 170x300, pas au TTGO V1.1. Le correctif DIO du bootloader (V8.1.2) reste en place.
+
+Télécharger `firmware/Tamagotchi_V8_1_3_TDisplay_S3_LCD_full.bin` et flasher à **0x0000** sur le S3 pour ce test. Compiler sans erreur ne prouve pas à lui seul que l'affichage est corrigé : à valider par photo sur l'écran réel.

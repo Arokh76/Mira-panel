@@ -1613,7 +1613,14 @@ static void pushTamaFrame() {
       s3ScaledPixels[offset+x]=gfx.readPixel(sx,sy);
     }
   }
+  // gfx.readPixel() renvoie RGB565 dans l'ordre naturel (R5G6B5).
+  // TFT_eSprite::pushSprite utilise au contraire sa RAM interne byte-swappee.
+  // lcd.pushImage() doit donc ECHANGER les octets pour ce tampon reconstruit.
+  // Sinon le rose de l'oeuf devient vert et le decor parait corrompu.
+  const bool wasSwapped=lcd.getSwapBytes();
+  lcd.setSwapBytes(true);
   lcd.pushImage(0,S3_OFFSET_Y,S3_PHYSICAL_W,S3_VIEW_H,s3ScaledPixels);
+  lcd.setSwapBytes(wasSwapped);
 }
 #else
 static void pushTamaFrame() { gfx.pushSprite(0,0); }
