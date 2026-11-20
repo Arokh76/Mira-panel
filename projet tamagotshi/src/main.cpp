@@ -1679,9 +1679,26 @@ static bool loadArt(uint8_t id) {
   cachedArtId=id;
   return true;
 }
+// Le moteur TFT_eSprite 170x320 V8.2.3 reste inchange.
+// Sylvan est maintenant dessine directement, sans pack d'images externe.
+#include "tama_sylvan_s3.h"
+static bool s3ProceduralCreatureDrawn=false;
 static void drawS3ArtCreature(uint32_t now){
   const uint8_t st=stage();
   if(st==0 || tamaFamily<1 || tamaFamily>3){drawEgg(now);return;}
+  // V8.3.3: Sylvan (Terre, adulte A) en vectoriel natif et anime dans le code.
+  // Conserve la sauvegarde, le nom, les decors et le moteur de transferts LCD.
+  if(tamaFamily==1 && st==4 && tamaBranch!=2) {
+    static bool printed=false;
+    if(!printed) {
+      Serial.println("[TAMA-S3] V8.3.3 Sylvan procedural actif, aucun sprite RLE");
+      printed=true;
+    }
+    s3ProceduralCreatureDrawn=true;
+    artFrameWasDrawn=false;
+    TamaSylvanS3::draw(now);
+    return;
+  }
   const uint8_t idx=st==1?0:st==2?1:st==3?(tamaBranch==2?4:2):(tamaBranch==2?5:3);
   uint8_t variant=0;
   const bool active=(effect!=FX_NONE && (int32_t)(now-effectUntil)<0);
@@ -1856,12 +1873,15 @@ static void drawS3NativeHome(uint32_t now) {
   } else {
     // RLE chibi sur la grille native 170x320. Moteur V8.2.3 conserve.
     artFrameWasDrawn=false;
+    s3ProceduralCreatureDrawn=false;
     drawS3ArtCreature(now);
   }
 
   // Reactions natives, sans ecraser le sprite ni faire passer le menu dessus.
   const bool effectActive=effect!=FX_NONE && (int32_t)(now-effectUntil)<0;
-  if(effectActive && stage()>0){
+  // Les effets de Sylvan sont deja dessines dans le moteur d'animation
+  // procedural. Ne surtout pas rajouter un faux biscuit/bain par dessus.
+  if(effectActive && stage()>0 && !s3ProceduralCreatureDrawn){
     const uint32_t elapsed=now-effectStarted;
     if(effect==FX_FOOD){
       // Ne pas superposer un biscuit artificiel sur les nouvelles poses de repas.
