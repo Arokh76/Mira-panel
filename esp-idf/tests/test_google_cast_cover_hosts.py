@@ -16,5 +16,7 @@ assert '"http://' not in allowlist
 assert '"https://googleusercontent.com/"' not in allowlist
 assert '"https://ytimg.com/"' not in allowlist
 assert 'strncmp(url,allowed[i],n)&&url[n]' in allowlist
-assert 'strlen(url)>MIRA_COVER_URL' in allowlist
+assert 'length>MIRA_COVER_URL' in allowlist
+assert 'isspace((unsigned char)*url)' in allowlist
+assert 'isspace((unsigned char)url[length-1])' in allowlist
 print("PASS strict HTTPS Google Cast and YouTube Music cover CDN allowlist")
