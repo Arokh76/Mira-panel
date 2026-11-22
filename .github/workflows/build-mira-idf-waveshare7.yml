@@ -104,6 +104,14 @@ jobs:
           PY
           python3 "$ROOT/tests/test_media_volume_live.py"
           python3 "$ROOT/tests/test_google_cast_cover_hosts.py"
+      - name: Convert approved SVG sources into native LVGL assets (offline)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet 'Pillow>=10,<13' 'CairoSVG>=2.7,<3'
+          python3 esp-idf/tools/generate_energy_i8r.py
+          test -s esp-idf/main/energy_raster/maison_fond.i8r
+          test -s esp-idf/main/energy_raster/batterie_coque.i8r
       - name: Native ESP-IDF 5.5.6 build
         uses: espressif/esp-idf-ci-action@v1
         with:
