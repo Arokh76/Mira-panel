@@ -411,6 +411,20 @@ static cJSON *index_from_config(const char *json) {
                         cJSON_ReplaceItemInObjectCaseSensitive(
                             a,"unit",cJSON_CreateString(n==0?"°C":"%"));
                 }
+                // Extra READ-ONLY real-time power sensors. These do NOT replace
+                // historical kWh display commands or move the first 11 IDs.
+                // Positive grid power = import; negative = export.
+                // Positive battery power = charge; negative = discharge.
+                static const char *const instant_fields[]={
+                    "solar_power","home_power","grid_power","battery_power"
+                };
+                for(size_t n=0;n<4;n++){
+                    char compound[192];
+                    snprintf(compound,sizeof(compound),"%.95s__%s",name,instant_fields[n]);
+                    cJSON *a=append_action(arr,&id,"info",compound);
+                    if(a)cJSON_ReplaceItemInObjectCaseSensitive(
+                        a,"unit",cJSON_CreateString("W"));
+                }
             }
         }else if(!strcmp(type,"media")){
             for(size_t n=0;n<9;n++){
