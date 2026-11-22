@@ -2097,11 +2097,17 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
             (void)mira_energy_house_create(screen,energy_house_return_home);
             for(unsigned n=0;n<7;n++)
                 w->fields[n]=mira_energy_house_field(n);
+            const cJSON *solar_cfg=cJSON_GetObjectItemCaseSensitive(o,"showSolar");
+            const cJSON *battery_cfg=cJSON_GetObjectItemCaseSensitive(o,"showBattery");
+            const cJSON *ev_cfg=cJSON_GetObjectItemCaseSensitive(o,"showEv");
+            const cJSON *ecs_cfg=cJSON_GetObjectItemCaseSensitive(o,"showEcs");
+            // Old Jeedom versions omit these keys: hide until a real sensor
+            // value arrives, never display phantom equipment by default.
             mira_energy_house_options(
-                !cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(o,"showSolar")),
-                !cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(o,"showBattery")),
-                !cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(o,"showEv")),
-                !cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(o,"showEcs")));
+                cJSON_IsBool(solar_cfg)?(cJSON_IsTrue(solar_cfg)?1:0):-1,
+                cJSON_IsBool(battery_cfg)?(cJSON_IsTrue(battery_cfg)?1:0):-1,
+                cJSON_IsBool(ev_cfg)?(cJSON_IsTrue(ev_cfg)?1:0):-1,
+                cJSON_IsBool(ecs_cfg)?(cJSON_IsTrue(ecs_cfg)?1:0):-1);
             return;
         }
         // Restore the beta's 786x344 Jeedom energy dashboard. The generic
