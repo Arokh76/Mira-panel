@@ -2091,7 +2091,9 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         // The old classic widget is kept intact as style "classic".
         // This is an isolated visual change; all seven original Jeedom indices
         // remain mapped to the same passive state names as before.
-        if(pg==4 && strcmp(style,"classic")!=0){
+        if(pg==4 && strcmp(style,"classic")!=0 && !mira_energy_house_exists()){
+            // One screen-wide scene only. Further energy widgets keep the
+            // original card renderer instead of invalidating LVGL pointers.
             w->house_energy=true;
             w->card=NULL; // Full-screen screen child, never a flex/grid card.
             (void)mira_energy_house_create(screen,energy_house_return_home);
