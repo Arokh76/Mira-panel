@@ -634,6 +634,12 @@ static int to_page(const char *loc){
 static void show_page(int idx){
     if(idx<0||idx>5||!(visible_page_mask&(1u<<idx)))return;
     current_page=(uint8_t)idx;
+    // Highlight the CURRENT favorite page, not the home button permanently.
+    for(unsigned slot=0;slot<3;slot++){
+        if(favorite_btn[slot])
+            lv_obj_set_style_bg_opa(favorite_btn[slot],
+                favorite_pages[slot]==current_page?LV_OPA_70:LV_OPA_TRANSP,0);
+    }
     nav_count++;
     nav_last_heap=esp_get_free_heap_size();
     if(!nav_lowest_heap||nav_last_heap<nav_lowest_heap)nav_lowest_heap=nav_last_heap;
@@ -3059,7 +3065,7 @@ static void refresh_nav_favorites(void){
             continue;
         }
         lv_obj_remove_flag(bt,LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_style_bg_opa(bt,page==0?LV_OPA_70:LV_OPA_TRANSP,0);
+        lv_obj_set_style_bg_opa(bt,page==current_page?LV_OPA_70:LV_OPA_TRANSP,0);
         if(page==1)mira_nav_bulb(bt);
         else if(page==2)mira_nav_thermometer(bt);
         else{
