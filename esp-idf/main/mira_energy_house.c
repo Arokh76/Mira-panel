@@ -37,7 +37,7 @@ static lv_obj_t *ecs_card,*ecs_shape,*ecs_temp,*ecs_power;
 static lv_obj_t *ev_card,*ev_shape,*ev_soc,*ev_power;
 static lv_obj_t *solar_card,*solar_shape,*batt_card;
 static lv_obj_t *batt_extra[2], *battery_track[3];
-static lv_obj_t *battery_cell_fill[3][3], *batt_status;
+static lv_obj_t *battery_cell_fill[3][4], *batt_status;
 static lv_timer_t *animation_timer;
 static energy_route_t routes[6];
 static void (*back_cb)(void);
@@ -335,12 +335,15 @@ static void return_home(lv_event_t *ev){
     if(back_cb)back_cb();
 }
 static lv_obj_t *batt_box(unsigned i,int x){
-    // Three independent vector battery icons in the lower service area.
+    // Four independent 25% SOC steps. No green raised tab on the top bar.
+    // White carrying loop, cyan inner outline and four rectangular cells.
     lv_obj_t *b=shape(artwork,x,307,34,76,0x101C21u,CLR_WHITE,2,6);
-    shape(b,10,3,14,4,0x93A6AAu,0,0,2);
-    for(int n=0;n<3;n++){
-        shape(b,6,13+n*12,22,9,0x23363Fu,0x46636Bu,1,2);
-        battery_cell_fill[i][n]=shape(b,7,14+n*12,20,7,0x62D6A7u,0,0,2);
+    shape(b,10,1,14,9,CLR_BG,CLR_WHITE,2,4);
+    shape(b,4,10,26,49,CLR_BG,0x09DBECu,2,5);
+    for(int n=0;n<4;n++){
+        const int y=14+n*11;
+        shape(b,6,y,22,9,0x23363Fu,0,0,2);
+        battery_cell_fill[i][n]=shape(b,7,y+1,20,7,0x62D6A7u,0,0,2);
         lv_obj_add_flag(battery_cell_fill[i][n],LV_OBJ_FLAG_HIDDEN);
     }
     battery_track[i]=b;
@@ -357,10 +360,14 @@ static void update_battery_soc(unsigned battery,const char *text){
     const float pct=valid?fmaxf(0.f,fminf(100.f,percentage)):0.f;
     const uint32_t color=pct<=10.f?0xE35B64u:
         (pct<=20.f?0xEAA048u:0x62D6A7u);
-    for(unsigned cell=0;cell<3;cell++){
+    for(unsigned cell=0;cell<4;cell++){
         lv_obj_t *fill=battery_cell_fill[battery][cell];
         if(!fill)continue;
-        const float fraction=fmaxf(0.f,fminf(1.f,(pct-(100.f/3.f)*(float)cell)/(100.f/3.f)));
+        // Cell zero is at the TOP: fill from the BOTTOM as SOC rises.
+        // 0%: none, 25%: bottom, 50%: 2, 75%: 3, 100%: 4.
+        // Values between steps fill the next bar proportionally.
+        const float step_from_bottom=(float)(3u-cell);
+        const float fraction=fmaxf(0.f,fminf(1.f,(pct-25.f*step_from_bottom)/25.f));
         const int width=(int)roundf(20.f*fraction);
         set_visibility(fill,width>0);
         if(width>0)lv_obj_set_width(fill,width);
@@ -397,7 +404,7 @@ lv_obj_t *mira_energy_house_create(lv_obj_t *screen,void (*on_back)(void)){
     batt_status=txt(batt_card,"Charge / déch.",2,48,101,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
     for(int i=0;i<3;i++){
         battery_shapes[i]=batt_box((unsigned)i,473+i*38);
-        fields[4+i]=txt(battery_shapes[i],"--",0,58,34,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
+        fields[4+i]=txt(battery_shapes[i],"--",-2,60,38,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
         if(i)lv_obj_add_flag(battery_shapes[i],LV_OBJ_FLAG_HIDDEN);
     }
     // Invisible touch target on unused black space, never a visible menu.
