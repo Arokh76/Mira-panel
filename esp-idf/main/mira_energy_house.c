@@ -133,7 +133,6 @@ POLY(tower_cross,{36,274},{73,209});
 POLY(tower_cross_2,{73,274},{38,210});
 POLY(meter_bolt,{176,334},{166,349},{175,349},{171,363},{183,343},{173,343});
 POLY(boiler_thermometer,{533,274},{533,296});
-POLY(boiler_base,{520,320},{520,326},{544,326},{544,320});
 POLY(plant_stem,{339,414},{340,379},{335,375});
 POLY(plant_branch_a,{339,398},{332,385},{327,383});
 POLY(plant_branch_b,{339,391},{350,379},{354,376});
@@ -210,7 +209,6 @@ static void draw_background(void){
     shape(ecs_shape,5,4,38,62,0xC7D4D7u,CLR_WHITE,2,12);
     shape(ecs_shape,5,4,38,11,0xE2E8E8u,0,0,10);
     shape(ecs_shape,5,55,38,11,0x9AAEB4u,0,0,10);
-    poly(ecs_shape,boiler_base,0,0,0); // Kept as a no-op only for the static reference.
     shape(ecs_shape,22,64,4,13,0x9AAEB4u,0,0,1);
     shape(ecs_shape,16,77,16,3,0x9AAEB4u,0,0,1);
     shape(ecs_shape,23,21,3,26,0xE4402Eu,0,0,2);
@@ -235,12 +233,12 @@ static void set_route(int i,const lv_point_precise_t *p,unsigned n,uint32_t colo
     r->pulse=shape(scene,0,0,8,8,0xFFFFFFu,0,0,LV_RADIUS_CIRCLE);
     lv_obj_add_flag(r->pulse,LV_OBJ_FLAG_HIDDEN);
 }
-POLY(route_solar,{352,86},{352,183},{416,204},{419,310});
-POLY(route_home,{419,310},{190,310});
-POLY(route_grid,{419,310},{178,310},{91,310},{91,278});
-POLY(route_battery,{419,310},{419,380},{448,380});
-POLY(route_ecs,{419,310},{492,310},{503,294},{518,294});
-POLY(route_ev,{419,310},{607,310},{607,367},{702,367});
+POLY(route_solar,{345,106},{345,210},{410,240},{410,337});
+POLY(route_home,{410,337},{197,337});
+POLY(route_grid,{410,337},{191,337},{54,337},{54,274});
+POLY(route_battery,{410,337},{410,361},{448,361});
+POLY(route_ecs,{410,337},{438,337},{458,318},{458,293},{510,293});
+POLY(route_ev,{410,337},{596,337},{596,420},{637,420});
 static void routes_create(void){
     set_route(0,route_solar,4,0x8EC740u);
     set_route(1,route_home,2,0x42C7EEu);
@@ -248,7 +246,7 @@ static void routes_create(void){
     set_route(3,route_battery,3,0x55DAABu);
     set_route(4,route_ecs,4,0xEAA048u);
     set_route(5,route_ev,4,0x62D6A7u);
-    shape(scene,413,304,12,12,0xFFFFFFu,0x42C7EEu,1,LV_RADIUS_CIRCLE);
+    shape(scene,404,331,12,12,0xFFFFFFu,0x42C7EEu,1,LV_RADIUS_CIRCLE);
 }
 static void set_visibility(lv_obj_t *object,bool show){
     if(!object)return;
@@ -328,9 +326,9 @@ static void return_home(lv_event_t *ev){
     if(back_cb)back_cb();
 }
 static lv_obj_t *batt_box(unsigned i,int x){
-    lv_obj_t *b=shape(scene,x,355,43,78,0x131E21u,CLR_WHITE,2,7);
-    shape(b,13,-5,17,5,0x7F9493u,0,0,1);
-    for(int n=0;n<3;n++)shape(b,9,12+n*12,25,8,0x62D6A7u,0,0,1);
+    lv_obj_t *b=shape(scene,x,357,43,89,0x101C21u,CLR_WHITE,2,7);
+    shape(b,13,3,17,4,0x7F9493u,0,0,1);
+    for(int n=0;n<3;n++)shape(b,9,15+n*14,25,10,0x62D6A7u,0,0,2);
     battery_track[i]=b;
     return b;
 }
@@ -344,24 +342,24 @@ lv_obj_t *mira_energy_house_create(lv_obj_t *screen,void (*on_back)(void)){
     lv_obj_set_style_pad_all(scene,0,0);
     draw_background();
     routes_create();
-    solar_card=card(250,16,200,70,"Panneaux",CLR_SOLAR);
-    fields[0]=txt(solar_card,"--",12,36,176,CLR_SOLAR,&lv_font_montserrat_20,LV_TEXT_ALIGN_CENTER);
-    lv_obj_t *grid=card(77,186,127,76,"Réseau",CLR_GRID);
-    fields[2]=txt(grid,"--",5,30,117,CLR_GRID,&lv_font_montserrat_20,LV_TEXT_ALIGN_CENTER);
-    lv_obj_t *home=card(212,248,159,64,"Maison",CLR_HOME);
-    fields[1]=txt(home,"--",5,32,149,CLR_HOME,&lv_font_montserrat_20,LV_TEXT_ALIGN_CENTER);
-    ecs_card=card(478,171,129,73,"ECS",CLR_ECS);
-    ecs_temp=txt(ecs_card,"--",5,26,119,CLR_ECS,&mira_font_fr_16,LV_TEXT_ALIGN_CENTER);
-    ecs_power=txt(ecs_card,"--",5,48,119,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
-    ev_card=card(638,202,154,78,"Véhicule",CLR_EV);
+    solar_card=card(243,44,193,65,"Panneaux",CLR_SOLAR);
+    fields[0]=txt(solar_card,"--",9,34,175,CLR_SOLAR,&lv_font_montserrat_20,LV_TEXT_ALIGN_CENTER);
+    lv_obj_t *grid=card(77,201,117,77,"Réseau",CLR_GRID);
+    fields[2]=txt(grid,"--",4,30,109,CLR_GRID,&lv_font_montserrat_20,LV_TEXT_ALIGN_CENTER);
+    lv_obj_t *home=card(237,267,146,62,"Maison",CLR_HOME);
+    fields[1]=txt(home,"--",5,30,136,CLR_HOME,&lv_font_montserrat_20,LV_TEXT_ALIGN_CENTER);
+    ecs_card=card(465,172,124,75,"ECS",CLR_ECS);
+    ecs_temp=txt(ecs_card,"--",5,28,114,CLR_ECS,&mira_font_fr_16,LV_TEXT_ALIGN_CENTER);
+    ecs_power=txt(ecs_card,"--",5,52,114,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
+    ev_card=card(638,195,155,80,"Véhicule",CLR_EV);
     ev_soc=txt(ev_card,"--",8,28,138,CLR_EV,&lv_font_montserrat_20,LV_TEXT_ALIGN_CENTER);
     ev_power=txt(ev_card,"--",8,53,138,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
-    batt_card=card(314,355,124,73,"Batterie",CLR_BATT);
-    fields[3]=txt(batt_card,"--",6,29,112,CLR_BATT,&mira_font_fr_16,LV_TEXT_ALIGN_CENTER);
-    txt(batt_card,"Charge / décharge",5,53,114,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
+    batt_card=card(340,370,103,72,"Batterie",CLR_BATT);
+    fields[3]=txt(batt_card,"--",5,27,93,CLR_BATT,&mira_font_fr_16,LV_TEXT_ALIGN_CENTER);
+    txt(batt_card,"Charge / décharge",2,51,99,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
     for(int i=0;i<3;i++){
-        battery_shapes[i]=batt_box((unsigned)i,450+i*48);
-        fields[4+i]=txt(battery_shapes[i],"--",1,56,41,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
+        battery_shapes[i]=batt_box((unsigned)i,449+i*48);
+        fields[4+i]=txt(battery_shapes[i],"--",1,67,41,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
         if(i)lv_obj_add_flag(battery_shapes[i],LV_OBJ_FLAG_HIDDEN);
     }
     // Invisible touch target on unused black space, never a visible menu.
