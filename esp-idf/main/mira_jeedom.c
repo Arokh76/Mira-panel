@@ -388,24 +388,20 @@ static cJSON *index_from_config(const char *json) {
                 char compound[192];snprintf(compound,sizeof(compound),"%.95s__%s",name,energy_fields[n]);
                 append_action(arr,&id,"info",compound);
             }
-            // Only requested auxiliary equipment receives Jeedom commands.
-            // Keep the seven historic indices stable, then append optional
-            // temperature/power/SOC data. This must match the LVGL state names.
-            static const char *const ecs_fields[]={"ecs_temp","ecs_power"};
-            static const char *const ev_fields[]={"ev_soc","ev_power"};
-            if(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(w,"showEcs"))){
-                for(size_t n=0;n<2;n++){
-                    char compound[192];snprintf(compound,sizeof(compound),"%.95s__%s",name,ecs_fields[n]);
-                    cJSON *a=append_action(arr,&id,"info",compound);
-                    if(a&&n==0)cJSON_ReplaceItemInObjectCaseSensitive(a,"unit",cJSON_CreateString("°C"));
-                }
-            }
-            if(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(w,"showEv"))){
-                for(size_t n=0;n<2;n++){
-                    char compound[192];snprintf(compound,sizeof(compound),"%.95s__%s",name,ev_fields[n]);
-                    cJSON *a=append_action(arr,&id,"info",compound);
-                    if(a&&n==0)cJSON_ReplaceItemInObjectCaseSensitive(a,"unit",cJSON_CreateString("%"));
-                }
+            // IMPORTANT: reserve fixed indices for all four optional
+            // measurements even when the modules are hidden. Selecting ECS
+            // on/off must NEVER shift VE or later widget command IDs.
+            // Jeedom hides unselected command rows without deleting bindings.
+            static const char *const extra_fields[]={
+                "ecs_temp","ecs_power","ev_soc","ev_power"
+            };
+            for(size_t n=0;n<4;n++){
+                char compound[192];
+                snprintf(compound,sizeof(compound),"%.95s__%s",name,extra_fields[n]);
+                cJSON *a=append_action(arr,&id,"info",compound);
+                if(a&&(n==0||n==2))
+                    cJSON_ReplaceItemInObjectCaseSensitive(
+                        a,"unit",cJSON_CreateString(n==0?"°C":"%"));
             }
         }else if(!strcmp(type,"media")){
             for(size_t n=0;n<9;n++){
