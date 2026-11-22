@@ -174,12 +174,27 @@ POLY(route_grid,{454,281},{241,281},{224,282},{116,282},{55,282},{55,245});
 POLY(route_battery,{454,281},{454,307},{488,307});
 POLY(route_ecs,{454,281},{520,281},{563,261});
 POLY(route_ev,{454,281},{598,281},{598,345},{640,345});
+// A route owns a stable point buffer plus its LVGL line and three animated dashes.
+// This native helper is required by routes_create() after the SVG transition.
+static void set_route(int i,const lv_point_precise_t *p,unsigned n,uint32_t color){
+    if(i<0||i>=6||!p)return;
+    energy_route_t *r=&routes[i];
+    if(n>8)n=8;
+    r->n=(uint8_t)n;
+    for(unsigned j=0;j<n;j++)r->p[j]=p[j];
+    r->track=poly(artwork,r->p,(int)n,color,2);
+    lv_obj_set_style_line_opa(r->track,LV_OPA_50,0);
+    for(unsigned j=0;j<3;j++){
+        r->pulse[j]=shape(artwork,0,0,9,3,color,0,0,LV_RADIUS_CIRCLE);
+        lv_obj_add_flag(r->pulse[j],LV_OBJ_FLAG_HIDDEN);
+    }
+}
 static void routes_create(void){
     set_route(0,route_solar,4,0x8EC740u);
     set_route(1,route_home,2,0x42C7EEu);
-    set_route(2,route_grid,4,0x42C7EEu);
+    set_route(2,route_grid,6,0x42C7EEu);
     set_route(3,route_battery,3,0x55DAABu);
-    set_route(4,route_ecs,4,0xEAA048u);
+    set_route(4,route_ecs,3,0xEAA048u);
     set_route(5,route_ev,4,0x62D6A7u);
     // Keep the central junction small, above the home/battery path.
     shape(artwork,451,278,6,6,0x42C7EEu,0,0,LV_RADIUS_CIRCLE);
