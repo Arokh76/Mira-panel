@@ -100,7 +100,6 @@ static lv_obj_t *poly(lv_obj_t *p,const lv_point_precise_t *pts,int count,
 POLY(roof_main,{187,239},{278,150},{506,113},{631,240});
 POLY(roof_gable,{506,113},{559,166},{631,240});
 POLY(roof_eave,{188,239},{400,217});
-POLY(roof_back,{278,151},{505,113},{607,214});
 POLY(house_walls,{197,238},{197,448},{613,448},{613,239});
 POLY(ground_line,{153,450},{770,450});
 POLY(garage_top,{593,308},{607,295},{752,295},{767,308});
@@ -132,7 +131,6 @@ POLY(tower_mid,{32,242},{56,222},{81,242});
 POLY(tower_cross,{36,274},{73,209});
 POLY(tower_cross_2,{73,274},{38,210});
 POLY(meter_bolt,{176,334},{166,349},{175,349},{171,363},{183,343},{173,343});
-POLY(boiler_thermometer,{533,274},{533,296});
 POLY(plant_stem,{339,414},{340,379},{335,375});
 POLY(plant_branch_a,{339,398},{332,385},{327,383});
 POLY(plant_branch_b,{339,391},{350,379},{354,376});
