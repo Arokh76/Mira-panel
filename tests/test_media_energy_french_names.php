@@ -1,7 +1,7 @@
 <?php
 // Run the exact Jeedom command-label translation block with lightweight stubs.
 $source=file_get_contents(__DIR__.'/../core/class/mira.class.php');
-$start=strpos($source,"if (preg_match('/^(.*)__(solar|home|grid|battery|soc|soc2|soc3|ecs_temp|ecs_power|ev_soc|ev_power)\$/D'");
+$start=strpos($source,"if (preg_match('/^(.*)__(solar|home|grid|battery|soc|soc2|soc3|ecs_temp|ecs_power|ev_soc|ev_power|solar_power|home_power|grid_power|battery_power)\$/D'");
 $end=$start===false ? false : strpos($source,'$info->save();',$start);
 if($start===false || $end===false)throw new RuntimeException('Translation block missing');
 $block=substr($source,$start,$end-$start);
@@ -22,6 +22,10 @@ $cases=[
   'Home__ecs_power'=>'Home · ECS · Puissance',
   'Home__ev_soc'=>'Home · VE · Niveau batterie',
   'Home__ev_power'=>'Home · VE · Recharge',
+  'Home__solar_power'=>'Home · Puissance solaire (instantanée)',
+  'Home__home_power'=>'Home · Consommation maison (instantanée)',
+  'Home__grid_power'=>'Home · Puissance réseau (signée)',
+  'Home__battery_power'=>'Home · Puissance batterie (signée)',
   'Maison__device'=>'Maison · Enceinte active',
   'Maison__devices'=>'Maison · Enceintes disponibles',
   'Maison__title'=>'Maison · Titre',

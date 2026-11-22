@@ -1303,11 +1303,12 @@ $('#table_cmd').off('click.mira_media','.mira-media-toggle-links')
 // Energy battery rows are real indexed Mira infos. Preserve their Jeedom
 // mappings when hidden: the selector changes visibility, never deletes a cmd.
 function miraEnergyModulePermitted(logicalId){
-  var match=String(logicalId||'').match(/^(.*)__(solar|home|grid|battery|soc|soc2|soc3|ecs_temp|ecs_power|ev_soc|ev_power)$/);
+  var match=String(logicalId||'').match(/^(.*)__(solar|home|grid|battery|soc|soc2|soc3|ecs_temp|ecs_power|ev_soc|ev_power|solar_power|home_power|grid_power|battery_power)$/);
   if(!match) return true;
-  if(match[2]==='home'||match[2]==='grid')return true;
-  var key=(match[2]==='solar')?'showSolar':
-    (match[2]==='battery'||match[2]==='soc'||match[2]==='soc2'||match[2]==='soc3')?'showBattery':
+  if(match[2]==='home'||match[2]==='grid'||
+     match[2]==='home_power'||match[2]==='grid_power')return true;
+  var key=(match[2]==='solar'||match[2]==='solar_power')?'showSolar':
+    (match[2]==='battery'||match[2]==='battery_power'||match[2]==='soc'||match[2]==='soc2'||match[2]==='soc3')?'showBattery':
     (match[2].indexOf('ev_')===0)?'showEv':'showEcs';
   var row=MiraGetRows().find(function(x){
     return MiraRowType(x)==='energy'&&MiraTechnicalName(x)===match[1];
@@ -1317,7 +1318,7 @@ function miraEnergyModulePermitted(logicalId){
 function miraRefreshEnergyModuleRows(){
   $('#table_cmd tbody tr[data-mira-logicalid]').each(function(){
     var row=$(this),name=row.attr('data-mira-logicalid')||'';
-    if(!/__(solar|battery|soc|soc2|soc3|ecs_temp|ecs_power|ev_soc|ev_power)$/.test(name))return;
+    if(!/__(solar|battery|soc|soc2|soc3|ecs_temp|ecs_power|ev_soc|ev_power|solar_power|battery_power)$/.test(name))return;
     row.toggle(row.attr('data-mira-origin-hidden')!=='1' && miraEnergyModulePermitted(name));
   });
   miraRefreshEnergyBatteryRows();
