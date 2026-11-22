@@ -396,13 +396,15 @@ static cJSON *index_from_config(const char *json) {
             if(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(w,"showEcs"))){
                 for(size_t n=0;n<2;n++){
                     char compound[192];snprintf(compound,sizeof(compound),"%.95s__%s",name,ecs_fields[n]);
-                    append_action(arr,&id,"info",compound);
+                    cJSON *a=append_action(arr,&id,"info",compound);
+                    if(a&&n==0)cJSON_ReplaceItemInObjectCaseSensitive(a,"unit",cJSON_CreateString("°C"));
                 }
             }
             if(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(w,"showEv"))){
                 for(size_t n=0;n<2;n++){
                     char compound[192];snprintf(compound,sizeof(compound),"%.95s__%s",name,ev_fields[n]);
-                    append_action(arr,&id,"info",compound);
+                    cJSON *a=append_action(arr,&id,"info",compound);
+                    if(a&&n==0)cJSON_ReplaceItemInObjectCaseSensitive(a,"unit",cJSON_CreateString("%"));
                 }
             }
         }else if(!strcmp(type,"media")){
