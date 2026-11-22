@@ -110,3 +110,13 @@ CONFIG_AUTOSTART_ARDUINO=n
 # Third-party esp-modbus pulled by Arduino 3.3.12 triggers GCC14
 # -Wstringop-truncation under -Werror; retain diagnostics, no -Werror.
 CONFIG_COMPILER_WARNINGS_AS_ERRORS=n
+
+# Approved SVG images are rasterized on the CI runner, never decoded on panel.
+# Keep ThorVG and SVG parsing disabled to protect LVGL startup memory and stack.
+CONFIG_LV_USE_SVG=n
+CONFIG_LV_USE_THORVG=n
+CONFIG_LV_USE_THORVG_INTERNAL=n
+CONFIG_LV_USE_VECTOR_GRAPHIC=n
+CONFIG_LV_USE_SVG_ANIMATION=n
+CONFIG_LV_DRAW_SW_SUPPORT_ARGB8888=y
+CONFIG_LV_DRAW_THREAD_STACK_SIZE=8192
