@@ -388,6 +388,23 @@ static cJSON *index_from_config(const char *json) {
                 char compound[192];snprintf(compound,sizeof(compound),"%.95s__%s",name,energy_fields[n]);
                 append_action(arr,&id,"info",compound);
             }
+            // Only requested auxiliary equipment receives Jeedom commands.
+            // Keep the seven historic indices stable, then append optional
+            // temperature/power/SOC data. This must match the LVGL state names.
+            static const char *const ecs_fields[]={"ecs_temp","ecs_power"};
+            static const char *const ev_fields[]={"ev_soc","ev_power"};
+            if(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(w,"showEcs"))){
+                for(size_t n=0;n<2;n++){
+                    char compound[192];snprintf(compound,sizeof(compound),"%.95s__%s",name,ecs_fields[n]);
+                    append_action(arr,&id,"info",compound);
+                }
+            }
+            if(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(w,"showEv"))){
+                for(size_t n=0;n<2;n++){
+                    char compound[192];snprintf(compound,sizeof(compound),"%.95s__%s",name,ev_fields[n]);
+                    append_action(arr,&id,"info",compound);
+                }
+            }
         }else if(!strcmp(type,"media")){
             for(size_t n=0;n<9;n++){
                 char compound[192];snprintf(compound,sizeof(compound),"%.95s__%s",name,media_fields[n]);
