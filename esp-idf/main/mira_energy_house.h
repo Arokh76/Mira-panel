@@ -12,4 +12,4 @@ bool mira_energy_house_exists(void);
 lv_obj_t *mira_energy_house_field(unsigned field); // existing solar/home/grid/battery/soc1..3
 void mira_energy_house_update(unsigned field, const char *value);
 void mira_energy_house_aux(const char *name, const char *value);
-void mira_energy_house_options(bool solar, bool battery, bool ev, bool ecs);
+void mira_energy_house_options(int solar, int battery, int ev, int ecs);
