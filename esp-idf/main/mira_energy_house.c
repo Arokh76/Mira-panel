@@ -23,6 +23,7 @@ typedef struct {
     lv_point_precise_t p[8];
     uint8_t n;
     lv_obj_t *pulse;
+    lv_obj_t *track;
     bool valid;
     float watts;
     float phase;
@@ -30,6 +31,7 @@ typedef struct {
 } energy_route_t;
 
 static lv_obj_t *scene, *fields[7], *battery_shapes[3];
+static lv_obj_t *solar_layer,*ev_layer;
 static lv_obj_t *ecs_card,*ecs_shape,*ecs_temp,*ecs_power;
 static lv_obj_t *ev_card,*ev_shape,*ev_soc,*ev_power;
 static lv_obj_t *solar_card,*solar_shape,*batt_card;
@@ -37,7 +39,18 @@ static lv_obj_t *batt_extra[2], *battery_track[3];
 static lv_timer_t *animation_timer;
 static energy_route_t routes[6];
 static void (*back_cb)(void);
-static bool enabled_solar=true,enabled_battery=true,enabled_ev=true,enabled_ecs=true;
+// -1: infer presence from a real Jeedom state (old plugin), 0: disabled
+// in Jeedom, 1: explicitly selected in Jeedom.
+static int option_solar=-1,option_battery=-1,option_ev=-1,option_ecs=-1;
+static bool seen_solar,seen_battery,seen_ev,seen_ecs;
+static bool has_value(const char *value) {
+    return value && *value && strcmp(value,"--")!=0 &&
+           strcmp(value,"null")!=0 && strcmp(value,"undefined")!=0;
+}
+static bool enabled(int option,bool seen) {
+    return option<0 ? seen : option>0;
+}
+static void refresh_visibility(void);
 
 static lv_obj_t *shape(lv_obj_t *p,int x,int y,int w,int h,uint32_t fill,
                        uint32_t border,int bw,int radius){
@@ -110,14 +123,16 @@ static void draw_background(void){
     poly(scene,garage_outline,4,CLR_WHITE,3);
     shape(scene,608,314,154,115,CLR_BG,0x6C777Bu,2,0);
     shape(scene,521,97,20,24,CLR_BG,CLR_WHITE,2,0); // discreet chimney
-    solar_shape=poly(scene,pv_outline,5,0x397CD6u,3);
-    poly(scene,pv_r1,2,0x2677B6u,1);
-    poly(scene,pv_r2,2,0x2677B6u,1);
-    poly(scene,pv_r3,2,0x2677B6u,1);
-    poly(scene,pv_c1,2,0x2677B6u,1);
-    poly(scene,pv_c2,2,0x2677B6u,1);
-    poly(scene,pv_c3,2,0x2677B6u,1);
-    poly(scene,pv_c4,2,0x2677B6u,1);
+    solar_layer=shape(scene,0,0,800,480,CLR_BG,0,0,0);
+    solar_shape=solar_layer;
+    poly(solar_layer,pv_outline,5,0x397CD6u,3);
+    poly(solar_layer,pv_r1,2,0x2677B6u,1);
+    poly(solar_layer,pv_r2,2,0x2677B6u,1);
+    poly(solar_layer,pv_r3,2,0x2677B6u,1);
+    poly(solar_layer,pv_c1,2,0x2677B6u,1);
+    poly(solar_layer,pv_c2,2,0x2677B6u,1);
+    poly(solar_layer,pv_c3,2,0x2677B6u,1);
+    poly(solar_layer,pv_c4,2,0x2677B6u,1);
     shape(scene,179,319,169,110,CLR_BG,0x6D777Bu,1,0);
     // Interior is intentionally understated: a sofa, a lamp and a plant.
     shape(scene,201,390,100,32,CLR_BG,0x99A3A5u,2,5);
@@ -127,12 +142,14 @@ static void draw_background(void){
     shape(scene,338,408,17,3,0x87999Eu,0,0,1);
     shape(scene,341,398,12,12,CLR_BG,0x749C59u,1,2);
     shape(scene,344,390,2,9,0x749C59u,0,0,0);
-    poly(scene,car_top,4,CLR_WHITE,2);
-    poly(scene,car_bottom,4,CLR_WHITE,2);
-    shape(scene,660,402,11,3,0x3BC6E4u,0,0,1);
-    shape(scene,725,402,11,3,0x3BC6E4u,0,0,1);
-    shape(scene,665,418,12,7,0x9CA5A9u,0,0,3);
-    shape(scene,726,418,12,7,0x9CA5A9u,0,0,3);
+    ev_layer=shape(scene,0,0,800,480,CLR_BG,0,0,0);
+    ev_shape=ev_layer;
+    poly(ev_layer,car_top,4,CLR_WHITE,2);
+    poly(ev_layer,car_bottom,4,CLR_WHITE,2);
+    shape(ev_layer,660,402,11,3,0x3BC6E4u,0,0,1);
+    shape(ev_layer,725,402,11,3,0x3BC6E4u,0,0,1);
+    shape(ev_layer,665,418,12,7,0x9CA5A9u,0,0,3);
+    shape(ev_layer,726,418,12,7,0x9CA5A9u,0,0,3);
     poly(scene,power_tower,3,CLR_WHITE,2);
     poly(scene,tower_top,3,CLR_WHITE,2);
     poly(scene,tower_cross1,2,CLR_WHITE,2);
@@ -148,7 +165,7 @@ static void set_route(int i,const lv_point_precise_t *p,unsigned n,uint32_t colo
     if(n>8)n=8;
     r->n=(uint8_t)n;
     for(unsigned j=0;j<n;j++)r->p[j]=p[j];
-    poly(scene,r->p,(int)n,color,3);
+    r->track=poly(scene,r->p,(int)n,color,3);
     r->pulse=shape(scene,0,0,8,8,0xFFFFFFu,0,0,LV_RADIUS_CIRCLE);
     lv_obj_add_flag(r->pulse,LV_OBJ_FLAG_HIDDEN);
 }
@@ -205,8 +222,10 @@ static void animate(lv_timer_t *timer){
         if(!r->valid||fabsf(r->watts)<3.f||r->n<2||!r->pulse){
             set_visibility(r->pulse,false);continue;
         }
-        if((k==0&&!enabled_solar)||(k==3&&!enabled_battery)||
-           (k==4&&!enabled_ecs)||(k==5&&!enabled_ev)){
+        if((k==0&&!enabled(option_solar,seen_solar))||
+           (k==3&&!enabled(option_battery,seen_battery))||
+           (k==4&&!enabled(option_ecs,seen_ecs))||
+           (k==5&&!enabled(option_ev,seen_ev))){
             set_visibility(r->pulse,false);continue;
         }
         float dist=0.f;
@@ -291,12 +310,15 @@ lv_obj_t *mira_energy_house_create(lv_obj_t *screen,void (*on_back)(void)){
     lv_obj_add_event_cb(return_zone,return_home,LV_EVENT_CLICKED,NULL);
     animation_timer=lv_timer_create(animate,90,NULL);
     lv_obj_add_flag(scene,LV_OBJ_FLAG_HIDDEN);
-    mira_energy_house_options(true,true,true,true);
+    mira_energy_house_options(-1,-1,-1,-1);
     return scene;
 }
 void mira_energy_house_destroy(void){
     if(animation_timer){lv_timer_delete(animation_timer);animation_timer=NULL;}
     if(scene){lv_obj_delete(scene);scene=NULL;}
+    solar_layer=NULL;ev_layer=NULL;
+    seen_solar=false;seen_battery=false;seen_ecs=false;seen_ev=false;
+    option_solar=-1;option_battery=-1;option_ev=-1;option_ecs=-1;
     memset(fields,0,sizeof(fields));
     memset(routes,0,sizeof(routes));
     memset(battery_shapes,0,sizeof(battery_shapes));
@@ -319,10 +341,14 @@ void mira_energy_house_update(unsigned field,const char *value){
     const char *old=lv_label_get_text(fields[field]);
     if(!old||strcmp(old,new_value))lv_label_set_text(fields[field],new_value);
     if(field<4)set_power_valid(field,new_value);
-    if(field>=4&&field<=6){
-        unsigned i=field-4;
-        set_visibility(battery_shapes[i],i==0||strcmp(new_value,"--")!=0);
+    if(field==0)seen_solar=has_value(new_value);
+    if(field==3||field==4||field==5||field==6){
+        seen_battery=has_value(lv_label_get_text(fields[3]))||
+            has_value(lv_label_get_text(fields[4]))||
+            has_value(lv_label_get_text(fields[5]))||
+            has_value(lv_label_get_text(fields[6]));
     }
+    refresh_visibility();
 }
 void mira_energy_house_aux(const char *name,const char *value){
     if(!scene||!name)return;
@@ -332,18 +358,36 @@ void mira_energy_house_aux(const char *name,const char *value){
     else if(!strcmp(name,"ev_soc"))field=ev_soc;
     else if(!strcmp(name,"ev_power")){field=ev_power;set_power_valid(5,value);}
     if(field)lv_label_set_text(field,value&&*value?value:"--");
+    if(!strncmp(name,"ecs_",4))seen_ecs=has_value(lv_label_get_text(ecs_temp))||has_value(lv_label_get_text(ecs_power));
+    if(!strncmp(name,"ev_",3))seen_ev=has_value(lv_label_get_text(ev_soc))||has_value(lv_label_get_text(ev_power));
+    refresh_visibility();
 }
-void mira_energy_house_options(bool solar,bool battery,bool ev,bool ecs){
-    enabled_solar=solar;enabled_battery=battery;enabled_ev=ev;enabled_ecs=ecs;
+static void refresh_visibility(void){
+    if(!scene)return;
+    const bool solar=enabled(option_solar,seen_solar);
+    const bool batt=enabled(option_battery,seen_battery);
+    const bool ev=enabled(option_ev,seen_ev);
+    const bool ecs=enabled(option_ecs,seen_ecs);
     set_visibility(solar_card,solar);
-    set_visibility(solar_shape,solar);
-    set_visibility(batt_card,battery);
+    set_visibility(solar_layer,solar);
+    set_visibility(batt_card,batt);
     for(int i=0;i<3;i++){
-        bool populated=(i==0)||(fields[4+i]&&strcmp(lv_label_get_text(fields[4+i]),"--")!=0);
-        set_visibility(battery_shapes[i],battery&&populated);
+        const bool populated=(i==0)||
+            (fields[4+i] && has_value(lv_label_get_text(fields[4+i])));
+        set_visibility(battery_shapes[i],batt&&populated);
     }
     set_visibility(ecs_card,ecs);
     set_visibility(ecs_shape,ecs);
     set_visibility(ev_card,ev);
-    set_visibility(ev_shape,ev);
+    set_visibility(ev_layer,ev);
+    // Hide the whole cable as well as moving pixels for absent equipment.
+    for(int i=0;i<6;i++){
+        const bool on=i==0?solar:i==3?batt:i==4?ecs:i==5?ev:true;
+        set_visibility(routes[i].track,on);
+        if(!on)set_visibility(routes[i].pulse,false);
+    }
+}
+void mira_energy_house_options(int solar,int battery,int ev,int ecs){
+    option_solar=solar;option_battery=battery;option_ev=ev;option_ecs=ecs;
+    refresh_visibility();
 }
