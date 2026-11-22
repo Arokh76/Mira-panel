@@ -22,9 +22,10 @@
 typedef struct {
     lv_point_precise_t p[8];
     uint8_t n;
-    lv_obj_t *pulse;
+    lv_obj_t *pulse[3];
     lv_obj_t *track;
     bool valid;
+    bool cumulative; // kWh is energy, not instantaneous power.
     float watts;
     float phase;
     bool backwards;
@@ -36,6 +37,7 @@ static lv_obj_t *ecs_card,*ecs_shape,*ecs_temp,*ecs_power;
 static lv_obj_t *ev_card,*ev_shape,*ev_soc,*ev_power;
 static lv_obj_t *solar_card,*solar_shape,*batt_card;
 static lv_obj_t *batt_extra[2], *battery_track[3];
+static lv_obj_t *battery_cell_fill[3][3], *batt_status;
 static lv_timer_t *animation_timer;
 static energy_route_t routes[6];
 static void (*back_cb)(void);
@@ -227,10 +229,13 @@ static void set_route(int i,const lv_point_precise_t *p,unsigned n,uint32_t colo
     if(n>8)n=8;
     r->n=(uint8_t)n;
     for(unsigned j=0;j<n;j++)r->p[j]=p[j];
-    r->track=poly(artwork,r->p,(int)n,color,3);
-    // Small colored moving segment, never a giant white arrow/dot.
-    r->pulse=shape(artwork,0,0,11,4,color,0,0,LV_RADIUS_CIRCLE);
-    lv_obj_add_flag(r->pulse,LV_OBJ_FLAG_HIDDEN);
+    r->track=poly(artwork,r->p,(int)n,color,2);
+    lv_obj_set_style_line_opa(r->track,LV_OPA_50,0);
+    // Three short, spaced dashes rather than one large traveling dot.
+    for(unsigned j=0;j<3;j++){
+        r->pulse[j]=shape(artwork,0,0,9,3,color,0,0,LV_RADIUS_CIRCLE);
+        lv_obj_add_flag(r->pulse[j],LV_OBJ_FLAG_HIDDEN);
+    }
 }
 POLY(route_solar,{345,106},{345,210},{410,240},{410,337});
 POLY(route_home,{410,337},{197,337});
@@ -245,7 +250,8 @@ static void routes_create(void){
     set_route(3,route_battery,3,0x55DAABu);
     set_route(4,route_ecs,4,0xEAA048u);
     set_route(5,route_ev,4,0x62D6A7u);
-    shape(artwork,404,331,12,12,0xFFFFFFu,0x42C7EEu,1,LV_RADIUS_CIRCLE);
+    // Small junction instead of a large solid white ball.
+    shape(artwork,407,334,6,6,0x42C7EEu,0,0,LV_RADIUS_CIRCLE);
 }
 static void set_visibility(lv_obj_t *object,bool show){
     if(!object)return;
@@ -257,7 +263,7 @@ static void set_power_valid(unsigned route,const char *text){
     energy_route_t *r=&routes[route];
     if(!text||!*text||!strcmp(text,"--")){
         r->valid=false;
-        set_visibility(r->pulse,false);
+        for(unsigned j=0;j<3;j++)set_visibility(r->pulse[j],false);
         return;
     }
     char scratch[64];
@@ -267,11 +273,13 @@ static void set_power_valid(unsigned route,const char *text){
     float v=strtof(scratch,&end);
     if(end==scratch||!isfinite(v)){
         r->valid=false;
-        set_visibility(r->pulse,false);
+        for(unsigned j=0;j<3;j++)set_visibility(r->pulse[j],false);
         return;
     }
-    if(strstr(scratch,"kW")||strstr(scratch,"kw"))v*=1000.f;
+    const bool cumulative=strstr(scratch,"Wh")!=NULL||strstr(scratch,"wh")!=NULL;
+    if(!cumulative&&(strstr(scratch,"kW")||strstr(scratch,"kw")))v*=1000.f;
     r->valid=true;
+    r->cumulative=cumulative;
     r->watts=v;
     r->backwards=(route==2&&v>0.f)||(route==3&&v<0.f);
     if(route==2)r->backwards=v>0.f; // positive=import, negative=export
@@ -282,14 +290,14 @@ static void animate(lv_timer_t *timer){
     if(!scene||lv_obj_has_flag(scene,LV_OBJ_FLAG_HIDDEN))return;
     for(int k=0;k<6;k++){
         energy_route_t *r=&routes[k];
-        if(!r->valid||fabsf(r->watts)<0.01f||r->n<2||!r->pulse){
-            set_visibility(r->pulse,false);continue;
-        }
-        if((k==0&&!enabled(option_solar,seen_solar))||
-           (k==3&&!enabled(option_battery,seen_battery))||
-           (k==4&&!enabled(option_ecs,seen_ecs))||
-           (k==5&&!enabled(option_ev,seen_ev))){
-            set_visibility(r->pulse,false);continue;
+        const bool available=r->valid&&fabsf(r->watts)>=0.01f&&r->n>=2&&r->pulse[0];
+        const bool enabled_route=(k!=0||enabled(option_solar,seen_solar))&&
+            (k!=3||enabled(option_battery,seen_battery))&&
+            (k!=4||enabled(option_ecs,seen_ecs))&&
+            (k!=5||enabled(option_ev,seen_ev));
+        if(!available||!enabled_route){
+            for(unsigned dot=0;dot<3;dot++)set_visibility(r->pulse[dot],false);
+            continue;
         }
         float dist=0.f;
         for(unsigned j=1;j<r->n;j++){
@@ -298,26 +306,31 @@ static void animate(lv_timer_t *timer){
             dist+=sqrtf(dx*dx+dy*dy);
         }
         if(dist<1.f)continue;
-        const float absw=fabsf(r->watts);
-        float speed=0.018f+fminf(absw/9000.f,0.045f);
+        // Energy in kWh uses a neutral speed, not a fictitious kW rating.
+        const float speed=r->cumulative?0.022f:
+            (0.018f+fminf(fabsf(r->watts)/9000.f,0.045f));
         r->phase+=speed;
         if(r->phase>=1.f)r->phase-=1.f;
-        float target=(r->backwards?1.f-r->phase:r->phase)*dist;
-        float x=(float)r->p[0].x,y=(float)r->p[0].y;
-        for(unsigned j=1;j<r->n;j++){
-            float dx=(float)(r->p[j].x-r->p[j-1].x);
-            float dy=(float)(r->p[j].y-r->p[j-1].y);
-            float len=sqrtf(dx*dx+dy*dy);
-            if(target<=len||j==r->n-1){
-                float t=len>0.f?target/len:0.f;
-                x=(float)r->p[j-1].x+t*dx;
-                y=(float)r->p[j-1].y+t*dy;
-                break;
+        for(unsigned dot=0;dot<3;dot++){
+            float progress=r->phase+(float)dot/3.f;
+            if(progress>=1.f)progress-=1.f;
+            float target=(r->backwards?1.f-progress:progress)*dist;
+            float x=(float)r->p[0].x,y=(float)r->p[0].y;
+            for(unsigned j=1;j<r->n;j++){
+                const float dx=(float)(r->p[j].x-r->p[j-1].x);
+                const float dy=(float)(r->p[j].y-r->p[j-1].y);
+                const float len=sqrtf(dx*dx+dy*dy);
+                if(target<=len||j==r->n-1){
+                    const float t=len>0.f?target/len:0.f;
+                    x=(float)r->p[j-1].x+t*dx;
+                    y=(float)r->p[j-1].y+t*dy;
+                    break;
+                }
+                target-=len;
             }
-            target-=len;
+            lv_obj_set_pos(r->pulse[dot],(int)x-4,(int)y-1);
+            set_visibility(r->pulse[dot],true);
         }
-        lv_obj_set_pos(r->pulse,(int)x-5,(int)y-2);
-        set_visibility(r->pulse,true);
     }
 }
 static void return_home(lv_event_t *ev){
@@ -327,9 +340,34 @@ static void return_home(lv_event_t *ev){
 static lv_obj_t *batt_box(unsigned i,int x){
     lv_obj_t *b=shape(artwork,x,357,43,89,0x101C21u,CLR_WHITE,2,7);
     shape(b,13,3,17,4,0x7F9493u,0,0,1);
-    for(int n=0;n<3;n++)shape(b,9,15+n*14,25,10,0x62D6A7u,0,0,2);
+    for(int n=0;n<3;n++){
+        shape(b,9,15+n*14,25,10,0x21343Du,0x49636Cu,1,2);
+        battery_cell_fill[i][n]=shape(b,10,16+n*14,23,8,0x62D6A7u,0,0,2);
+        lv_obj_add_flag(battery_cell_fill[i][n],LV_OBJ_FLAG_HIDDEN);
+    }
     battery_track[i]=b;
     return b;
+}
+static void update_battery_soc(unsigned battery,const char *text){
+    if(battery>=3)return;
+    char number[32];
+    snprintf(number,sizeof(number),"%s",text?text:"");
+    for(char *p=number;*p;p++)if(*p==',')*p='.';
+    char *end=NULL;
+    const float percentage=strtof(number,&end);
+    const bool valid=has_value(text)&&end!=number&&isfinite(percentage);
+    const float pct=valid?fmaxf(0.f,fminf(100.f,percentage)):0.f;
+    const uint32_t color=pct<=10.f?0xE35B64u:
+        (pct<=20.f?0xEAA048u:0x62D6A7u);
+    for(unsigned cell=0;cell<3;cell++){
+        lv_obj_t *fill=battery_cell_fill[battery][cell];
+        if(!fill)continue;
+        const float fraction=fmaxf(0.f,fminf(1.f,(pct-(100.f/3.f)*(float)cell)/(100.f/3.f)));
+        const int width=(int)roundf(23.f*fraction);
+        set_visibility(fill,width>0);
+        if(width>0)lv_obj_set_width(fill,width);
+        lv_obj_set_style_bg_color(fill,lv_color_hex(color),0);
+    }
 }
 lv_obj_t *mira_energy_house_create(lv_obj_t *screen,void (*on_back)(void)){
     mira_energy_house_destroy();
@@ -342,7 +380,7 @@ lv_obj_t *mira_energy_house_create(lv_obj_t *screen,void (*on_back)(void)){
     lv_obj_set_style_bg_opa(scene,LV_OPA_COVER,0);
     lv_obj_add_flag(scene,LV_OBJ_FLAG_IGNORE_LAYOUT);
     lv_obj_set_style_pad_all(scene,0,0);
-    artwork=shape(scene,0,-22,800,480,CLR_BG,0,0,0);
+    artwork=shape(scene,0,-30,800,480,CLR_BG,0,0,0);
     lv_obj_add_flag(artwork,LV_OBJ_FLAG_IGNORE_LAYOUT);
     draw_background();
     routes_create();
@@ -360,7 +398,7 @@ lv_obj_t *mira_energy_house_create(lv_obj_t *screen,void (*on_back)(void)){
     ev_power=txt(ev_card,"--",8,53,138,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
     batt_card=card(340,370,103,72,"Batterie",CLR_BATT);
     fields[3]=txt(batt_card,"--",5,27,93,CLR_BATT,&mira_font_fr_16,LV_TEXT_ALIGN_CENTER);
-    txt(batt_card,"Charge / décharge",2,51,99,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
+    batt_status=txt(batt_card,"Charge / déch.",2,51,99,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
     for(int i=0;i<3;i++){
         battery_shapes[i]=batt_box((unsigned)i,449+i*48);
         fields[4+i]=txt(battery_shapes[i],"--",1,67,41,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
@@ -392,6 +430,8 @@ void mira_energy_house_destroy(void){
     memset(routes,0,sizeof(routes));
     memset(battery_shapes,0,sizeof(battery_shapes));
     memset(battery_track,0,sizeof(battery_track));
+    memset(battery_cell_fill,0,sizeof(battery_cell_fill));
+    batt_status=NULL;
     ecs_card=NULL;ecs_shape=NULL;ecs_temp=NULL;ecs_power=NULL;
     ev_card=NULL;ev_shape=NULL;ev_soc=NULL;ev_power=NULL;
     batt_card=NULL;solar_card=NULL;solar_shape=NULL;
@@ -410,6 +450,13 @@ void mira_energy_house_update(unsigned field,const char *value){
     const char *old=lv_label_get_text(fields[field]);
     if(!old||strcmp(old,new_value))lv_label_set_text(fields[field],new_value);
     if(field<4)set_power_valid(field,new_value);
+    if(field>=4)update_battery_soc(field-4,new_value);
+    if(field==3&&batt_status){
+        const bool cumulative=strstr(new_value,"Wh")||strstr(new_value,"wh");
+        lv_label_set_text(batt_status,cumulative?"Énergie":
+            !routes[3].valid?"Charge / déch.":
+            routes[3].backwards?"Décharge":"Charge");
+    }
     if(field==0)seen_solar=has_value(new_value);
     if(field==3||field==4||field==5||field==6){
         seen_battery=has_value(lv_label_get_text(fields[3]))||
@@ -453,7 +500,7 @@ static void refresh_visibility(void){
     for(int i=0;i<6;i++){
         const bool on=i==0?solar:i==3?batt:i==4?ecs:i==5?ev:true;
         set_visibility(routes[i].track,on);
-        if(!on)set_visibility(routes[i].pulse,false);
+        if(!on)for(unsigned j=0;j<3;j++)set_visibility(routes[i].pulse[j],false);
     }
 }
 void mira_energy_house_options(int solar,int battery,int ev,int ecs){
