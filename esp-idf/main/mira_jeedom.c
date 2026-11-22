@@ -411,20 +411,6 @@ static cJSON *index_from_config(const char *json) {
                         cJSON_ReplaceItemInObjectCaseSensitive(
                             a,"unit",cJSON_CreateString(n==0?"°C":"%"));
                 }
-                // Extra READ-ONLY real-time power sensors. These do NOT replace
-                // historical kWh display commands or move the first 11 IDs.
-                // Positive grid power = import; negative = export.
-                // Positive battery power = charge; negative = discharge.
-                static const char *const instant_fields[]={
-                    "solar_power","home_power","grid_power","battery_power"
-                };
-                for(size_t n=0;n<4;n++){
-                    char compound[192];
-                    snprintf(compound,sizeof(compound),"%.95s__%s",name,instant_fields[n]);
-                    cJSON *a=append_action(arr,&id,"info",compound);
-                    if(a)cJSON_ReplaceItemInObjectCaseSensitive(
-                        a,"unit",cJSON_CreateString("W"));
-                }
             }
         }else if(!strcmp(type,"media")){
             for(size_t n=0;n<9;n++){
@@ -462,6 +448,31 @@ static cJSON *index_from_config(const char *json) {
             if(weather)cJSON_ReplaceItemInObjectCaseSensitive(weather,"unit",cJSON_CreateString("°C"));
             append_action(arr,&id,"info","__mira_weather_condition");
             append_action(arr,&id,"info","__mira_weather_code");
+        }
+    }
+    // New instantaneous power commands are APPENDED AFTER ALL existing
+    // widgets. No existing command ID (including media, relays, thermostat)
+    // changes when upgrading a previously configured Mira screen.
+    static const char *const instant_fields[]={
+        "solar_power","home_power","grid_power","battery_power"
+    };
+    const cJSON *energy=NULL;
+    cJSON_ArrayForEach(energy,widgets){
+        if(strcmp(jstr((cJSON*)energy,"type",""),"energy"))continue;
+        const char *energy_name=jstr((cJSON*)energy,"name","");
+        if(!*energy_name)continue;
+        const bool modern=
+            cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(energy,"showSolar"))||
+            cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(energy,"showBattery"))||
+            cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(energy,"showEv"))||
+            cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(energy,"showEcs"));
+        if(!modern)continue;
+        for(size_t n=0;n<4;n++){
+            char compound[192];
+            snprintf(compound,sizeof(compound),"%.95s__%s",energy_name,instant_fields[n]);
+            cJSON *a=append_action(arr,&id,"info",compound);
+            if(a)cJSON_ReplaceItemInObjectCaseSensitive(
+                a,"unit",cJSON_CreateString("W"));
         }
     }
     cJSON_Delete(root);
