@@ -230,7 +230,8 @@ static void set_route(int i,const lv_point_precise_t *p,unsigned n,uint32_t colo
     r->n=(uint8_t)n;
     for(unsigned j=0;j<n;j++)r->p[j]=p[j];
     r->track=poly(scene,r->p,(int)n,color,3);
-    r->pulse=shape(scene,0,0,8,8,0xFFFFFFu,0,0,LV_RADIUS_CIRCLE);
+    // Small colored moving segment, never a giant white arrow/dot.
+    r->pulse=shape(scene,0,0,11,4,color,0,0,LV_RADIUS_CIRCLE);
     lv_obj_add_flag(r->pulse,LV_OBJ_FLAG_HIDDEN);
 }
 POLY(route_solar,{345,106},{345,210},{410,240},{410,337});
@@ -283,7 +284,7 @@ static void animate(lv_timer_t *timer){
     if(!scene||lv_obj_has_flag(scene,LV_OBJ_FLAG_HIDDEN))return;
     for(int k=0;k<6;k++){
         energy_route_t *r=&routes[k];
-        if(!r->valid||fabsf(r->watts)<3.f||r->n<2||!r->pulse){
+        if(!r->valid||fabsf(r->watts)<0.01f||r->n<2||!r->pulse){
             set_visibility(r->pulse,false);continue;
         }
         if((k==0&&!enabled(option_solar,seen_solar))||
@@ -317,7 +318,7 @@ static void animate(lv_timer_t *timer){
             }
             target-=len;
         }
-        lv_obj_set_pos(r->pulse,(int)x-4,(int)y-4);
+        lv_obj_set_pos(r->pulse,(int)x-5,(int)y-2);
         set_visibility(r->pulse,true);
     }
 }
