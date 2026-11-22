@@ -3602,7 +3602,9 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                msg->name[p]=='_' && msg->name[p+1]=='_'){
                 const char *aux=msg->name+p+2;
                 if(!strcmp(aux,"ecs_temp")||!strcmp(aux,"ecs_power")||
-                   !strcmp(aux,"ev_soc")||!strcmp(aux,"ev_power")){
+                   !strcmp(aux,"ev_soc")||!strcmp(aux,"ev_power")||
+                   !strcmp(aux,"solar_power")||!strcmp(aux,"home_power")||
+                   !strcmp(aux,"grid_power")||!strcmp(aux,"battery_power")){
                     mira_energy_house_aux(aux,msg->value);
                     continue;
                 }
