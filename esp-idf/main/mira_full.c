@@ -642,13 +642,13 @@ static void show_page(int idx){
         else lv_obj_add_flag(pages[i],LV_OBJ_FLAG_HIDDEN);
     }
     lv_obj_add_flag(page_picker,LV_OBJ_FLAG_HIDDEN);
-    // The new energy view alone is full-screen. All other pages retain
-    // their original 50px navigation, layout, commands, and touch behavior.
+    // Keep the same 50px bottom navigation on every page, including
+    // the energy house. The artwork is restricted to the 430px area above.
     const bool house_visible=(idx==4&&mira_energy_house_exists());
     if(idx==4)ESP_LOGI(TAG,"ENERGY_HOUSE_PAGE: scene=%u",house_visible?1u:0u);
-    if(house_visible)lv_obj_add_flag(nav,LV_OBJ_FLAG_HIDDEN);
-    else lv_obj_remove_flag(nav,LV_OBJ_FLAG_HIDDEN);
     mira_energy_house_show(house_visible);
+    lv_obj_remove_flag(nav,LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(nav);
 }
 static void nav_click(lv_event_t *e){
     if(display_sleeping)return;
