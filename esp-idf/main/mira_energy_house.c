@@ -134,7 +134,7 @@ static void init_svg_assets(void){
         {panneaux_solaires_begin,panneaux_solaires_end,242,88},
         {ballon_ecs_begin,ballon_ecs_end,49,79},
         {vehicule_electrique_begin,vehicule_electrique_end,136,97},
-        {batterie_coque_begin,batterie_coque_end,36,50},
+        {batterie_coque_begin,batterie_coque_end,46,64},
     };
     for(unsigned i=0;i<SVG_COUNT;i++){
         const uint32_t pixels=(uint32_t)assets[i].w*assets[i].h;
