@@ -44,7 +44,7 @@ static void (*back_cb)(void);
 static int option_solar=-1,option_battery=-1,option_ev=-1,option_ecs=-1;
 static bool seen_solar,seen_battery,seen_ev,seen_ecs;
 static bool has_value(const char *value) {
-    return value && *value && strcmp(value,"--")!=0 &&
+    return value && *value && strncmp(value,"--",2)!=0 &&
            strcmp(value,"null")!=0 && strcmp(value,"undefined")!=0;
 }
 static bool enabled(int option,bool seen) {
@@ -285,17 +285,17 @@ lv_obj_t *mira_energy_house_create(lv_obj_t *screen,void (*on_back)(void)){
     lv_obj_t *home=card(212,248,159,64,"Maison",CLR_HOME);
     fields[1]=txt(home,"--",5,32,149,CLR_HOME,&lv_font_montserrat_20,LV_TEXT_ALIGN_CENTER);
     ecs_card=card(478,171,129,73,"ECS",CLR_ECS);
-    ecs_temp=txt(ecs_card,"-- °C",5,26,119,CLR_ECS,&mira_font_fr_16,LV_TEXT_ALIGN_CENTER);
-    ecs_power=txt(ecs_card,"-- W",5,48,119,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
+    ecs_temp=txt(ecs_card,"--",5,26,119,CLR_ECS,&mira_font_fr_16,LV_TEXT_ALIGN_CENTER);
+    ecs_power=txt(ecs_card,"--",5,48,119,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
     ev_card=card(638,202,154,78,"Véhicule",CLR_EV);
-    ev_soc=txt(ev_card,"-- %",8,28,138,CLR_EV,&lv_font_montserrat_20,LV_TEXT_ALIGN_CENTER);
-    ev_power=txt(ev_card,"-- W",8,53,138,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
+    ev_soc=txt(ev_card,"--",8,28,138,CLR_EV,&lv_font_montserrat_20,LV_TEXT_ALIGN_CENTER);
+    ev_power=txt(ev_card,"--",8,53,138,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
     batt_card=card(314,355,124,73,"Batterie",CLR_BATT);
     fields[3]=txt(batt_card,"--",6,29,112,CLR_BATT,&mira_font_fr_16,LV_TEXT_ALIGN_CENTER);
     txt(batt_card,"Charge / décharge",5,53,114,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
     for(int i=0;i<3;i++){
         battery_shapes[i]=batt_box((unsigned)i,450+i*48);
-        fields[4+i]=txt(battery_shapes[i],"-- %",1,56,41,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
+        fields[4+i]=txt(battery_shapes[i],"--",1,56,41,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
         if(i)lv_obj_add_flag(battery_shapes[i],LV_OBJ_FLAG_HIDDEN);
     }
     // Invisible touch target on unused black space, never a visible menu.
