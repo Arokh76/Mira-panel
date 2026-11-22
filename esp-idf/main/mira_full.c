@@ -5,6 +5,7 @@
 #include "mira_full.h"
 #include "mira_french_font.h"
 #include "mira_info_glyphs.h"
+#include "mira_energy_house.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -360,6 +361,7 @@ typedef struct {
     lv_obj_t *fields[9]; // energy/media passive Jeedom composite infos
     lv_obj_t *energy_gauge[3],*energy_extra_names[2];
     bool energy_extra_active[2];
+    bool house_energy; // native 7-inch experimental energy scene only
     lv_obj_t *media_slider,*media_device_dropdown,*media_play_caption;
     lv_obj_t *media_progress_bar;
     lv_obj_t *media_artwork_image,*media_artwork_placeholder;
@@ -640,6 +642,12 @@ static void show_page(int idx){
         else lv_obj_add_flag(pages[i],LV_OBJ_FLAG_HIDDEN);
     }
     lv_obj_add_flag(page_picker,LV_OBJ_FLAG_HIDDEN);
+    // The new energy view alone is full-screen. All other pages retain
+    // their original 50px navigation, layout, commands, and touch behavior.
+    const bool house_visible=(idx==4&&mira_energy_house_exists());
+    if(house_visible)lv_obj_add_flag(nav,LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_remove_flag(nav,LV_OBJ_FLAG_HIDDEN);
+    mira_energy_house_show(house_visible);
 }
 static void nav_click(lv_event_t *e){
     if(display_sleeping)return;
@@ -1583,6 +1591,7 @@ static void artwork_poll(void){
     if(w->media_artwork_placeholder)
         lv_obj_add_flag(w->media_artwork_placeholder,LV_OBJ_FLAG_HIDDEN);
 }
+static void energy_house_return_home(void){show_page(0);}
 static void make_widget(const cJSON *o,int info_total,int *info_seen){
     if(widget_n>=MAX_WIDGETS){ESP_LOGW(TAG,"Widget capacity reached (%d)",MAX_WIDGETS);return;}
     const char *type=str(o,"type",""),*loc=str(o,"emplacement","accueil");
@@ -2078,6 +2087,23 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         return;
     }
     if(!strcmp(type,"energy")){
+        // Default on the Waveshare 7-inch energy page: native full-screen house.
+        // The old classic widget is kept intact as style "classic".
+        // This is an isolated visual change; all seven original Jeedom indices
+        // remain mapped to the same passive state names as before.
+        if(pg==4 && strcmp(style,"classic")!=0){
+            w->house_energy=true;
+            w->card=NULL; // Full-screen screen child, never a flex/grid card.
+            (void)mira_energy_house_create(screen,energy_house_return_home);
+            for(unsigned n=0;n<7;n++)
+                w->fields[n]=mira_energy_house_field(n);
+            mira_energy_house_options(
+                !cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(o,"showSolar")),
+                !cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(o,"showBattery")),
+                !cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(o,"showEv")),
+                !cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(o,"showEcs")));
+            return;
+        }
         // Restore the beta's 786x344 Jeedom energy dashboard. The generic
         // 7-row table wasn't visually or functionally equivalent.
         const int pad=13,gap=8,box_w=(786-2*pad-gap)/2,box_h=91;
@@ -2942,6 +2968,7 @@ static void build_config(void){
             return;
         }
     }
+    mira_energy_house_destroy(); // stop house timer and delete the old scene
     artwork_reset(); // detach any old cover before deleting media cards
     scroll_cache_reset(); // release every LVGL image reference BEFORE card deletion
     wheel_release_all(); // drop each colorwheel image source/cache before freeing PSRAM
@@ -3541,6 +3568,18 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
     }
     for(uint8_t i=0;i<widget_n;i++){
         mira_widget_t *w=&widgets[i];
+        if(w->house_energy){
+            const size_t p=strlen(w->name),len=strlen(msg->name);
+            if(len>p+2 && !strncmp(msg->name,w->name,p)&&
+               msg->name[p]=='_' && msg->name[p+1]=='_'){
+                const char *aux=msg->name+p+2;
+                if(!strcmp(aux,"ecs_temp")||!strcmp(aux,"ecs_power")||
+                   !strcmp(aux,"ev_soc")||!strcmp(aux,"ev_power")){
+                    mira_energy_house_aux(aux,msg->value);
+                    continue;
+                }
+            }
+        }
         if(!strcmp(w->type,"energy")||!strcmp(w->type,"media")){
             static const char *const energy_fields[]={"solar","home","grid","battery","soc","soc2","soc3"};
             static const char *const media_fields[]={"title","artist","album","state","progress","volume","cover","device","devices"};
@@ -3554,6 +3593,10 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                 for(int n=0;n<total;n++){
                     const char *known=media?media_fields[n]:energy_fields[n];
                     if(!strcmp(field,known)&&w->fields[n]){
+                        if(!media&&w->house_energy){
+                            mira_energy_house_update((unsigned)n,msg->value);
+                            break; // passive LVGL update; no Jeedom action
+                        }
                         if(media&&n==5&&w->local_input_until_ms!=0&&
                            (int32_t)(lv_tick_get()-w->local_input_until_ms)<0)
                             break;
