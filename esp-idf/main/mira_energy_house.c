@@ -113,8 +113,8 @@ static lv_obj_t *poly(lv_obj_t *p,const lv_point_precise_t *pts,int count,
 #error "Mira 7 Energy SVG assets require LV_USE_SVG and LV_USE_VECTOR_GRAPHIC"
 #endif
 #define SVG_EXTERN(name) \
-    extern const uint8_t name##_begin[] asm("_binary_energy_svg_" #name "_svg_start"); \
-    extern const uint8_t name##_end[] asm("_binary_energy_svg_" #name "_svg_end")
+    extern const uint8_t name##_begin[] asm("_binary_" #name "_svg_start"); \
+    extern const uint8_t name##_end[] asm("_binary_" #name "_svg_end")
 SVG_EXTERN(maison_fond);
 SVG_EXTERN(porte_garage);
 SVG_EXTERN(panneaux_solaires);
