@@ -1,5 +1,5 @@
 // Native Mira 7 STD energy-house preview, branched from MIRA7_OTA_20261120.
-// Built entirely from LVGL primitives (no image assets, no HTTP/MQTT changes).
+// Approved graphics are embedded real SVG files decoded by LVGL 9.6 / ThorVG.
 #include "mira_energy_house.h"
 #include "mira_french_font.h"
 #include <stdio.h>
@@ -105,135 +105,69 @@ static lv_obj_t *poly(lv_obj_t *p,const lv_point_precise_t *pts,int count,
     poly(parent,pts,(int)(sizeof(pts)/sizeof(pts[0])),color,width); \
 } while(0)
 
-static void draw_background(void){
-    const uint32_t cyan=0x08DFE9u;
-    const uint32_t white=0xF2F6F7u;
-    const uint32_t silver=0xBECBD1u;
-    const uint32_t dark=0x0C151Bu;
+// Genuine SVG geometry from the user-validated five images.
+// No original SVG existed in the image-generation outputs, so the pixel
+// references were traced into SVG paths (never embedded PNG).
+// Names correspond to EMBED_TXTFILES in main/CMakeLists.txt.
+#if !LV_USE_SVG || !LV_USE_VECTOR_GRAPHIC
+#error "Mira 7 Energy SVG assets require LV_USE_SVG and LV_USE_VECTOR_GRAPHIC"
+#endif
+#define SVG_EXTERN(name) \
+    extern const uint8_t name##_begin[] asm("_binary_energy_svg_" #name "_svg_start"); \
+    extern const uint8_t name##_end[] asm("_binary_energy_svg_" #name "_svg_end")
+SVG_EXTERN(maison_fond);
+SVG_EXTERN(porte_garage);
+SVG_EXTERN(panneaux_solaires);
+SVG_EXTERN(ballon_ecs);
+SVG_EXTERN(vehicule_electrique);
+SVG_EXTERN(batterie_coque);
+#undef SVG_EXTERN
 
-    // 1. APPROVED SHELL. Pylon detached on the far left; meter on wall.
-    // Two roof edges form the two-plane gable seen in the approved drawing.
-    STROKE(artwork,white,4,{218,171},{305,91},{545,54},{667,172});
-    STROKE(artwork,white,4,{218,171},{428,171},{545,54});
-    STROKE(artwork,white,4,{665,170},{635,170},{635,224});
-    STROKE(artwork,white,4,{244,171},{244,386});
-    STROKE(artwork,white,4,{220,386},{788,386});
-    // Chimney: no illumination or ambient glow.
-    STROKE(artwork,white,4,{576,86},{576,45},{608,45},{608,112});
-
-    // 2. PERMANENT INTERIOR: cyan upper floor and furnished living area.
-    STROKE(artwork,cyan,3,{244,266},{594,266});
-    STROKE(artwork,cyan,3,{265,266},{265,385});
-    STROKE(artwork,cyan,3,{412,266},{412,385});
-    // Upstairs utility room: angled ceiling and cyan partition.
-    STROKE(artwork,cyan,3,{440,266},{440,170},{485,126},{571,126},{622,170},{622,224});
-    // Two-door storage cabinet and under-counter linen shelf (static).
-    STROKE(artwork,white,2,{459,165},{524,165},{524,201},{459,201},{459,165});
-    STROKE(artwork,white,1,{491,165},{491,201});
-    shape(artwork,486,182,2,9,white,0,0,1);
-    shape(artwork,495,182,2,9,white,0,0,1);
-    STROKE(artwork,white,2,{459,231},{530,231});
-    STROKE(artwork,white,2,{463,231},{463,263});
-    STROKE(artwork,white,2,{525,231},{525,263});
-    for(int n=0;n<2;n++)shape(artwork,469,217+n*6,23,5,CLR_BG,white,1,3);
-    shape(artwork,507,212,10,18,CLR_BG,white,1,2); // Soap bottle.
-    shape(artwork,507,208,9,4,white,0,0,1);
-    shape(artwork,478,242,33,19,CLR_BG,white,1,1); // Laundry basket.
-    STROKE(artwork,white,1,{481,245},{485,258},{491,245},{495,258},{501,245},{505,258});
-
-    // White-outline sofa + non-illuminated pendant light at ground floor.
-    shape(artwork,284,330,99,38,CLR_BG,white,2,10);
-    shape(artwork,279,344,15,29,CLR_BG,white,2,7);
-    shape(artwork,376,344,15,29,CLR_BG,white,2,7);
-    STROKE(artwork,white,2,{289,354},{380,354});
-    STROKE(artwork,white,2,{292,373},{291,383});
-    STROKE(artwork,white,2,{382,373},{384,383});
-    STROKE(artwork,white,2,{330,267},{330,304});
-    STROKE(artwork,white,2,{314,311},{319,303},{341,303},{346,311},{314,311});
-    // Plant on a small stool. Leaves remain cyan, no light/glow.
-    STROKE(artwork,white,2,{389,357},{416,357});
-    STROKE(artwork,white,2,{394,358},{391,384});
-    STROKE(artwork,white,2,{412,358},{415,384});
-    shape(artwork,395,343,15,14,white,0,0,2);
-    STROKE(artwork,cyan,2,{402,344},{402,320});
-    STROKE(artwork,cyan,2,{402,335},{391,329},{390,319},{402,324});
-    STROKE(artwork,cyan,2,{402,329},{413,317},{417,313},{416,329},{402,338});
-
-    // 3. GARAGE FRAME IS PERMANENT. Door is a DISTINCT object layer.
-    STROKE(artwork,white,4,{594,226},{781,226});
-    STROKE(artwork,white,4,{594,226},{594,386});
-    STROKE(artwork,white,4,{781,226},{781,386});
-    garage_door=shape(artwork,0,0,800,430,CLR_BG,0,0,0);
-    STROKE(garage_door,cyan,3,{612,252},{766,252},{766,385},{612,385},{612,252});
-    STROKE(garage_door,cyan,2,{612,281},{766,281});
-    STROKE(garage_door,cyan,2,{612,314},{766,314});
-    STROKE(garage_door,cyan,2,{612,349},{766,349});
-
-    // 4. EDF pylon and EXTERIOR METER: intentionally NO solid wire.
-    STROKE(artwork,white,3,{27,242},{53,132},{81,242});
-    STROKE(artwork,white,3,{25,241},{83,241});
-    STROKE(artwork,white,3,{20,175},{55,155},{91,175},{91,185});
-    STROKE(artwork,white,3,{20,175},{20,185});
-    STROKE(artwork,white,3,{23,213},{55,192},{88,213},{88,222});
-    STROKE(artwork,white,3,{23,213},{23,222});
-    STROKE(artwork,white,2,{37,207},{72,234},{38,237},{72,207},{44,187},{66,171},{44,171},{66,187});
-    STROKE(artwork,white,2,{41,156},{64,156},{43,177},{65,200});
-    STROKE(artwork,white,2,{68,157},{43,182});
-    // Meter box sits directly against the LEFT house wall (x244).
-    shape(artwork,209,258,32,49,dark,white,2,6);
-    shape(artwork,214,263,22,10,0x4B5C65,silver,1,2);
-    STROKE(artwork,0xFDE700u,3,{224,278},{217,290},{225,290},{221,302},{232,285},{223,285});
-    shape(artwork,217,308,18,3,silver,0,0,2);
-
-    // 5. SOLAR is detachable from the roof: no panels when Jeedom disables it.
-    solar_layer=shape(artwork,0,0,800,430,CLR_BG,0,0,0);
-    solar_shape=solar_layer;
-    STROKE(solar_layer,white,3,{256,154},{315,105},{491,82},{426,153},{256,154});
-    STROKE(solar_layer,cyan,2,{260,151},{317,108},{486,85},{423,149},{260,151});
-    STROKE(solar_layer,white,1,{300,120},{470,102});
-    STROKE(solar_layer,white,1,{286,133},{454,120});
-    STROKE(solar_layer,white,1,{273,144},{438,135});
-    STROKE(solar_layer,white,1,{350,102},{294,151});
-    STROKE(solar_layer,white,1,{384,98},{326,151});
-    STROKE(solar_layer,white,1,{419,94},{358,150});
-    STROKE(solar_layer,white,1,{454,90},{392,150});
-
-    // 6. ECS is a removable, independent object INSIDE upstairs utility room.
-    ecs_shape=shape(artwork,539,182,47,81,CLR_BG,0,0,0);
-    shape(ecs_shape,4,3,39,67,0xDDE5E8u,white,2,16);
-    shape(ecs_shape,8,5,31,5,0xEFF5F6u,0,0,3);
-    shape(ecs_shape,8,63,31,6,0x91A9B1u,0,0,5);
-    shape(ecs_shape,21,70,4,7,silver,0,0,2);
-    shape(ecs_shape,12,76,22,3,silver,0,0,1);
-    shape(ecs_shape,23,21,3,22,0xF04439u,0,0,2);
-    shape(ecs_shape,19,39,11,11,0xE84032u,0,0,LV_RADIUS_CIRCLE);
-
-    // 7. EV replaces the whole garage-door layer, without hiding garage walls.
-    ev_layer=shape(artwork,0,0,800,430,CLR_BG,0,0,0);
-    ev_shape=ev_layer;
-    STROKE(ev_layer,white,3,{635,365},{638,342},{651,326},{671,319},{714,319},
-           {735,330},{743,345},{747,369},{740,376},{641,376},{635,365});
-    STROKE(ev_layer,white,2,{651,335},{663,324},{720,324},{731,337},{651,337});
-    shape(ev_layer,648,347,22,5,cyan,0,0,3);
-    shape(ev_layer,714,347,22,5,cyan,0,0,3);
-    STROKE(ev_layer,white,2,{653,364},{674,366},{711,366},{730,364});
-    shape(ev_layer,645,376,19,7,white,0,0,3);
-    shape(ev_layer,718,376,19,7,white,0,0,3);
-    STROKE(ev_layer,0xDBF414u,3,{694,344},{686,356},{696,356},{690,369},{704,350},{693,350});
-}
-static void set_route(int i,const lv_point_precise_t *p,unsigned n,uint32_t color){
-    energy_route_t *r=&routes[i];
-    if(n>8)n=8;
-    r->n=(uint8_t)n;
-    for(unsigned j=0;j<n;j++)r->p[j]=p[j];
-    r->track=poly(artwork,r->p,(int)n,color,2);
-    lv_obj_set_style_line_opa(r->track,LV_OPA_50,0);
-    // Three short, spaced dashes rather than one large traveling dot.
-    for(unsigned j=0;j<3;j++){
-        r->pulse[j]=shape(artwork,0,0,9,3,color,0,0,LV_RADIUS_CIRCLE);
-        lv_obj_add_flag(r->pulse[j],LV_OBJ_FLAG_HIDDEN);
+typedef enum {SVG_HOUSE,SVG_GARAGE_DOOR,SVG_SOLAR,SVG_ECS,SVG_EV,SVG_BATTERY,SVG_COUNT} mira_svg_id_t;
+static lv_image_dsc_t svg_dsc[SVG_COUNT];
+static void init_svg_assets(void){
+    static bool ready=false;
+    if(ready)return;
+    const struct {const uint8_t *start,*end;uint16_t w,h;} assets[SVG_COUNT]={
+        {maison_fond_begin,maison_fond_end,800,450},
+        {porte_garage_begin,porte_garage_end,184,147},
+        {panneaux_solaires_begin,panneaux_solaires_end,242,88},
+        {ballon_ecs_begin,ballon_ecs_end,49,79},
+        {vehicule_electrique_begin,vehicule_electrique_end,136,97},
+        {batterie_coque_begin,batterie_coque_end,36,50},
+    };
+    for(unsigned i=0;i<SVG_COUNT;i++){
+        lv_image_dsc_t *d=&svg_dsc[i];
+        memset(d,0,sizeof(*d));
+        d->header.magic=LV_IMAGE_HEADER_MAGIC;
+        d->header.cf=LV_COLOR_FORMAT_RAW;
+        d->header.w=assets[i].w;d->header.h=assets[i].h;
+        d->data=(const uint8_t*)assets[i].start;
+        d->data_size=(uint32_t)(assets[i].end-assets[i].start);
     }
+    ready=true;
 }
+static lv_obj_t *svg_object(lv_obj_t *parent,mira_svg_id_t id,int x,int y){
+    lv_obj_t *obj=lv_image_create(parent);
+    lv_image_set_src(obj,&svg_dsc[id]);
+    lv_obj_set_pos(obj,x,y);
+    lv_obj_remove_flag(obj,LV_OBJ_FLAG_CLICKABLE|LV_OBJ_FLAG_SCROLLABLE);
+    return obj;
+}
+static void draw_background(void){
+    init_svg_assets();
+    // The FULL approved house, pylon, wall meter, sofa and upstairs details.
+    (void)svg_object(artwork,SVG_HOUSE,0,0);
+    // Independent door: visible only when EV module is absent.
+    garage_door=svg_object(artwork,SVG_GARAGE_DOOR,598,250);
+    // Independent panels, ECS cylinder upstairs and VE; controlled by Jeedom.
+    solar_layer=svg_object(artwork,SVG_SOLAR,256,112);
+    solar_shape=solar_layer;
+    ecs_shape=svg_object(artwork,SVG_ECS,549,171);
+    ev_layer=svg_object(artwork,SVG_EV,633,270);
+    ev_shape=ev_layer;
+}
+
 POLY(route_solar,{359,105},{359,157},{454,194},{454,281});
 POLY(route_home,{454,281},{309,281});
 POLY(route_grid,{454,281},{241,281},{224,282},{116,282},{55,282},{55,245});
@@ -335,15 +269,14 @@ static void return_home(lv_event_t *ev){
     if(back_cb)back_cb();
 }
 static lv_obj_t *batt_box(unsigned i,int x){
-    // Four independent 25% SOC steps. No green raised tab on the top bar.
-    // White carrying loop, cyan inner outline and four rectangular cells.
-    lv_obj_t *b=shape(artwork,x,307,34,76,0x101C21u,CLR_WHITE,2,6);
-    shape(b,10,1,14,9,CLR_BG,CLR_WHITE,2,4);
-    shape(b,4,10,26,49,CLR_BG,0x09DBECu,2,5);
+    // Actual APPROVED battery SVG outline + four real, live SOC segments.
+    // The white carrying loop and cyan inner border come from the SVG,
+    // not an approximating LVGL rectangle.
+    lv_obj_t *b=shape(artwork,x,303,36,80,CLR_BG,0,0,0);
+    (void)svg_object(b,SVG_BATTERY,0,0);
     for(int n=0;n<4;n++){
-        const int y=14+n*11;
-        shape(b,6,y,22,9,0x23363Fu,0,0,2);
-        battery_cell_fill[i][n]=shape(b,7,y+1,20,7,0x62D6A7u,0,0,2);
+        // The SVG's four green bars were intentionally split out of its shell.
+        battery_cell_fill[i][n]=shape(b,7,14+n*8,22,6,0x6AF900u,0,0,3);
         lv_obj_add_flag(battery_cell_fill[i][n],LV_OBJ_FLAG_HIDDEN);
     }
     battery_track[i]=b;
@@ -368,7 +301,7 @@ static void update_battery_soc(unsigned battery,const char *text){
         // Values between steps fill the next bar proportionally.
         const float step_from_bottom=(float)(3u-cell);
         const float fraction=fmaxf(0.f,fminf(1.f,(pct-25.f*step_from_bottom)/25.f));
-        const int width=(int)roundf(20.f*fraction);
+        const int width=(int)roundf(22.f*fraction);
         set_visibility(fill,width>0);
         if(width>0)lv_obj_set_width(fill,width);
         lv_obj_set_style_bg_color(fill,lv_color_hex(color),0);
@@ -404,7 +337,7 @@ lv_obj_t *mira_energy_house_create(lv_obj_t *screen,void (*on_back)(void)){
     batt_status=txt(batt_card,"Charge / déch.",2,48,101,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
     for(int i=0;i<3;i++){
         battery_shapes[i]=batt_box((unsigned)i,473+i*38);
-        fields[4+i]=txt(battery_shapes[i],"--",-2,60,38,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
+        fields[4+i]=txt(battery_shapes[i],"--",-2,57,40,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
         if(i)lv_obj_add_flag(battery_shapes[i],LV_OBJ_FLAG_HIDDEN);
     }
     // Invisible touch target on unused black space, never a visible menu.
