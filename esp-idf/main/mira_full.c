@@ -645,6 +645,7 @@ static void show_page(int idx){
     // The new energy view alone is full-screen. All other pages retain
     // their original 50px navigation, layout, commands, and touch behavior.
     const bool house_visible=(idx==4&&mira_energy_house_exists());
+    if(idx==4)ESP_LOGI(TAG,"ENERGY_HOUSE_PAGE: scene=%u",house_visible?1u:0u);
     if(house_visible)lv_obj_add_flag(nav,LV_OBJ_FLAG_HIDDEN);
     else lv_obj_remove_flag(nav,LV_OBJ_FLAG_HIDDEN);
     mira_energy_house_show(house_visible);
@@ -3005,6 +3006,13 @@ static void build_config(void){
             }
         }
     }
+    // The Énergie PAGE is part of Mira, not an optional Jeedom tile:
+    // the house must exist even when the user's configuration has no
+    // 'energy' widget or placed one elsewhere.
+    if(!mira_energy_house_exists()){
+        (void)mira_energy_house_create(screen,energy_house_return_home);
+        ESP_LOGI(TAG,"ENERGY_HOUSE: scene created without widget dependency");
+    }
     widget_count=(uint32_t)widget_n;
     cJSON_Delete(root);
     // Match the WT32's persistent action values: a theme/program rebuild must
@@ -3319,6 +3327,12 @@ void mira_full_ui_create(lv_display_t *disp){
     refresh_nav_favorites();
     ESP_LOGI(TAG,"CLOCK_UI_PHASE 6: parsing imported widget JSON");
     build_config();
+    // Also handle first boot with missing miralvgl.json: build_config()
+    // legitimately exits early but navigation to Énergie must still work.
+    if(!mira_energy_house_exists()){
+        (void)mira_energy_house_create(screen,energy_house_return_home);
+        ESP_LOGI(TAG,"ENERGY_HOUSE: scene created without miralvgl.json");
+    }
     ESP_LOGI(TAG,"CLOCK_UI_PHASE 7: parsed widgets=%u, internal largest=%u",
              (unsigned)widget_count,
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
@@ -3576,7 +3590,7 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
     }
     for(uint8_t i=0;i<widget_n;i++){
         mira_widget_t *w=&widgets[i];
-        if(w->house_energy){
+        if(!strcmp(w->type,"energy")){
             const size_t p=strlen(w->name),len=strlen(msg->name);
             if(len>p+2 && !strncmp(msg->name,w->name,p)&&
                msg->name[p]=='_' && msg->name[p+1]=='_'){
@@ -3601,6 +3615,11 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                 for(int n=0;n<total;n++){
                     const char *known=media?media_fields[n]:energy_fields[n];
                     if(!strcmp(field,known)&&w->fields[n]){
+                        // Existing/classic energy widgets continue to update
+                        // normally, while the always-present house mirrors
+                        // their passive data (no outgoing Jeedom actions).
+                        if(!media&&!w->house_energy&&mira_energy_house_exists())
+                            mira_energy_house_update((unsigned)n,msg->value);
                         if(!media&&w->house_energy){
                             mira_energy_house_update((unsigned)n,msg->value);
                             break; // passive LVGL update; no Jeedom action
