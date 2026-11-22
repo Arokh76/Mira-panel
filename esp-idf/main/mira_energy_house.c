@@ -25,9 +25,10 @@ typedef struct {
     lv_obj_t *pulse[3];
     lv_obj_t *track;
     bool valid;
-    bool cumulative; // kWh is energy, not instantaneous power.
+    bool dedicated; // A dedicated W/kW sensor overrides any old display value.
     float watts;
     float phase;
+    uint32_t last_seen_ms;
     bool backwards;
 } energy_route_t;
 
@@ -193,7 +194,8 @@ static void draw_background(void){
     // Independent door: visible only when EV module is absent.
     garage_door=svg_object(artwork,SVG_GARAGE_DOOR,598,250);
     // Independent panels, ECS cylinder upstairs and VE; controlled by Jeedom.
-    solar_layer=svg_object(artwork,SVG_SOLAR,256,112);
+    // Identical approved solar drawing, translated up/right to sit ON the roof.
+    solar_layer=svg_object(artwork,SVG_SOLAR,275,93);
     solar_shape=solar_layer;
     ecs_shape=svg_object(artwork,SVG_ECS,549,171);
     ev_layer=svg_object(artwork,SVG_EV,633,270);
@@ -236,70 +238,90 @@ static void set_visibility(lv_obj_t *object,bool show){
     if(show)lv_obj_remove_flag(object,LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(object,LV_OBJ_FLAG_HIDDEN);
 }
-static void set_power_valid(unsigned route,const char *text){
+// Inputs for moving flows are instantaneous signed W/kW ONLY.
+// kWh/Wh energy totals must never be interpreted as power or cause movement.
+// Dedicated __*_power infos override the old __solar/__home/... values.
+static void set_power_valid(unsigned route,const char *text,bool dedicated){
     if(route>=6)return;
     energy_route_t *r=&routes[route];
-    if(!text||!*text||!strcmp(text,"--")){
-        r->valid=false;
-        for(unsigned j=0;j<3;j++)set_visibility(r->pulse[j],false);
-        return;
-    }
+    if(dedicated)r->dedicated=true;
+    if(!dedicated&&r->dedicated)return;
+    r->valid=false;
+    r->watts=0.f;
+    if(!has_value(text))return;
     char scratch[64];
     snprintf(scratch,sizeof(scratch),"%s",text);
     for(char *p=scratch;*p;p++)if(*p==',')*p='.';
     char *end=NULL;
     float v=strtof(scratch,&end);
-    if(end==scratch||!isfinite(v)){
-        r->valid=false;
-        for(unsigned j=0;j<3;j++)set_visibility(r->pulse[j],false);
-        return;
-    }
-    const bool cumulative=strstr(scratch,"Wh")!=NULL||strstr(scratch,"wh")!=NULL;
-    if(!cumulative&&(strstr(scratch,"kW")||strstr(scratch,"kw")))v*=1000.f;
+    if(end==scratch||!isfinite(v))return;
+    while(*end==' '||*end=='\t')end++;
+    bool kw=false;
+    if((*end=='k'||*end=='K')&&(end[1]=='W'||end[1]=='w')){
+        kw=true;end+=2;
+    }else if(*end=='W'||*end=='w'){
+        end++;
+    }else return; // Missing unit, Wh, kWh, %, volts... -> not a power.
+    while(*end==' '||*end=='\t')end++;
+    if(*end!='\0')return;
+    if(kw)v*=1000.f;
+    if(!isfinite(v)||fabsf(v)>50000.f)return;
+    if(route!=2&&route!=3&&v<0.f)return;
     r->valid=true;
-    r->cumulative=cumulative;
     r->watts=v;
+    r->last_seen_ms=lv_tick_get();
+    // Grid +W = import -> home; -W = export -> pylon.
+    // Battery +W = charging (home -> pack); -W = discharging.
     r->backwards=(route==2&&v>0.f)||(route==3&&v<0.f);
-    if(route==2)r->backwards=v>0.f; // positive=import, negative=export
-    if(route==3)r->backwards=v<0.f; // negative=discharge
+}
+static bool route_is_live(const energy_route_t *r){
+    return r->valid&&fabsf(r->watts)>0.5f&&
+           ((uint32_t)(lv_tick_get()-r->last_seen_ms)<180000u);
 }
 static void animate(lv_timer_t *timer){
     (void)timer;
+    static uint32_t previous=0;
+    const uint32_t now=lv_tick_get();
+    uint32_t elapsed=previous?now-previous:90u;
+    previous=now;
+    if(elapsed>250u)elapsed=250u;
     if(!scene||lv_obj_has_flag(scene,LV_OBJ_FLAG_HIDDEN))return;
-    for(int k=0;k<6;k++){
+    for(unsigned k=0;k<6;k++){
         energy_route_t *r=&routes[k];
-        const bool available=r->valid&&fabsf(r->watts)>=0.01f&&r->n>=2&&r->pulse[0];
-        const bool enabled_route=(k!=0||enabled(option_solar,seen_solar))&&
+        const bool allowed=(k!=0||enabled(option_solar,seen_solar))&&
             (k!=3||enabled(option_battery,seen_battery))&&
             (k!=4||enabled(option_ecs,seen_ecs))&&
             (k!=5||enabled(option_ev,seen_ev));
-        if(!available||!enabled_route){
+        const bool live=allowed&&route_is_live(r)&&r->n>=2&&r->pulse[0];
+        set_visibility(r->track,live);
+        if(!live){
             for(unsigned dot=0;dot<3;dot++)set_visibility(r->pulse[dot],false);
             continue;
         }
-        float dist=0.f;
+        float distance=0.f;
         for(unsigned j=1;j<r->n;j++){
             const float dx=(float)(r->p[j].x-r->p[j-1].x);
             const float dy=(float)(r->p[j].y-r->p[j-1].y);
-            dist+=sqrtf(dx*dx+dy*dy);
+            distance+=sqrtf(dx*dx+dy*dy);
         }
-        if(dist<1.f)continue;
-        // Energy in kWh uses a neutral speed, not a fictitious kW rating.
-        const float speed=r->cumulative?0.022f:
-            (0.018f+fminf(fabsf(r->watts)/9000.f,0.045f));
-        r->phase+=speed;
-        if(r->phase>=1.f)r->phase-=1.f;
+        if(distance<1.f)continue;
+        // Dash motion proportional to MEASURED instantaneous watts.
+        // No motion from accumulated kWh, and no idle "decorative" speed.
+        const float watts=fabsf(r->watts);
+        const float pixels_per_second=fminf(75.f,10.f+watts*0.014f);
+        r->phase+=pixels_per_second*((float)elapsed/1000.f)/distance;
+        while(r->phase>=1.f)r->phase-=1.f;
         for(unsigned dot=0;dot<3;dot++){
             float progress=r->phase+(float)dot/3.f;
             if(progress>=1.f)progress-=1.f;
-            float target=(r->backwards?1.f-progress:progress)*dist;
+            float target=(r->backwards?1.f-progress:progress)*distance;
             float x=(float)r->p[0].x,y=(float)r->p[0].y;
             for(unsigned j=1;j<r->n;j++){
                 const float dx=(float)(r->p[j].x-r->p[j-1].x);
                 const float dy=(float)(r->p[j].y-r->p[j-1].y);
                 const float len=sqrtf(dx*dx+dy*dy);
                 if(target<=len||j==r->n-1){
-                    const float t=len>0.f?target/len:0.f;
+                    const float t=len>0.f?fminf(1.f,target/len):0.f;
                     x=(float)r->p[j-1].x+t*dx;
                     y=(float)r->p[j-1].y+t*dy;
                     break;
@@ -316,14 +338,12 @@ static void return_home(lv_event_t *ev){
     if(back_cb)back_cb();
 }
 static lv_obj_t *batt_box(unsigned i,int x){
-    // Actual APPROVED battery SVG outline + four real, live SOC segments.
-    // The white carrying loop and cyan inner border come from the SVG,
-    // not an approximating LVGL rectangle.
-    lv_obj_t *b=shape(artwork,x,303,36,80,CLR_BG,0,0,0);
+    // The accepted SVG is rasterized at 46x64 only. Keep its original style.
+    // Four live segments occupy the bottom half, with SOC text INSIDE on top.
+    lv_obj_t *b=shape(artwork,x,300,46,66,CLR_BG,0,0,0);
     (void)svg_object(b,SVG_BATTERY,0,0);
     for(int n=0;n<4;n++){
-        // The SVG's four green bars were intentionally split out of its shell.
-        battery_cell_fill[i][n]=shape(b,7,14+n*8,22,6,0x6AF900u,0,0,3);
+        battery_cell_fill[i][n]=shape(b,10,33+n*6,26,5,0x6AF900u,0,0,2);
         lv_obj_add_flag(battery_cell_fill[i][n],LV_OBJ_FLAG_HIDDEN);
     }
     battery_track[i]=b;
@@ -348,7 +368,7 @@ static void update_battery_soc(unsigned battery,const char *text){
         // Values between steps fill the next bar proportionally.
         const float step_from_bottom=(float)(3u-cell);
         const float fraction=fmaxf(0.f,fminf(1.f,(pct-25.f*step_from_bottom)/25.f));
-        const int width=(int)roundf(22.f*fraction);
+        const int width=(int)roundf(26.f*fraction);
         set_visibility(fill,width>0);
         if(width>0)lv_obj_set_width(fill,width);
         lv_obj_set_style_bg_color(fill,lv_color_hex(color),0);
@@ -358,16 +378,23 @@ lv_obj_t *mira_energy_house_create(lv_obj_t *screen,void (*on_back)(void)){
     mira_energy_house_destroy();
     back_cb=on_back;
     // Native vector viewport is 800x430, leaving bottom 50px to Mira navigation.
-    scene=shape(screen,0,0,800,430,0x000001u,0,0,0);
-    lv_obj_set_style_bg_color(scene,lv_color_hex(CLR_BG),0);
+    scene=shape(screen,0,0,800,430,0x071421u,0,0,0);
+    lv_obj_set_style_bg_color(scene,lv_color_hex(0x071421u),0);
     lv_obj_set_style_bg_opa(scene,LV_OPA_COVER,0);
     lv_obj_add_flag(scene,LV_OBJ_FLAG_IGNORE_LAYOUT);
     lv_obj_set_style_pad_all(scene,0,0);
+    // Thermostat-style 786x414 panel and midnight-blue fill, without
+    // changing the shared bottom navigation bar at Y=430.
+    lv_obj_t *thermostat_style_card=shape(scene,7,8,786,414,0x0E2032u,0x17354Bu,1,14);
+    lv_obj_set_style_border_opa(thermostat_style_card,LV_OPA_50,0);
+    lv_obj_set_style_outline_width(thermostat_style_card,2,0);
+    lv_obj_set_style_outline_color(thermostat_style_card,lv_color_black(),0);
+    lv_obj_set_style_outline_opa(thermostat_style_card,LV_OPA_50,0);
     artwork=shape(scene,0,0,800,430,CLR_BG,0,0,0);
     lv_obj_add_flag(artwork,LV_OBJ_FLAG_IGNORE_LAYOUT);
     draw_background();
     routes_create();
-    solar_card=card(239,3,179,63,"Panneaux",CLR_SOLAR);
+    solar_card=card(239,17,179,63,"Panneaux",CLR_SOLAR);
     fields[0]=txt(solar_card,"--",7,31,165,CLR_SOLAR,&lv_font_montserrat_20,LV_TEXT_ALIGN_CENTER);
     lv_obj_t *grid=card(89,178,113,69,"Réseau",CLR_GRID);
     fields[2]=txt(grid,"--",4,29,105,CLR_GRID,&lv_font_montserrat_20,LV_TEXT_ALIGN_CENTER);
@@ -379,12 +406,12 @@ lv_obj_t *mira_energy_house_create(lv_obj_t *screen,void (*on_back)(void)){
     ev_card=card(644,154,147,73,"Véhicule",CLR_EV);
     ev_soc=txt(ev_card,"--",6,26,135,CLR_EV,&lv_font_montserrat_20,LV_TEXT_ALIGN_CENTER);
     ev_power=txt(ev_card,"--",6,50,135,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
-    batt_card=card(360,309,105,66,"Batterie",CLR_BATT);
+    batt_card=card(338,308,105,65,"Batterie",CLR_BATT);
     fields[3]=txt(batt_card,"--",5,26,95,CLR_BATT,&mira_font_fr_16,LV_TEXT_ALIGN_CENTER);
     batt_status=txt(batt_card,"Charge / déch.",2,48,101,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
     for(int i=0;i<3;i++){
-        battery_shapes[i]=batt_box((unsigned)i,473+i*38);
-        fields[4+i]=txt(battery_shapes[i],"--",-2,57,40,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
+        battery_shapes[i]=batt_box((unsigned)i,455+i*47);
+        fields[4+i]=txt(battery_shapes[i],"--",2,13,42,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
         if(i)lv_obj_add_flag(battery_shapes[i],LV_OBJ_FLAG_HIDDEN);
     }
     // Invisible touch target on unused black space, never a visible menu.
@@ -432,7 +459,7 @@ void mira_energy_house_update(unsigned field,const char *value){
     const char *new_value=(value&&*value)?value:"--";
     const char *old=lv_label_get_text(fields[field]);
     if(!old||strcmp(old,new_value))lv_label_set_text(fields[field],new_value);
-    if(field<4)set_power_valid(field,new_value);
+    if(field<4)set_power_valid(field,new_value,false);
     if(field>=4)update_battery_soc(field-4,new_value);
     if(field==3&&batt_status){
         const bool cumulative=strstr(new_value,"Wh")||strstr(new_value,"wh");
@@ -453,9 +480,13 @@ void mira_energy_house_aux(const char *name,const char *value){
     if(!scene||!name)return;
     lv_obj_t *field=NULL;
     if(!strcmp(name,"ecs_temp"))field=ecs_temp;
-    else if(!strcmp(name,"ecs_power")){field=ecs_power;set_power_valid(4,value);}
+    else if(!strcmp(name,"ecs_power")){field=ecs_power;set_power_valid(4,value,true);}
     else if(!strcmp(name,"ev_soc"))field=ev_soc;
-    else if(!strcmp(name,"ev_power")){field=ev_power;set_power_valid(5,value);}
+    else if(!strcmp(name,"ev_power")){field=ev_power;set_power_valid(5,value,true);}
+    else if(!strcmp(name,"solar_power"))set_power_valid(0,value,true);
+    else if(!strcmp(name,"home_power"))set_power_valid(1,value,true);
+    else if(!strcmp(name,"grid_power"))set_power_valid(2,value,true);
+    else if(!strcmp(name,"battery_power"))set_power_valid(3,value,true);
     if(field)lv_label_set_text(field,value&&*value?value:"--");
     if(!strncmp(name,"ecs_",4))seen_ecs=has_value(lv_label_get_text(ecs_temp))||has_value(lv_label_get_text(ecs_power));
     if(!strncmp(name,"ev_",3))seen_ev=has_value(lv_label_get_text(ev_soc))||has_value(lv_label_get_text(ev_power));
@@ -484,8 +515,9 @@ static void refresh_visibility(void){
     // Hide the whole cable as well as moving pixels for absent equipment.
     for(int i=0;i<6;i++){
         const bool on=i==0?solar:i==3?batt:i==4?ecs:i==5?ev:true;
-        set_visibility(routes[i].track,on&&routes[i].valid&&fabsf(routes[i].watts)>0.01f);
-        if(!on)for(unsigned j=0;j<3;j++)set_visibility(routes[i].pulse[j],false);
+        const bool live=on&&route_is_live(&routes[i]);
+        set_visibility(routes[i].track,live);
+        if(!live)for(unsigned j=0;j<3;j++)set_visibility(routes[i].pulse[j],false);
     }
 }
 void mira_energy_house_options(int solar,int battery,int ev,int ecs){
