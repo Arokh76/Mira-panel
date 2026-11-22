@@ -388,20 +388,29 @@ static cJSON *index_from_config(const char *json) {
                 char compound[192];snprintf(compound,sizeof(compound),"%.95s__%s",name,energy_fields[n]);
                 append_action(arr,&id,"info",compound);
             }
-            // IMPORTANT: reserve fixed indices for all four optional
-            // measurements even when the modules are hidden. Selecting ECS
-            // on/off must NEVER shift VE or later widget command IDs.
-            // Jeedom hides unselected command rows without deleting bindings.
-            static const char *const extra_fields[]={
-                "ecs_temp","ecs_power","ev_soc","ev_power"
-            };
-            for(size_t n=0;n<4;n++){
-                char compound[192];
-                snprintf(compound,sizeof(compound),"%.95s__%s",name,extra_fields[n]);
-                cJSON *a=append_action(arr,&id,"info",compound);
-                if(a&&(n==0||n==2))
-                    cJSON_ReplaceItemInObjectCaseSensitive(
-                        a,"unit",cJSON_CreateString(n==0?"°C":"%"));
+            // Legacy Mira (no show* keys): keep the ORIGINAL seven indexed
+            // Infos so flashing the new firmware alone cannot move media
+            // or other commands. New Jeedom writes explicit booleans and
+            // synchronizes its bindings during /programui.
+            const bool new_energy_config=
+                cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(w,"showSolar"))||
+                cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(w,"showBattery"))||
+                cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(w,"showEv"))||
+                cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(w,"showEcs"));
+            if(new_energy_config){
+                // New schema reserves all four stable slots regardless of
+                // selections: toggling ECS must not move VE index IDs.
+                static const char *const extra_fields[]={
+                    "ecs_temp","ecs_power","ev_soc","ev_power"
+                };
+                for(size_t n=0;n<4;n++){
+                    char compound[192];
+                    snprintf(compound,sizeof(compound),"%.95s__%s",name,extra_fields[n]);
+                    cJSON *a=append_action(arr,&id,"info",compound);
+                    if(a&&(n==0||n==2))
+                        cJSON_ReplaceItemInObjectCaseSensitive(
+                            a,"unit",cJSON_CreateString(n==0?"°C":"%"));
+                }
             }
         }else if(!strcmp(type,"media")){
             for(size_t n=0;n<9;n++){
