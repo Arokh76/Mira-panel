@@ -855,7 +855,10 @@ function Remplissage(contjson){
     oBtSup = miratable.getElementsByClassName('bt-supprimer');
     oBtSup[i].addEventListener('click',  supprimerLigne); 
     nbr=i;
-  }  
+  }
+  // Imported screen configuration may arrive after the Jeedom Commandes
+  // table: synchronize visibility in both loading orders.
+  miraRefreshEnergyModuleRows();
 }
 
 
