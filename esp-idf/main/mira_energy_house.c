@@ -105,29 +105,28 @@ static lv_obj_t *poly(lv_obj_t *p,const lv_point_precise_t *pts,int count,
     poly(parent,pts,(int)(sizeof(pts)/sizeof(pts[0])),color,width); \
 } while(0)
 
-// Genuine SVG geometry from the user-validated five images.
-// No original SVG existed in the image-generation outputs, so the pixel
-// references were traced into SVG paths (never embedded PNG).
-// Names correspond to EMBED_TXTFILES in main/CMakeLists.txt.
-#if !LV_USE_SVG || !LV_USE_VECTOR_GRAPHIC
-#error "Mira 7 Energy SVG assets require LV_USE_SVG and LV_USE_VECTOR_GRAPHIC"
-#endif
-#define SVG_EXTERN(name) \
-    extern const uint8_t name##_begin[] asm("_binary_" #name "_svg_start"); \
-    extern const uint8_t name##_end[] asm("_binary_" #name "_svg_end")
-SVG_EXTERN(maison_fond);
-SVG_EXTERN(porte_garage);
-SVG_EXTERN(panneaux_solaires);
-SVG_EXTERN(ballon_ecs);
-SVG_EXTERN(vehicule_electrique);
-SVG_EXTERN(batterie_coque);
-#undef SVG_EXTERN
+// The graphics are exact rasterizations of the six approved SVG sources.
+// An offline generator converts them to a compact I8 palette + RLE format.
+// LVGL draws native images; SVG and ThorVG are never invoked on ESP32-S3.
+#define IMAGE_EXTERN(name) \
+    extern const uint8_t name##_begin[] asm("_binary_" #name "_i8r_start"); \
+    extern const uint8_t name##_end[] asm("_binary_" #name "_i8r_end")
+IMAGE_EXTERN(maison_fond);
+IMAGE_EXTERN(porte_garage);
+IMAGE_EXTERN(panneaux_solaires);
+IMAGE_EXTERN(ballon_ecs);
+IMAGE_EXTERN(vehicule_electrique);
+IMAGE_EXTERN(batterie_coque);
+#undef IMAGE_EXTERN
 
 typedef enum {SVG_HOUSE,SVG_GARAGE_DOOR,SVG_SOLAR,SVG_ECS,SVG_EV,SVG_BATTERY,SVG_COUNT} mira_svg_id_t;
 static lv_image_dsc_t svg_dsc[SVG_COUNT];
+static uint8_t *svg_pixels[SVG_COUNT];
+
 static void init_svg_assets(void){
-    static bool ready=false;
-    if(ready)return;
+    static bool initialized=false;
+    if(initialized)return;
+    initialized=true;
     const struct {const uint8_t *start,*end;uint16_t w,h;} assets[SVG_COUNT]={
         {maison_fond_begin,maison_fond_end,800,450},
         {porte_garage_begin,porte_garage_end,184,147},
@@ -137,17 +136,50 @@ static void init_svg_assets(void){
         {batterie_coque_begin,batterie_coque_end,36,50},
     };
     for(unsigned i=0;i<SVG_COUNT;i++){
+        const uint32_t pixels=(uint32_t)assets[i].w*assets[i].h;
+        const size_t encoded_size=(size_t)(assets[i].end-assets[i].start);
+        if(encoded_size<1024||((encoded_size-1024)&1u)){
+            ESP_LOGE("mira-energy","Invalid RLE asset %u",i);
+            continue;
+        }
+        const size_t output_size=1024u+(size_t)pixels;
+        uint8_t *buf=lv_malloc(output_size); // LVGL custom allocator = PSRAM
+        if(!buf){
+            ESP_LOGE("mira-energy","Image %u allocation failed (%u bytes)",i,(unsigned)output_size);
+            continue;  // Leave a blank asset rather than rebooting the panel.
+        }
+        memcpy(buf,assets[i].start,1024);
+        uint32_t written=0;
+        bool valid=true;
+        for(const uint8_t *cur=assets[i].start+1024;cur<assets[i].end;cur+=2){
+            const uint32_t run=cur[0];
+            if(run==0||run>pixels-written){valid=false;break;}
+            memset(buf+1024+written,cur[1],run);
+            written+=run;
+        }
+        if(!valid||written!=pixels){
+            lv_free(buf);
+            ESP_LOGE("mira-energy","Corrupted RLE image %u (%u/%u pixels)",
+                     i,(unsigned)written,(unsigned)pixels);
+            continue;
+        }
+        svg_pixels[i]=buf;
         lv_image_dsc_t *d=&svg_dsc[i];
         memset(d,0,sizeof(*d));
         d->header.magic=LV_IMAGE_HEADER_MAGIC;
-        d->header.cf=LV_COLOR_FORMAT_RAW;
-        d->header.w=assets[i].w;d->header.h=assets[i].h;
-        d->data=(const uint8_t*)assets[i].start;
-        d->data_size=(uint32_t)(assets[i].end-assets[i].start);
+        d->header.cf=LV_COLOR_FORMAT_I8;
+        d->header.w=assets[i].w;
+        d->header.h=assets[i].h;
+        d->header.stride=assets[i].w;
+        d->data=buf;
+        d->data_size=(uint32_t)output_size;
+        ESP_LOGI("mira-energy","Native image %u decoded in PSRAM: %u bytes",
+                 i,(unsigned)output_size);
     }
-    ready=true;
 }
 static lv_obj_t *svg_object(lv_obj_t *parent,mira_svg_id_t id,int x,int y){
+    if(id>=SVG_COUNT||!svg_pixels[id])
+        return shape(parent,x,y,1,1,CLR_BG,0,0,0);
     lv_obj_t *obj=lv_image_create(parent);
     lv_image_set_src(obj,&svg_dsc[id]);
     lv_obj_set_pos(obj,x,y);
