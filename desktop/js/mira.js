@@ -272,6 +272,38 @@ function MiraAppendRowPresentation(cell,type,style,labelMode,icon){
   refresh();
 }
 
+const MiraEnergyModules=[
+  ['showSolar','solar'],['showBattery','battery'],
+  ['showEv','ev'],['showEcs','ecs']
+];
+function MiraEnergyReadRow(row,key){
+  return row && row.dataset && row.dataset[key]==='1';
+}
+function MiraEnergyReadOptions(row){
+  var result={};
+  MiraEnergyModules.forEach(function(pair){
+    result[pair[0]]=MiraEnergyReadRow(row,pair[0]);
+  });
+  return result;
+}
+function MiraEnergyStoreOptions(row,source){
+  MiraEnergyModules.forEach(function(pair){
+    row.dataset[pair[0]]=source[pair[0]]===true?'1':'0';
+  });
+}
+function MiraEnergyCollectCheckboxes(prefix){
+  var state={};
+  MiraEnergyModules.forEach(function(pair){
+    state[pair[0]]=$('#'+prefix+'-'+pair[1]).is(':checked');
+  });
+  return state;
+}
+function MiraEnergyPopulateCheckboxes(prefix,row){
+  var state=MiraEnergyReadOptions(row);
+  MiraEnergyModules.forEach(function(pair){
+    $('#'+prefix+'-'+pair[1]).prop('checked',state[pair[0]]);
+  });
+}
 function MiraTechnicalName(row){
   return MiraSafeText(Object.prototype.hasOwnProperty.call(row.cells[3].dataset,'technicalName') ? row.cells[3].dataset.technicalName : row.cells[3].textContent).trim();
 }
@@ -319,7 +351,8 @@ function MiraRowIconConfig(row){
 function MiraStyleOptions(type){
   if (type === 'info') return [['standard','Standard'],['value','Valeur dominante'],['compact','Compact']];
   if (type === 'button' || type === 'camera') return [['standard','Standard'],['compact','Compact']];
-  if (type === 'energy' || type === 'media') return [['standard','Tableau Mira']];
+  if (type === 'energy') return [['standard','Maison énergie Mira'],['classic','Tableau classique']];
+  if (type === 'media') return [['standard','Tableau Mira']];
   if (type === 'toggle') return [['standard','Standard'],['compact','Compact']];
   if (type === 'range' || type === 'roundrange' || type === 'list') return [['standard','Standard'],['compact','Compact']];
   if (type === 'listbutton') return [['standard','Standard'],['compact','Compact'],['segmented','Segmenté']];
@@ -509,6 +542,9 @@ async function SendListHTTP(ip,mdp){
         layout: miralayout
       };
       if(miradisplayname && miradisplayname !== miraname) item.displayName=miradisplayname;
+      if(miratype === 'energy') {
+        Object.assign(item,MiraEnergyReadOptions(row));
+      }
       if(miratype === 'thermostat') {
         item.modes=MiraSafeText(row.dataset.thermoModes)||'Confort|Éco|Hors gel|Arrêt';
       }
@@ -804,6 +840,12 @@ function Remplissage(contjson){
     miracelllayout.appendChild(MiraLayoutSelect(miratype, miralayout));
     mirarow.dataset.freeLayout = miralayout === 'free' ? '1' : '0';
     mirarow.dataset.thermoModes = MiraSafeText(obj["lvgl"][i]["modes"]) || 'Confort|Éco|Hors gel|Arrêt';
+    if(miratype==='energy') MiraEnergyStoreOptions(mirarow,{
+      showSolar:obj["lvgl"][i].showSolar===true,
+      showBattery:obj["lvgl"][i].showBattery===true,
+      showEv:obj["lvgl"][i].showEv===true,
+      showEcs:obj["lvgl"][i].showEcs===true
+    });
     mirarow.dataset.lx = MiraSafeText(obj["lvgl"][i]["lx"]);
     mirarow.dataset.ly = MiraSafeText(obj["lvgl"][i]["ly"]);
     mirarow.dataset.lw = MiraSafeText(obj["lvgl"][i]["lw"]);
@@ -813,7 +855,10 @@ function Remplissage(contjson){
     oBtSup = miratable.getElementsByClassName('bt-supprimer');
     oBtSup[i].addEventListener('click',  supprimerLigne); 
     nbr=i;
-  }  
+  }
+  // Imported screen configuration may arrive after the Jeedom Commandes
+  // table: synchronize visibility in both loading orders.
+  miraRefreshEnergyModuleRows();
 }
 
 
@@ -917,6 +962,7 @@ $("#mirabuttonajouter").on('click', function (event) {
   miracelllayout.appendChild(MiraLayoutSelect(miratype, miralayout));
   mirarow.dataset.freeLayout = miralayout === 'free' ? '1' : '0';
   mirarow.dataset.thermoModes = miratype==='thermostat' ? thermoModes : '';
+  if(miratype==='energy') MiraEnergyStoreOptions(mirarow,MiraEnergyCollectCheckboxes('miraenergy'));
   mirarow.dataset.lx = '';
   mirarow.dataset.ly = '';
   mirarow.dataset.lw = '';
@@ -961,6 +1007,7 @@ $("#miratype").on('change',function(event) {
   MiraRefreshLayoutSelector(lvgl_type, 'auto');
   MiraRefreshInfoSelectors(lvgl_type);
   $('#divmirathermomodes').toggle(lvgl_type==='thermostat');
+  $('#miraenergyoptions').toggle(lvgl_type==='energy');
   // Camera URL is deliberately not requested in the add-widget form.
   $('#miraval').attr('type', 'number').attr('maxlength', 6).removeAttr('placeholder');
   if (lvgl_type === 'thermostat') {
@@ -1255,6 +1302,26 @@ $('#table_cmd').off('click.mira_media','.mira-media-toggle-links')
 
 // Energy battery rows are real indexed Mira infos. Preserve their Jeedom
 // mappings when hidden: the selector changes visibility, never deletes a cmd.
+function miraEnergyModulePermitted(logicalId){
+  var match=String(logicalId||'').match(/^(.*)__(solar|home|grid|battery|soc|soc2|soc3|ecs_temp|ecs_power|ev_soc|ev_power)$/);
+  if(!match) return true;
+  if(match[2]==='home'||match[2]==='grid')return true;
+  var key=(match[2]==='solar')?'showSolar':
+    (match[2]==='battery'||match[2]==='soc'||match[2]==='soc2'||match[2]==='soc3')?'showBattery':
+    (match[2].indexOf('ev_')===0)?'showEv':'showEcs';
+  var row=MiraGetRows().find(function(x){
+    return MiraRowType(x)==='energy'&&MiraTechnicalName(x)===match[1];
+  });
+  return row?MiraEnergyReadRow(row,key):true;
+}
+function miraRefreshEnergyModuleRows(){
+  $('#table_cmd tbody tr[data-mira-logicalid]').each(function(){
+    var row=$(this),name=row.attr('data-mira-logicalid')||'';
+    if(!/__(solar|battery|soc|soc2|soc3|ecs_temp|ecs_power|ev_soc|ev_power)$/.test(name))return;
+    row.toggle(row.attr('data-mira-origin-hidden')!=='1' && miraEnergyModulePermitted(name));
+  });
+  miraRefreshEnergyBatteryRows();
+}
 function miraRefreshEnergyBatteryRows() {
   $('#table_cmd tbody tr[data-mira-logicalid$="__soc"]').each(function(){
     var master=$(this), name=master.attr('data-mira-logicalid')||'';
@@ -1263,7 +1330,7 @@ function miraRefreshEnergyBatteryRows() {
     for(var n=2;n<=3;n++){
       $('#table_cmd tbody tr[data-mira-logicalid]').filter(function(){
         return $(this).attr('data-mira-logicalid')===base+'__soc'+n;
-      }).toggle(n<=count);
+      }).toggle(n<=count && miraEnergyModulePermitted(base+'__soc'+n));
     }
   });
 }
@@ -1562,6 +1629,7 @@ function addCmdToTable(_cmd) {
           miraMultiRefreshRow(tr);
           if (isMultiMaster) miraMultiSourceChanged(tr);
           if (/__soc(?:2|3)?$/.test(_cmd.logicalId||'')) miraRefreshEnergyBatteryRows();
+          miraRefreshEnergyModuleRows();
           miraRefreshMediaCommandRows();
         }
       })
@@ -2090,6 +2158,8 @@ function MiraOpenQuickOptions(row){
   $('#miraquickunit').val(MiraCellValue(row.cells[4]));
   $('#miraquickthermomodes').val(row.dataset.thermoModes || 'Confort|Éco|Hors gel|Arrêt');
   $('#miraquickthermomodeswrap').toggle(type==='thermostat');
+  $('#miraquickenergyoptions').toggle(type==='energy');
+  if(type==='energy') MiraEnergyPopulateCheckboxes('miraquickenergy',row);
   $('#miraquickmin').val(MiraCellValue(row.cells[5]));
   $('#miraquickmax').val(MiraCellValue(row.cells[6]));
   $('#miraquickvalue').val(MiraCellValue(row.cells[7]));
@@ -2129,6 +2199,10 @@ $('#miraquicksave').on('click',function(){
     row.cells[7].textContent=value;
   }
   if(type==='list' || type==='listbutton') row.cells[7].textContent=value;
+  if(type==='energy'){
+    MiraEnergyStoreOptions(row,MiraEnergyCollectCheckboxes('miraquickenergy'));
+    miraRefreshEnergyModuleRows();
+  }
   $('#miraboutonenvoyer').show();
   if($('#miradesigner').is(':visible')) MiraDesignerRender();
   MiraCloseQuickOptions();

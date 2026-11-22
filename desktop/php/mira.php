@@ -111,6 +111,16 @@ log::add('mira', 'debug', "Lancement script");
                           <input id="mirathermomodes" type="text" value="Confort|Éco|Hors gel|Arrêt" style="width:100%;">
                           <small>Après programmation, associer les commandes réelles dans les commandes Jeedom du panneau.</small>
                         </div>
+                        <div id="miraenergyoptions" style="display:none;margin:8px auto;padding:10px;border:1px solid #365768;border-radius:7px;width:96%;">
+                          <strong>Équipements de la maison</strong>
+                          <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:6px;">
+                            <label><input type="checkbox" id="miraenergy-solar"> Panneaux</label>
+                            <label><input type="checkbox" id="miraenergy-battery"> Batterie</label>
+                            <label><input type="checkbox" id="miraenergy-ev"> VE</label>
+                            <label><input type="checkbox" id="miraenergy-ecs"> ECS</label>
+                          </div>
+                          <small>Seuls les éléments cochés apparaissent sur le Mira 7". Maison et réseau restent affichés.</small>
+                        </div>
                       </div>
                     
                       <div id="mirabuttonajouter" class="mirabutton" style="background-color:var(--bt-success-color); width:95%; margin-top:10px;">{{Ajouter}}</div>
@@ -146,6 +156,15 @@ log::add('mira', 'debug', "Lancement script");
                         <div id="miraquickminmaxwrap"><label>Minimum <input type="number" id="miraquickmin"></label><label>Maximum <input type="number" id="miraquickmax"></label></div>
                         <div id="miraquickvaluewrap"><label><span id="miraquickvaluetitle">Valeur / options</span><input type="text" id="miraquickvalue"></label></div>
                         <div id="miraquickthermomodeswrap" style="display:none"><label>Modes du thermostat <input type="text" id="miraquickthermomodes" placeholder="Confort|Éco|Hors gel|Arrêt"></label></div>
+                        <div id="miraquickenergyoptions" style="display:none;padding:8px;border:1px solid #365768;border-radius:7px">
+                          <strong>Équipements affichés dans la maison</strong>
+                          <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:6px">
+                            <label><input type="checkbox" id="miraquickenergy-solar"> Panneaux</label>
+                            <label><input type="checkbox" id="miraquickenergy-battery"> Batterie</label>
+                            <label><input type="checkbox" id="miraquickenergy-ev"> VE</label>
+                            <label><input type="checkbox" id="miraquickenergy-ecs"> ECS</label>
+                          </div>
+                        </div>
 
                         <div class="mira-quickoptions-actions"><button type="button" id="miraquickcancel" class="btn btn-default">Annuler</button><button type="button" id="miraquicksave" class="btn btn-success">Valider</button></div>
                       </div>
