@@ -15,6 +15,7 @@ SVG_DIR=ROOT/"esp-idf"/"main"/"energy_svg"
 OUT_DIR=ROOT/"esp-idf"/"main"/"energy_raster"
 SIZES={
     "maison_fond":(800,450),
+    "pylone":(78,138),
     "porte_garage":(184,147),
     "panneaux_solaires":(292,112),
     "ballon_ecs":(49,79),
@@ -27,18 +28,30 @@ SIZES={
 # This does NOT move, resize, or reinterpret any of its SVG vertices.
 # Render bbox in the house coordinate space: x 240..532, y 68..180.
 SOLAR_CROP=(240,68,532,180)
+# The pylon is already present in the user-validated house SVG. Split it
+# into its own native raster ONLY at conversion time, without changing that SVG.
+# These bounds cover the whole tower and no portion of the house (800x450).
+PYLON_CROP=(18,132,96,270)
 
-def make_asset(svg_bytes:bytes,w:int,h:int,crop=None)->bytes:
+def make_asset(svg_bytes:bytes,w:int,h:int,crop=None,erase_pylon=False)->bytes:
     if crop is None:
         rendered=cairosvg.svg2png(bytestring=svg_bytes,output_width=w,output_height=h)
         rgba=Image.open(io.BytesIO(rendered)).convert("RGBA")
     else:
         import xml.etree.ElementTree as ET
         root=ET.fromstring(svg_bytes)
-        assert root.attrib.get("viewBox")=="0 0 800 450", "Approved panel must align with the house 800x450 canvas"
+        if crop==SOLAR_CROP:
+            assert root.attrib.get("viewBox")=="0 0 800 450", "Approved panel must align with the house 800x450 canvas"
+        else:
+            assert crop==PYLON_CROP, "Only solar and original-house pylon crops are permitted"
         assert (crop[2]-crop[0],crop[3]-crop[1])==(w,h)
         rendered=cairosvg.svg2png(bytestring=svg_bytes,output_width=800,output_height=450)
         rgba=Image.open(io.BytesIO(rendered)).convert("RGBA").crop(crop)
+    if erase_pylon:
+        assert crop is None and (w,h)==(800,450)
+        # The source SVG is unchanged; erase ONLY the pixels belonging to the
+        # existing pylon, now drawn in a separate sprite at the chosen position.
+        rgba.paste((0,0,0,0),PYLON_CROP)
     indexed=rgba.quantize(colors=256,method=Image.Quantize.FASTOCTREE,
                           dither=Image.Dither.NONE)
     palette=indexed.getpalette("RGBA")
@@ -68,7 +81,9 @@ def make_asset(svg_bytes:bytes,w:int,h:int,crop=None)->bytes:
 if __name__=="__main__":
     OUT_DIR.mkdir(parents=True,exist_ok=True)
     for name,(w,h) in SIZES.items():
-        out=make_asset((SVG_DIR/(name+".svg")).read_bytes(),w,h,
-                       SOLAR_CROP if name=="panneaux_solaires" else None)
+        source="maison_fond" if name=="pylone" else name
+        crop=SOLAR_CROP if name=="panneaux_solaires" else (PYLON_CROP if name=="pylone" else None)
+        out=make_asset((SVG_DIR/(source+".svg")).read_bytes(),w,h,
+                       crop,erase_pylon=name=="maison_fond")
         (OUT_DIR/(name+".i8r")).write_bytes(out)
         print(f"{name}: {w}x{h} -> {len(out)} bytes; verified")
