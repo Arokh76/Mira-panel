@@ -3319,6 +3319,13 @@ void mira_full_ui_create(lv_display_t *disp){
         } else make_flex(pages[i],LV_FLEX_FLOW_COLUMN,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_CENTER);
         lv_obj_set_scroll_dir(pages[i],LV_DIR_VER);
         lv_obj_set_scrollbar_mode(pages[i],LV_SCROLLBAR_MODE_OFF);
+        // The Energy house fills a fixed 800x430 viewport. Never let this
+        // page scroll vertically (or move the house under the navbar).
+        // Other pages keep their original scrolling behaviour.
+        if(i==4){
+            lv_obj_set_scroll_dir(pages[i],LV_DIR_NONE);
+            no_scroll(pages[i]);
+        }
         if(i==0||i==1||i==2)
             lv_obj_add_event_cb(pages[i],scroll_cache_on_move,LV_EVENT_SCROLL,NULL);
         if(i)lv_obj_add_flag(pages[i],LV_OBJ_FLAG_HIDDEN);
