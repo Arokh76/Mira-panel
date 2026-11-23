@@ -1,6 +1,7 @@
 // Native Mira 7 STD energy-house preview, branched from MIRA7_OTA_20261120.
 // Approved graphics are embedded real SVG files decoded by LVGL 9.6 / ThorVG.
 #include "mira_energy_house.h"
+#include "mira_full.h"
 #include "mira_french_font.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -134,7 +135,7 @@ static void init_svg_assets(void){
         {panneaux_solaires_begin,panneaux_solaires_end,242,88},
         {ballon_ecs_begin,ballon_ecs_end,49,79},
         {vehicule_electrique_begin,vehicule_electrique_end,136,97},
-        {batterie_coque_begin,batterie_coque_end,46,64},
+        {batterie_coque_begin,batterie_coque_end,46,90},
     };
     for(unsigned i=0;i<SVG_COUNT;i++){
         const uint32_t pixels=(uint32_t)assets[i].w*assets[i].h;
@@ -194,8 +195,8 @@ static void draw_background(void){
     // Independent door: visible only when EV module is absent.
     garage_door=svg_object(artwork,SVG_GARAGE_DOOR,598,250);
     // Independent panels, ECS cylinder upstairs and VE; controlled by Jeedom.
-    // Identical approved solar drawing, translated up/right to sit ON the roof.
-    solar_layer=svg_object(artwork,SVG_SOLAR,275,93);
+    // Exactly the approved solar panel; raise it into the roof slope, without scaling.
+    solar_layer=svg_object(artwork,SVG_SOLAR,269,77);
     solar_shape=solar_layer;
     ecs_shape=svg_object(artwork,SVG_ECS,549,171);
     ev_layer=svg_object(artwork,SVG_EV,633,270);
@@ -338,12 +339,12 @@ static void return_home(lv_event_t *ev){
     if(back_cb)back_cb();
 }
 static lv_obj_t *batt_box(unsigned i,int x){
-    // The accepted SVG is rasterized at 46x64 only. Keep its original style.
-    // Four live segments occupy the bottom half, with SOC text INSIDE on top.
-    lv_obj_t *b=shape(artwork,x,300,46,66,CLR_BG,0,0,0);
+    // Preserve approved SVG artwork, extend its body DOWN to reach the floor.
+    // Four SOC bars and the percentage remain inside the 46x90 shell.
+    lv_obj_t *b=shape(artwork,x,301,46,93,CLR_BG,0,0,0);
     (void)svg_object(b,SVG_BATTERY,0,0);
     for(int n=0;n<4;n++){
-        battery_cell_fill[i][n]=shape(b,10,33+n*6,26,5,0x6AF900u,0,0,2);
+        battery_cell_fill[i][n]=shape(b,10,46+n*8,26,6,0x6AF900u,0,0,2);
         lv_obj_add_flag(battery_cell_fill[i][n],LV_OBJ_FLAG_HIDDEN);
     }
     battery_track[i]=b;
@@ -374,27 +375,21 @@ static void update_battery_soc(unsigned battery,const char *text){
         lv_obj_set_style_bg_color(fill,lv_color_hex(color),0);
     }
 }
-lv_obj_t *mira_energy_house_create(lv_obj_t *screen,void (*on_back)(void)){
+lv_obj_t *mira_energy_house_create(lv_obj_t *page,void (*on_back)(void)){
     mira_energy_house_destroy();
     back_cb=on_back;
-    // Native vector viewport is 800x430, leaving bottom 50px to Mira navigation.
-    scene=shape(screen,0,0,800,430,0x071421u,0,0,0);
-    lv_obj_set_style_bg_color(scene,lv_color_hex(0x071421u),0);
-    lv_obj_set_style_bg_opa(scene,LV_OPA_COVER,0);
+    // PAGE 4 owns the full scene; it never overlays root navigation or picker.
+    scene=shape(page,0,0,800,430,0x071421u,0,0,0);
     lv_obj_add_flag(scene,LV_OBJ_FLAG_IGNORE_LAYOUT);
     lv_obj_set_style_pad_all(scene,0,0);
-    // Thermostat-style 786x414 panel and midnight-blue fill, without
-    // changing the shared bottom navigation bar at Y=430.
+    // Use EXACT same theme-aware background, border and relief as thermostat.
     lv_obj_t *thermostat_style_card=shape(scene,7,8,786,414,0x0E2032u,0x17354Bu,1,14);
-    lv_obj_set_style_border_opa(thermostat_style_card,LV_OPA_50,0);
-    lv_obj_set_style_outline_width(thermostat_style_card,2,0);
-    lv_obj_set_style_outline_color(thermostat_style_card,lv_color_black(),0);
-    lv_obj_set_style_outline_opa(thermostat_style_card,LV_OPA_50,0);
+    mira_full_style_energy_panel(scene,thermostat_style_card);
     artwork=shape(scene,0,0,800,430,CLR_BG,0,0,0);
     lv_obj_add_flag(artwork,LV_OBJ_FLAG_IGNORE_LAYOUT);
     draw_background();
     routes_create();
-    solar_card=card(239,17,179,63,"Panneaux",CLR_SOLAR);
+    solar_card=card(239,8,179,63,"Panneaux",CLR_SOLAR);
     fields[0]=txt(solar_card,"--",7,31,165,CLR_SOLAR,&lv_font_montserrat_20,LV_TEXT_ALIGN_CENTER);
     lv_obj_t *grid=card(89,178,113,69,"Réseau",CLR_GRID);
     fields[2]=txt(grid,"--",4,29,105,CLR_GRID,&lv_font_montserrat_20,LV_TEXT_ALIGN_CENTER);
@@ -411,7 +406,7 @@ lv_obj_t *mira_energy_house_create(lv_obj_t *screen,void (*on_back)(void)){
     batt_status=txt(batt_card,"Charge / déch.",2,48,101,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
     for(int i=0;i<3;i++){
         battery_shapes[i]=batt_box((unsigned)i,455+i*47);
-        fields[4+i]=txt(battery_shapes[i],"--",2,13,42,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
+        fields[4+i]=txt(battery_shapes[i],"--",2,23,42,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
         if(i)lv_obj_add_flag(battery_shapes[i],LV_OBJ_FLAG_HIDDEN);
     }
     // Invisible touch target on unused black space, never a visible menu.
