@@ -196,7 +196,7 @@ static void draw_background(void){
     garage_door=svg_object(artwork,SVG_GARAGE_DOOR,598,250);
     // Independent panels, ECS cylinder upstairs and VE; controlled by Jeedom.
     // Exactly the approved solar panel; raise it into the roof slope, without scaling.
-    solar_layer=svg_object(artwork,SVG_SOLAR,269,77);
+    solar_layer=svg_object(artwork,SVG_SOLAR,249,83);
     solar_shape=solar_layer;
     ecs_shape=svg_object(artwork,SVG_ECS,549,171);
     ev_layer=svg_object(artwork,SVG_EV,633,270);
