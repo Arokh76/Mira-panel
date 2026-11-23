@@ -1,36 +1,27 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="242" height="88"
-     viewBox="0 0 242 88" preserveAspectRatio="xMidYMid meet">
-  <!-- Solar artwork fitted directly to the APPROVED maison_fond.svg roof.
-       House source roof quadrilateral (viewBox 1000x563, display scaled x0.8):
-       left-bottom (277,228), left-top (386,120), right-top (695,74),
-       right-bottom (533,225) = in scene (222,182),(309,96),(556,59),(426,180).
-       Firmware solar origin remains EXACTLY (249,83); 242x88 unchanged.
-       Thus this polygon is inset INSIDE the actual roof with matching
-       top vanishing slope (-25/175) and lower horizontal edge. -->
-  <defs>
-    <linearGradient id="solarGlass" x1="0" y1="0" x2="0.3" y2="1">
-      <stop offset="0" stop-color="#065CB7"/>
-      <stop offset="1" stop-color="#003986"/>
-    </linearGradient>
-    <clipPath id="solarCells">
-      <polygon points="58,40 206,19 142,69 30,69"/>
-    </clipPath>
-  </defs>
-  <!-- White rim: same style as the approved illustration, but its
-       perspective is constructed FROM the house roof, not from the PNG. -->
-  <polygon points="49,29 224,4 154,80 8,80" fill="#EFF6FA"/>
-  <polygon points="50,33 218,10 151,76 15,76" fill="#071B2C"/>
-  <polygon points="54,36 212,14 147,73 23,73" fill="#04E6EE"/>
-  <polygon points="58,40 206,19 142,69 30,69" fill="url(#solarGlass)"/>
-  <g clip-path="url(#solarCells)" fill="none" stroke="#EFF8FF"
-     stroke-width="1.35" stroke-linecap="round">
-    <path d="M 82.67,36.5 L 48.67,69"/>
-    <path d="M 107.33,33 L 67.33,69"/>
-    <path d="M 132,29.5 L 86,69"/>
-    <path d="M 156.67,26 L 104.67,69"/>
-    <path d="M 181.33,22.5 L 123.33,69"/>
-    <path d="M 51,47.25 L 190,31.5"/>
-    <path d="M 44,54.5 L 174,44"/>
-    <path d="M 37,61.75 L 158,56.5"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="450" viewBox="0 0 800 450">
+  <g id="panneaux-solaires">
+    
+    <polygon points="316.6,104.0 525.2,75.3 425.3,169.3 246.9,172.4" fill="#041A33" stroke="#F0F7FA" stroke-width="3.5" stroke-linejoin="round" />
+
+    
+    <polygon points="319.4,107.3 511.8,82.1 425.2,163.6 257.6,168.0" fill="#03479E" />
+
+    
+    <g stroke="#F0F7FA" stroke-width="1.6" stroke-linecap="butt">
+      
+      <line x1="345.9" y1="103.8" x2="280.7" y2="167.4" />
+      <line x1="374.4" y1="100.1" x2="305.5" y2="166.7" />
+      <line x1="404.9" y1="96.1" x2="332.1" y2="166.0" />
+      <line x1="437.8" y1="91.8" x2="360.7" y2="165.3" />
+      <line x1="473.3" y1="87.1" x2="391.7" y2="164.5" />
+
+      
+      <line x1="304.0" y1="122.5" x2="490.2" y2="102.5" />
+      <line x1="288.5" y1="137.7" x2="468.5" y2="122.9" />
+      <line x1="273.1" y1="152.8" x2="446.9" y2="143.2" />
+    </g>
+
+    
+    <polygon points="319.4,107.3 511.8,82.1 425.2,163.6 257.6,168.0" fill="none" stroke="#00E5FF" stroke-width="2.4" stroke-linejoin="round" />
   </g>
 </svg>
