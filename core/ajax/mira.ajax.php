@@ -84,11 +84,20 @@ try {
                     continue;
                 }
                 if ($type === 'energy') {
-                    // One visual Energy card -> five standard Jeedom Info IDs.
-                    // Without these signatures autosync times out even though
-                    // the ESP32 /getindex was rebuilt successfully.
+                    // The original seven commands NEVER change their IDs.
+                    // New Mira7 configs always reserve the four ECS/EV slots,
+                    // whether the optional modules are currently visible or not.
                     foreach (array('solar', 'home', 'grid', 'battery', 'soc', 'soc2', 'soc3') as $field) {
                         $expectedSignatures[] = 'info|' . $name . '__' . $field;
+                    }
+                    $modern = array_key_exists('showSolar',$widget) ||
+                        array_key_exists('showBattery',$widget) ||
+                        array_key_exists('showEcs',$widget) ||
+                        array_key_exists('showEv',$widget);
+                    if ($modern) {
+                        foreach (array('ecs_temp','ecs_power','ev_soc','ev_power') as $field) {
+                            $expectedSignatures[] = 'info|' . $name . '__' . $field;
+                        }
                     }
                     continue;
                 }
@@ -163,7 +172,27 @@ try {
 
             sort($expectedSignatures, SORT_STRING);
             sort($actualSignatures, SORT_STRING);
-            return $expectedSignatures === $actualSignatures;
+            if ($expectedSignatures === $actualSignatures) return true;
+
+            // Newer Mira7 builds append four signed W telemetry channels
+            // after ALL existing IDs. Support both the 11-field and 15-field
+            // generations without treating an incomplete index as valid.
+            $withInstant = $expectedSignatures;
+            foreach ($widgets as $widget) {
+                if (!is_array($widget) ||
+                    ($widget['type'] ?? '') !== 'energy') continue;
+                $name = trim((string)($widget['name'] ?? ''));
+                $modern = array_key_exists('showSolar',$widget) ||
+                    array_key_exists('showBattery',$widget) ||
+                    array_key_exists('showEcs',$widget) ||
+                    array_key_exists('showEv',$widget);
+                if (!$modern || $name === '') continue;
+                foreach (array('solar_power','home_power','grid_power','battery_power') as $field) {
+                    $withInstant[] = 'info|' . $name . '__' . $field;
+                }
+            }
+            sort($withInstant, SORT_STRING);
+            return $withInstant === $actualSignatures;
         };
 
         $results = array();
