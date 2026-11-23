@@ -123,7 +123,10 @@ function HTTPTestModule(url,ip,mdp){
 // another fragile 1.5-second HTTP GET immediately before /programui.
 // Send a SINGLE POST; the PHP relay checks its actual HTTP response and
 // verifies the persisted screen configuration if the ACK is lost.
-$("#miraboutonenvoyer").off('click.miraProgram').on('click.miraProgram', function () {
+// Jeedom may evaluate this editor again without unloading the old script.
+// Remove any previous (including unnamespaced legacy) programmer callback.
+$("#miraboutonenvoyer").off('click');
+$("#miraboutonenvoyer").on('click', function () {
   var ip = $("#miraip").val(), mdp = $("#miramdp").val();
   if (!ip || !mdp) {
     alert("Renseigne l'adresse IP et le mot de passe de l'écran.");
