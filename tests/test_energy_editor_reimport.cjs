@@ -11,5 +11,5 @@ vm.runInContext(match[0],context);
 vm.runInContext(match[0],context);
 assert.equal(context.MiraEnergyModuleFlags.length,4);
 assert.match(source,/expectedWidget\[pair\[0\]\]=item\[pair\[0\]\]===true/);
-assert.match(source,/click\.miraProgram/);
+assert.match(source,/\$\("#miraboutonenvoyer"\)\.off\('click'\)/);
 console.log('PASS: Mira JavaScript energy editor survives repeated script injection');
