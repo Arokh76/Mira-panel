@@ -552,6 +552,23 @@ static void panel_style(lv_obj_t *obj,bool light){
     lv_obj_set_style_pad_all(obj,9,0);
     lv_obj_set_style_shadow_width(obj,0,0); // no shadows during first real UI comparison
 }
+// The energy house must inherit the CURRENT thermostat style/theme, not
+// approximate its dark-blue colors with hardcoded hex values.
+void mira_full_style_energy_panel(lv_obj_t *backdrop,lv_obj_t *energy_card){
+    if(backdrop){
+        lv_obj_set_style_bg_color(backdrop,bg_c(),0);
+        lv_obj_set_style_bg_opa(backdrop,LV_OPA_COVER,0);
+    }
+    if(energy_card){
+        panel_style(energy_card,false);
+        lv_obj_set_style_pad_all(energy_card,0,0);
+        lv_obj_set_style_shadow_width(energy_card,0,0);
+        lv_obj_set_style_outline_width(energy_card,2,0);
+        lv_obj_set_style_outline_color(energy_card,lv_color_black(),0);
+        lv_obj_set_style_outline_opa(energy_card,LV_OPA_50,0);
+        lv_obj_set_style_outline_pad(energy_card,0,0);
+    }
+}
 static lv_obj_t *card(int page,int width,int height){
     lv_obj_t *c=lv_obj_create(pages[page]);
     lv_obj_set_size(c,width,height);
@@ -660,9 +677,13 @@ static void nav_click(lv_event_t *e){
     if(display_sleeping)return;
     int index=(int)(intptr_t)lv_event_get_user_data(e);
     if(index==6) {
-        if(lv_obj_has_flag(page_picker,LV_OBJ_FLAG_HIDDEN))
+        if(lv_obj_has_flag(page_picker,LV_OBJ_FLAG_HIDDEN)){
             lv_obj_remove_flag(page_picker,LV_OBJ_FLAG_HIDDEN);
-        else lv_obj_add_flag(page_picker,LV_OBJ_FLAG_HIDDEN);
+            // Picker must remain above PAGE 4 artwork after opening it.
+            lv_obj_move_foreground(page_picker);
+        }else lv_obj_add_flag(page_picker,LV_OBJ_FLAG_HIDDEN);
+        // Keep the real bottom bar interactive, including its close button.
+        lv_obj_move_foreground(nav);
     }else if(index>=7&&index<=9){
         const uint8_t page=favorite_pages[index-7];
         if(page<6)show_page(page);
@@ -2103,7 +2124,7 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
             // original card renderer instead of invalidating LVGL pointers.
             w->house_energy=true;
             w->card=NULL; // Full-screen screen child, never a flex/grid card.
-            (void)mira_energy_house_create(screen,energy_house_return_home);
+            (void)mira_energy_house_create(pages[4],energy_house_return_home);
             for(unsigned n=0;n<7;n++)
                 w->fields[n]=mira_energy_house_field(n);
             const cJSON *solar_cfg=cJSON_GetObjectItemCaseSensitive(o,"showSolar");
@@ -3016,7 +3037,7 @@ static void build_config(void){
     // the house must exist even when the user's configuration has no
     // 'energy' widget or placed one elsewhere.
     if(!mira_energy_house_exists()){
-        (void)mira_energy_house_create(screen,energy_house_return_home);
+        (void)mira_energy_house_create(pages[4],energy_house_return_home);
         ESP_LOGI(TAG,"ENERGY_HOUSE: scene created without widget dependency");
     }
     widget_count=(uint32_t)widget_n;
@@ -3336,7 +3357,7 @@ void mira_full_ui_create(lv_display_t *disp){
     // Also handle first boot with missing miralvgl.json: build_config()
     // legitimately exits early but navigation to Énergie must still work.
     if(!mira_energy_house_exists()){
-        (void)mira_energy_house_create(screen,energy_house_return_home);
+        (void)mira_energy_house_create(pages[4],energy_house_return_home);
         ESP_LOGI(TAG,"ENERGY_HOUSE: scene created without miralvgl.json");
     }
     ESP_LOGI(TAG,"CLOCK_UI_PHASE 7: parsed widgets=%u, internal largest=%u",
