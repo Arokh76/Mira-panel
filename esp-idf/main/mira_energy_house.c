@@ -132,7 +132,7 @@ static void init_svg_assets(void){
     const struct {const uint8_t *start,*end;uint16_t w,h;} assets[SVG_COUNT]={
         {maison_fond_begin,maison_fond_end,800,450},
         {porte_garage_begin,porte_garage_end,184,147},
-        {panneaux_solaires_begin,panneaux_solaires_end,242,88},
+        {panneaux_solaires_begin,panneaux_solaires_end,292,112},
         {ballon_ecs_begin,ballon_ecs_end,49,79},
         {vehicule_electrique_begin,vehicule_electrique_end,136,97},
         {batterie_coque_begin,batterie_coque_end,46,90},
@@ -195,8 +195,10 @@ static void draw_background(void){
     // Independent door: visible only when EV module is absent.
     garage_door=svg_object(artwork,SVG_GARAGE_DOOR,598,250);
     // Independent panels, ECS cylinder upstairs and VE; controlled by Jeedom.
-    // Exactly the approved solar panel; raise it into the roof slope, without scaling.
-    solar_layer=svg_object(artwork,SVG_SOLAR,249,83);
+    // User-provided 800x450 SVG is rendered 1:1 and cropped to x240..532,
+    // y68..180 at build time. Placing this native crop at (240,68) preserves
+    // every original point in the house's shared coordinate space.
+    solar_layer=svg_object(artwork,SVG_SOLAR,240,68);
     solar_shape=solar_layer;
     ecs_shape=svg_object(artwork,SVG_ECS,549,171);
     ev_layer=svg_object(artwork,SVG_EV,633,300);
@@ -397,7 +399,7 @@ lv_obj_t *mira_energy_house_create(lv_obj_t *page,void (*on_back)(void)){
     lv_obj_add_flag(artwork,LV_OBJ_FLAG_IGNORE_LAYOUT);
     draw_background();
     routes_create();
-    solar_card=card(239,8,179,63,"Panneaux",CLR_SOLAR);
+    solar_card=card(239,20,179,63,"Panneaux",CLR_SOLAR);
     fields[0]=txt(solar_card,"--",7,31,165,CLR_SOLAR,&lv_font_montserrat_20,LV_TEXT_ALIGN_CENTER);
     lv_obj_t *grid=card(89,178,113,69,"Réseau",CLR_GRID);
     fields[2]=txt(grid,"--",4,29,105,CLR_GRID,&lv_font_montserrat_20,LV_TEXT_ALIGN_CENTER);
@@ -406,7 +408,7 @@ lv_obj_t *mira_energy_house_create(lv_obj_t *page,void (*on_back)(void)){
     ecs_card=card(513,88,115,64,"ECS",CLR_ECS);
     ecs_temp=txt(ecs_card,"--",5,25,105,CLR_ECS,&mira_font_fr_16,LV_TEXT_ALIGN_CENTER);
     ecs_power=txt(ecs_card,"--",5,44,105,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
-    ev_card=card(644,154,147,73,"Véhicule",CLR_EV);
+    ev_card=card(619,154,147,73,"Véhicule",CLR_EV);
     ev_soc=txt(ev_card,"--",6,26,135,CLR_EV,&lv_font_montserrat_20,LV_TEXT_ALIGN_CENTER);
     ev_power=txt(ev_card,"--",6,50,135,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
     batt_card=card(338,308,105,65,"Batterie",CLR_BATT);
