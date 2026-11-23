@@ -379,8 +379,16 @@ lv_obj_t *mira_energy_house_create(lv_obj_t *page,void (*on_back)(void)){
     mira_energy_house_destroy();
     back_cb=on_back;
     // PAGE 4 owns the full scene; it never overlays root navigation or picker.
+    // Unlike an ordinary flex card, the 800x430 canvas must cover the whole
+    // PAGE viewport. Page 4 has 6px left / 8px top content padding: LVGL
+    // positions child objects relative to that content origin. Compensate
+    // those insets once so the 786x414 energy frame is really at (7,8),
+    // just like the centered thermostat card, with no right/bottom clipping.
     scene=shape(page,0,0,800,430,0x071421u,0,0,0);
     lv_obj_add_flag(scene,LV_OBJ_FLAG_IGNORE_LAYOUT);
+    lv_obj_set_pos(scene,
+        -lv_obj_get_style_pad_left(page,LV_PART_MAIN),
+        -lv_obj_get_style_pad_top(page,LV_PART_MAIN));
     lv_obj_set_style_pad_all(scene,0,0);
     // Use EXACT same theme-aware background, border and relief as thermostat.
     lv_obj_t *thermostat_style_card=shape(scene,7,8,786,414,0x0E2032u,0x17354Bu,1,14);
