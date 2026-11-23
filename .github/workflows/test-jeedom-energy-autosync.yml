@@ -1,0 +1,30 @@
+name: Jeedom Energy AutoSync and Editor Regression
+
+on:
+  push:
+    branches:
+      - fix/jeedom-energy-js-autosync-20261123
+  pull_request:
+    paths:
+      - desktop/js/mira.js
+      - core/ajax/mira.ajax.php
+      - tests/test_energy_autosync_signatures.php
+      - tests/test_energy_editor_reimport.cjs
+
+jobs:
+  energy-qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax-check JS and PHP without Jeedom runtime
+        run: |
+          node --check desktop/js/mira.js
+          php -l core/ajax/mira.ajax.php
+          php -l tests/test_energy_autosync_signatures.php
+      - name: Autosync legacy/ECS/VE/instant W regression
+        run: php tests/test_energy_autosync_signatures.php
+      - name: Reloaded Jeedom editor regression
+        run: node tests/test_energy_editor_reimport.cjs
+      - name: Existing translated energy/EV labels
+        run: php tests/test_media_energy_french_names.php
