@@ -195,11 +195,13 @@ static void draw_background(void){
     // Original validated house, unchanged source SVG; the pylon pixels
     // are split offline into a separate image so the tower can be repositioned.
     (void)svg_object(artwork,SVG_HOUSE,0,0);
-    // House-group moves 35 px left. Place the tower CENTERED below the
-    // stationary Réseau card (global x=89..202, midpoint 145).
-    // Pylon native crop is 78x138; global x = -35+141 = 106, center 145.
-    // Starts just below Réseau (bottom y247), ends at y405 max.
-    (void)svg_object(artwork,SVG_PYLON,141,267);
+    // Approved Wave 7 preview: whole composition is offset -35px,
+    // including the Réseau card. Its global center is x=110.5.
+    // The 78px-wide pylon is placed at local x=108 (global x=73),
+    // center x=112, immediately beneath the Réseau card.
+    // Visible tower base originally ends at crop-local y=131;
+    // moving the crop to y=260 aligns it with the house ground y=391.
+    (void)svg_object(artwork,SVG_PYLON,108,260);
     // Independent door: visible only when EV module is absent.
     garage_door=svg_object(artwork,SVG_GARAGE_DOOR,598,250);
     // Independent panels, ECS cylinder upstairs and VE; controlled by Jeedom.
@@ -215,7 +217,7 @@ static void draw_background(void){
 
 POLY(route_solar,{359,105},{359,157},{454,194},{454,281});
 POLY(route_home,{454,281},{309,281});
-POLY(route_grid,{454,281},{241,281},{224,282},{180,282},{180,270});
+POLY(route_grid,{454,281},{241,281},{224,282},{145,282},{145,260});
 POLY(route_battery,{454,281},{454,307},{488,307});
 POLY(route_ecs,{454,281},{520,281},{563,261});
 POLY(route_ev,{454,281},{598,281},{598,345},{640,345});
@@ -412,8 +414,9 @@ lv_obj_t *mira_energy_house_create(lv_obj_t *page,void (*on_back)(void)){
     routes_create();
     solar_card=card(239,20,179,63,"Panneaux",CLR_SOLAR);
     fields[0]=txt(solar_card,"--",7,31,165,CLR_SOLAR,&lv_font_montserrat_20,LV_TEXT_ALIGN_CENTER);
-    // Artwork is x=-35; x=124 here keeps Réseau at global x=89.
-    lv_obj_t *grid=card(124,178,113,69,"Réseau",CLR_GRID);
+    // Réseau follows the house by -35px, just like EVERY other card.
+    // Its global x is 54, centered above the pylon (center x=112).
+    lv_obj_t *grid=card(89,178,113,69,"Réseau",CLR_GRID);
     fields[2]=txt(grid,"--",4,29,105,CLR_GRID,&lv_font_montserrat_20,LV_TEXT_ALIGN_CENTER);
     lv_obj_t *home=card(251,209,144,61,"Maison",CLR_HOME);
     fields[1]=txt(home,"--",5,28,134,CLR_HOME,&lv_font_montserrat_20,LV_TEXT_ALIGN_CENTER);
