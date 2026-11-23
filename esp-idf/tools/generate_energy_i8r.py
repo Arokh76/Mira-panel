@@ -19,7 +19,7 @@ SIZES={
     "panneaux_solaires":(242,88),
     "ballon_ecs":(49,79),
     "vehicule_electrique":(136,97),
-    "batterie_coque":(46,64),
+    "batterie_coque":(46,90),
 }
 
 def make_asset(svg_bytes:bytes,w:int,h:int)->bytes:
