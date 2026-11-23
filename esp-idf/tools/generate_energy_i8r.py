@@ -16,15 +16,29 @@ OUT_DIR=ROOT/"esp-idf"/"main"/"energy_raster"
 SIZES={
     "maison_fond":(800,450),
     "porte_garage":(184,147),
-    "panneaux_solaires":(242,88),
+    "panneaux_solaires":(292,112),
     "ballon_ecs":(49,79),
     "vehicule_electrique":(136,97),
     "batterie_coque":(46,90),
 }
 
-def make_asset(svg_bytes:bytes,w:int,h:int)->bytes:
-    rendered=cairosvg.svg2png(bytestring=svg_bytes,output_width=w,output_height=h)
-    rgba=Image.open(io.BytesIO(rendered)).convert("RGBA")
+# The user's approved panel SVG is an 800x450 transparent overlay already
+# aligned with the approved house: render it at 1:1 and crop blank margins.
+# This does NOT move, resize, or reinterpret any of its SVG vertices.
+# Render bbox in the house coordinate space: x 240..532, y 68..180.
+SOLAR_CROP=(240,68,532,180)
+
+def make_asset(svg_bytes:bytes,w:int,h:int,crop=None)->bytes:
+    if crop is None:
+        rendered=cairosvg.svg2png(bytestring=svg_bytes,output_width=w,output_height=h)
+        rgba=Image.open(io.BytesIO(rendered)).convert("RGBA")
+    else:
+        import xml.etree.ElementTree as ET
+        root=ET.fromstring(svg_bytes)
+        assert root.attrib.get("viewBox")=="0 0 800 450", "Approved panel must align with the house 800x450 canvas"
+        assert (crop[2]-crop[0],crop[3]-crop[1])==(w,h)
+        rendered=cairosvg.svg2png(bytestring=svg_bytes,output_width=800,output_height=450)
+        rgba=Image.open(io.BytesIO(rendered)).convert("RGBA").crop(crop)
     indexed=rgba.quantize(colors=256,method=Image.Quantize.FASTOCTREE,
                           dither=Image.Dither.NONE)
     palette=indexed.getpalette("RGBA")
@@ -54,6 +68,7 @@ def make_asset(svg_bytes:bytes,w:int,h:int)->bytes:
 if __name__=="__main__":
     OUT_DIR.mkdir(parents=True,exist_ok=True)
     for name,(w,h) in SIZES.items():
-        out=make_asset((SVG_DIR/(name+".svg")).read_bytes(),w,h)
+        out=make_asset((SVG_DIR/(name+".svg")).read_bytes(),w,h,
+                       SOLAR_CROP if name=="panneaux_solaires" else None)
         (OUT_DIR/(name+".i8r")).write_bytes(out)
         print(f"{name}: {w}x{h} -> {len(out)} bytes; verified")
