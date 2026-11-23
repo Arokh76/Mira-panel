@@ -1,32 +1,36 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="242" height="88" viewBox="80 328 1308 476" preserveAspectRatio="xMidYMid meet">
-  <!-- True vector reconstruction from the validated solar panel reference image.
-       Source image: panneau_solaire_bleu_en_grille_lumineuse.png (1448x1086).
-       Perspective, lattice endpoints and rim follow the source coordinates.
-       Keep this artwork's native 242x88 size and let firmware place it. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="242" height="88"
+     viewBox="0 0 242 88" preserveAspectRatio="xMidYMid meet">
+  <!-- Solar artwork fitted directly to the APPROVED maison_fond.svg roof.
+       House source roof quadrilateral (viewBox 1000x563, display scaled x0.8):
+       left-bottom (277,228), left-top (386,120), right-top (695,74),
+       right-bottom (533,225) = in scene (222,182),(309,96),(556,59),(426,180).
+       Firmware solar origin remains EXACTLY (249,83); 242x88 unchanged.
+       Thus this polygon is inset INSIDE the actual roof with matching
+       top vanishing slope (-25/175) and lower horizontal edge. -->
   <defs>
-    <linearGradient id="solarGlass" x1="0" y1="0" x2="0.4" y2="1" gradientUnits="objectBoundingBox">
-      <stop offset="0" stop-color="#0052aa"/>
-      <stop offset="1" stop-color="#00449e"/>
+    <linearGradient id="solarGlass" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0" stop-color="#065CB7"/>
+      <stop offset="1" stop-color="#003986"/>
     </linearGradient>
-    <clipPath id="solarGlassClip">
-      <path d="M449,463 L1299,391 L1023,731 L173,742 Z"/>
+    <clipPath id="solarCells">
+      <polygon points="58,40 206,19 142,69 30,69"/>
     </clipPath>
   </defs>
-  <!-- Broad bright white outer frame, preserved original perspective. -->
-  <path fill="#F7FBFF" d="M413,419 Q420,414 428,414 L1365,336 Q1379,333 1382,341 Q1386,347 1376,359 L1046,773 Q1039,783 1029,783 L97,787 Q90,788 89,783 Q88,779 94,771 Z"/>
-  <path fill="#001a2c" d="M426,431 L1353,354 L1027,769 L113,772 Z"/>
-  <!-- Original bright cyan inner rim. -->
-  <path fill="#00E8F8" d="M436,448 L1322,374 L1034,747 L153,758 Z"/>
-  <path fill="url(#solarGlass)" d="M449,463 L1299,391 L1023,731 L173,742 Z"/>
-  <!-- Original five slanted cell separators and three perspective rows. -->
-  <g clip-path="url(#solarGlassClip)" fill="none" stroke="#F3F8FC" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M569,445 L303,746"/>
-    <path d="M711,432 L449,747"/>
-    <path d="M856,422 L595,747"/>
-    <path d="M1007,406 L742,744"/>
-    <path d="M1157,394 L889,742"/>
-    <path d="M375,529 L1239,469"/>
-    <path d="M306,604 L1171,558"/>
-    <path d="M236,679 L1102,645"/>
+  <!-- White rim: same style as the approved illustration, but its
+       perspective is constructed FROM the house roof, not from the PNG. -->
+  <polygon points="49,29 224,4 154,80 8,80" fill="#EFF6FA"/>
+  <polygon points="50,33 218,10 151,76 15,76" fill="#071B2C"/>
+  <polygon points="54,36 212,14 147,73 23,73" fill="#04E6EE"/>
+  <polygon points="58,40 206,19 142,69 30,69" fill="url(#solarGlass)"/>
+  <g clip-path="url(#solarCells)" fill="none" stroke="#EFF8FF"
+     stroke-width="1.35" stroke-linecap="round">
+    <path d="M 82.67,36.5 L 48.67,69"/>
+    <path d="M 107.33,33 L 67.33,69"/>
+    <path d="M 132,29.5 L 86,69"/>
+    <path d="M 156.67,26 L 104.67,69"/>
+    <path d="M 181.33,22.5 L 123.33,69"/>
+    <path d="M 51,47.25 L 190,31.5"/>
+    <path d="M 44,54.5 L 174,44"/>
+    <path d="M 37,61.75 L 158,56.5"/>
   </g>
 </svg>
