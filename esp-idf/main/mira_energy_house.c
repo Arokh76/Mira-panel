@@ -199,7 +199,7 @@ static void draw_background(void){
     solar_layer=svg_object(artwork,SVG_SOLAR,249,83);
     solar_shape=solar_layer;
     ecs_shape=svg_object(artwork,SVG_ECS,549,171);
-    ev_layer=svg_object(artwork,SVG_EV,633,270);
+    ev_layer=svg_object(artwork,SVG_EV,633,300);
     ev_shape=ev_layer;
 }
 
@@ -403,7 +403,7 @@ lv_obj_t *mira_energy_house_create(lv_obj_t *page,void (*on_back)(void)){
     fields[2]=txt(grid,"--",4,29,105,CLR_GRID,&lv_font_montserrat_20,LV_TEXT_ALIGN_CENTER);
     lv_obj_t *home=card(251,209,144,61,"Maison",CLR_HOME);
     fields[1]=txt(home,"--",5,28,134,CLR_HOME,&lv_font_montserrat_20,LV_TEXT_ALIGN_CENTER);
-    ecs_card=card(513,114,115,64,"ECS",CLR_ECS);
+    ecs_card=card(513,88,115,64,"ECS",CLR_ECS);
     ecs_temp=txt(ecs_card,"--",5,25,105,CLR_ECS,&mira_font_fr_16,LV_TEXT_ALIGN_CENTER);
     ecs_power=txt(ecs_card,"--",5,44,105,CLR_WHITE,&mira_font_fr_12,LV_TEXT_ALIGN_CENTER);
     ev_card=card(644,154,147,73,"Véhicule",CLR_EV);
