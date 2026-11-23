@@ -114,6 +114,7 @@ static lv_obj_t *poly(lv_obj_t *p,const lv_point_precise_t *pts,int count,
     extern const uint8_t name##_begin[] asm("_binary_" #name "_i8r_start"); \
     extern const uint8_t name##_end[] asm("_binary_" #name "_i8r_end")
 IMAGE_EXTERN(maison_fond);
+IMAGE_EXTERN(pylone);
 IMAGE_EXTERN(porte_garage);
 IMAGE_EXTERN(panneaux_solaires);
 IMAGE_EXTERN(ballon_ecs);
@@ -121,7 +122,7 @@ IMAGE_EXTERN(vehicule_electrique);
 IMAGE_EXTERN(batterie_coque);
 #undef IMAGE_EXTERN
 
-typedef enum {SVG_HOUSE,SVG_GARAGE_DOOR,SVG_SOLAR,SVG_ECS,SVG_EV,SVG_BATTERY,SVG_COUNT} mira_svg_id_t;
+typedef enum {SVG_HOUSE,SVG_PYLON,SVG_GARAGE_DOOR,SVG_SOLAR,SVG_ECS,SVG_EV,SVG_BATTERY,SVG_COUNT} mira_svg_id_t;
 static lv_image_dsc_t svg_dsc[SVG_COUNT];
 static uint8_t *svg_pixels[SVG_COUNT];
 
@@ -131,6 +132,7 @@ static void init_svg_assets(void){
     initialized=true;
     const struct {const uint8_t *start,*end;uint16_t w,h;} assets[SVG_COUNT]={
         {maison_fond_begin,maison_fond_end,800,450},
+        {pylone_begin,pylone_end,78,138},
         {porte_garage_begin,porte_garage_end,184,147},
         {panneaux_solaires_begin,panneaux_solaires_end,292,112},
         {ballon_ecs_begin,ballon_ecs_end,49,79},
@@ -190,8 +192,14 @@ static lv_obj_t *svg_object(lv_obj_t *parent,mira_svg_id_t id,int x,int y){
 }
 static void draw_background(void){
     init_svg_assets();
-    // The FULL approved house, pylon, wall meter, sofa and upstairs details.
+    // Original validated house, unchanged source SVG; the pylon pixels
+    // are split offline into a separate image so the tower can be repositioned.
     (void)svg_object(artwork,SVG_HOUSE,0,0);
+    // House-group moves 35 px left. Place the tower CENTERED below the
+    // stationary Réseau card (global x=89..202, midpoint 145).
+    // Pylon native crop is 78x138; global x = -35+141 = 106, center 145.
+    // Starts just below Réseau (bottom y247), ends at y405 max.
+    (void)svg_object(artwork,SVG_PYLON,141,267);
     // Independent door: visible only when EV module is absent.
     garage_door=svg_object(artwork,SVG_GARAGE_DOOR,598,250);
     // Independent panels, ECS cylinder upstairs and VE; controlled by Jeedom.
@@ -207,7 +215,7 @@ static void draw_background(void){
 
 POLY(route_solar,{359,105},{359,157},{454,194},{454,281});
 POLY(route_home,{454,281},{309,281});
-POLY(route_grid,{454,281},{241,281},{224,282},{116,282},{55,282},{55,245});
+POLY(route_grid,{454,281},{241,281},{224,282},{180,282},{180,270});
 POLY(route_battery,{454,281},{454,307},{488,307});
 POLY(route_ecs,{454,281},{520,281},{563,261});
 POLY(route_ev,{454,281},{598,281},{598,345},{640,345});
@@ -229,7 +237,7 @@ static void set_route(int i,const lv_point_precise_t *p,unsigned n,uint32_t colo
 static void routes_create(void){
     set_route(0,route_solar,4,0x8EC740u);
     set_route(1,route_home,2,0x42C7EEu);
-    set_route(2,route_grid,6,0x42C7EEu);
+    set_route(2,route_grid,5,0x42C7EEu);
     set_route(3,route_battery,3,0x55DAABu);
     set_route(4,route_ecs,3,0xEAA048u);
     set_route(5,route_ev,4,0x62D6A7u);
@@ -395,13 +403,17 @@ lv_obj_t *mira_energy_house_create(lv_obj_t *page,void (*on_back)(void)){
     // Use EXACT same theme-aware background, border and relief as thermostat.
     lv_obj_t *thermostat_style_card=shape(scene,7,8,786,414,0x0E2032u,0x17354Bu,1,14);
     mira_full_style_energy_panel(scene,thermostat_style_card);
-    artwork=shape(scene,0,0,800,430,CLR_BG,0,0,0);
+    // Move the entire validated house composition left by only 35 pixels.
+    // The approved house and roof-aligned solar SVG are not rescaled.
+    // The Réseau card is intentionally kept at its former global x.
+    artwork=shape(scene,-35,0,800,430,CLR_BG,0,0,0);
     lv_obj_add_flag(artwork,LV_OBJ_FLAG_IGNORE_LAYOUT);
     draw_background();
     routes_create();
     solar_card=card(239,20,179,63,"Panneaux",CLR_SOLAR);
     fields[0]=txt(solar_card,"--",7,31,165,CLR_SOLAR,&lv_font_montserrat_20,LV_TEXT_ALIGN_CENTER);
-    lv_obj_t *grid=card(89,178,113,69,"Réseau",CLR_GRID);
+    // Artwork is x=-35; x=124 here keeps Réseau at global x=89.
+    lv_obj_t *grid=card(124,178,113,69,"Réseau",CLR_GRID);
     fields[2]=txt(grid,"--",4,29,105,CLR_GRID,&lv_font_montserrat_20,LV_TEXT_ALIGN_CENTER);
     lv_obj_t *home=card(251,209,144,61,"Maison",CLR_HOME);
     fields[1]=txt(home,"--",5,28,134,CLR_HOME,&lv_font_montserrat_20,LV_TEXT_ALIGN_CENTER);
