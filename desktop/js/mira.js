@@ -123,7 +123,7 @@ function HTTPTestModule(url,ip,mdp){
 // another fragile 1.5-second HTTP GET immediately before /programui.
 // Send a SINGLE POST; the PHP relay checks its actual HTTP response and
 // verifies the persisted screen configuration if the ACK is lost.
-$("#miraboutonenvoyer").on('click', function () {
+$("#miraboutonenvoyer").off('click.miraProgram').on('click.miraProgram', function () {
   var ip = $("#miraip").val(), mdp = $("#miramdp").val();
   if (!ip || !mdp) {
     alert("Renseigne l'adresse IP et le mot de passe de l'écran.");
@@ -272,7 +272,11 @@ function MiraAppendRowPresentation(cell,type,style,labelMode,icon){
   refresh();
 }
 
-const MiraEnergyModules=[
+// Jeedom injects this script again during same-page navigation. A top-level
+// const throws SyntaxError on the second load and disables the entire editor.
+// var is intentionally redeclarable, with a new name to coexist with an
+// already-loaded legacy const until the browser performs a full reload.
+var MiraEnergyModuleFlags=[
   ['showSolar','solar'],['showBattery','battery'],
   ['showEv','ev'],['showEcs','ecs']
 ];
@@ -281,26 +285,26 @@ function MiraEnergyReadRow(row,key){
 }
 function MiraEnergyReadOptions(row){
   var result={};
-  MiraEnergyModules.forEach(function(pair){
+  MiraEnergyModuleFlags.forEach(function(pair){
     result[pair[0]]=MiraEnergyReadRow(row,pair[0]);
   });
   return result;
 }
 function MiraEnergyStoreOptions(row,source){
-  MiraEnergyModules.forEach(function(pair){
+  MiraEnergyModuleFlags.forEach(function(pair){
     row.dataset[pair[0]]=source[pair[0]]===true?'1':'0';
   });
 }
 function MiraEnergyCollectCheckboxes(prefix){
   var state={};
-  MiraEnergyModules.forEach(function(pair){
+  MiraEnergyModuleFlags.forEach(function(pair){
     state[pair[0]]=$('#'+prefix+'-'+pair[1]).is(':checked');
   });
   return state;
 }
 function MiraEnergyPopulateCheckboxes(prefix,row){
   var state=MiraEnergyReadOptions(row);
-  MiraEnergyModules.forEach(function(pair){
+  MiraEnergyModuleFlags.forEach(function(pair){
     $('#'+prefix+'-'+pair[1]).prop('checked',state[pair[0]]);
   });
 }
@@ -562,14 +566,22 @@ async function SendListHTTP(ip,mdp){
       if(miratype !== 'info' && miratype !== 'datetime') item.url='';
       payload.lvgl.push(item);
 
-      expectedWidgets.push({
+      var expectedWidget={
         modes: miratype==='thermostat' ? item.modes : undefined,
         type: miratype,
         style: mirastyle,
         layout: miralayout,
         name: miraname,
         value: miraval
-      });
+      };
+      // The asynchronous Jeedom sync must know that the energy widget
+      // exposes ECS, EV and signed instantaneous-power command slots.
+      if(miratype==='energy'){
+        MiraEnergyModuleFlags.forEach(function(pair){
+          expectedWidget[pair[0]]=item[pair[0]]===true;
+        });
+      }
+      expectedWidgets.push(expectedWidget);
     }
 
     // 1.2.17 : le relais confirme aussi les ecritures si l'ESP redemarre
