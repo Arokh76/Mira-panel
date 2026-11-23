@@ -3,6 +3,7 @@ idf_component_register(
   INCLUDE_DIRS "."
   EMBED_FILES
     "energy_raster/maison_fond.i8r"
+    "energy_raster/pylone.i8r"
     "energy_raster/porte_garage.i8r"
     "energy_raster/panneaux_solaires.i8r"
     "energy_raster/ballon_ecs.i8r"
