@@ -475,6 +475,33 @@ static cJSON *index_from_config(const char *json) {
                 a,"unit",cJSON_CreateString("W"));
         }
     }
+    // New W-only flow telemetry for ECS and EV is appended AFTER every
+    // existing energy and media command, including the four power channels.
+    // This preserves all pre-existing /getindex transport IDs and Jeedom
+    // bindings. Slots are reserved regardless of showEcs/showEv so toggling
+    // visible equipment never renumbers any other command.
+    const cJSON *flow_energy=NULL;
+    cJSON_ArrayForEach(flow_energy,widgets){
+        if(strcmp(jstr((cJSON*)flow_energy,"type",""),"energy"))continue;
+        const char *energy_name=jstr((cJSON*)flow_energy,"name","");
+        if(!*energy_name)continue;
+        const bool modern=
+            cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(flow_energy,"showSolar"))||
+            cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(flow_energy,"showBattery"))||
+            cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(flow_energy,"showEv"))||
+            cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(flow_energy,"showEcs"));
+        if(!modern)continue;
+        static const char *const flow_fields[]={
+            "ecs_instant_power","ev_instant_power"
+        };
+        for(size_t n=0;n<2;n++){
+            char compound[192];
+            snprintf(compound,sizeof(compound),"%.95s__%s",energy_name,flow_fields[n]);
+            cJSON *a=append_action(arr,&id,"info",compound);
+            if(a)cJSON_ReplaceItemInObjectCaseSensitive(
+                a,"unit",cJSON_CreateString("W"));
+        }
+    }
     cJSON_Delete(root);
     return out;
 }
