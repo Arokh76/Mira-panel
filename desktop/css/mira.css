@@ -543,3 +543,39 @@ th.sorttable_sorted_reverse::after {
   max-width:85%;
   min-width:0;
 }
+
+
+/* Mira Wave 7 / Jeedom: use the available desktop width for complete
+ * command labels (e.g. "Test5 · Puissance batterie (signée)").
+ * Only the command editor is affected, never the screen or other tables. */
+#table_cmd {
+  width:100%;
+  min-width:1650px;
+  table-layout:fixed;
+}
+#table_cmd th:nth-child(1) { width:68px; }
+#table_cmd th:nth-child(2) { width:410px; }
+#table_cmd th:nth-child(3) { width:105px; }
+#table_cmd th:nth-child(4) { width:75px; }
+#table_cmd th:nth-child(5) { width:100px; }
+#table_cmd th:nth-child(6) { width:100px; }
+#table_cmd th:nth-child(7) { width:135px; }
+#table_cmd th:nth-child(8) { width:138px; }
+#table_cmd th:nth-child(9) { width:390px; }
+#table_cmd th:nth-child(10) { width:140px; }
+#table_cmd th:nth-child(11) { width:76px; }
+#table_cmd td:nth-child(2) .input-group {
+  display:flex;
+  align-items:center;
+  flex-wrap:nowrap;
+  width:100%;
+}
+#table_cmd td:nth-child(2) .input-group input[data-l1key="name"] {
+  min-width:0;
+  width:1%;
+  flex:1 1 auto;
+}
+#table_cmd td:nth-child(2) .input-group-btn,
+#table_cmd td:nth-child(2) .input-group-addon {
+  flex:0 0 auto;
+}
