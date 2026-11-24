@@ -507,9 +507,15 @@ void mira_energy_house_aux(const char *name,const char *value){
     if(!scene||!name)return;
     lv_obj_t *field=NULL;
     if(!strcmp(name,"ecs_temp"))field=ecs_temp;
-    else if(!strcmp(name,"ecs_power")){field=ecs_power;set_power_valid(4,value,true);}
+    // ECS/VE display lines may be kWh totals. They remain visible, but
+    // only parse as a legacy W fallback for flow animation.
+    // Dedicated __ecs_instant_power / __ev_instant_power (W) override them
+    // without replacing those user-configured labels and values.
+    else if(!strcmp(name,"ecs_power")){field=ecs_power;set_power_valid(4,value,false);}
     else if(!strcmp(name,"ev_soc"))field=ev_soc;
-    else if(!strcmp(name,"ev_power")){field=ev_power;set_power_valid(5,value,true);}
+    else if(!strcmp(name,"ev_power")){field=ev_power;set_power_valid(5,value,false);}
+    else if(!strcmp(name,"ecs_instant_power"))set_power_valid(4,value,true);
+    else if(!strcmp(name,"ev_instant_power"))set_power_valid(5,value,true);
     else if(!strcmp(name,"solar_power"))set_power_valid(0,value,true);
     else if(!strcmp(name,"home_power"))set_power_valid(1,value,true);
     else if(!strcmp(name,"grid_power"))set_power_valid(2,value,true);
