@@ -269,13 +269,14 @@ POLY(route_solar,{400,173},{415,190},{415,241});
 POLY(route_grid,{415,241},{405,253},{405,285},{237,285},
                 {223,316},{223,343},{178,343},{178,326});
 // Follow the user's close-up hand-traced routes without changing artwork:
-// violet slightly angled DOWN-RIGHT to separate it from pink at the hub,
-// then a clean horizontal leg to the first battery upper terminal;
+// Violet clears the EV branch at the junction, then stays a little LOWER
+// while reaching the first battery terminal (no wave/curve).
 // orange right, UP then right beneath the cupboard (clear of cyan furniture);
-// pink gentle diagonal DOWN-RIGHT, then a clean separate horizontal EV line.
-POLY(route_battery,{415,241},{423,289},{478,289},{478,300});
+// Pink joins the existing light-cyan house beam and follows it all the
+// way to the garage wall, then turns DOWN and RIGHT to the vehicle.
+POLY(route_battery,{415,241},{423,299},{478,299},{478,301});
 POLY(route_ecs,{415,241},{451,241},{451,216},{548,216});
-POLY(route_ev,{415,241},{443,278},{599,278},{609,327},{634,327});
+POLY(route_ev,{415,241},{443,278},{609,278},{609,327},{634,327});
 // A route owns a stable point buffer plus its LVGL line and three animated dashes.
 // This native helper is required by routes_create() after the SVG transition.
 static void set_route(int i,const lv_point_precise_t *p,unsigned n,uint32_t color){
