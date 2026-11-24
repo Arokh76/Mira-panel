@@ -262,9 +262,12 @@ static void draw_background(void){
 // Points 4..7: meter BOTTOM inlet -> U-turn to pylone output.
 // Segment 3->4 is hidden inside the meter (no drawn line or moving pulse).
 // Signed network W drives BOTH stretches and reverses their common direction.
+// The last point now reaches the pylon's lower right arm: the previous
+// x=186 endpoint stopped in mid-air a few pixels short on the real Wave7.
+// Keep both visible legs and the hidden-through-meter section unchanged.
 POLY(route_solar,{400,173},{415,190},{415,241});
 POLY(route_grid,{415,241},{405,253},{405,285},{237,285},
-                {223,316},{223,343},{186,343},{186,327});
+                {223,316},{223,343},{178,343},{178,326});
 POLY(route_battery,{415,241},{425,260},{427,286},{478,286},{478,300});
 POLY(route_ecs,{415,241},{454,241},{454,226},{548,226});
 POLY(route_ev,{415,241},{435,268},{599,268},{609,327},{634,327});
