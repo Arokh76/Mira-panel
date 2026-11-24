@@ -268,9 +268,13 @@ static void draw_background(void){
 POLY(route_solar,{400,173},{415,190},{415,241});
 POLY(route_grid,{415,241},{405,253},{405,285},{237,285},
                 {223,316},{223,343},{178,343},{178,326});
-POLY(route_battery,{415,241},{425,260},{427,286},{478,286},{478,300});
-POLY(route_ecs,{415,241},{454,241},{454,226},{548,226});
-POLY(route_ev,{415,241},{435,268},{599,268},{609,327},{634,327});
+// Follow the user's close-up hand-traced routes without changing artwork:
+// violet straight DOWN, then right to the first battery upper terminal;
+// orange right, UP then right beneath the cupboard (clear of cyan furniture);
+// pink gentle diagonal DOWN-RIGHT, then a clean separate horizontal EV line.
+POLY(route_battery,{415,241},{415,289},{478,289},{478,300});
+POLY(route_ecs,{415,241},{451,241},{451,216},{548,216});
+POLY(route_ev,{415,241},{443,278},{599,278},{609,327},{634,327});
 // A route owns a stable point buffer plus its LVGL line and three animated dashes.
 // This native helper is required by routes_create() after the SVG transition.
 static void set_route(int i,const lv_point_precise_t *p,unsigned n,uint32_t color){
@@ -303,7 +307,7 @@ static void routes_create(void){
     // value can still be received without drawing a redundant sixth flow.
     set_route(0,route_solar,3,0x28C859u);   // green: rooftop -> house
     set_route(2,route_grid,8,0x318BFAu);    // EDF, one flow, two visible legs
-    set_route(3,route_battery,5,0xAE43EAu); // violet: charging/discharging
+    set_route(3,route_battery,4,0xAE43EAu); // violet: charging/discharging
     set_route(4,route_ecs,4,0xF79031u);     // orange: hot-water heater
     set_route(5,route_ev,5,0xDE2984u);      // pink: car charger
     // Small neutral junction, shared by the five independent branches.
