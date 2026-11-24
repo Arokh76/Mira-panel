@@ -215,12 +215,17 @@ static void draw_background(void){
     ev_shape=ev_layer;
 }
 
-POLY(route_solar,{359,105},{359,157},{454,194},{454,281});
-POLY(route_home,{454,281},{309,281});
-POLY(route_grid,{454,281},{241,281},{224,282},{145,282},{145,260});
-POLY(route_battery,{454,281},{454,307},{488,307});
-POLY(route_ecs,{454,281},{520,281},{563,261});
-POLY(route_ev,{454,281},{598,281},{598,345},{640,345});
+// Five energy branches converge at the HOUSE junction (415,241), drawn
+// from the user's annotated Wave 7 photo. Artwork itself is offset -35px.
+// No extra home-power branch: the Maison card is already the central sink.
+// Distinct accent colors below follow the user's colored route sketch.
+// The 8-point network route stays under Maison's card and skirts the meter.
+POLY(route_solar,{400,173},{415,190},{415,241});
+POLY(route_grid,{415,241},{415,280},{395,283},{245,283},
+                {225,304},{225,350},{186,350},{186,323});
+POLY(route_battery,{415,241},{429,264},{429,291},{455,304});
+POLY(route_ecs,{415,241},{456,241},{456,211},{548,211});
+POLY(route_ev,{415,241},{435,268},{599,268},{609,327},{634,327});
 // A route owns a stable point buffer plus its LVGL line and three animated dashes.
 // This native helper is required by routes_create() after the SVG transition.
 static void set_route(int i,const lv_point_precise_t *p,unsigned n,uint32_t color){
@@ -237,14 +242,16 @@ static void set_route(int i,const lv_point_precise_t *p,unsigned n,uint32_t colo
     }
 }
 static void routes_create(void){
-    set_route(0,route_solar,4,0x8EC740u);
-    set_route(1,route_home,2,0x42C7EEu);
-    set_route(2,route_grid,5,0x42C7EEu);
-    set_route(3,route_battery,3,0x55DAABu);
-    set_route(4,route_ecs,3,0xEAA048u);
-    set_route(5,route_ev,4,0x62D6A7u);
-    // Keep the central junction small, above the home/battery path.
-    shape(artwork,451,278,6,6,0x42C7EEu,0,0,LV_RADIUS_CIRCLE);
+    // The center is a common point, NOT a separate animated Maison route.
+    // route[1] remains uninitialized on purpose: the Jeedom home-power
+    // value can still be received without drawing a redundant sixth flow.
+    set_route(0,route_solar,3,0x28C859u);   // green: rooftop -> house
+    set_route(2,route_grid,8,0x318BFAu);    // blue: EDF, bidirectional
+    set_route(3,route_battery,4,0xAE43EAu); // violet: charging/discharging
+    set_route(4,route_ecs,4,0xF79031u);     // orange: hot-water heater
+    set_route(5,route_ev,5,0xDE2984u);      // pink: car charger
+    // Small neutral junction, shared by the five independent branches.
+    shape(artwork,412,238,6,6,0x42C7EEu,0,0,LV_RADIUS_CIRCLE);
 }
 static void set_visibility(lv_obj_t *object,bool show){
     if(!object)return;
@@ -407,7 +414,7 @@ lv_obj_t *mira_energy_house_create(lv_obj_t *page,void (*on_back)(void)){
     mira_full_style_energy_panel(scene,thermostat_style_card);
     // Move the entire validated house composition left by only 35 pixels.
     // The approved house and roof-aligned solar SVG are not rescaled.
-    // The Réseau card is intentionally kept at its former global x.
+    // The Réseau card moves with the house; paths use the same local origin.
     artwork=shape(scene,-35,0,800,430,CLR_BG,0,0,0);
     lv_obj_add_flag(artwork,LV_OBJ_FLAG_IGNORE_LAYOUT);
     draw_background();
