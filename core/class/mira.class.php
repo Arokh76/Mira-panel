@@ -1471,13 +1471,13 @@ class mira extends eqLogic {
           			$info->setConfiguration('commande',$cmd_id);
                     // L'unité Énergie appartient à Jeedom : ne jamais la
                     // remplacer par une valeur imposée depuis le firmware.
-                    if ($unite !== '' || !preg_match('/__(solar|home|grid|battery|soc|soc2|soc3|ecs_temp|ecs_power|ev_soc|ev_power|solar_power|home_power|grid_power|battery_power)$/D',(string)$name))
+                    if ($unite !== '' || !preg_match('/__(solar|home|grid|battery|soc|soc2|soc3|ecs_temp|ecs_power|ev_soc|ev_power|solar_power|home_power|grid_power|battery_power|ecs_instant_power|ev_instant_power)$/D',(string)$name))
                       $info->setUnite($unite);
                     // Jeedom enforces unique (equipment, command name), not only logicalId.
                     // Each composite card must therefore keep its own named Info
                     // commands, even when several Media/Energy widgets coexist.
                     // Keep stable logical IDs, translate labels only, preserve custom names.
-                    if (preg_match('/^(.*)__(solar|home|grid|battery|soc|soc2|soc3|ecs_temp|ecs_power|ev_soc|ev_power|solar_power|home_power|grid_power|battery_power)$/D',(string)$name,$miraEnergyField)) {
+                    if (preg_match('/^(.*)__(solar|home|grid|battery|soc|soc2|soc3|ecs_temp|ecs_power|ev_soc|ev_power|solar_power|home_power|grid_power|battery_power|ecs_instant_power|ev_instant_power)$/D',(string)$name,$miraEnergyField)) {
                       $energyNames=array('solar'=>'Solaire','home'=>'Consommation maison',
                         'grid'=>'Réseau','battery'=>'Batterie','soc'=>'Stockage · SoC',
                         'soc2'=>'SoC batterie 2','soc3'=>'SoC batterie 3',
@@ -1486,7 +1486,9 @@ class mira extends eqLogic {
                         'solar_power'=>'Puissance solaire (instantanée)',
                         'home_power'=>'Consommation maison (instantanée)',
                         'grid_power'=>'Puissance réseau (signée)',
-                        'battery_power'=>'Puissance batterie (signée)');
+                        'battery_power'=>'Puissance batterie (signée)',
+                        'ecs_instant_power'=>'ECS · Puissance instantanée',
+                        'ev_instant_power'=>'VE · Puissance recharge instantanée');
                       $suffix=$miraEnergyField[2];
                       $oldLabel=preg_match('/^soc([23])$/D',$suffix,$socN) ?
                         'SoC batterie '.$socN[1] : '';
@@ -2715,7 +2717,7 @@ class miraCmd extends cmd {
             $eqLogic->panelHttpGet($url);
             return null;
           }
-          if (preg_match('/__(solar|home|grid|battery|soc|soc2|soc3|ecs_temp|ecs_power|ev_soc|ev_power|solar_power|home_power|grid_power|battery_power)$/D',(string)$nom)) {
+          if (preg_match('/__(solar|home|grid|battery|soc|soc2|soc3|ecs_temp|ecs_power|ev_soc|ev_power|solar_power|home_power|grid_power|battery_power|ecs_instant_power|ev_instant_power)$/D',(string)$nom)) {
             // Never impose a unit on energy fields: append only the unit
             // explicitly selected by the Jeedom user.
             $formattedResult = self::formatEnergyValue($result);
