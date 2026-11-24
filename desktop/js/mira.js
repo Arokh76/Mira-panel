@@ -283,6 +283,68 @@ var MiraEnergyModuleFlags=[
   ['showSolar','solar'],['showBattery','battery'],
   ['showEv','ev'],['showEcs','ecs']
 ];
+// The Jeedom Commands tab exists independently of the Mira editor popup:
+// its #miratable is normally empty. Retrieve the actual selection from
+// /getlvgl when the Commands tab opens, without changing user bindings.
+// Keep unknown as UNKNOWN rather than pretending the VE is enabled/disabled.
+var MiraEnergyScreenOptions={};
+var MiraEnergyScreenConfigKey='';
+var MiraEnergyScreenLoaded=false;
+var MiraEnergyRequestSequence=0;
+function MiraEnergyBoolean(value){
+  return value===true || value===1 || value==='1' || value==='true';
+}
+function MiraEnergyRememberScreenConfig(config){
+  if(!config || !Array.isArray(config.lvgl))return false;
+  var next={};
+  config.lvgl.forEach(function(widget){
+    if(!widget || widget.type!=='energy' || !widget.name)return;
+    // Old firmware that has none of the four switches must not disable
+    // fields merely because the option is absent.
+    var known={};
+    MiraEnergyModuleFlags.forEach(function(pair){
+      if(Object.prototype.hasOwnProperty.call(widget,pair[0]))
+        known[pair[0]]=MiraEnergyBoolean(widget[pair[0]]);
+    });
+    next[String(widget.name)]=known;
+  });
+  MiraEnergyScreenOptions=next;
+  MiraEnergyScreenLoaded=true;
+  return true;
+}
+function MiraEnergyLoadScreenOptions(){
+  var ip=String($('.eqLogicAttr[data-l1key="configuration"][data-l2key="adresseip"]').val()||'').trim();
+  var key=String($('.eqLogicAttr[data-l1key="configuration"][data-l2key="password"]').val()||'');
+  var eqId=String($('.eqLogicAttr[data-l1key="id"]').val()||'');
+  if(!ip || !key || !eqId)return;
+  var configKey=eqId+'|'+ip;
+  if(configKey!==MiraEnergyScreenConfigKey){
+    MiraEnergyScreenOptions={};
+    MiraEnergyScreenLoaded=false;
+    MiraEnergyScreenConfigKey=configKey;
+  }
+  var sequence=++MiraEnergyRequestSequence;
+  $.ajax({
+    type:'POST',
+    url:'plugins/mira/core/ajax/mira.ajax.php',
+    data:{action:'GetHTTP',url:'http://'+ip+'/getlvgl?key='+encodeURIComponent(key)},
+    dataType:'json',
+    timeout:8500
+  }).done(function(result){
+    if(sequence!==MiraEnergyRequestSequence || configKey!==MiraEnergyScreenConfigKey)return;
+    try {
+      var payload=result && result.result;
+      if(typeof payload==='string')payload=JSON.parse(payload);
+      if(MiraEnergyRememberScreenConfig(payload))miraRefreshEnergyModuleRows();
+    } catch(error){ console.warn('Mira: options Énergie non lisibles',error); }
+  }).fail(function(){
+    // Keep already saved Jeedom command associations visible if offline.
+    // The next tab opening will retry; never invent off/on selections.
+  });
+}
+$(document).off('click.miraEnergyScreen','#mira_commandes a')
+  .on('click.miraEnergyScreen','#mira_commandes a',MiraEnergyLoadScreenOptions);
+
 function MiraEnergyReadRow(row,key){
   return row && row.dataset && row.dataset[key]==='1';
 }
@@ -592,6 +654,10 @@ async function SendListHTTP(ip,mdp){
     await HTTPPostJson('http://'+ip+'/programui',mdp,JSON.stringify(payload));
 
     SyncJeedomCommands(ip, expectedWidgets);
+    // Preserve the just-programmed energy module choices immediately;
+    // do not wait for another HTTP read or Jeedom editor popup.
+    MiraEnergyRememberScreenConfig(payload);
+    miraRefreshEnergyModuleRows();
     Vider();
   } catch (e) {
     console.error('Mira: erreur pendant la programmation', e);
@@ -1331,14 +1397,16 @@ function miraEnergyModulePermitted(logicalId){
   var row=MiraGetRows().find(function(x){
     return MiraRowType(x)==='energy'&&MiraTechnicalName(x)===match[1];
   });
-  // During Jeedom page load, the command list can be hydrated before
-  // the Mira energy widget row exists. No matching row means UNKNOWN,
-  // never "disabled": keep existing user associations visible.
-  // Only an explicit equipment selection may hide these lines.
-  if(!row) return true;
-  // Legacy config has no show* flag: preserve its pre-existing commands.
-  if(!Object.prototype.hasOwnProperty.call(row.dataset,key)) return true;
-  return MiraEnergyReadRow(row,key);
+  // A populated editor row (possibly containing unsaved checkbox edits)
+  // has precedence. Otherwise use the real /getlvgl configuration loaded
+  // when the Commands tab is opened — no popup necessary.
+  if(row && Object.prototype.hasOwnProperty.call(row.dataset,key))
+    return MiraEnergyReadRow(row,key);
+  var saved=MiraEnergyScreenOptions[match[1]];
+  if(saved && Object.prototype.hasOwnProperty.call(saved,key))
+    return saved[key]===true;
+  // Missing/offline/legacy configuration is unknown, never explicit OFF.
+  return true;
 }
 function miraEnergyRowAllowed(row){
   var name=row.attr('data-mira-logicalid')||'';
