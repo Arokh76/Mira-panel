@@ -1492,6 +1492,14 @@ class mira extends eqLogic {
                         'SoC batterie '.$socN[1] : '';
                       if (in_array((string)$info->getName(),array((string)$name,$oldLabel),true))
                         $info->setName($miraEnergyField[1].' · '.$energyNames[$suffix]);
+                      if ($suffix==='home_power') {
+                        // The new five-flow Mira7 layout has Maison as the
+                        // central junction: this sixth W input is unnecessary.
+                        // Preserve its original logical ID, remote index, and
+                        // any user association instead of deleting the command.
+                        $info->setIsVisible(0);
+                        $info->setConfiguration('visible_cmd','0');
+                      }
                     }
                     if (preg_match('/^(.*)__(title|artist|album|cover|state|progress|volume|device|devices)$/D',(string)$name,$miraMediaField)) {
                       $names=array('title'=>'Titre','artist'=>'Artiste','album'=>'Album',
