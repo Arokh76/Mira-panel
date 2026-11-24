@@ -1320,7 +1320,7 @@ $('#table_cmd').off('click.mira_media','.mira-media-toggle-links')
 // The house itself is the energy-flow junction: __home_power is obsolete for
 // animation; __home (the displayed kWh total) must remain visible.
 function miraEnergyModulePermitted(logicalId){
-  var match=String(logicalId||'').match(/^(.*)__(solar|home|grid|battery|soc|soc2|soc3|ecs_temp|ecs_power|ev_soc|ev_power|solar_power|home_power|grid_power|battery_power)$/);
+  var match=String(logicalId||'').match(/^(.*)__(solar|home|grid|battery|soc|soc2|soc3|ecs_temp|ecs_power|ev_soc|ev_power|solar_power|home_power|grid_power|battery_power|ecs_instant_power|ev_instant_power)$/);
   if(!match) return true;
   var field=match[2];
   if(field==='home_power') return false;
@@ -1353,7 +1353,7 @@ function miraEnergyRowAllowed(row){
 function miraRefreshEnergyModuleRows(){
   $('#table_cmd tbody tr[data-mira-logicalid]').each(function(){
     var row=$(this),name=row.attr('data-mira-logicalid')||'';
-    if(!/__(solar|home|grid|battery|soc|soc2|soc3|ecs_temp|ecs_power|ev_soc|ev_power|solar_power|home_power|grid_power|battery_power)$/.test(name))return;
+    if(!/__(solar|home|grid|battery|soc|soc2|soc3|ecs_temp|ecs_power|ev_soc|ev_power|solar_power|home_power|grid_power|battery_power|ecs_instant_power|ev_instant_power)$/.test(name))return;
     row.toggle(miraEnergyRowAllowed(row));
   });
 }
