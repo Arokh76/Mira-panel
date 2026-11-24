@@ -25,6 +25,8 @@ typedef struct {
     uint8_t n;
     lv_obj_t *pulse[3];
     lv_obj_t *track;
+    lv_obj_t *track_extra;  // second visible segment around the electricity meter
+    uint8_t hidden_segment; // 1-based segment index hidden INSIDE meter
     bool valid;
     bool dedicated; // A dedicated W/kW sensor overrides any old display value.
     float watts;
@@ -254,16 +256,15 @@ static void draw_background(void){
     ev_shape=ev_layer;
 }
 
-// Five flows share the Maison junction at (415,241), with artwork -35px.
-// The photo's blue floor beam and electricity meter must remain readable.
-// EDF takes an independent line BELOW the beam, runs to the meter's RIGHT,
-// and reaches the pylon without passing THROUGH the meter graphic.
-// Battery flow ends at the first battery's top terminal (not its left edge).
-// ECS flow runs beneath the cupboard's top line, not along its cyan outline.
-// The house itself is the junction: no redundant sixth house-power route.
+// Five flows share the Maison junction at (415,241), artwork offset -35px.
+// Grid (blue): two visually separated stretches of ONE flow.
+// Points 0..3: central junction -> meter RIGHT outlet, above the floor beam.
+// Points 4..7: meter BOTTOM inlet -> U-turn to pylone output.
+// Segment 3->4 is hidden inside the meter (no drawn line or moving pulse).
+// Signed network W drives BOTH stretches and reverses their common direction.
 POLY(route_solar,{400,173},{415,190},{415,241});
-POLY(route_grid,{415,241},{405,253},{405,293},{252,293},
-                {252,333},{177,333});
+POLY(route_grid,{415,241},{405,253},{405,285},{237,285},
+                {223,316},{223,343},{186,343},{186,327});
 POLY(route_battery,{415,241},{425,260},{427,286},{478,286},{478,300});
 POLY(route_ecs,{415,241},{454,241},{454,226},{548,226});
 POLY(route_ev,{415,241},{435,268},{599,268},{609,327},{634,327});
@@ -277,7 +278,16 @@ static void set_route(int i,const lv_point_precise_t *p,unsigned n,uint32_t colo
     for(unsigned j=0;j<n;j++)r->p[j]=p[j];
     // 4px / 80% gives the flow its own contrast without hiding the house.
     // Prior 2px / 50% was nearly invisible beside the cyan wall outlines.
-    r->track=poly(artwork,r->p,(int)n,color,4);
+    if(i==2 && n==8){
+        // The real meter occludes the transition: don't paint its inside.
+        // Keep a single animated route with an invisible inter-segment gap.
+        r->hidden_segment=4;
+        r->track=poly(artwork,r->p,4,color,4);
+        r->track_extra=poly(artwork,r->p+4,4,color,4);
+        lv_obj_set_style_line_opa(r->track_extra,LV_OPA_80,0);
+    }else{
+        r->track=poly(artwork,r->p,(int)n,color,4);
+    }
     lv_obj_set_style_line_opa(r->track,LV_OPA_80,0);
     for(unsigned j=0;j<3;j++){
         r->pulse[j]=shape(artwork,0,0,10,5,color,0,0,LV_RADIUS_CIRCLE);
@@ -289,7 +299,7 @@ static void routes_create(void){
     // route[1] remains uninitialized on purpose: the Jeedom home-power
     // value can still be received without drawing a redundant sixth flow.
     set_route(0,route_solar,3,0x28C859u);   // green: rooftop -> house
-    set_route(2,route_grid,6,0x318BFAu);    // blue: EDF, bidirectional
+    set_route(2,route_grid,8,0x318BFAu);    // EDF, one flow, two visible legs
     set_route(3,route_battery,5,0xAE43EAu); // violet: charging/discharging
     set_route(4,route_ecs,4,0xF79031u);     // orange: hot-water heater
     set_route(5,route_ev,5,0xDE2984u);      // pink: car charger
@@ -357,6 +367,7 @@ static void animate(lv_timer_t *timer){
             (k!=5||enabled(option_ev,seen_ev));
         const bool live=allowed&&route_is_live(r)&&r->n>=2&&r->pulse[0];
         set_visibility(r->track,live);
+        set_visibility(r->track_extra,live);
         if(!live){
             for(unsigned dot=0;dot<3;dot++)set_visibility(r->pulse[dot],false);
             continue;
@@ -379,17 +390,26 @@ static void animate(lv_timer_t *timer){
             if(progress>=1.f)progress-=1.f;
             float target=(r->backwards?1.f-progress:progress)*distance;
             float x=(float)r->p[0].x,y=(float)r->p[0].y;
+            bool inside_meter=false;
             for(unsigned j=1;j<r->n;j++){
                 const float dx=(float)(r->p[j].x-r->p[j-1].x);
                 const float dy=(float)(r->p[j].y-r->p[j-1].y);
                 const float len=sqrtf(dx*dx+dy*dy);
                 if(target<=len||j==r->n-1){
-                    const float t=len>0.f?fminf(1.f,target/len):0.f;
-                    x=(float)r->p[j-1].x+t*dx;
-                    y=(float)r->p[j-1].y+t*dy;
+                    if(j==r->hidden_segment){
+                        inside_meter=true;
+                    }else{
+                        const float t=len>0.f?fminf(1.f,target/len):0.f;
+                        x=(float)r->p[j-1].x+t*dx;
+                        y=(float)r->p[j-1].y+t*dy;
+                    }
                     break;
                 }
                 target-=len;
+            }
+            if(inside_meter){
+                set_visibility(r->pulse[dot],false);
+                continue;
             }
             lv_obj_set_pos(r->pulse[dot],(int)x-5,(int)y-2);
             set_visibility(r->pulse[dot],true);
@@ -618,6 +638,7 @@ static void refresh_visibility(void){
         const bool on=i==0?solar:i==3?batt:i==4?ecs:i==5?ev:true;
         const bool live=on&&route_is_live(&routes[i]);
         set_visibility(routes[i].track,live);
+        set_visibility(routes[i].track_extra,live);
         if(!live)for(unsigned j=0;j<3;j++)set_visibility(routes[i].pulse[j],false);
     }
 }
