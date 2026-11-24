@@ -192,7 +192,27 @@ try {
                 }
             }
             sort($withInstant, SORT_STRING);
-            return $withInstant === $actualSignatures;
+            if ($withInstant === $actualSignatures) return true;
+
+            // The five-flow Wave7 adds ECS/VE instantaneous W inputs after
+            // all existing IDs. Accept this 17-field schema while retaining
+            // compatibility with the previous 11- and 15-field indices.
+            $withAuxInstant = $withInstant;
+            foreach ($widgets as $widget) {
+                if (!is_array($widget) ||
+                    ($widget['type'] ?? '') !== 'energy') continue;
+                $name = trim((string)($widget['name'] ?? ''));
+                $modern = array_key_exists('showSolar',$widget) ||
+                    array_key_exists('showBattery',$widget) ||
+                    array_key_exists('showEcs',$widget) ||
+                    array_key_exists('showEv',$widget);
+                if (!$modern || $name === '') continue;
+                foreach (array('ecs_instant_power','ev_instant_power') as $field) {
+                    $withAuxInstant[] = 'info|' . $name . '__' . $field;
+                }
+            }
+            sort($withAuxInstant, SORT_STRING);
+            return $withAuxInstant === $actualSignatures;
         };
 
         $results = array();
