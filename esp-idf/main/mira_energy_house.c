@@ -125,6 +125,10 @@ IMAGE_EXTERN(batterie_coque);
 typedef enum {SVG_HOUSE,SVG_PYLON,SVG_GARAGE_DOOR,SVG_SOLAR,SVG_ECS,SVG_EV,SVG_BATTERY,SVG_COUNT} mira_svg_id_t;
 static lv_image_dsc_t svg_dsc[SVG_COUNT];
 static uint8_t *svg_pixels[SVG_COUNT];
+// The approved ECS image contains ONE independently cyan-painted element:
+// the thermometer. A small second I8 palette keeps the tank itself unchanged.
+static lv_image_dsc_t ecs_hot_dsc;
+static bool ecs_hot_image_ready,ecs_thermometer_red;
 
 static void init_svg_assets(void){
     static bool initialized=false;
@@ -180,6 +184,40 @@ static void init_svg_assets(void){
         ESP_LOGI("mira-energy","Native image %u decoded in PSRAM: %u bytes",
                  i,(unsigned)output_size);
     }
+    if(svg_pixels[SVG_ECS]){
+        // One 49x79 sprite copy in PSRAM; pixel indices and transparency
+        // are identical. Only cyan palette entries are changed to warm red.
+        // The white tank and dark outlines stay exactly as approved.
+        const size_t count=1024u+49u*79u;
+        uint8_t *hot=lv_malloc(count);
+        if(hot){
+            memcpy(hot,svg_pixels[SVG_ECS],count);
+            bool found_cyan=false;
+            for(unsigned i=0;i<256;i++){
+                uint8_t *rgba=hot+4u*i; // indexed palette is BGRA
+                const unsigned blue=rgba[0],green=rgba[1],red=rgba[2];
+                if(rgba[3]==0||green<115u||
+                   green<=red+52u||blue<=red+55u)continue;
+                const unsigned chroma=green-red;
+                unsigned new_red=red+chroma*11u/10u;
+                if(new_red>255u)new_red=255u;
+                rgba[2]=(uint8_t)new_red;
+                rgba[1]=(uint8_t)(red+chroma/4u);
+                rgba[0]=(uint8_t)(red+chroma/5u);
+                found_cyan=true;
+            }
+            if(found_cyan){
+                ecs_hot_dsc=svg_dsc[SVG_ECS];
+                ecs_hot_dsc.data=hot;
+                ecs_hot_image_ready=true;
+            }else{
+                lv_free(hot);
+                ESP_LOGW("mira-energy","ECS cyan thermometer color not found");
+            }
+        }else{
+            ESP_LOGW("mira-energy","No PSRAM for red ECS thermometer");
+        }
+    }
 }
 static lv_obj_t *svg_object(lv_obj_t *parent,mira_svg_id_t id,int x,int y){
     if(id>=SVG_COUNT||!svg_pixels[id])
@@ -211,6 +249,7 @@ static void draw_background(void){
     solar_layer=svg_object(artwork,SVG_SOLAR,240,68);
     solar_shape=solar_layer;
     ecs_shape=svg_object(artwork,SVG_ECS,549,171);
+    ecs_thermometer_red=false;
     ev_layer=svg_object(artwork,SVG_EV,633,300);
     ev_shape=ev_layer;
 }
@@ -357,6 +396,27 @@ static void animate(lv_timer_t *timer){
         }
     }
 }
+// 45°C at the sensor at the FOOT of the hot-water tank is the user's
+// requested indication. Heating normally stops at 47°C. Do not change
+// its numerical display, nor recolor the whole cylinder.
+static void update_ecs_thermometer(const char *reading){
+    if(!ecs_shape)return;
+    bool red=false;
+    if(has_value(reading)){
+        char tmp[64];
+        snprintf(tmp,sizeof(tmp),"%s",reading);
+        for(char *p=tmp;*p;p++)if(*p==',')*p='.';
+        char *end=NULL;
+        const float degrees=strtof(tmp,&end);
+        if(end!=tmp&&isfinite(degrees)&&degrees>=-40.f&&degrees<=150.f)
+            red=degrees>=45.f;
+    }
+    // Missing readings show the default blue rather than a stale red warning.
+    if(red&&!ecs_hot_image_ready)red=false;
+    if(red==ecs_thermometer_red)return;
+    ecs_thermometer_red=red;
+    lv_image_set_src(ecs_shape,red?&ecs_hot_dsc:&svg_dsc[SVG_ECS]);
+}
 static void return_home(lv_event_t *ev){
     (void)ev;
     if(back_cb)back_cb();
@@ -474,6 +534,7 @@ void mira_energy_house_destroy(void){
     memset(battery_cell_fill,0,sizeof(battery_cell_fill));
     batt_status=NULL;
     ecs_card=NULL;ecs_shape=NULL;ecs_temp=NULL;ecs_power=NULL;
+    ecs_thermometer_red=false;
     ev_card=NULL;ev_shape=NULL;ev_soc=NULL;ev_power=NULL;
     batt_card=NULL;solar_card=NULL;solar_shape=NULL;
     memset(batt_extra,0,sizeof(batt_extra));
@@ -510,7 +571,10 @@ void mira_energy_house_update(unsigned field,const char *value){
 void mira_energy_house_aux(const char *name,const char *value){
     if(!scene||!name)return;
     lv_obj_t *field=NULL;
-    if(!strcmp(name,"ecs_temp"))field=ecs_temp;
+    if(!strcmp(name,"ecs_temp")){
+        field=ecs_temp;
+        update_ecs_thermometer(value);
+    }
     // ECS/VE display lines may be kWh totals. They remain visible, but
     // only parse as a legacy W fallback for flow animation.
     // Dedicated __ecs_instant_power / __ev_instant_power (W) override them
