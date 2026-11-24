@@ -1331,8 +1331,14 @@ function miraEnergyModulePermitted(logicalId){
   var row=MiraGetRows().find(function(x){
     return MiraRowType(x)==='energy'&&MiraTechnicalName(x)===match[1];
   });
-  // No matching energy widget => no optional commands shown.
-  return row?MiraEnergyReadRow(row,key):false;
+  // During Jeedom page load, the command list can be hydrated before
+  // the Mira energy widget row exists. No matching row means UNKNOWN,
+  // never "disabled": keep existing user associations visible.
+  // Only an explicit equipment selection may hide these lines.
+  if(!row) return true;
+  // Legacy config has no show* flag: preserve its pre-existing commands.
+  if(!Object.prototype.hasOwnProperty.call(row.dataset,key)) return true;
+  return MiraEnergyReadRow(row,key);
 }
 function miraEnergyRowAllowed(row){
   var name=row.attr('data-mira-logicalid')||'';
