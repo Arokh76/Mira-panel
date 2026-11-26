@@ -1,0 +1,55 @@
+name: One-shot cleanup of 20 temporary branches
+on:
+  push:
+    branches: [firmware-beta]
+    paths:
+      - '.github/workflows/prune-temporary-branches.yml'
+permissions:
+  contents: write
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Confirm unchanged heads and delete only explicitly listed temporary branches
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/temporary-branches.txt <<'REFS'
+          experiment/async-one-server-7std 6633f1371f8ecac7d0817813f83521178cca074b
+          experiment/espasync-finish-7std 768d8620be04bde9afe4000135076cdb455bad51
+          experiment/espasync-native-only-7std bb481494f542a4353ddcc17c1c955947e50cb605
+          experiment/espasyncwebserver-7std fae6263d16b58f18d7eb5e2fd58fcf3d13daa74b
+          feature/jeedom-energy-modules-20261122 0ca9295a7e39ce4726dc04c3da6c17074bcf627b
+          feature/mira7-energy-approved-vector-20261122 2dafbae68c05c9477f656fc808fa3623ea36790f
+          feature/mira7-energy-house-20261120 4185e951a8958556f178509febb5810dc90b5c05
+          feature/mira7-native-svg-approved-20261122 8587dcf66b4fa27a12004270cf0b0b07cc54e80e
+          fix/async-web-commands-wt32-parity 448fb31423ee08329a5dff3b55815c5949c736bf
+          fix/clean-home-from-espasync-finish-7std 02845828017ab6b598e74cc2cfda05631c9eece2
+          fix/jeedom-energy-js-autosync-20261123 7ed9bf6c903a32237f908d7451371a055c02a888
+          fix/mira7-energie-maison-nav-20261122-v2 f149ad23c27efd30edd109c06351c8de21a4b4c0
+          fix/mira7-energy-layout-live-flows-20261122 64c3245bd1c71ceb039b6576cc7213da85cfd017
+          fix/mira7-energy-offline-svg-safe-20261122 3305a4a9a52da50c0ce3230f0202a211f4d04111
+          fix/mira7-energy-thermostat-roof-battery-nav-20261123 981754d325094c420acb99cf5fb81e92115114b8
+          fix/restore-homepage-only-7std c5a1933f41fb265055ba1f2f8eeb26cdff2f90e2
+          fix/restore-original-command-renderer-7std 6b63572aa3f74454054139a463f4aa954e611c54
+          fix/7std-home-actions-post-unfiltered c6e62619718ca29e08850348abed53665fb275d2
+          fix/7std-home-wt32-only-v3 65c46e76a56950fbd4b2a3e5d9ef1a6b3e22e2c8
+          fix/7std-wt32-ota-from-c6e6261 d4df17985e009dfbe470e62a86381586202c8b9e
+          REFS
+          python3 - <<'PY'
+          import subprocess
+          from pathlib import Path
+          entries=[line.strip().split() for line in Path('/tmp/temporary-branches.txt').read_text().splitlines() if line.strip()]
+          assert len(entries)==20
+          for name,expected in entries:
+              assert name.startswith(('experiment/','feature/','fix/')),name
+              actual=subprocess.check_output(['git','ls-remote','--heads','origin',f'refs/heads/{name}'],text=True).strip().split()
+              if not actual or actual[0]!=expected:
+                  raise SystemExit(f'STOP: branch changed or missing: {name} {actual}')
+          print('Validated all 20 exact remote SHAs',flush=True)
+          for name,_ in entries:
+              subprocess.run(['git','push','origin','--delete',name],check=True)
+              print(f'DELETED: {name}',flush=True)
+          print('DELETED 20 temporary branches; preserved main, beta, firmware-beta, stable, projet-tamagotshi and release/*',flush=True)
+          PY
