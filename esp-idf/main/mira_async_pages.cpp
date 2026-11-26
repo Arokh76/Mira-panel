@@ -539,7 +539,7 @@ static bool replace_token(PsramPage& out,const char *token,
        mira_beta_networks_get(id,&profile)==ESP_OK){
         if(!strcmp(token,"NETWORKIDUPDATE")){
             char decimal_id[8];
-            snprintf(decimal_id,sizeof(decimal_id,"%d",id);
+            snprintf(decimal_id,sizeof(decimal_id),"%d",id);
             return out.add(decimal_id);
         }
         const char *values[]={profile.ssid,profile.ip_mode,profile.ip,
