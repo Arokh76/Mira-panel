@@ -564,7 +564,9 @@ class mira extends eqLogic {
 
     $url='http://'.$ip.'/updatenr?key='.rawurlencode($key).
         '&info='.$index.'&value='.rawurlencode((string)$value);
+    $startedAt=microtime(true);
     $out=$mira->panelHttpGet($url);
+    $duration=(int)round((microtime(true)-$startedAt)*1000);
     if ($out===false) return false;
     $cmd->setCache(array('mira_media_http_value'=>(string)$value,
       'mira_media_http_at'=>microtime(true)));
