@@ -894,9 +894,14 @@ bool mira_async_handle_beta(AsyncWebServerRequest *r){
         if(!authorized(r))return true;
         return save_display(r);
     }
-    if(path=="/reboot"&&r->method()==AsyncWebRequestMethod::HTTP_GET){
+    // The original Mira "Redemarrer" button points to /load?nav=reboot.
+    // Preserve that historical URL as well as the direct /reboot endpoint.
+    // Authenticate before scheduling a delayed restart so HTTP 200 can flush.
+    if(r->method()==AsyncWebRequestMethod::HTTP_GET &&
+       (path=="/reboot"||(path=="/load"&&q(r,"nav")=="reboot"))){
         if(!authorized(r))return true;
-        r->send(200,"text/plain","Mira Panel redemarre");
+        r->send(200,"text/html; charset=utf-8",
+                "<h2>Mira Panel</h2><p>Redemarrage du panneau...</p>");
         queue_restart();return true;
     }
     if(path=="/api/checkupdate"&&r->method()==AsyncWebRequestMethod::HTTP_GET){
@@ -907,11 +912,13 @@ bool mira_async_handle_beta(AsyncWebServerRequest *r){
     }
     if(path=="/mira/clock/status"&&r->method()==AsyncWebRequestMethod::HTTP_GET){
         if(!authorized(r))return true;
-        time_t now=time(nullptr);
-        char msg[100];
-        snprintf(msg,sizeof(msg),"{\"epoch\":%lld,\"valid\":%s}",
-                 (long long)now,now>1700000000?"true":"false");
-        r->send(200,"application/json",msg);
+        char msg[512];
+        if(!mira_recovery_clock_status_json(msg,sizeof(msg))){
+            r->send(503,"text/plain","Diagnostic NTP indisponible");return true;
+        }
+        auto *resp=r->beginResponse(200,"application/json",msg);
+        resp->addHeader("Cache-Control","no-store");
+        r->send(resp);
         return true;
     }
     return false;

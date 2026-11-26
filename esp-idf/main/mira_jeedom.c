@@ -388,6 +388,30 @@ static cJSON *index_from_config(const char *json) {
                 char compound[192];snprintf(compound,sizeof(compound),"%.95s__%s",name,energy_fields[n]);
                 append_action(arr,&id,"info",compound);
             }
+            // Legacy Mira (no show* keys): keep the ORIGINAL seven indexed
+            // Infos so flashing the new firmware alone cannot move media
+            // or other commands. New Jeedom writes explicit booleans and
+            // synchronizes its bindings during /programui.
+            const bool new_energy_config=
+                cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(w,"showSolar"))||
+                cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(w,"showBattery"))||
+                cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(w,"showEv"))||
+                cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(w,"showEcs"));
+            if(new_energy_config){
+                // New schema reserves all four stable slots regardless of
+                // selections: toggling ECS must not move VE index IDs.
+                static const char *const extra_fields[]={
+                    "ecs_temp","ecs_power","ev_soc","ev_power"
+                };
+                for(size_t n=0;n<4;n++){
+                    char compound[192];
+                    snprintf(compound,sizeof(compound),"%.95s__%s",name,extra_fields[n]);
+                    cJSON *a=append_action(arr,&id,"info",compound);
+                    if(a&&(n==0||n==2))
+                        cJSON_ReplaceItemInObjectCaseSensitive(
+                            a,"unit",cJSON_CreateString(n==0?"°C":"%"));
+                }
+            }
         }else if(!strcmp(type,"media")){
             for(size_t n=0;n<9;n++){
                 char compound[192];snprintf(compound,sizeof(compound),"%.95s__%s",name,media_fields[n]);
@@ -424,6 +448,58 @@ static cJSON *index_from_config(const char *json) {
             if(weather)cJSON_ReplaceItemInObjectCaseSensitive(weather,"unit",cJSON_CreateString("°C"));
             append_action(arr,&id,"info","__mira_weather_condition");
             append_action(arr,&id,"info","__mira_weather_code");
+        }
+    }
+    // New instantaneous power commands are APPENDED AFTER ALL existing
+    // widgets. No existing command ID (including media, relays, thermostat)
+    // changes when upgrading a previously configured Mira screen.
+    static const char *const instant_fields[]={
+        "solar_power","home_power","grid_power","battery_power"
+    };
+    const cJSON *energy=NULL;
+    cJSON_ArrayForEach(energy,widgets){
+        if(strcmp(jstr((cJSON*)energy,"type",""),"energy"))continue;
+        const char *energy_name=jstr((cJSON*)energy,"name","");
+        if(!*energy_name)continue;
+        const bool modern=
+            cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(energy,"showSolar"))||
+            cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(energy,"showBattery"))||
+            cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(energy,"showEv"))||
+            cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(energy,"showEcs"));
+        if(!modern)continue;
+        for(size_t n=0;n<4;n++){
+            char compound[192];
+            snprintf(compound,sizeof(compound),"%.95s__%s",energy_name,instant_fields[n]);
+            cJSON *a=append_action(arr,&id,"info",compound);
+            if(a)cJSON_ReplaceItemInObjectCaseSensitive(
+                a,"unit",cJSON_CreateString("W"));
+        }
+    }
+    // New W-only flow telemetry for ECS and EV is appended AFTER every
+    // existing energy and media command, including the four power channels.
+    // This preserves all pre-existing /getindex transport IDs and Jeedom
+    // bindings. Slots are reserved regardless of showEcs/showEv so toggling
+    // visible equipment never renumbers any other command.
+    const cJSON *flow_energy=NULL;
+    cJSON_ArrayForEach(flow_energy,widgets){
+        if(strcmp(jstr((cJSON*)flow_energy,"type",""),"energy"))continue;
+        const char *energy_name=jstr((cJSON*)flow_energy,"name","");
+        if(!*energy_name)continue;
+        const bool modern=
+            cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(flow_energy,"showSolar"))||
+            cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(flow_energy,"showBattery"))||
+            cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(flow_energy,"showEv"))||
+            cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(flow_energy,"showEcs"));
+        if(!modern)continue;
+        static const char *const flow_fields[]={
+            "ecs_instant_power","ev_instant_power"
+        };
+        for(size_t n=0;n<2;n++){
+            char compound[192];
+            snprintf(compound,sizeof(compound),"%.95s__%s",energy_name,flow_fields[n]);
+            cJSON *a=append_action(arr,&id,"info",compound);
+            if(a)cJSON_ReplaceItemInObjectCaseSensitive(
+                a,"unit",cJSON_CreateString("W"));
         }
     }
     cJSON_Delete(root);
