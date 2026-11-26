@@ -7,6 +7,12 @@ on:
       - '.github/workflows/build-mira-idf-waveshare7.yml'
       - 'esp-idf/**'
   workflow_dispatch:
+    inputs:
+      build_full:
+        description: 'Also package full image for USB/ESPTool (normally OTA only)'
+        type: boolean
+        required: false
+        default: false
   pull_request:
     branches: [firmware-beta]
     paths:
@@ -143,6 +149,7 @@ jobs:
           if-no-files-found: error
 
       - name: Package complete ESP32-S3 flash image (bootloader + partitions + application)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_full == true }}
         shell: bash
         run: |
           set -euo pipefail
@@ -183,6 +190,7 @@ jobs:
           print(f"COMPLETE FLASH: {out} ({len(image)} bytes), write at 0x0",flush=True)
           PY
       - name: Upload full development FLUX firmware for ESPTool at 0x0
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_full == true }}
         uses: actions/upload-artifact@v4
         with:
           name: MIRA7_IDF_DEV_FLUX_FULL
@@ -190,18 +198,23 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-      - name: Save FLUX OTA and FULL beside matching 7-inch beta sources
-        if: github.event_name == 'push' && github.ref == 'refs/heads/firmware-beta'
+      - name: Save newly compiled FLUX OTA (and optional FULL) beside 7-inch beta sources
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/firmware-beta'
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p esp-idf/bin
           cp mira7_ota/MIRA7_IDF_DEV_FLUX_OTA.bin esp-idf/bin/MIRA7_IDF_DEV_FLUX_OTA.bin
-          cp mira7_ota/MIRA7_IDF_DEV_FLUX_FULL.bin esp-idf/bin/MIRA7_IDF_DEV_FLUX_FULL.bin
+          if [ -f mira7_ota/MIRA7_IDF_DEV_FLUX_FULL.bin ]; then
+            cp mira7_ota/MIRA7_IDF_DEV_FLUX_FULL.bin esp-idf/bin/MIRA7_IDF_DEV_FLUX_FULL.bin
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add esp-idf/bin/MIRA7_IDF_DEV_FLUX_OTA.bin esp-idf/bin/MIRA7_IDF_DEV_FLUX_FULL.bin
+          git add esp-idf/bin/MIRA7_IDF_DEV_FLUX_OTA.bin
+          if [ -f mira7_ota/MIRA7_IDF_DEV_FLUX_FULL.bin ]; then
+            git add esp-idf/bin/MIRA7_IDF_DEV_FLUX_FULL.bin
+          fi
           if ! git diff --cached --quiet; then
-            git commit -m "build(7std): publish FLUX OTA and FULL [skip ci]"
+            git commit -m "build(7std): publish requested FLUX image(s) [skip ci]"
             git push origin HEAD:firmware-beta
           fi
