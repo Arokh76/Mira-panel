@@ -13,7 +13,7 @@ on:
       - '.github/workflows/build-mira-idf-waveshare7.yml'
       - 'esp-idf/**'
 permissions:
-  contents: read
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -104,6 +104,14 @@ jobs:
           PY
           python3 "$ROOT/tests/test_media_volume_live.py"
           python3 "$ROOT/tests/test_google_cast_cover_hosts.py"
+      - name: Convert approved SVG sources into native LVGL assets (offline)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet 'Pillow>=10,<13' 'CairoSVG>=2.7,<3'
+          python3 esp-idf/tools/generate_energy_i8r.py
+          test -s esp-idf/main/energy_raster/maison_fond.i8r
+          test -s esp-idf/main/energy_raster/batterie_coque.i8r
       - name: Native ESP-IDF 5.5.6 build
         uses: espressif/esp-idf-ci-action@v1
         with:
@@ -117,10 +125,10 @@ jobs:
           set -euo pipefail
           ROOT=esp-idf/build
           mkdir -p mira7_ota
-          cp "$ROOT/mira_idf_7std.bin" mira7_ota/MIRA7_IDF_DEV_OTA.bin
+          cp "$ROOT/mira_idf_7std.bin" mira7_ota/MIRA7_IDF_DEV_FLUX_OTA.bin
           python3 - <<'PY'
           from pathlib import Path
-          path=Path("mira7_ota/MIRA7_IDF_DEV_OTA.bin")
+          path=Path("mira7_ota/MIRA7_IDF_DEV_FLUX_OTA.bin")
           data=path.read_bytes()
           assert len(data)>65536 and len(data)<=0x300000, "OTA image exceeds app slot"
           assert data[0]==0xE9, "Not an ESP app image"
@@ -129,7 +137,71 @@ jobs:
       - name: Upload development OTA (not the frozen HTTP24K reference)
         uses: actions/upload-artifact@v4
         with:
-          name: MIRA7_IDF_DEV_OTA
-          path: mira7_ota/MIRA7_IDF_DEV_OTA.bin
+          name: MIRA7_IDF_DEV_FLUX_OTA
+          path: mira7_ota/MIRA7_IDF_DEV_FLUX_OTA.bin
           retention-days: 30
           if-no-files-found: error
+
+      - name: Package complete ESP32-S3 flash image (bootloader + partitions + application)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet 'esptool>=4.8,<5'
+          python3 - <<'PY'
+          import json,subprocess,sys
+          from pathlib import Path
+          build=Path("esp-idf/build")
+          manifest=json.loads((build/"flasher_args.json").read_text())
+          images=manifest["flash_files"]
+          settings=manifest["flash_settings"]
+          assert images, "No flash binaries in ESP-IDF flasher manifest"
+          offsets=sorted((int(addr,0),build/file) for addr,file in images.items())
+          assert offsets[0][0]==0, "Factory ESP32-S3 flash must start at address 0"
+          assert all(path.is_file() for _,path in offsets), "Missing ESP-IDF flash image"
+          out=Path("mira7_ota/MIRA7_IDF_DEV_FLUX_FULL.bin")
+          out.parent.mkdir(exist_ok=True)
+          cmd=[sys.executable,"-m","esptool","--chip","esp32s3",
+               "merge_bin","-o",str(out),
+               "--flash_mode",settings["flash_mode"],
+               "--flash_freq",settings["flash_freq"],
+               "--flash_size",settings["flash_size"]]
+          for addr,path in offsets:
+              cmd.extend([f"0x{addr:x}",str(path)])
+          print("Merging flash map:",[(hex(addr),str(path)) for addr,path in offsets],flush=True)
+          subprocess.run(cmd,check=True)
+          image=out.read_bytes()
+          assert len(image)>len((build/"mira_idf_7std.bin").read_bytes()),"Full image too small"
+          assert image[0]==0xE9,"Missing ESP32-S3 bootloader"
+          for addr,path in offsets:
+              expected=path.read_bytes()
+              actual=image[addr:addr+len(expected)]
+              # esptool may patch flash-header settings in the first image.
+              if addr==0:
+                  assert actual[8:]==expected[8:],"Bootloader image mismatch"
+              else:
+                  assert actual==expected,f"Flash image mismatch at 0x{addr:x}"
+          print(f"COMPLETE FLASH: {out} ({len(image)} bytes), write at 0x0",flush=True)
+          PY
+      - name: Upload full development FLUX firmware for ESPTool at 0x0
+        uses: actions/upload-artifact@v4
+        with:
+          name: MIRA7_IDF_DEV_FLUX_FULL
+          path: mira7_ota/MIRA7_IDF_DEV_FLUX_FULL.bin
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Save FLUX OTA and FULL beside matching 7-inch beta sources
+        if: github.event_name == 'push' && github.ref == 'refs/heads/firmware-beta'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p esp-idf/bin
+          cp mira7_ota/MIRA7_IDF_DEV_FLUX_OTA.bin esp-idf/bin/MIRA7_IDF_DEV_FLUX_OTA.bin
+          cp mira7_ota/MIRA7_IDF_DEV_FLUX_FULL.bin esp-idf/bin/MIRA7_IDF_DEV_FLUX_FULL.bin
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add esp-idf/bin/MIRA7_IDF_DEV_FLUX_OTA.bin esp-idf/bin/MIRA7_IDF_DEV_FLUX_FULL.bin
+          if ! git diff --cached --quiet; then
+            git commit -m "build(7std): publish FLUX OTA and FULL [skip ci]"
+            git push origin HEAD:firmware-beta
+          fi

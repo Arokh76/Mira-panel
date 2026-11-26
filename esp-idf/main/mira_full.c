@@ -5,6 +5,7 @@
 #include "mira_full.h"
 #include "mira_french_font.h"
 #include "mira_info_glyphs.h"
+#include "mira_energy_house.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -360,6 +361,7 @@ typedef struct {
     lv_obj_t *fields[9]; // energy/media passive Jeedom composite infos
     lv_obj_t *energy_gauge[3],*energy_extra_names[2];
     bool energy_extra_active[2];
+    bool house_energy; // native 7-inch experimental energy scene only
     lv_obj_t *media_slider,*media_device_dropdown,*media_play_caption;
     lv_obj_t *media_progress_bar;
     lv_obj_t *media_artwork_image,*media_artwork_placeholder;
@@ -550,6 +552,23 @@ static void panel_style(lv_obj_t *obj,bool light){
     lv_obj_set_style_pad_all(obj,9,0);
     lv_obj_set_style_shadow_width(obj,0,0); // no shadows during first real UI comparison
 }
+// The energy house must inherit the CURRENT thermostat style/theme, not
+// approximate its dark-blue colors with hardcoded hex values.
+void mira_full_style_energy_panel(lv_obj_t *backdrop,lv_obj_t *energy_card){
+    if(backdrop){
+        lv_obj_set_style_bg_color(backdrop,bg_c(),0);
+        lv_obj_set_style_bg_opa(backdrop,LV_OPA_COVER,0);
+    }
+    if(energy_card){
+        panel_style(energy_card,false);
+        lv_obj_set_style_pad_all(energy_card,0,0);
+        lv_obj_set_style_shadow_width(energy_card,0,0);
+        lv_obj_set_style_outline_width(energy_card,2,0);
+        lv_obj_set_style_outline_color(energy_card,lv_color_black(),0);
+        lv_obj_set_style_outline_opa(energy_card,LV_OPA_50,0);
+        lv_obj_set_style_outline_pad(energy_card,0,0);
+    }
+}
 static lv_obj_t *card(int page,int width,int height){
     lv_obj_t *c=lv_obj_create(pages[page]);
     lv_obj_set_size(c,width,height);
@@ -632,6 +651,12 @@ static int to_page(const char *loc){
 static void show_page(int idx){
     if(idx<0||idx>5||!(visible_page_mask&(1u<<idx)))return;
     current_page=(uint8_t)idx;
+    // Highlight the CURRENT favorite page, not the home button permanently.
+    for(unsigned slot=0;slot<3;slot++){
+        if(favorite_btn[slot])
+            lv_obj_set_style_bg_opa(favorite_btn[slot],
+                favorite_pages[slot]==current_page?LV_OPA_70:LV_OPA_TRANSP,0);
+    }
     nav_count++;
     nav_last_heap=esp_get_free_heap_size();
     if(!nav_lowest_heap||nav_last_heap<nav_lowest_heap)nav_lowest_heap=nav_last_heap;
@@ -640,14 +665,25 @@ static void show_page(int idx){
         else lv_obj_add_flag(pages[i],LV_OBJ_FLAG_HIDDEN);
     }
     lv_obj_add_flag(page_picker,LV_OBJ_FLAG_HIDDEN);
+    // Keep the same 50px bottom navigation on every page, including
+    // the energy house. The artwork is restricted to the 430px area above.
+    const bool house_visible=(idx==4&&mira_energy_house_exists());
+    if(idx==4)ESP_LOGI(TAG,"ENERGY_HOUSE_PAGE: scene=%u",house_visible?1u:0u);
+    mira_energy_house_show(house_visible);
+    lv_obj_remove_flag(nav,LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(nav);
 }
 static void nav_click(lv_event_t *e){
     if(display_sleeping)return;
     int index=(int)(intptr_t)lv_event_get_user_data(e);
     if(index==6) {
-        if(lv_obj_has_flag(page_picker,LV_OBJ_FLAG_HIDDEN))
+        if(lv_obj_has_flag(page_picker,LV_OBJ_FLAG_HIDDEN)){
             lv_obj_remove_flag(page_picker,LV_OBJ_FLAG_HIDDEN);
-        else lv_obj_add_flag(page_picker,LV_OBJ_FLAG_HIDDEN);
+            // Picker must remain above PAGE 4 artwork after opening it.
+            lv_obj_move_foreground(page_picker);
+        }else lv_obj_add_flag(page_picker,LV_OBJ_FLAG_HIDDEN);
+        // Keep the real bottom bar interactive, including its close button.
+        lv_obj_move_foreground(nav);
     }else if(index>=7&&index<=9){
         const uint8_t page=favorite_pages[index-7];
         if(page<6)show_page(page);
@@ -1583,6 +1619,7 @@ static void artwork_poll(void){
     if(w->media_artwork_placeholder)
         lv_obj_add_flag(w->media_artwork_placeholder,LV_OBJ_FLAG_HIDDEN);
 }
+static void energy_house_return_home(void){show_page(0);}
 static void make_widget(const cJSON *o,int info_total,int *info_seen){
     if(widget_n>=MAX_WIDGETS){ESP_LOGW(TAG,"Widget capacity reached (%d)",MAX_WIDGETS);return;}
     const char *type=str(o,"type",""),*loc=str(o,"emplacement","accueil");
@@ -2078,6 +2115,31 @@ static void make_widget(const cJSON *o,int info_total,int *info_seen){
         return;
     }
     if(!strcmp(type,"energy")){
+        // Default on the Waveshare 7-inch energy page: native full-screen house.
+        // The old classic widget is kept intact as style "classic".
+        // This is an isolated visual change; all seven original Jeedom indices
+        // remain mapped to the same passive state names as before.
+        if(pg==4 && strcmp(style,"classic")!=0 && !mira_energy_house_exists()){
+            // One screen-wide scene only. Further energy widgets keep the
+            // original card renderer instead of invalidating LVGL pointers.
+            w->house_energy=true;
+            w->card=NULL; // Full-screen screen child, never a flex/grid card.
+            (void)mira_energy_house_create(pages[4],energy_house_return_home);
+            for(unsigned n=0;n<7;n++)
+                w->fields[n]=mira_energy_house_field(n);
+            const cJSON *solar_cfg=cJSON_GetObjectItemCaseSensitive(o,"showSolar");
+            const cJSON *battery_cfg=cJSON_GetObjectItemCaseSensitive(o,"showBattery");
+            const cJSON *ev_cfg=cJSON_GetObjectItemCaseSensitive(o,"showEv");
+            const cJSON *ecs_cfg=cJSON_GetObjectItemCaseSensitive(o,"showEcs");
+            // Old Jeedom versions omit these keys: hide until a real sensor
+            // value arrives, never display phantom equipment by default.
+            mira_energy_house_options(
+                cJSON_IsBool(solar_cfg)?(cJSON_IsTrue(solar_cfg)?1:0):-1,
+                cJSON_IsBool(battery_cfg)?(cJSON_IsTrue(battery_cfg)?1:0):-1,
+                cJSON_IsBool(ev_cfg)?(cJSON_IsTrue(ev_cfg)?1:0):-1,
+                cJSON_IsBool(ecs_cfg)?(cJSON_IsTrue(ecs_cfg)?1:0):-1);
+            return;
+        }
         // Restore the beta's 786x344 Jeedom energy dashboard. The generic
         // 7-row table wasn't visually or functionally equivalent.
         const int pad=13,gap=8,box_w=(786-2*pad-gap)/2,box_h=91;
@@ -2942,6 +3004,7 @@ static void build_config(void){
             return;
         }
     }
+    mira_energy_house_destroy(); // stop house timer and delete the old scene
     artwork_reset(); // detach any old cover before deleting media cards
     scroll_cache_reset(); // release every LVGL image reference BEFORE card deletion
     wheel_release_all(); // drop each colorwheel image source/cache before freeing PSRAM
@@ -2969,6 +3032,13 @@ static void build_config(void){
                         str(it,"labelMode","auto"),str(it,"layout","auto"));
             }
         }
+    }
+    // The Énergie PAGE is part of Mira, not an optional Jeedom tile:
+    // the house must exist even when the user's configuration has no
+    // 'energy' widget or placed one elsewhere.
+    if(!mira_energy_house_exists()){
+        (void)mira_energy_house_create(pages[4],energy_house_return_home);
+        ESP_LOGI(TAG,"ENERGY_HOUSE: scene created without widget dependency");
     }
     widget_count=(uint32_t)widget_n;
     cJSON_Delete(root);
@@ -3016,7 +3086,7 @@ static void refresh_nav_favorites(void){
             continue;
         }
         lv_obj_remove_flag(bt,LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_style_bg_opa(bt,page==0?LV_OPA_70:LV_OPA_TRANSP,0);
+        lv_obj_set_style_bg_opa(bt,page==current_page?LV_OPA_70:LV_OPA_TRANSP,0);
         if(page==1)mira_nav_bulb(bt);
         else if(page==2)mira_nav_thermometer(bt);
         else{
@@ -3249,6 +3319,13 @@ void mira_full_ui_create(lv_display_t *disp){
         } else make_flex(pages[i],LV_FLEX_FLOW_COLUMN,LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_CENTER);
         lv_obj_set_scroll_dir(pages[i],LV_DIR_VER);
         lv_obj_set_scrollbar_mode(pages[i],LV_SCROLLBAR_MODE_OFF);
+        // The Energy house fills a fixed 800x430 viewport. Never let this
+        // page scroll vertically (or move the house under the navbar).
+        // Other pages keep their original scrolling behaviour.
+        if(i==4){
+            lv_obj_set_scroll_dir(pages[i],LV_DIR_NONE);
+            no_scroll(pages[i]);
+        }
         if(i==0||i==1||i==2)
             lv_obj_add_event_cb(pages[i],scroll_cache_on_move,LV_EVENT_SCROLL,NULL);
         if(i)lv_obj_add_flag(pages[i],LV_OBJ_FLAG_HIDDEN);
@@ -3284,6 +3361,12 @@ void mira_full_ui_create(lv_display_t *disp){
     refresh_nav_favorites();
     ESP_LOGI(TAG,"CLOCK_UI_PHASE 6: parsing imported widget JSON");
     build_config();
+    // Also handle first boot with missing miralvgl.json: build_config()
+    // legitimately exits early but navigation to Énergie must still work.
+    if(!mira_energy_house_exists()){
+        (void)mira_energy_house_create(pages[4],energy_house_return_home);
+        ESP_LOGI(TAG,"ENERGY_HOUSE: scene created without miralvgl.json");
+    }
     ESP_LOGI(TAG,"CLOCK_UI_PHASE 7: parsed widgets=%u, internal largest=%u",
              (unsigned)widget_count,
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
@@ -3541,6 +3624,22 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
     }
     for(uint8_t i=0;i<widget_n;i++){
         mira_widget_t *w=&widgets[i];
+        if(!strcmp(w->type,"energy")){
+            const size_t p=strlen(w->name),len=strlen(msg->name);
+            if(len>p+2 && !strncmp(msg->name,w->name,p)&&
+               msg->name[p]=='_' && msg->name[p+1]=='_'){
+                const char *aux=msg->name+p+2;
+                if(!strcmp(aux,"ecs_temp")||!strcmp(aux,"ecs_power")||
+                   !strcmp(aux,"ev_soc")||!strcmp(aux,"ev_power")||
+                   !strcmp(aux,"solar_power")||!strcmp(aux,"home_power")||
+                   !strcmp(aux,"grid_power")||!strcmp(aux,"battery_power")||
+                   !strcmp(aux,"ecs_instant_power")||
+                   !strcmp(aux,"ev_instant_power")){
+                    mira_energy_house_aux(aux,msg->value);
+                    continue;
+                }
+            }
+        }
         if(!strcmp(w->type,"energy")||!strcmp(w->type,"media")){
             static const char *const energy_fields[]={"solar","home","grid","battery","soc","soc2","soc3"};
             static const char *const media_fields[]={"title","artist","album","state","progress","volume","cover","device","devices"};
@@ -3554,6 +3653,15 @@ static void apply_state_on_lvgl_task(const mira_state_update_t *msg){
                 for(int n=0;n<total;n++){
                     const char *known=media?media_fields[n]:energy_fields[n];
                     if(!strcmp(field,known)&&w->fields[n]){
+                        // Existing/classic energy widgets continue to update
+                        // normally, while the always-present house mirrors
+                        // their passive data (no outgoing Jeedom actions).
+                        if(!media&&!w->house_energy&&mira_energy_house_exists())
+                            mira_energy_house_update((unsigned)n,msg->value);
+                        if(!media&&w->house_energy){
+                            mira_energy_house_update((unsigned)n,msg->value);
+                            break; // passive LVGL update; no Jeedom action
+                        }
                         if(media&&n==5&&w->local_input_until_ms!=0&&
                            (int32_t)(lv_tick_get()-w->local_input_until_ms)<0)
                             break;

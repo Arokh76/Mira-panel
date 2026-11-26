@@ -17,6 +17,8 @@ bool mira_full_passive_ready(void);
 // Hardware-only offline UI test: mount existing SPIFFS; never format user data.
 bool mira_full_storage_mount_existing_only(void);
 void mira_full_ui_create(lv_display_t *disp);
+// Apply the very same theme-aware colors and relief as the thermostat card.
+void mira_full_style_energy_panel(lv_obj_t *backdrop, lv_obj_t *card);
 void mira_full_ui_tick(void);
 void mira_full_register_http(httpd_handle_t server);
 uint32_t mira_full_widget_count(void);

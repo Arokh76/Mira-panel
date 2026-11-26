@@ -809,10 +809,15 @@ static void wifi_status_event(void *arg,esp_event_base_t base,int32_t id,void *d
         if(station_configured)esp_wifi_connect();
     }
 }
-static esp_err_t __attribute__((unused)) clock_status_get(httpd_req_t *req){
+// Read-only live network/NTP diagnostics for the active ESPAsyncWebServer.
+// Unlike the old HTTPD-only debug route, this can be queried on port 80.
+bool mira_recovery_clock_status_json(char *body,size_t capacity){
+    if(!body||capacity<256u)return false;
     const time_t now=time(NULL);
     const bool valid=now>1700000000;
-    char local[48]="",dns_main[20]="",dns_backup[20]="",gateway[20]="";
+    const char *mode=legacy_ip_mode==PROFILE_MANUAL?"manual":
+        legacy_ip_mode==PROFILE_FIXED_AUTO?"fixed_auto":"auto";
+    char local[48]="",dns_main[20]="",dns_backup[20]="",gateway[20]="",ipaddr[20]="";
     if(valid){
         struct tm tmv={0};
         if(localtime_r(&now,&tmv))
@@ -828,29 +833,36 @@ static esp_err_t __attribute__((unused)) clock_status_get(httpd_req_t *req){
            dns.ip.type==ESP_IPADDR_TYPE_V4)
             snprintf(dns_backup,sizeof(dns_backup),IPSTR,IP2STR(&dns.ip.u_addr.ip4));
         esp_netif_ip_info_t ip={0};
-        if(esp_netif_get_ip_info(sta_netif,&ip)==ESP_OK)
+        if(esp_netif_get_ip_info(sta_netif,&ip)==ESP_OK){
+            snprintf(ipaddr,sizeof(ipaddr),IPSTR,IP2STR(&ip.ip));
             snprintf(gateway,sizeof(gateway),IPSTR,IP2STR(&ip.gw));
+        }
     }
     unsigned int reach0=0,reach1=0;
     if(clock_sntp_initialized){
         (void)esp_netif_sntp_reachability(0,&reach0);
         (void)esp_netif_sntp_reachability(1,&reach1);
     }
-    char body[448];
-    snprintf(body,sizeof(body),
-        "{\"wifi_connected\":%s,\"ntp_started\":%s,\"ntp_synced\":%s,"
+    const int written=snprintf(body,capacity,
+        "{\"wifi_connected\":%s,\"ip_mode\":\"%s\",\"ip\":\"%s\","
+        "\"gateway\":\"%s\",\"dns_main\":\"%s\",\"dns_backup\":\"%s\","
+        "\"ntp_initialized\":%s,\"ntp_started\":%s,\"ntp_synced\":%s,"
         "\"time_valid\":%s,\"epoch\":%lld,\"last_sync\":%lld,"
-        "\"local\":\"%s\",\"ntp_initialized\":%s,"
-        "\"last_ntp_start_error\":%d,\"dns_main\":\"%s\","
-        "\"dns_backup\":\"%s\",\"gateway\":\"%s\","
+        "\"local\":\"%s\",\"last_ntp_start_error\":%d,"
         "\"ntp_reachability\":[%u,%u]}",
-        station_connected?"true":"false",
+        station_connected?"true":"false",mode,ipaddr,gateway,dns_main,dns_backup,
+        clock_sntp_initialized?"true":"false",
         clock_sntp_started?"true":"false",
         clock_sntp_synced?"true":"false",
         valid?"true":"false",(long long)now,(long long)clock_last_sync_epoch,
-        local,clock_sntp_initialized?"true":"false",
-        (int)clock_last_start_error,dns_main,dns_backup,gateway,
-        reach0,reach1);
+        local,(int)clock_last_start_error,reach0,reach1);
+    return written>0&&(size_t)written<capacity;
+}
+static esp_err_t __attribute__((unused)) clock_status_get(httpd_req_t *req){
+    char body[512];
+    if(!mira_recovery_clock_status_json(body,sizeof(body)))
+        return httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,
+                                   "NTP diagnostic unavailable"),ESP_FAIL;
     httpd_resp_set_type(req,"application/json");
     httpd_resp_set_hdr(req,"Cache-Control","no-store");
     return httpd_resp_sendstr(req,body);
