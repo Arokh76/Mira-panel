@@ -82,6 +82,27 @@ static void nvs_text(const char *ns,const char *key,const char *fallback,
         nvs_close(nv);
     }
 }
+
+/* Read the same atomic network profile consumed by the ESP-IDF STA.
+ * Old individual web_* keys are fallback only for pre-migration users. */
+static bool async_web_profile_field(const char *key,char *out,size_t cap){
+    if(!key||!out||!cap)return false;
+    nvs_handle_t nv;
+    if(nvs_open("mira_idf_net",NVS_READONLY,&nv)!=ESP_OK)return false;
+    char profile[512]={0};
+    size_t n=sizeof(profile);
+    const bool present=nvs_get_str(nv,"web_profile",profile,&n)==ESP_OK;
+    nvs_close(nv);
+    if(!present)return false;
+    cJSON *root=cJSON_Parse(profile);
+    if(!root)return false;
+    const cJSON *value=cJSON_GetObjectItemCaseSensitive(root,key);
+    const bool valid=cJSON_IsString(value)&&value->valuestring&&
+                     strlen(value->valuestring)<cap;
+    if(valid)snprintf(out,cap,"%s",value->valuestring);
+    cJSON_Delete(root);
+    return valid;
+}
 static unsigned nvs_number(const char *ns,const char *key,unsigned fallback){
     nvs_handle_t nv;
     uint32_t u32=0;uint8_t u8=0;uint16_t u16=0;
@@ -419,10 +440,27 @@ static bool replace_token(PsramPage& out,const char *token,
         esp_netif_t *netif=esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
         esp_netif_ip_info_t ip={};
         if(!netif||esp_netif_get_ip_info(netif,&ip)!=ESP_OK||!ip.ip.addr)
-            return out.add("Non connecte");
+            return out.add("Wi-Fi non connecte");
         char local[28]={0};
         snprintf(local,sizeof(local),IPSTR,IP2STR(&ip.ip));
-        return out.escaped(local);
+        // Other pages require just the address; the network page needs all details.
+        if(!strcmp(token,"LOCALIP"))return out.escaped(local);
+        char mask[28]={0},gateway[28]={0},dns1[28]="0.0.0.0",dns2[28]="0.0.0.0";
+        snprintf(mask,sizeof(mask),IPSTR,IP2STR(&ip.netmask));
+        snprintf(gateway,sizeof(gateway),IPSTR,IP2STR(&ip.gw));
+        esp_netif_dns_info_t dns={};
+        if(esp_netif_get_dns_info(netif,ESP_NETIF_DNS_MAIN,&dns)==ESP_OK&&
+           dns.ip.type==ESP_IPADDR_TYPE_V4)
+            snprintf(dns1,sizeof(dns1),IPSTR,IP2STR(&dns.ip.u_addr.ip4));
+        memset(&dns,0,sizeof(dns));
+        if(esp_netif_get_dns_info(netif,ESP_NETIF_DNS_BACKUP,&dns)==ESP_OK&&
+           dns.ip.type==ESP_IPADDR_TYPE_V4)
+            snprintf(dns2,sizeof(dns2),IPSTR,IP2STR(&dns.ip.u_addr.ip4));
+        return out.add("IP ")&&out.escaped(local)&&
+               out.add(" | Masque ")&&out.escaped(mask)&&
+               out.add(" | Passerelle ")&&out.escaped(gateway)&&
+               out.add(" | DNS ")&&out.escaped(dns1)&&
+               out.add(" / ")&&out.escaped(dns2);
     }
     if(!strcmp(token,"SSID")){
         wifi_config_t sta={};
@@ -433,9 +471,11 @@ static bool replace_token(PsramPage& out,const char *token,
     }
     const char *netkeys[]={"IPMODE","IP","MASK","GATEWAY","DNS1","DNS2"};
     const char *prefs[]={"web_mode","web_ip","web_mask","web_gw","web_dns1","web_dns2"};
+    const char *atomic_keys[]={"mode","ip","mask","gateway","dns1","dns2"};
     for(size_t i=0;i<6;i++)if(!strcmp(token,netkeys[i])){
         char val[64]={0};
-        nvs_text("mira_idf_net",prefs[i],i==0?"auto":"",val,sizeof(val));
+        if(!async_web_profile_field(atomic_keys[i],val,sizeof(val)))
+            nvs_text("mira_idf_net",prefs[i],i==0?"auto":"",val,sizeof(val));
         return out.escaped(val);
     }
     if(!strcmp(token,"MDPAP")){
@@ -495,7 +535,13 @@ static bool replace_token(PsramPage& out,const char *token,
     String network=q(r,"network");
     int id=network.toInt();
     mira_beta_network_t profile={};
-    if(network.length()&&mira_beta_networks_get(id,&profile)==ESP_OK){
+    if(network.length()&&id>=0&&id<=999&&
+       mira_beta_networks_get(id,&profile)==ESP_OK){
+        if(!strcmp(token,"NETWORKIDUPDATE")){
+            char decimal_id[8];
+            snprintf(decimal_id,sizeof(decimal_id,"%d",id);
+            return out.add(decimal_id);
+        }
         const char *values[]={profile.ssid,profile.ip_mode,profile.ip,
                                profile.mask,profile.gateway,profile.dns1,profile.dns2};
         for(size_t i=0;i<7;i++)if(!strcmp(fields[i],token))
@@ -619,7 +665,8 @@ static bool save_network(AsyncWebServerRequest *r,bool editing){
         String network=q(r,"network");
         id=network.length()?network.toInt():-1;
         mira_beta_network_t found={};
-        if(id<0||mira_beta_networks_get(id,&found)!=ESP_OK)err=ESP_ERR_NOT_FOUND;
+        if(id<0||id>999||mira_beta_networks_get(id,&found)!=ESP_OK)
+            err=ESP_ERR_NOT_FOUND;
     }else if(err==ESP_OK){
         for(size_t i=0;i<count;i++)
             if(ssid==known[i].ssid){id=known[i].id;break;}
