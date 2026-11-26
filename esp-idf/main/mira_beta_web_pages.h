@@ -237,7 +237,7 @@ static const char mira_beta_system_html[] =
     "  <div class=\"hero\"><h1>Système</h1><p>Maintenance, informations et mises à jour de Mira Panel.</p></div>\n"
     "  <div class=\"grid\">\n"
     "    <section class=\"card\"><h2>Informations</h2><p class=\"hint\">État général du panneau.</p><div class=\"kv\"><span>Firmware</span><strong>%VERSION%</strong></div><div class=\"kv\"><span>Adresse IP</span><strong>%LOCALIP%</strong></div><div class=\"kv\"><span>Plateforme</span><strong>Waveshare ESP32-S3 Touch LCD 7 STD</strong></div></section>\n"
-    "    <section class=\"card\"><h2>Maintenance</h2><p class=\"hint\">Actions locales sur le panneau.</p><div class=\"buttons\"><button class=\"btn secondary\" onclick=\"window.location.href='/load?nav=reboot'\">Redémarrer</button><button class=\"btn\" onclick=\"window.location.href='/load?nav=rst'\">Gestion des données</button>\n"
+    "    <section class=\"card\"><h2>Maintenance</h2><p class=\"hint\">Actions locales sur le panneau.</p><div class=\"buttons\"><button type=\"button\" class=\"btn secondary\" onclick=\"fetch('/reboot',{cache:'no-store',credentials:'same-origin'}).then(function(r){if(!r.ok)throw Error('reboot');}).catch(function(){alert('Redemarrage impossible.');})\">Redémarrer</button><button class=\"btn\" onclick=\"window.location.href='/load?nav=rst'\">Gestion des données</button>\n"
     "</div></section>\n"
     "\n"
     "    <section class=\"card full\">\n"

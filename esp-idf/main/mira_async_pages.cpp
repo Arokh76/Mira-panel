@@ -947,25 +947,9 @@ bool mira_async_handle_beta(AsyncWebServerRequest *r){
     if(r->method()==AsyncWebRequestMethod::HTTP_GET &&
        (path=="/reboot"||(path=="/load"&&q(r,"nav")=="reboot"))){
         if(!authorized(r))return true;
-        // Reload the home page only after the new HTTP server is ready.
-        // Start after the scheduled restart so we cannot hit the old server.
-        r->send(200,"text/html; charset=utf-8",
-                "<!doctype html><html lang='fr'><head><meta charset='utf-8'>"
-                "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-                "<title>Mira Panel - Redemarrage</title></head><body>"
-                "<h2>Mira Panel</h2><p>Redemarrage du panneau en cours...</p>"
-                "<p>Retour automatique a l'accueil des que Mira est pret.</p>"
-                "<p><a href='/'>Retour a l'accueil</a></p>"
-                "<script>(function(){"
-                "function check(){"
-                "fetch('/mira/async-health?reboot='+Date.now(),{cache:'no-store'})"
-                ".then(function(r){if(!r.ok)throw Error('offline');return r.json();})"
-                ".then(function(j){if(j.transport!=='ESPAsyncWebServer')throw Error('booting');"
-                "window.location.replace('/');})"
-                ".catch(function(){setTimeout(check,1500);});"
-                "}"
-                "setTimeout(check,4000);"
-                "})();</script></body></html>");
+        // The Web button calls /reboot via fetch(): it stays on the current page.
+        // Keep the legacy /load?nav=reboot alias for existing integrations.
+        r->send(200,"text/plain; charset=utf-8","OK");
         queue_restart();return true;
     }
     if(path=="/api/checkupdate"&&r->method()==AsyncWebRequestMethod::HTTP_GET){
