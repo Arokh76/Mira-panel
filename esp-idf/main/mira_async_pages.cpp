@@ -912,11 +912,13 @@ bool mira_async_handle_beta(AsyncWebServerRequest *r){
     }
     if(path=="/mira/clock/status"&&r->method()==AsyncWebRequestMethod::HTTP_GET){
         if(!authorized(r))return true;
-        time_t now=time(nullptr);
-        char msg[100];
-        snprintf(msg,sizeof(msg),"{\"epoch\":%lld,\"valid\":%s}",
-                 (long long)now,now>1700000000?"true":"false");
-        r->send(200,"application/json",msg);
+        char msg[512];
+        if(!mira_recovery_clock_status_json(msg,sizeof(msg))){
+            r->send(503,"text/plain","Diagnostic NTP indisponible");return true;
+        }
+        auto *resp=r->beginResponse(200,"application/json",msg);
+        resp->addHeader("Cache-Control","no-store");
+        r->send(resp);
         return true;
     }
     return false;
