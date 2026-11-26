@@ -2,7 +2,10 @@
 #include "esp_err.h"
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 esp_err_t mira_recovery_init(void);
+// Authenticated async web status: current NTP sync and live static-IP/DNS settings.
+bool mira_recovery_clock_status_json(char *buffer, size_t capacity);
 // Last internal network step for on-screen first-run diagnosis.
 const char *mira_recovery_last_stage(void);
 // True when the small HTTP diagnostic server started but full web did not.
