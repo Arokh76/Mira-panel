@@ -1,0 +1,32 @@
+name: One-shot cleanup of two superseded Jeedom beta release branches
+on:
+  push:
+    branches: [firmware-beta]
+    paths:
+      - '.github/workflows/prune-obsolete-beta-releases.yml'
+permissions:
+  contents: write
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Delete only two obsolete beta release refs after verifying exact SHAs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import subprocess
+          expected={
+              "release/jeedom-energy-1.2.30-beta.1":"f0b1bfa35ae3ea7c106e46bd0dd43d6713259ff4",
+              "release/jeedom-1.2.30-beta.2-live-energy-flow":"c77e70963f3ba097b626643ee69161f9ece4b6f8"
+          }
+          for name,sha in expected.items():
+              ref=f"refs/heads/{name}"
+              line=subprocess.check_output(["git","ls-remote","--heads","origin",ref],text=True).strip().split()
+              if not line or line[0]!=sha:
+                  raise SystemExit(f"STOP: unexpected head for {name}: {line}")
+          for name in expected:
+              subprocess.run(["git","push","origin","--delete",name],check=True)
+              print(f"DELETED {name}",flush=True)
+          PY
